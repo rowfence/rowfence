@@ -70,6 +70,9 @@ jobs:
   npm:
     needs: check
     runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
+    # npm trusts this workflow only in the environment `npm` (each package's trusted publisher names it), which
+    # takes v* tags only; a dry run, on a branch, publishes nothing and goes without it
+    environment: ${{ needs.check.outputs.publish == 'public' && 'npm' || '' }}
     permissions: {id-token: write, contents: read, packages: write}
     env:
       PUBLISH: ${{ needs.check.outputs.publish }}
@@ -88,7 +91,7 @@ jobs:
       - run: for d in sdk/typescript/*/; do cp LICENSE "$d" && cp sdk/typescript/README.md "$d"; done
       # every package as the public publish would send it, the launcher too
       - run: for d in packaging/npm/out/cli-* packaging/npm/out/rowfence sdk/typescript/*/; do npm publish --dry-run --tag "$TAG" --access public "$d"; done
-      # npmjs.com trusts this workflow (each package's trusted publisher: rowfence/rowfence, release.yml): npm
+      # npmjs.com trusts this workflow (each package's trusted publisher: rowfence/rowfence, release.yml, npm): npm
       # trades the job's OIDC token for one publish, from npm 11.5.1 on. GitHub Packages (private) takes GITHUB_TOKEN
       - if: env.PUBLISH != 'none'
         env:
