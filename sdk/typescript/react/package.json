@@ -1,6 +1,6 @@
 {
   "name": "@rowfence/react",
-  "version": "0.1.0-alpha.1",
+  "version": "0.1.0-dev",
   "description": "rowfence for React: usePerms, <Can>, a headless share dialog, access requests, live updates",
   "license": "Apache-2.0",
   "repository": { "type": "git", "url": "git+https://github.com/rowfence/rowfence.git", "directory": "sdk/typescript/react" },
@@ -18,7 +18,7 @@
   ],
   "sideEffects": false,
   "dependencies": {
-    "@rowfence/client": "0.1.0-alpha.1"
+    "@rowfence/client": "0.1.0-dev"
   },
   "peerDependencies": {
     "react": ">=18"
