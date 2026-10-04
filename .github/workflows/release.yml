@@ -192,8 +192,11 @@ jobs:
           OVSX_PAT: ${{ secrets.OVSX_PAT }}
         run: |
           version=$(node -p "require('./editor/package.json').version")
+          # a registry whose token isn't set is skipped, said in the run's summary
+          if [ -z "$VSCE_PAT" ]; then
+            echo "::notice::VSCE_PAT isn't set (environment vscode): not published on the VS Code Marketplace"
           # vsce show prints "undefined" for an extension the Marketplace doesn't have
-          if npx --yes @vscode/vsce@3.9.2 show rowfence.rowfence --json | node -e '
+          elif npx --yes @vscode/vsce@3.9.2 show rowfence.rowfence --json | node -e '
             let s = ""; process.stdin.on("data", (d) => (s += d)).on("end", () => {
               let versions = []; try { versions = JSON.parse(s).versions.map((v) => v.version) } catch {}
               process.exit(versions.includes(process.argv[1]) ? 0 : 1)
@@ -202,7 +205,9 @@ jobs:
           else
             npx --yes @vscode/vsce@3.9.2 publish --packagePath rowfence.vsix
           fi
-          if curl -sf "https://open-vsx.org/api/rowfence/rowfence/$version" > /dev/null; then
+          if [ -z "$OVSX_PAT" ]; then
+            echo "::notice::OVSX_PAT isn't set (environment vscode): not published on Open VSX"
+          elif curl -sf "https://open-vsx.org/api/rowfence/rowfence/$version" > /dev/null; then
             echo "Open VSX has rowfence.rowfence $version already"
           else
             npx --yes ovsx@1.2.0 publish rowfence.vsix

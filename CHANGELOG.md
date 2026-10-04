@@ -11,8 +11,8 @@ Each release upgrades from the one before it. How releases are numbered and made
 
 - The docs site, at https://rowfence.dev: the guides, the reference, the error codes and the playground,
   as of the latest release.
-- The VS Code extension is published on the VS Code Marketplace and Open VSX (as a preview), by the release
-  workflow, whenever its own version is new.
+- The VS Code extension is published on Open VSX, as a preview, by the release workflow whenever its own
+  version is new (VSCodium, Cursor, Gitpod and other editors install from there).
 
 ### Changed
 
