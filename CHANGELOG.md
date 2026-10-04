@@ -24,7 +24,10 @@ Each release upgrades from the one before it. How releases are numbered and made
 
 - The policies readers copy (the docs app, the cookbook, the example apps' policies and tests) are laid out as
   `rowfence fmt` writes them, so `rowfence fmt --check` in CI passes on a copy; only spacing changed.
-- `rowfence graph`'s first line says it was made by `rowfence graph` (it named `authzc --graph`).
+- `rowfence graph`'s first line says it was made by `rowfence graph` (it named `authzc --graph`), and so do the
+  other files rowfence writes: the generated clients say `rowfence client`, the compiled SQL and the policy
+  tests' SQL `rowfence`. `authzc` is the compiler's name inside the repository, not a command users have.
+  The next `rowfence client` rewrites the clients' first line; no migration is needed.
 - While only an alpha is published, a plain `pip install rowfence` finds nothing and `npm i rowfence` gets the
   0.0.0 placeholder: `rowfence init` now tells a Python app to add `rowfence[...]>=0.1.0a1` (at least its own
   version, which lets pip and uv take a pre-release), and the stack pages, the Python SDK's README and
