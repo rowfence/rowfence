@@ -1,6 +1,6 @@
 # rowfence for Python
 
-`pip install rowfence` installs the `rowfence` command (`rowfence init`, `dev`, `migrate`, `review`; also
+`pip install --pre rowfence` (`--pre` while only an alpha is published) installs the `rowfence` command (`rowfence init`, `dev`, `migrate`, `review`; also
 `python -m rowfence`) and the SDK for Python apps. Extras bring the integrations' dependencies:
 `rowfence[fastapi]`, `[sqlalchemy]`, `[psycopg]`, `[asyncpg]`. Python 3.11 or newer.
 

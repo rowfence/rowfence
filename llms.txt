@@ -65,7 +65,7 @@ rules app.folders
 - [Node: pg, postgres.js, Drizzle](docs/stacks/node.md): any Node app
 - [Python: SQLAlchemy, SQLModel, psycopg, asyncpg](docs/stacks/python.md): any Python app
 - [Any other stack](docs/stacks/sql.md): the SQL an app sends
-- [Python SDK](sdk/python/README.md): `pip install rowfence`, its modules
+- [Python SDK](sdk/python/README.md): `pip install --pre rowfence` (an alpha so far), its modules
 - [TypeScript SDK](sdk/typescript/README.md): the `@rowfence/*` packages
 
 ## Optional

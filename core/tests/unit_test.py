@@ -584,6 +584,12 @@ class Command(unittest.TestCase):
                              "alembic.ini": "script_location = %(here)s/alembic\n", "app/main.py": "app = FastAPI()\n"}))
         self.assertEqual((s.found, s.tool, s.migrations_dir, s.pip, s.setup_file),
                          (["FastAPI", "SQLModel", "Alembic"], "alembic", "alembic/versions", "rowfence[fastapi,sqlalchemy]", "app/main.py"))
+        # a release's name is bare; an alpha, a candidate or main's build asks for at least itself, which lets pip
+        # take a pre-release (a bare name got the 0.0.0 placeholder while only an alpha was published)
+        self.assertEqual(stack.pip_requirement("rowfence[fastapi]", "0.2.0"), "rowfence[fastapi]")
+        self.assertEqual(stack.pip_requirement("rowfence[fastapi]", "0.1.0-alpha.1"), "rowfence[fastapi]>=0.1.0a1")
+        self.assertEqual(stack.pip_requirement("rowfence", "0.2.0-rc.12"), "rowfence>=0.2.0rc12")
+        self.assertEqual(stack.pip_requirement("rowfence", "0.2.0-dev"), "rowfence>=0.2.0.dev0")
         s = stack.detect(at({"migrations/0001.sql": "CREATE TABLE t ();"}))
         self.assertEqual((s.tool, s.migrations_dir, s.npm, s.pip), ("sql", "migrations", [], ""))
         d = at({"package.json": '{\n\t"dependencies": {\n\t\t"next": "16"\n\t}\n}\n'})
@@ -1795,6 +1801,46 @@ class DocPages(unittest.TestCase):
         with open(os.path.join(self.REPO, "sdk", "python", "pyproject.toml"), "rb") as fh:
             extras = set(tomllib.load(fh)["project"]["optional-dependencies"])
         self.assertEqual(set(re.findall(r"`rowfence\[(\w+)\]`", page)), extras, "docs/installing.md: the Python package's extras")
+
+    def test_the_install_lines_ask_for_what_is_published(self) -> None:
+        # While the version is an alpha or a candidate, a plain install gets an older release (or the 0.0.0
+        # placeholder, before 0.1.0): each install line asks for the pre-release, and the image names its version.
+        # On a final release, none still does. A build of main (-dev) is left to the release pull request.
+        version = authzlib.__version__
+        if version.endswith("-dev"):
+            self.skipTest("main between releases: the release pull request sets the install lines")
+        pre = "-" in version
+        pages = ["README.md", "llms.txt", "sdk/python/README.md", "editor/README.md",
+                 *[os.path.relpath(p, self.REPO).replace(os.sep, "/") for p in
+                   glob.glob(os.path.join(self.REPO, "docs", "**", "*.md"), recursive=True)],
+                 *[os.path.relpath(p, self.REPO).replace(os.sep, "/") for p in
+                   glob.glob(os.path.join(self.REPO, "sdk", "typescript", "*", "README.md"))]]
+        wrong: list[str] = []
+        for rel in pages:
+            text = self.page(rel)
+            if rel == "docs/installing.md":    # its section on alphas and candidates shows how to ask for one
+                text = re.sub(r"\n## Alphas and release candidates\n.*?(?=\n## )", "\n", text, flags=re.S)
+            fenced = False
+            for line in text.split("\n"):
+                if line.startswith("```"):
+                    fenced = not fenced
+                    continue
+                if not (fenced or line.startswith(("    ", "|"))):
+                    continue
+                npm = re.search(r"\bnpm (?:i|install)\b.*?(?<![\w/@-])rowfence(@\w+)?(?![\w/-])", line.split("#")[0])
+                pip = re.search(r"\bpip install\b.*\browfence\b", line)
+                uv = re.search(r"\buv add\b.*\browfence\b", line)
+                image = re.search(r"ghcr\.io/rowfence/rowfence(:[\w.-]+)?", line)
+                if pre:
+                    bad = ((npm and npm.group(1) != "@next") or (pip and "--pre" not in line)
+                           or (uv and "--prerelease=allow" not in line)
+                           or (image and image.group(1) != f":{version}"))
+                else:
+                    bad = ((npm and npm.group(1) == "@next") or (pip and "--pre" in line)
+                           or (uv and "--prerelease" in line) or (image and "-" in (image.group(1) or "")))
+                if bad:
+                    wrong.append(f"{rel}: {line.strip()}")
+        self.assertEqual(wrong, [], f"install lines that don't get {version} ({'ask for the pre-release' if pre else 'plain installs, no pre-release'})")
 
     def test_each_call_a_page_writes_is_one_the_functions_take(self) -> None:
         sql = Compiler(parse_policy(read("example/docs.authz"))).compile("x")

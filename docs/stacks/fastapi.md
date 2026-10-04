@@ -12,7 +12,7 @@ supported stack passes (`integrations/fastapi/test.sh`).
 ## Install
 
 ```sh
-uv add "rowfence[fastapi,sqlalchemy,asyncpg]"
+uv add --prerelease=allow "rowfence[fastapi,sqlalchemy,asyncpg]"   # while only an alpha is published
 uv run rowfence init        # a first policy from your tables, a test file, rowfence.toml
 ```
 

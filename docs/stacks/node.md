@@ -19,7 +19,7 @@ needs its own connection to Postgres: [Behind a pooler](../operations.md#behind-
 
 ```sh
 npm install @rowfence/client @rowfence/pg          # or @rowfence/postgres, @rowfence/drizzle
-npm install --save-dev rowfence                     # the command: init, dev, migrate, review
+npm install --save-dev rowfence@next                # the command (@next while only an alpha is published)
 ```
 
 ## pg

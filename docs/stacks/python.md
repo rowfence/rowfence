@@ -10,7 +10,7 @@ reads and refuses what it may not write, and the SDK raises `Refused` (403) or `
 These come from the conformance suite (`integrations/fastapi/tests/test_conformance.py`).
 
 ```sh
-pip install "rowfence[sqlalchemy,psycopg]"      # or [asyncpg]; the command comes with it
+pip install --pre "rowfence[sqlalchemy,psycopg]"   # or [asyncpg]; the command comes with it (--pre: an alpha)
 ```
 
 ## Who a transaction acts for

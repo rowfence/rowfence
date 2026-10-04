@@ -5,10 +5,10 @@ signs in each transaction, reads a refusal, and ships the policy with its migrat
 
 | stack | page | SDK |
 |---|---|---|
-| FastAPI, SQLAlchemy (async), Alembic | [fastapi.md](fastapi.md) | `pip install rowfence` |
+| FastAPI, SQLAlchemy (async), Alembic | [fastapi.md](fastapi.md) | `pip install --pre rowfence` |
 | Next.js, Prisma, React | [nextjs.md](nextjs.md) | `@rowfence/prisma`, `/next`, `/react` |
 | Node: pg, postgres.js, Drizzle (Express, Hono, workers) | [node.md](node.md) | `@rowfence/pg`, `/postgres`, `/drizzle` |
-| Python: SQLAlchemy (sync), SQLModel, psycopg, asyncpg | [python.md](python.md) | `pip install rowfence` |
+| Python: SQLAlchemy (sync), SQLModel, psycopg, asyncpg | [python.md](python.md) | `pip install --pre rowfence` |
 | Anything else (Go, Ruby, Java, Rust, ...) | [sql.md](sql.md) | none: a few SQL statements |
 
 Every line of code these pages show is in a tested app (`integrations/fastapi`, `integrations/nextjs`, the
