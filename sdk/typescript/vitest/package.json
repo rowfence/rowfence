@@ -1,6 +1,6 @@
 {
   "name": "@rowfence/vitest",
-  "version": "0.1.0-dev",
+  "version": "0.1.0-alpha.1",
   "description": "rowfence with Vitest (and Jest): asUser, toBeRefused, a database per worker",
   "license": "Apache-2.0",
   "repository": { "type": "git", "url": "git+https://github.com/rowfence/rowfence.git", "directory": "sdk/typescript/vitest" },
@@ -18,7 +18,7 @@
   ],
   "sideEffects": false,
   "dependencies": {
-    "@rowfence/client": "0.1.0-dev"
+    "@rowfence/client": "0.1.0-alpha.1"
   },
   "peerDependencies": {
     "vitest": "^4.0.0 || ^5.0.0",

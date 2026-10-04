@@ -6,11 +6,14 @@ the command writes migrations, and your migration tool runs them as the owner of
 
 ## The command
 
-Once published, one of:
+Only an alpha is published so far, 0.1.0-alpha.1, and a plain install doesn't get it. Ask for it:
 
-    npm i -D rowfence              # the command with its own Python: a TypeScript app needs none
-    pip install rowfence           # the command and the Python SDK: rowfence[fastapi], [sqlalchemy], ...
-    docker run --rm -u "$(id -u):$(id -g)" -v "$PWD:/work" ghcr.io/rowfence/rowfence migrate
+    npm i -D rowfence@next         # the command with its own Python: a TypeScript app needs none
+    pip install --pre rowfence     # the command and the Python SDK: rowfence[fastapi], [sqlalchemy], ...
+    docker run --rm -u "$(id -u):$(id -g)" -v "$PWD:/work" ghcr.io/rowfence/rowfence:0.1.0-alpha.1 migrate
+
+Once 0.1.0 is out, the plain `npm i -D rowfence`, `pip install rowfence` and `ghcr.io/rowfence/rowfence` get
+it.
 
 - **npm**: the package brings a Python of its own, built for your machine: Linux (glibc and musl, x64 and
   arm64), macOS (x64 and arm64) and Windows x64. Run it as `npx rowfence`, or from a script in `package.json`.
