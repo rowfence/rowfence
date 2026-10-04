@@ -14,7 +14,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 import re  # noqa: E402
 
-import compile_policy  # noqa: E402
+from authzlib import Compiler, PolicyError, parse_policy  # noqa: E402
 from authzlib.errors import CODES, split  # noqa: E402
 
 
@@ -349,7 +349,7 @@ TESTS = [
 
 
 def compile_policy(text: str, tests: bool = False, files: dict[str, str] | None = None) -> str:
-    c = compile_policy.Compiler(compile_policy.parse_policy(text, files=files))
+    c = Compiler(parse_policy(text, files=files))
     return c.compile_tests("t") if tests else c.compile("t")
 
 
@@ -361,7 +361,7 @@ def main() -> None:
         try:
             compile_policy(BASE + extra)
             got = "(compiled without error)"
-        except compile_policy.PolicyError as e:
+        except PolicyError as e:
             got = str(e)
         ok = want in got and (line is None or got.startswith(f"line {line}:")) and coded(got)
         fails += not ok
@@ -370,7 +370,7 @@ def main() -> None:
         try:
             compile_policy(text)
             got = "(compiled without error)"
-        except compile_policy.PolicyError as e:
+        except PolicyError as e:
             got = str(e)
         ok = want in got and got.startswith(f"line {line}:") and coded(got)
         fails += not ok
@@ -379,7 +379,7 @@ def main() -> None:
     try:
         compile_policy(BASE + "  can view = owner\ntest\n  user 1 can edit doc 1\n", tests=True)
         got = "(compiled without error)"
-    except compile_policy.PolicyError as e:
+    except PolicyError as e:
         got = str(e)
     ok = "doc has no permission 'edit'" in got and coded(got)
     fails += not ok
@@ -389,26 +389,26 @@ def main() -> None:
         try:
             compile_policy(BASE + extra, tests=True)
             got = "(compiled without error)"
-        except compile_policy.PolicyError as e:
+        except PolicyError as e:
             got = str(e)
         ok = want in got and got.startswith(f"line {line}:") and coded(got)
         fails += not ok
         print(f"{'ok  ' if ok else 'FAIL'}  named tests: {what}: {got}")
     try:
-        c = compile_policy.Compiler(compile_policy.parse_policy(BASE))
+        c = Compiler(parse_policy(BASE))
         c.add_test_files({"more.authz": "type x = alt.x\n"})
         got = "(compiled without error)"
-    except compile_policy.PolicyError as e:
+    except PolicyError as e:
         got = str(e)
     ok = got.startswith("more.authz: a test file holds only named tests") and coded(got)
     fails += not ok
     print(f"{'ok  ' if ok else 'FAIL'}  named tests: a test file with a type in it: {got}")
     try:
-        c = compile_policy.Compiler(compile_policy.parse_policy(BASE))
+        c = Compiler(parse_policy(BASE))
         c.add_test_files({"more.authz": 'test "t"\n  user 1 can view doc 1\n'})
         c.tests_function_sql()
         got = "(compiled without error)"
-    except compile_policy.PolicyError as e:
+    except PolicyError as e:
         got = str(e)
     ok = got.startswith("more.authz line 2: doc has no permission 'view'") and coded(got)
     fails += not ok
@@ -418,7 +418,7 @@ def main() -> None:
         try:
             compile_policy(main_text, files=files)
             got = "(compiled without error)"
-        except compile_policy.PolicyError as e:
+        except PolicyError as e:
             got = str(e)
         ok = got.startswith(want) and coded(got)
         fails += not ok
@@ -426,7 +426,7 @@ def main() -> None:
     try:
         compile_policy('include "sub/a.authz"\n', files={"sub/a.authz": 'include "b.authz"\n', "sub/b.authz": BASE})
         got = ""
-    except compile_policy.PolicyError as e:
+    except PolicyError as e:
         got = str(e)
     fails += bool(got)
     print(f"{'ok  ' if not got else 'FAIL'}  included files: nested includes compile{': ' + got if got else ''}")
@@ -457,7 +457,7 @@ def main() -> None:
                                env={**os.environ, **env})
             err = next((ln for ln in p.stderr.splitlines() if "ERROR" in ln), "")
             ok = p.returncode == 0
-        except compile_policy.PolicyError as e:
+        except PolicyError as e:
             ok, err = False, str(e)
         fails += not ok
         print(f"{'ok  ' if ok else 'FAIL'}  {what}{': ' + err if err else ''}")
