@@ -80,7 +80,9 @@ A build from `main` records its version with a hash of the compiler's sources (`
    version agree, runs the unit tests and the packaging tests, then publishes: the Python package, the npm
    packages, the image, and a GitHub release holding the wheel, the sdist, the npm launcher and the VS Code
    extension, with the changelog's section as its notes. Where it publishes follows the repository: private
-   places while it is private, PyPI, npm and ghcr.io once public.
+   places while it is private, PyPI, npm and ghcr.io once public. The tag also deploys the docs site at
+   rowfence.dev (`.github/workflows/site.yml`), built from the tag, when the release is what a plain install
+   gets, or while no final release exists: `gh workflow run site.yml -f tag=vX.Y.Z` deploys another one.
 5. **Check it** as a user would: install from the registries on Linux, macOS and Windows, then `rowfence
    init`, `migrate` and `test` on a small app, and the review action on a pull request. Then the next
    alpha, the next candidate or the final release. A tag pushed is not a release made: look at the workflow's
