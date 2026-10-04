@@ -19,8 +19,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT)
 sys.path.insert(0, os.path.join(ROOT, "cli"))
-import compile_policy  # noqa: E402
 import client_types  # noqa: E402
+import compile_policy  # noqa: E402
 import pgwire  # noqa: E402
 
 fails = 0
