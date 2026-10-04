@@ -25,7 +25,7 @@ expect() {   # $1 label, $2 expected output (an SQLSTATE for errors), rest: psql
   if [ "$got" = "$want" ]; then echo "ok    $label"; else echo "FAIL  $label: expected '$want', got '$got'"; fails=$((fails + 1)); fi
 }
 
-python3 authzc.py example/docs.authz > /tmp/authz_adversarial.sql || exit 1
+python3 compile_policy.py example/docs.authz > /tmp/authz_adversarial.sql || exit 1
 PGOPTIONS="-c client_min_messages=error" psql -X -q -v ON_ERROR_STOP=1 -d "$DB" -f example/app_schema.sql >/dev/null &&
 PGOPTIONS="-c client_min_messages=error" psql -X -q -v ON_ERROR_STOP=1 -d "$DB" -f /tmp/authz_adversarial.sql >/dev/null || exit 1
 PSQL -c "SET ROLE app_user; SET authz.user_id = 5; SELECT authz.share('folder', 1, 'viewer', 'org', 1, 'member')" >/dev/null
@@ -98,7 +98,7 @@ got=$(catalog "$DB" /tmp/authz_adversarial.sql app_user)
 for p in "multi tests/multi_schema.sql tests/multi.authz app_user" "alt tests/alt_schema.sql tests/alt.authz app_user"          "composite tests/composite_schema.sql tests/composite.authz app_user"          "cookbook ../docs/cookbook/schema.sql ../docs/cookbook/policy.authz cb_app"; do
   set -- $p; C="${DB}_catalog"
   dropdb --if-exists "$C" 2>/dev/null; createdb "$C" || exit 1
-  python3 authzc.py "$3" > /tmp/authz_adversarial_catalog.sql &&
+  python3 compile_policy.py "$3" > /tmp/authz_adversarial_catalog.sql &&
   PGOPTIONS="-c client_min_messages=error" psql -X -q -v ON_ERROR_STOP=1 -d "$C" -f "$2" -f /tmp/authz_adversarial_catalog.sql >/dev/null ||
     { echo "FAIL  applying $3"; fails=$((fails + 1)); continue; }
   got=$(catalog "$C" /tmp/authz_adversarial_catalog.sql "$4"); dropdb "$C"

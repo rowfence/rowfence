@@ -1,4 +1,4 @@
-"""authzc: compile a .authz policy file into PostgreSQL (views, closure tables,
+"""authzlib: compile a .authz policy file into PostgreSQL (views, closure tables,
 triggers, row-level security policies and an API for app code)."""
 from .devtools import DevMixin
 from .output import OutputMixin

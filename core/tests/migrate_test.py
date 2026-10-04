@@ -134,7 +134,7 @@ UNION ALL
 SELECT 'view ' || c.oid::regclass::text || E'\n' || pg_get_viewdef(c.oid) || E'\nacl ' || coalesce(c.relacl::text, '')
        || E'\ncomment ' || coalesce(obj_description(c.oid, 'pg_class'), '')
 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-WHERE c.relkind = 'v' AND (n.nspname IN ('authz_int', 'authz_gen') OR obj_description(c.oid, 'pg_class') = 'authzc masked view')
+WHERE c.relkind = 'v' AND (n.nspname IN ('authz_int', 'authz_gen') OR obj_description(c.oid, 'pg_class') = 'rowfence masked view')
 UNION ALL
 SELECT 'trigger ' || t.tgname || ' ON ' || t.tgrelid::regclass::text || E'\n' || pg_get_triggerdef(t.oid)
        || ' ' || t.tgenabled::text

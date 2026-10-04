@@ -8,7 +8,7 @@ page is for working on them.
 |---|---|
 | `authzlib/` | the compiler (Python 3, standard library only); `database.py` is what the command does to a database, `migrate.py` the migrations |
 | `cli/` | `rowfence`, the command that compiles and applies, and `pgwire.py`, the small Postgres client it uses |
-| `authzc.py` | the same compiler without a database: writes the SQL to a file (for development, tests and the editor) |
+| `compile_policy.py` | the same compiler without a database: writes the SQL to a file (for development, tests and the editor) |
 | `example/` | the docs app used throughout: its schema, `docs.authz` and the policy's tests (`docs.test.authz`) |
 | `tests/` | every test suite; `run_tests.sh` runs them all, `ci.sh` on every Postgres version |
 | `bench/` | the benchmarks: `benchmark.sql` (the docs app, bigger) and the scale benchmark |

@@ -26,7 +26,7 @@ expect_code() {  # $1 label, $2 expected SQLSTATE, rest: -c statements (as app_u
   if [ "$got" = "$want" ]; then echo "ok    $label"; else echo "FAIL  $label: expected $want, got $got"; fails=$((fails + 1)); fi
 }
 
-python3 authzc.py example/docs.authz > /tmp/authz_governance.sql || exit 1
+python3 compile_policy.py example/docs.authz > /tmp/authz_governance.sql || exit 1
 PGOPTIONS="-c client_min_messages=error" psql -X -q -v ON_ERROR_STOP=1 -d "$DB" -f example/app_schema.sql >/dev/null &&
 PGOPTIONS="-c client_min_messages=error" psql -X -q -v ON_ERROR_STOP=1 -d "$DB" -f /tmp/authz_governance.sql >/dev/null || exit 1
 
@@ -179,7 +179,7 @@ sed -e 's/^  editor      : user, team#member shared$/  editor      : user, team#
     example/docs.authz > /tmp/authz_governance_by.authz
 grep -q "can manage_editors = owner" /tmp/authz_governance_by.authz && grep -q "shared by manage_editors" /tmp/authz_governance_by.authz ||
   { echo "FAIL  could not make the variant policy"; fails=$((fails + 1)); }
-python3 authzc.py /tmp/authz_governance_by.authz > /tmp/authz_governance_by.sql &&
+python3 compile_policy.py /tmp/authz_governance_by.authz > /tmp/authz_governance_by.sql &&
 PGOPTIONS="-c client_min_messages=error" psql -X -q -v ON_ERROR_STOP=1 -d "$DB" -f /tmp/authz_governance_by.sql >/dev/null
 as 1 -c "SELECT authz.share('folder', 3, 'editor', 'user', 4)" >/dev/null
 expect_code "erin (share, but not manage_editors) cannot unshare dave's editor share" 42501 -c "SET authz.user_id = 5" \
@@ -197,7 +197,7 @@ admin "the example data keeps the invariant" "0" "SELECT count(*) FROM authz.che
 PSQL -c "UPDATE app.folders SET owner_id = 6 WHERE id = 4" >/dev/null
 admin "a Globex user owning an Acme folder breaks it" "6|{4}" \
   "SELECT user_id || '|' || object_ids::text FROM authz.check_invariants()"
-got=$(psql -X -q -At -d "$DB" -f <(python3 authzc.py example/docs.authz --tests) 2>&1)
+got=$(psql -X -q -At -d "$DB" -f <(python3 compile_policy.py example/docs.authz --tests) 2>&1)
 case "$got" in *"FAIL  invariant"*"policy test(s) failed"*) echo "ok    the policy tests fail on it";;
   *) echo "FAIL  policy tests with a broken invariant: $got"; fails=$((fails + 1));; esac
 PSQL -c "UPDATE app.folders SET owner_id = 1 WHERE id = 4" >/dev/null
@@ -219,7 +219,7 @@ sed -e 's/^           or linked_into.view .*$//' -e 's/^  linked_into : folder *
 grep -q "linked_into" "$TMPD/nolinks.authz" && { echo "FAIL  could not make the policy without links"; fails=$((fails + 1)); }
 COUNTS="SELECT (SELECT count(*) FROM authz.shares) || '|' || (SELECT count(*) FROM authz.audit) || '|' || (SELECT count(*) FROM authz.changes)"
 BEFORE=$(PSQL -c "$COUNTS")
-python3 authzc.py "$TMPD/nolinks.authz" --diff > "$TMPD/diff.sql" &&
+python3 compile_policy.py "$TMPD/nolinks.authz" --diff > "$TMPD/diff.sql" &&
 out=$(PGOPTIONS="-c client_min_messages=error" psql -X -q -d "$DB" -f "$TMPD/diff.sql" 2>&1)
 case "$out" in *"loses  | 5       | file        | permission view | 16"*) echo "ok    without links, erin would lose joint-plan.md";;
   *) echo "FAIL  diff: $out"; fails=$((fails + 1));; esac
@@ -228,7 +228,7 @@ case "$out" in *"loses  | 5       | app.files   | rows readable   | 16"*) echo "
 case "$out" in *gains*) echo "FAIL  the diff shows gains: $out"; fails=$((fails + 1));; *) echo "ok    ...and nobody gains anything";; esac
 check "the preview changed nothing" "t" "SET authz.user_id = 5; SELECT authz.can('file', 16, 'view')"
 admin "... not even the trail or the feed" "$BEFORE" "$COUNTS"
-out=$(python3 authzc.py "$TMPD/nolinks.authz" --diff --users 1,3 | PGOPTIONS="-c client_min_messages=error" psql -X -q -d "$DB" 2>&1)
+out=$(python3 compile_policy.py "$TMPD/nolinks.authz" --diff --users 1,3 | PGOPTIONS="-c client_min_messages=error" psql -X -q -d "$DB" 2>&1)
 case "$out" in *"| 5 "*|*ERROR*) echo "FAIL  --users 1,3 shows other users: $out"; fails=$((fails + 1));; *) echo "ok    --users limits the preview";; esac
 rm -rf "$TMPD"
 
@@ -283,7 +283,7 @@ PSQL -c "ALTER TABLE app.files ENABLE ROW LEVEL SECURITY" >/dev/null
 expect_code "the app role cannot run lint" 42501 -c "SELECT * FROM authz.lint()"
 # without its 'after' rule, moving a folder isn't checked where it goes
 grep -v "update parent_id after" example/docs.authz > /tmp/authz_no_after.authz
-python3 authzc.py /tmp/authz_no_after.authz > /tmp/authz_no_after.sql &&
+python3 compile_policy.py /tmp/authz_no_after.authz > /tmp/authz_no_after.sql &&
 PGOPTIONS="-c client_min_messages=error" psql -X -q -v ON_ERROR_STOP=1 -d "$DB" -f /tmp/authz_no_after.sql >/dev/null
 admin "lint finds a move nothing checks the destination of" "1" \
   "SELECT count(*) FROM authz.lint() WHERE object = 'app.folders.parent_id' AND problem LIKE 'moves a row under another%'"

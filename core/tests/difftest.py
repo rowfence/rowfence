@@ -38,7 +38,7 @@ from typing import Any, ClassVar
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
-import authzc  # noqa: E402
+import compile_policy  # noqa: E402
 from authzlib import evaluate  # noqa: E402
 from authzlib.parse import Caveat, Cols, Rule, Type  # noqa: E402
 from authzlib.sqlutil import on_row  # noqa: E402
@@ -206,7 +206,7 @@ class Checker:
         self.db, self.gen = db, gen
         # everyone who signs in, and nobody ('': signed out, what `anyone` and links are for)
         self.users, self.role = [*gen.users, ""], gen.role
-        self.pol = authzc.parse_policy(read(policy_path), policy_path)
+        self.pol = compile_policy.parse_policy(read(policy_path), policy_path)
         self.types, self.rules = self.pol.types, self.pol.rules
         self.ref = Reference(self.pol)
         self._nocontext: dict[tuple[str, str, str], set[str]] | None = None
@@ -1197,7 +1197,7 @@ def main() -> None:
     db.recreate()
     db.run(read(gen.schema))
     db.run(gen.initial())
-    compiled = subprocess.run([sys.executable, "authzc.py", gen.policy], capture_output=True, text=True, check=True).stdout
+    compiled = subprocess.run([sys.executable, "compile_policy.py", gen.policy], capture_output=True, text=True, check=True).stdout
     db.run(compiled)
     db.run(gen.grants())
     checker = Checker(db, gen.policy, gen)

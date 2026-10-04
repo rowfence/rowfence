@@ -18,7 +18,7 @@ so under the box).
 | `compiler.worker.mjs` | the compiler in a worker, so Python starts beside Postgres and typing never waits |
 | `playground.mjs`, `index.html` | the page |
 | `build.mjs` | writes `dist/`: the page, and `bundle.json` with the compiler and the examples, read from the repository (the getting-started guide's own schema, policy and test; the docs example; the cookbook) |
-| `test.mjs` | the engine headless, in Node: every example compiles, applies and passes its tests; asking as someone; mistakes; each run starts from nothing; the SQL is the command's (it runs `core/authzc.py`: `PYTHON=...` if `python3` isn't the one) |
+| `test.mjs` | the engine headless, in Node: every example compiles, applies and passes its tests; asking as someone; mistakes; each run starts from nothing; the SQL is the command's (it runs `core/compile_policy.py`: `PYTHON=...` if `python3` isn't the one) |
 | `browser_test.mjs` | the page in headless Chrome or Edge, over the DevTools protocol; also how long loading takes |
 
 ```sh

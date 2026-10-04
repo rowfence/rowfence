@@ -147,7 +147,7 @@ def describe_missing(missing: list[Lookup], tool: str | None) -> str:
 # --- plans ---------------------------------------------------------------------------------------------
 def app_role(db: Db) -> str | None:
     rows = db.rows("SELECT DISTINCT r.rolname AS r FROM pg_catalog.pg_policy p JOIN pg_catalog.pg_description d "
-                   "ON d.objoid = p.oid AND d.classoid = 'pg_catalog.pg_policy'::regclass AND d.description = 'authzc' "
+                   "ON d.objoid = p.oid AND d.classoid = 'pg_catalog.pg_policy'::regclass AND d.description = 'rowfence' "
                    "CROSS JOIN unnest(p.polroles) ro JOIN pg_catalog.pg_roles r ON r.oid = ro")
     return text(rows[0], "r") if rows else None
 

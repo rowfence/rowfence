@@ -704,7 +704,7 @@ BEGIN
                    cols, {lit(where)});
   END;
 END $mv$;
-COMMENT ON VIEW {qt(view)} IS 'authzc masked view';
+COMMENT ON VIEW {qt(view)} IS 'rowfence masked view';
 REVOKE ALL ON {qt(view)} FROM PUBLIC;
 GRANT SELECT ON {qt(view)} TO {self.role};""")
         masked: dict[str, list[str]] = {}
@@ -758,7 +758,7 @@ BEGIN
            FROM pg_depend d WHERE d.refclassid = 'pg_class'::regclass AND d.refobjid = c.oid AND d.deptype = 'n'
              AND NOT (d.classid = 'pg_rewrite'::regclass AND d.objid IN (SELECT oid FROM pg_rewrite WHERE ev_class = c.oid))) || ')', '; ')
   INTO v_old FROM pg_class c JOIN pg_description d ON d.objoid = c.oid AND d.classoid = 'pg_class'::regclass
-  WHERE c.relkind = 'v' AND d.description = 'authzc masked view' AND c.oid <> ALL (ARRAY[{ours}]::oid[]);
+  WHERE c.relkind = 'v' AND d.description = 'rowfence masked view' AND c.oid <> ALL (ARRAY[{ours}]::oid[]);
   IF v_old IS NOT NULL THEN
     RAISE EXCEPTION 'this policy no longer makes a masked view that something in the database is built on: % [AZ617]', v_old
       USING HINT = 'Drop or change what is built on it, then apply again.';
@@ -817,7 +817,7 @@ END $kv$;"""
                 else:
                     policies.append(f"{head}CREATE POLICY {name} ON {qt(table)} FOR {r.command.upper()} TO {self.role}\n"
                                     f"  USING ({sql});")
-                policies.append(f"COMMENT ON POLICY {name} ON {qt(table)} IS 'authzc';")
+                policies.append(f"COMMENT ON POLICY {name} ON {qt(table)} IS 'rowfence';")
 
         shared_types = {t.name for t in self.types.values()
                         for r in t.relations.values() for src in r.sources if src.kind in ("shared", "roles")}
@@ -1134,14 +1134,14 @@ CREATE TEMP TABLE authz_old_tables ON COMMIT DROP AS
   SELECT DISTINCT p.polrelid::regclass AS tbl
   FROM pg_policy p
   LEFT JOIN pg_description d ON d.objoid = p.oid AND d.classoid = 'pg_policy'::regclass
-  WHERE d.description = 'authzc' OR p.polname IN ('authz_select', 'authz_insert', 'authz_update', 'authz_delete');
+  WHERE d.description = 'rowfence' OR p.polname IN ('authz_select', 'authz_insert', 'authz_update', 'authz_delete');
 DO $d$
 DECLARE old record;
 BEGIN
   FOR old IN SELECT pol.polname, pol.polrelid::regclass AS tbl
              FROM pg_policy pol
              LEFT JOIN pg_description d ON d.objoid = pol.oid AND d.classoid = 'pg_policy'::regclass
-             WHERE d.description = 'authzc' OR pol.polname IN ('authz_select', 'authz_insert', 'authz_update', 'authz_delete') LOOP
+             WHERE d.description = 'rowfence' OR pol.polname IN ('authz_select', 'authz_insert', 'authz_update', 'authz_delete') LOOP
     EXECUTE format('DROP POLICY %I ON %s', old.polname, old.tbl);
   END LOOP;
 END $d$;"""
@@ -1187,7 +1187,7 @@ DO $mv$
 DECLARE v record;
 BEGIN
   FOR v IN SELECT c.oid::regclass AS name FROM pg_class c JOIN pg_description d ON d.objoid = c.oid
-           AND d.classoid = 'pg_class'::regclass WHERE c.relkind = 'v' AND d.description = 'authzc masked view' LOOP
+           AND d.classoid = 'pg_class'::regclass WHERE c.relkind = 'v' AND d.description = 'rowfence masked view' LOOP
     EXECUTE format('DROP VIEW %s', v.name);
   END LOOP;
 END $mv$;"""
@@ -1199,7 +1199,7 @@ DO $mv$
 DECLARE v record; cols text;
 BEGIN
   FOR v IN SELECT c.oid, c.oid::regclass AS name FROM pg_class c JOIN pg_description d ON d.objoid = c.oid
-           AND d.classoid = 'pg_class'::regclass WHERE c.relkind = 'v' AND d.description = 'authzc masked view' LOOP
+           AND d.classoid = 'pg_class'::regclass WHERE c.relkind = 'v' AND d.description = 'rowfence masked view' LOOP
     BEGIN
       EXECUTE format('DROP VIEW %s', v.name);
     EXCEPTION WHEN dependent_objects_still_exist THEN

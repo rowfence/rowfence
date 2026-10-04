@@ -23,7 +23,7 @@ snapshot() { PSQL -c "DROP TABLE IF EXISTS kept" -c "CREATE TABLE kept (d bigint
 untouched() { echo "SELECT count(*) > 100 AND count(*) = count(*) FILTER (WHERE t.xmin = k.x)
                     FROM kept k JOIN $T t ON t.descendant = k.d AND t.ancestor = k.a"; }
 
-python3 authzc.py example/docs.authz > "/tmp/${DB}_docs.sql" || exit 1
+python3 compile_policy.py example/docs.authz > "/tmp/${DB}_docs.sql" || exit 1
 PSQL -f example/app_schema.sql >/dev/null 2>&1 && PSQL -f "/tmp/${DB}_docs.sql" >/dev/null 2>&1 || { echo "setup failed"; exit 1; }
 # five levels below each of two roots (1000 and 2000), 4 children each; links point nearer the top
 PSQL >/dev/null <<'SQL' || { echo "load failed"; exit 1; }

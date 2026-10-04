@@ -439,7 +439,7 @@ def unchanged(db: Db, policy: str, files: Files) -> bool:
         "SELECT to_regnamespace('authz_int') IS NOT NULL AND to_regnamespace('authz_gen') IS NOT NULL "
         "AND NOT EXISTS (SELECT 1 FROM unnest($1::text[], $2::text[]) m(tbl, name) WHERE NOT EXISTS ("
         "  SELECT 1 FROM pg_catalog.pg_policy p JOIN pg_catalog.pg_description d ON d.objoid = p.oid "
-        "  AND d.classoid = 'pg_catalog.pg_policy'::regclass AND d.description = 'authzc' "
+        "  AND d.classoid = 'pg_catalog.pg_policy'::regclass AND d.description = 'rowfence' "
         "  WHERE p.polrelid = to_regclass(m.tbl) AND p.polname = m.name)) "
         "AND NOT EXISTS (SELECT 1 FROM unnest($3::text[]) g(tbl) WHERE NOT coalesce("
         "  (SELECT c.relrowsecurity FROM pg_catalog.pg_class c WHERE c.oid = to_regclass(g.tbl)), false)) "

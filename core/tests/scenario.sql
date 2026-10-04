@@ -1,7 +1,7 @@
 -- =====================================================================
 -- scenario.sql — end-to-end checks of the compiled policy, through RLS
---   python3 authzc.py example/docs.authz > /tmp/docs.sql
---   python3 authzc.py example/docs.authz --tests > /tmp/docs_tests.sql
+--   python3 compile_policy.py example/docs.authz > /tmp/docs.sql
+--   python3 compile_policy.py example/docs.authz --tests > /tmp/docs_tests.sql
 --   psql -v ON_ERROR_STOP=1 -d scratch -f example/app_schema.sql
 --   psql -v ON_ERROR_STOP=1 -d scratch -f /tmp/docs.sql
 --   psql -v ON_ERROR_STOP=1 -v docs_tests=/tmp/docs_tests.sql -d scratch -f tests/scenario.sql

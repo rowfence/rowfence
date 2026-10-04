@@ -47,14 +47,14 @@ CREATE TEMP TABLE authz_old_tables ON COMMIT DROP AS
   SELECT DISTINCT p.polrelid::regclass AS tbl
   FROM pg_policy p
   LEFT JOIN pg_description d ON d.objoid = p.oid AND d.classoid = 'pg_policy'::regclass
-  WHERE d.description = 'authzc' OR p.polname IN ('authz_select', 'authz_insert', 'authz_update', 'authz_delete');
+  WHERE d.description = 'rowfence' OR p.polname IN ('authz_select', 'authz_insert', 'authz_update', 'authz_delete');
 DO $d$
 DECLARE old record;
 BEGIN
   FOR old IN SELECT pol.polname, pol.polrelid::regclass AS tbl
              FROM pg_policy pol
              LEFT JOIN pg_description d ON d.objoid = pol.oid AND d.classoid = 'pg_policy'::regclass
-             WHERE d.description = 'authzc' OR pol.polname IN ('authz_select', 'authz_insert', 'authz_update', 'authz_delete') LOOP
+             WHERE d.description = 'rowfence' OR pol.polname IN ('authz_select', 'authz_insert', 'authz_update', 'authz_delete') LOOP
     EXECUTE format('DROP POLICY %I ON %s', old.polname, old.tbl);
   END LOOP;
 END $d$;
@@ -64,7 +64,7 @@ DO $mv$
 DECLARE v record; cols text;
 BEGIN
   FOR v IN SELECT c.oid, c.oid::regclass AS name FROM pg_class c JOIN pg_description d ON d.objoid = c.oid
-           AND d.classoid = 'pg_class'::regclass WHERE c.relkind = 'v' AND d.description = 'authzc masked view' LOOP
+           AND d.classoid = 'pg_class'::regclass WHERE c.relkind = 'v' AND d.description = 'rowfence masked view' LOOP
     BEGIN
       EXECUTE format('DROP VIEW %s', v.name);
     EXCEPTION WHEN dependent_objects_still_exist THEN
@@ -3012,7 +3012,7 @@ CREATE POLICY "authz_select" ON "alt"."docs" FOR SELECT TO app_user
     OR EXISTS (SELECT 1 FROM authz_gen."doc__parent__hidden__ext" v WHERE v.id = "docs"."doc_no"))
     OR EXISTS (SELECT 1 FROM authz_gen."doc__shortcut__hidden" v WHERE v.id = "docs"."doc_no")), false))));
 
-COMMENT ON POLICY "authz_select" ON "alt"."docs" IS 'authzc';
+COMMENT ON POLICY "authz_select" ON "alt"."docs" IS 'rowfence';
 
 -- alt.docs insert (line 44): {this.owner_id = authz.uid()} and (parent.edit or {up is null})
 CREATE POLICY "authz_insert" ON "alt"."docs" FOR INSERT TO app_user
@@ -3022,7 +3022,7 @@ CREATE POLICY "authz_insert" ON "alt"."docs" FOR INSERT TO app_user
     OR authz_gen."doc__parent__edit__links"("docs"."doc_no")))))
     OR authz_gen."alt.docs:insert:refuse"(ROW("docs".*)::"alt"."docs"));
 
-COMMENT ON POLICY "authz_insert" ON "alt"."docs" IS 'authzc';
+COMMENT ON POLICY "authz_insert" ON "alt"."docs" IS 'rowfence';
 
 -- alt.docs update (line 45): edit
 CREATE POLICY "authz_update" ON "alt"."docs" FOR UPDATE TO app_user
@@ -3068,14 +3068,14 @@ CREATE POLICY "authz_update" ON "alt"."docs" FOR UPDATE TO app_user
     OR authz_gen."doc__parent__edit__links"("docs"."doc_no")))))
     OR authz_gen."alt.docs:update:refuse"(ROW("docs".*)::"alt"."docs"));
 
-COMMENT ON POLICY "authz_update" ON "alt"."docs" IS 'authzc';
+COMMENT ON POLICY "authz_update" ON "alt"."docs" IS 'rowfence';
 
 -- alt.docs delete (line 48): share and not blocked
 CREATE POLICY "authz_delete" ON "alt"."docs" FOR DELETE TO app_user
   USING (((SELECT authz_int.scope_cmd('alt.docs', 'delete')) AND (coalesce("docs"."owner_id" = (SELECT authz.uid()), false)
     AND NOT coalesce(coalesce("docs"."blocked_id" = (SELECT authz.uid()), false), false))));
 
-COMMENT ON POLICY "authz_delete" ON "alt"."docs" IS 'authzc';
+COMMENT ON POLICY "authz_delete" ON "alt"."docs" IS 'rowfence';
 
 CREATE FUNCTION authz_gen."alt.docs:column_1:items"(p_row "alt"."docs") RETURNS boolean[]
 LANGUAGE sql STABLE
@@ -5529,7 +5529,7 @@ WHERE w.who IS NOT NULL AND n.nspname !~ '^pg_(toast_)?temp_' LOOP
            FROM pg_policy p
            LEFT JOIN pg_description d ON d.objoid = p.oid AND d.classoid = 'pg_policy'::regclass
            WHERE p.polrelid = ANY (SELECT to_regclass(x) FROM unnest(ARRAY['"alt"."docs"']::text[]) x)
-             AND d.description IS DISTINCT FROM 'authzc'
+             AND d.description IS DISTINCT FROM 'rowfence'
              AND p.polname NOT IN ('authz_select', 'authz_insert', 'authz_update', 'authz_delete')
              AND EXISTS (SELECT 1 FROM unnest(p.polroles) o
                          WHERE CASE WHEN o = 0 THEN true ELSE pg_has_role(v_role, o, 'MEMBER') END)
@@ -5670,7 +5670,7 @@ WHERE w.who IS NOT NULL AND n.nspname !~ '^pg_(toast_)?temp_' LOOP
              AND d.refobjid = ANY (SELECT to_regclass(x) FROM unnest(ARRAY['"alt"."docs"', '"alt"."groups"', '"alt"."projects"', '"alt"."users"', '"alt"."doc_links"', '"alt"."doc_projects"', '"alt"."group_members"', '"alt"."project_groups"']::text[]) x)
              AND v.oid <> d.refobjid AND v.relkind IN ('v', 'm')
              AND v.relnamespace NOT IN (to_regnamespace('authz_gen'), to_regnamespace('authz_int'))
-             AND coalesce(ds.description, '') <> 'authzc masked view'
+             AND coalesce(ds.description, '') <> 'rowfence masked view'
              AND NOT coalesce(v.reloptions @> ARRAY['security_invoker=true'], false)
              AND NOT coalesce(v.reloptions @> ARRAY['security_invoker=on'], false)
              AND has_table_privilege(v_role, v.oid, 'SELECT') LOOP
@@ -5809,7 +5809,7 @@ BEGIN
            FROM pg_depend d WHERE d.refclassid = 'pg_class'::regclass AND d.refobjid = c.oid AND d.deptype = 'n'
              AND NOT (d.classid = 'pg_rewrite'::regclass AND d.objid IN (SELECT oid FROM pg_rewrite WHERE ev_class = c.oid))) || ')', '; ')
   INTO v_old FROM pg_class c JOIN pg_description d ON d.objoid = c.oid AND d.classoid = 'pg_class'::regclass
-  WHERE c.relkind = 'v' AND d.description = 'authzc masked view' AND c.oid <> ALL (ARRAY[]::oid[]);
+  WHERE c.relkind = 'v' AND d.description = 'rowfence masked view' AND c.oid <> ALL (ARRAY[]::oid[]);
   IF v_old IS NOT NULL THEN
     RAISE EXCEPTION 'this policy no longer makes a masked view that something in the database is built on: % [AZ617]', v_old
       USING HINT = 'Drop or change what is built on it, then apply again.';
