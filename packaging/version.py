@@ -32,7 +32,7 @@ PLACES = [
     (["sdk/typescript/*/package.json", "package-lock.json"], r'"@rowfence/[a-z-]+": "(\d[^"]*)"'),  # optional
     (["package-lock.json"], r'"name": "@rowfence/[a-z-]+",\n\s+"version": "([^"]+)"'),
     (["review-ci/github/action.yml"], r'^    default: "(\d[^"]*)"'),
-    (["review-ci/github/action.yml"], r"review-ci/github@v(\S+)"),
+    (["review-ci/github/action.yml", "docs/reference/review.md"], r"review-ci/github@v(\S+)"),
     (["review-ci/gitlab/rowfence-review.gitlab-ci.yml"], r'ROWFENCE_VERSION: "([^"]+)"'),
     (["review-ci/gitlab/rowfence-review.gitlab-ci.yml"], r"/rowfence/rowfence/v([^/]+)/"),
 ]

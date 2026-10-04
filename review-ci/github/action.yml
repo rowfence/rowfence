@@ -1,7 +1,10 @@
 # rowfence review for GitHub pull requests: one comment, updated in place, that says what the
 # policy change does (meaning, access, risk, tests, deploy), and a warning on each policy line it flags.
 #
-#   - uses: actions/checkout@v4
+#   on: pull_request
+#   permissions: {contents: read, pull-requests: write}   # pull-requests: write posts the comment
+#   ...
+#   - uses: actions/checkout@v7
 #     with: {fetch-depth: 0}                      # the base branch's policy is read with git
 #   - uses: rowfence/rowfence/review-ci/github@v0.1.0-dev
 #     with:
