@@ -44,11 +44,11 @@ says what to do. [What a 0.x release promises](docs/reference/limits.md#what-a-0
 
 ## Installing
 
-Once published:
+Only an alpha is published so far, 0.1.0-alpha.1: ask for it.
 
-    npm i -D rowfence              # the command with its own Python: a TypeScript app needs none
-    pip install rowfence           # the command and the Python SDK: rowfence[fastapi], [sqlalchemy], ...
-    docker run --rm -u "$(id -u):$(id -g)" -v "$PWD:/work" ghcr.io/rowfence/rowfence migrate
+    npm i -D rowfence@next         # the command with its own Python: a TypeScript app needs none
+    pip install --pre rowfence     # the command and the Python SDK: rowfence[fastapi], [sqlalchemy], ...
+    docker run --rm -u "$(id -u):$(id -g)" -v "$PWD:/work" ghcr.io/rowfence/rowfence:0.1.0-alpha.1 migrate
 
 `npm` brings the Python for Linux (glibc and musl, x64 and arm64), macOS (x64 and arm64) and Windows x64. The
 image runs as root unless told otherwise: `-u` makes the files it writes yours. [Installing](docs/installing.md)
