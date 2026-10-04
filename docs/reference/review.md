@@ -40,7 +40,20 @@ grants the same.
 
 [`review-ci/github/action.yml`](../../review-ci/github/action.yml) runs it on each pull request and keeps one comment up to date (and the annotations);
 [`review-ci/gitlab/rowfence-review.gitlab-ci.yml`](../../review-ci/gitlab/rowfence-review.gitlab-ci.yml) does the same for merge requests. `rowfence fmt --check` in CI
-keeps text diffs to real changes.
+keeps text diffs to real changes. On GitHub, the workflow may post the comment once it has
+`pull-requests: write`, and checks out the history the base branch's policy is read from:
+
+```yaml
+on: pull_request
+permissions: {contents: read, pull-requests: write}
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with: {fetch-depth: 0}
+      - uses: rowfence/rowfence/review-ci/github@v0.1.0-dev   # the release you use
+```
 
 The review reports; it doesn't gate. It exits 0 whatever it finds: a widened permission, a failing test and a
 lock file behind the policy are all in what it prints, for a person to read. (It exits 1 for a policy that
