@@ -22,7 +22,8 @@ impl zed::Extension for Rowfence {
         let command = match binary.and_then(|b| b.path) {
             Some(path) => path,
             None => worktree.which("rowfence").ok_or(
-                "rowfence isn't on the PATH: install it in the project (npm i -D rowfence, or pip install rowfence), \
+                "rowfence isn't on the PATH: install it in the project \
+                 (https://github.com/rowfence/rowfence/blob/main/docs/installing.md), \
                  or set lsp.rowfence.binary.path in Zed's settings",
             )?,
         };
