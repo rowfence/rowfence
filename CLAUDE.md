@@ -1,13 +1,13 @@
-# rowfence
+# rowstile
 
-Access rules for Postgres: a policy language (`.authz`) that the `rowfence` command compiles into row-level
+Access rules for Postgres: a policy language (`.authz`) that the `rowstile` command compiles into row-level
 security (views, trigger-maintained closure tables, RLS policies and `authz.*` SQL functions) and applies as
 plain SQL, as the tables' owner. No extension, no superuser. PostgreSQL 16, 17 and 18.
 User-facing docs: `README.md`, then `docs/reference/` (read them first). Terms in `CONTEXT-MAP.md` and `core/CONTEXT.md`.
 
 ## Layout
 
-- `core/` — rowfence itself: the compiler, the command, their tests (main work happens here)
+- `core/` — rowstile itself: the compiler, the command, their tests (main work happens here)
   - `authzlib/` — compiler, standard library only; `__version__` in `__init__.py` is the version the command
     and the packages carry (`packaging/version.py X.Y.Z` sets it everywhere; `unit_test.py` checks they
     agree). `Compiler` in `__init__.py` is a stack of mixins:
@@ -25,7 +25,7 @@ User-facing docs: `README.md`, then `docs/reference/` (read them first). Terms i
     - `testing.py` — policy tests: the unnamed section, named tests (`given`, `as user X allowed|refused|sees`), invariants,
       compiled into one plpgsql function `pg_temp.authz_policy_tests()` returning a row per check
     - `refusals.py` — refused writes that say why, `authz.explain_rule`, `authz.who_among`
-    - `draft.py` — a first policy from the catalog (`rowfence init`)
+    - `draft.py` — a first policy from the catalog (`rowstile init`)
     - `base.py` — persistent tables (`authz.shares`, `authz.audit`, ...), migrations, `GENERATED_FUNCTIONS`
     - `sqlutil.py` — quoting helpers (`q`, `qt`, `lit`, ...), `this.`, and `reads_more` (whether a condition
       reads more than its row: then it runs with the policy's rights)
@@ -39,25 +39,25 @@ User-facing docs: `README.md`, then `docs/reference/` (read them first). Terms i
       object each one makes
     - `evaluate.py` — the reference evaluator (sets of ids, a least fixpoint, straight from the policy) and small
       worlds made up for two policies at once (`compare`: the review's refactor check); difftest uses it
-    - `review.py` — `rowfence review`: meaning, access, risk, tests, deploy; markdown, text, JSON,
+    - `review.py` — `rowstile review`: meaning, access, risk, tests, deploy; markdown, text, JSON,
       annotations
-    - `fmt.py` — `rowfence fmt`: one layout, refused if it would change what the policy says
-    - `prove.py` — `rowfence prove`: invariants in many small worlds (the reference evaluator), the smallest
+    - `fmt.py` — `rowstile fmt`: one layout, refused if it would change what the policy says
+    - `prove.py` — `rowstile prove`: invariants in many small worlds (the reference evaluator), the smallest
       counterexample, shrunk link by link
     - `coverage.py` — the branches of each permission no passing check makes true (from `authz.explain`'s
       answers, which the test function returns with `coverage=True`)
-    - `errors.py` — each error code's page (title, meaning, the mistake, the fix); `rowfence help AZ201`
+    - `errors.py` — each error code's page (title, meaning, the mistake, the fix); `rowstile help AZ201`
     - `perf.py` — the indexes the policy's lookups need (named, never created: they are the app's schema),
       `plans` (EXPLAIN ANALYZE as the app role) and `bench`
-    - `grant.py` — `rowfence why` and Studio: the changes to the data (a share, a link row, a column, joining a
+    - `grant.py` — `rowstile why` and Studio: the changes to the data (a share, a link row, a column, joining a
       group, the permission on the object above) that would grant a permission, each tried in a savepoint as the
       owner and undone, with what else it grants (a preview: the command's, not the runtime's)
     - `migrate.py` — policy changes as migrations: the compiled policy as objects, the lock file,
       the migration from a lock to a policy (only what changed), trees built beside then swapped in
-  - `cli/` — the command runs on Python 3.11 or newer, standard library only: `rowfence` (`rowfence_cli.py`: compiles, and runs `authzlib.database` over its own connection; reads
-    included files and `rowfence.toml` from disk; `dev` watches and runs the loop), `lsp.py` (the
-    language server, `rowfence lsp`), `mcp.py` (the MCP server for coding agents, `rowfence mcp`: each tool runs
-    the command once; `tests/mcp_test.py`), `init.py` (`rowfence init`), `migrations.py` (a migration's files for
+  - `cli/` — the command runs on Python 3.11 or newer, standard library only: `rowstile` (`rowstile_cli.py`: compiles, and runs `authzlib.database` over its own connection; reads
+    included files and `rowstile.toml` from disk; `dev` watches and runs the loop), `lsp.py` (the
+    language server, `rowstile lsp`), `mcp.py` (the MCP server for coding agents, `rowstile mcp`: each tool runs
+    the command once; `tests/mcp_test.py`), `init.py` (`rowstile init`), `migrations.py` (a migration's files for
     each tool: Alembic, Prisma, Drizzle Kit, SQL, goose, dbmate, Flyway), `stack.py` (the app's stack, for
     `init`), `studio.py` and `studio/` (Studio: a local web page and its JSON API; read-only transactions unless
     `--write` or `dev`; localhost and a token; `tests/studio_test.py`) and `pgwire.py` (stdlib Postgres client,
@@ -75,34 +75,34 @@ User-facing docs: `README.md`, then `docs/reference/` (read them first). Terms i
   - `Dockerfile` — Postgres for development and tests: the stock image, python3, the command
     (build context: repo root)
 - `editor/` — `test.sh` (in containers: the grammar, the Zed build); the VS Code extension: TextMate grammar (the
-  site highlights ```authz with it too), and `extension.js` starting `rowfence lsp`; `tree-sitter-authz/` (the
+  site highlights ```authz with it too), and `extension.js` starting `rowstile lsp`; `tree-sitter-authz/` (the
   Tree-sitter grammar and its queries, for Zed, Helix and Neovim; `src/` is generated and committed, editors
   build from it); `zed/` (the Zed extension: its queries are copies of the grammar's, `Editors` in `unit_test.py`)
 - `review-ci/` — the review for CI: `github/action.yml` (a composite action; it installs the release its tag names
   from PyPI, or with `version: source` this checkout's command, as `.github/workflows/ci.yml` does) and
-  `gitlab/rowfence-review.gitlab-ci.yml`
+  `gitlab/rowstile-review.gitlab-ci.yml`
 - `examples/filemanager/` — the first adopter (uses only the public surface, `check_public_surface.py`):
   `db/` (migrations, `policy.authz`, `migrate.py`), `backend/` (FastAPI, uv), `frontend/` (React, Vite),
-  `docker-compose.yml` (rowfence image from this repo, RustFS); `test.sh` runs its tests
-- `examples/messenger/` — the second adopter, a WhatsApp-style app built to show what rowfence takes off an app
+  `docker-compose.yml` (rowstile image from this repo, RustFS); `test.sh` runs its tests
+- `examples/messenger/` — the second adopter, a WhatsApp-style app built to show what rowstile takes off an app
   (same stack and rules as the file manager: public surface only, `check_public_surface.py`); `test.sh` runs its tests
-- `sdk/python/` — the `rowfence` Python package: the Python SDK (`rowfence`: FastAPI, SQLAlchemy, psycopg, asyncpg,
-  Alembic, pytest) and the command, which `hatch_build.py` puts inside it (`rowfence/_command`).
-  It holds no rowfence logic: it signs transactions in and translates the `authz.*` answers
-- `sdk/typescript/` — the TypeScript SDK (`@rowfence/client`, `/pg`, `/postgres`, `/prisma`, `/drizzle`, `/next`,
+- `sdk/python/` — the `rowstile` Python package: the Python SDK (`rowstile`: FastAPI, SQLAlchemy, psycopg, asyncpg,
+  Alembic, pytest) and the command, which `hatch_build.py` puts inside it (`rowstile/_command`).
+  It holds no rowstile logic: it signs transactions in and translates the `authz.*` answers
+- `sdk/typescript/` — the TypeScript SDK (`@rowstile/client`, `/pg`, `/postgres`, `/prisma`, `/drizzle`, `/next`,
   `/react`, `/vitest`), one package per folder, built with `npx tsc -b sdk/typescript`. The repository
   root's `package.json` is the npm workspace for these packages and `integrations/nextjs` (one React, one pg);
-  `npm ci` at the root. Like the Python SDK it holds no rowfence logic
+  `npm ci` at the root. Like the Python SDK it holds no rowstile logic
 - `integrations/<stack>/` — each SDK's conformance suite: a small app and the checks listed in `integrations/README.md`;
   `integrations/fastapi/test.sh` (uv, Docker), `integrations/nextjs/test.sh` (Next.js, Prisma 7, Vitest, Docker)
-- `packaging/` — how rowfence is installed: `npm/build.mjs` (the `rowfence` npm package and one
-  `@rowfence/cli-<platform>` per platform with a standalone Python), `docker/Dockerfile` (the command's image);
+- `packaging/` — how rowstile is installed: `npm/build.mjs` (the `rowstile` npm package and one
+  `@rowstile/cli-<platform>` per platform with a standalone Python), `docker/Dockerfile` (the command's image);
   `test.sh` installs each on a clean machine; `version.py` sets the version (X.Y.Z, X.Y.Z-alpha.N or X.Y.Z-rc.N).
   `.github/workflows/release.yml` publishes them on a tag: to private places while the repository is private
   (GitHub Packages, the GitHub release), to PyPI, npm and ghcr.io once public. The workflows run on the
   runner the repository variable `RUNNER` names, else `ubuntu-latest` (GitHub's runners since 2026-10-03; `RUNNER`
   is unset)
-- `playground/` — rowfence in the browser: the compiler in Pyodide (a worker), the SQL in PGlite; `core.mjs` is the
+- `playground/` — rowstile in the browser: the compiler in Pyodide (a worker), the SQL in PGlite; `core.mjs` is the
   engine, `test.mjs` runs it in Node, `browser_test.mjs` the page in headless Chrome, `build.mjs` writes `dist/`
   (its examples are read from the repository: the getting-started guide's own, the docs app, the cookbook)
 - `README.md` — the landing page: the pitch, installing, the docs, the folders. `core/README.md` is for working
@@ -124,7 +124,7 @@ User-facing docs: `README.md`, then `docs/reference/` (read them first). Terms i
   build. `build.mjs` writes `dist/`: the pages, `/playground/`, each page's Markdown (`/cookbook.md`),
   `llms.txt` pointing to those, `llms-full.txt`. Its own pages: `index.md` and `problems/` (the SDKs' problem
   `type` URLs). A new doc page goes in `PAGES` and the sidebar (`.vitepress/config.mts`).
-  `.github/workflows/site.yml` deploys it to GitHub Pages (rowfence.dev), built from a release tag
+  `.github/workflows/site.yml` deploys it to GitHub Pages (rowstile.dev), built from a release tag
 - `.github/workflows/ci.yml` — on each push: `tests/unit_test.py` and the type checks, every suite on PG 16
   (`ci.sh`) and what depends on the version on 17 and 18 (`ci.sh --short`), the examples, the conformance suites,
   the editors, packaging, the site. `nightly.yml` (main) — every suite on 17 and 18, the proofs (`--proofs`) on
@@ -132,7 +132,7 @@ User-facing docs: `README.md`, then `docs/reference/` (read them first). Terms i
   through PgBouncer (`integrations/pooler.sh`), then
   the benchmark check, last (`gh workflow run nightly.yml -f only=bench` runs it alone; it judges speed against
   the runners' own baseline, not the gate's limits). On self-hosted runners sharing one machine, jobs with fixed container
-  names or ports hold a `flock` of their own, and `ci.sh` writes its logs where `ROWFENCE_CI_LOGS` says
+  names or ports hold a `flock` of their own, and `ci.sh` writes its logs where `ROWSTILE_CI_LOGS` says
 - `docs/threat-model.md` — the trust boundary and what `tests/adversarial.sh` checks
 
 ## Running
@@ -149,8 +149,8 @@ simplest is Docker, from the repo root (Git Bash works on Windows):
 
 For one suite, start a container and run it inside:
 
-    docker build -t rowfence:16 --build-arg PG_MAJOR=16 -f core/Dockerfile .
-    MSYS_NO_PATHCONV=1 docker run -d --name pga16 -e POSTGRES_HOST_AUTH_METHOD=trust -v "$(pwd -W):/src" rowfence:16
+    docker build -t rowstile:16 --build-arg PG_MAJOR=16 -f core/Dockerfile .
+    MSYS_NO_PATHCONV=1 docker run -d --name pga16 -e POSTGRES_HOST_AUTH_METHOD=trust -v "$(pwd -W):/src" rowstile:16
     MSYS_NO_PATHCONV=1 docker exec -e PGHOST=/var/run/postgresql -e PGUSER=postgres -w /src/core pga16 bash tests/make_owner.sh
     MSYS_NO_PATHCONV=1 docker exec -e PGHOST=/var/run/postgresql -e PGUSER=authz_owner -e PGSUPERUSER=postgres -w /src/core pga16 bash tests/cli.sh
 
@@ -231,7 +231,7 @@ For one suite, start a container and run it inside:
 - Error messages name the policy line and end with a code: `fail(loc, msg, "AZ201")`. A new kind of mistake
   gets a code and a page in `authzlib/errors.py` (the page's mistake must give its code, its fix must compile;
   `unit_test.py --update` writes `docs/errors/`), and a case in `tests/policy_errors.py`. What the runtime raises
-  (what apps see) carries its code in the HINT instead, `rowfence help AZ709`, so the message stays as the SDKs
+  (what apps see) carries its code in the HINT instead, `rowstile help AZ709`, so the message stays as the SDKs
   read it; `ErrorCodes` in `tests/unit_test.py` finds any RAISE without a code.
 - Types: all Python is strongly typed. `uvx ty@0.0.56 check && uvx ruff@0.15.12 check` from the root (CI's
   `unit` job): ty checks the types (`ty.toml`, every rule an error), Ruff the lint and that every function is
@@ -256,7 +256,7 @@ For one suite, start a container and run it inside:
 - Named tests never run on `apply` (they write); each runs in a subtransaction that always rolls back. New test
   syntax gets a case in `tests/policy_errors.py` and the grammars: `editor/syntaxes/` (TextMate) and
   `editor/tree-sitter-authz/` (Tree-sitter: `grammar.js`, then `npx tree-sitter generate`, a corpus case).
-- The language server (`cli/lsp.py`) only parses and compiles; database work belongs to `rowfence dev`.
+- The language server (`cli/lsp.py`) only parses and compiles; database work belongs to `rowstile dev`.
   `tests/lsp_test.py` drives it over the protocol.
 - Adopters' `test.sh` start from an empty database (`docker compose down -v`): migrations must work before the
   first apply (`authz.uid()` doesn't exist yet: use plpgsql bodies).

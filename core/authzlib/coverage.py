@@ -94,7 +94,7 @@ def describe(r: Report, limit: int | None = None) -> str:
 
 
 def summary(r: Report, limit: int = 2) -> str:
-    """For rowfence dev's line: '2 branches no test reaches (line 18: org.admin, line 40: {not locked})'."""
+    """For rowstile dev's line: '2 branches no test reaches (line 18: org.admin, line 40: {not locked})'."""
     if not r["missing"]:
         return ""
     short: Callable[[str], str] = lambda item: item if len(item) <= 32 else item[:29] + "..." + ("}" if item.startswith("{") else "")

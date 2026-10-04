@@ -1,6 +1,6 @@
-# rowfence
+# rowstile
 
-> Access rules for Postgres. A policy file (`.authz`) says who can do what; the `rowfence` command compiles it
+> Access rules for Postgres. A policy file (`.authz`) says who can do what; the `rowstile` command compiles it
 > into row-level security, trigger-maintained tables for inheritance and `authz.*` SQL functions, and ships
 > each change as a migration for the app's own tool (Alembic, Prisma, Drizzle Kit, SQL, goose, dbmate,
 > Flyway). Any Postgres 16, 17 or 18; no extension, no superuser. SDKs for Python (FastAPI, SQLAlchemy) and
@@ -8,16 +8,16 @@
 
 What an agent needs to know:
 
-- The policy lives in one file named by `rowfence.toml` (`policy = "db/policy.authz"`), with tests beside it
+- The policy lives in one file named by `rowstile.toml` (`policy = "db/policy.authz"`), with tests beside it
   (`tests = ["db/tests/*.authz"]`). Everything that grants access is written in the policy.
-- The loop after editing it: `rowfence check` (the first mistake, with its line and a code like `[AZ201]`),
-  `rowfence push` (the development database only), `rowfence test`. Or `rowfence dev`, which does all three on
-  each save. `rowfence help AZ201` explains a code and shows the mistake fixed.
-- Production takes migrations: `rowfence migrate` writes the next one from `db/policy.lock`; never `push`.
+- The loop after editing it: `rowstile check` (the first mistake, with its line and a code like `[AZ201]`),
+  `rowstile push` (the development database only), `rowstile test`. Or `rowstile dev`, which does all three on
+  each save. `rowstile help AZ201` explains a code and shows the mistake fixed.
+- Production takes migrations: `rowstile migrate` writes the next one from `db/policy.lock`; never `push`.
 - App code checks nothing by hand. Each transaction signs in (`SELECT authz.act_as('user', '42')`, which the
   SDKs do), then plain queries are filtered, refused writes raise SQLSTATE 42501 with the reason (the SDKs
   answer 403), and rows the user can't see are 404.
-- `rowfence mcp` is an MCP server with the command's tools: `check`, `prove`, `review`, `test`, `why`, `lint`
+- `rowstile mcp` is an MCP server with the command's tools: `check`, `prove`, `review`, `test`, `why`, `lint`
   and `push`.
 
 A small policy:
@@ -42,16 +42,16 @@ rules app.folders
 - [Using it from app code](docs/reference/app-code.md): every `authz.*` function, the generated clients, refusals that say why
 - [Identity](docs/reference/identity.md): a trusted backend, API keys and scopes, JWTs, services; signed sessions
 - [Governance](docs/reference/governance.md): audit trail, change feed, requests, break glass, reviews; `authz.lint()`
-- [Tools](docs/reference/tools.md): every `rowfence` command, `rowfence.toml`, the MCP server
+- [Tools](docs/reference/tools.md): every `rowstile` command, `rowstile.toml`, the MCP server
 - [Migrations](docs/reference/migrations.md): a policy change as a migration for your tool, the lock file
-- [Reviewing a change](docs/reference/review.md): what `rowfence review` says on a pull request
+- [Reviewing a change](docs/reference/review.md): what `rowstile review` says on a pull request
 - [How it works](docs/reference/guarantees.md): what it compiles to, what it guarantees, security
 - [Speed and limits](docs/reference/limits.md): measured speed, and what it doesn't do
 - [Installing](docs/installing.md): npm, pip or the image; alphas and release candidates; from the repository
 - [Getting started](docs/getting-started.md): from a schema to a policy, tests, the dev loop and migrations (run as written by the tests)
 - [Cookbook](docs/cookbook.md): tested patterns (teams inside teams, inheritance that stops, sharing for a while and share links, denies, tenants, bots, blocking, live updates)
 - [Troubleshooting](docs/troubleshooting.md): what people run into, by what they see
-- [Running rowfence](docs/operations.md): configuration, behind a pooler, deploying a change, upgrading, backups, retention, what to watch
+- [Running rowstile](docs/operations.md): configuration, behind a pooler, deploying a change, upgrading, backups, retention, what to watch
 - [Managed Postgres](docs/managed-postgres.md): the setup on a managed service; Neon and Supabase, as tried
 - [Files in S3-compatible storage](docs/signed-urls.md): signed URLs handed out only after the row was read
 - [Error codes](docs/errors/README.md): every mistake's code, what it means and the same mistake fixed
@@ -65,8 +65,8 @@ rules app.folders
 - [Node: pg, postgres.js, Drizzle](docs/stacks/node.md): any Node app
 - [Python: SQLAlchemy, SQLModel, psycopg, asyncpg](docs/stacks/python.md): any Python app
 - [Any other stack](docs/stacks/sql.md): the SQL an app sends
-- [Python SDK](sdk/python/README.md): `pip install --pre rowfence` (an alpha so far), its modules
-- [TypeScript SDK](sdk/typescript/README.md): the `@rowfence/*` packages
+- [Python SDK](sdk/python/README.md): `pip install --pre rowstile` (an alpha so far), its modules
+- [TypeScript SDK](sdk/typescript/README.md): the `@rowstile/*` packages
 
 ## Optional
 

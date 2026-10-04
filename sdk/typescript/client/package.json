@@ -1,9 +1,9 @@
 {
-  "name": "@rowfence/client",
+  "name": "@rowstile/client",
   "version": "0.1.0-dev",
-  "description": "rowfence for TypeScript apps: who each transaction acts for, refusals as errors, generated names",
+  "description": "rowstile for TypeScript apps: who each transaction acts for, refusals as errors, generated names",
   "license": "Apache-2.0",
-  "repository": { "type": "git", "url": "git+https://github.com/rowfence/rowfence.git", "directory": "sdk/typescript/client" },
+  "repository": { "type": "git", "url": "git+https://github.com/rowstile/rowstile.git", "directory": "sdk/typescript/client" },
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

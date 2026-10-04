@@ -1,5 +1,5 @@
 #!/bin/bash
-# apply.sh: what applying a policy with the rowfence command does to a database: no extension,
+# apply.sh: what applying a policy with the rowstile command does to a database: no extension,
 # no superuser needed, only-if-changed, included files, previews, tests, backup and restore, applying
 # again after an upgrade, and removing.
 #   PGHOST=... PGUSER=postgres tests/apply.sh
@@ -12,7 +12,7 @@ ok() { echo "ok    $1"; }
 bad() { echo "FAIL  $1${2:+: $2}"; fails=$((fails + 1)); }
 quiet() { PGOPTIONS="-c client_min_messages=error" psql -X -q -v ON_ERROR_STOP=1 "$@"; }
 fresh() { dropdb --if-exists "$1" 2>/dev/null; createdb "$1" || exit 1; }
-CLI() { python3 cli/rowfence_cli.py --db "dbname=$DB" "$@"; }
+CLI() { python3 cli/rowstile_cli.py --db "dbname=$DB" "$@"; }
 run() { out=$(CLI "$@" 2>&1); rc=$?; }
 T=$(mktemp -d)
 # the end-to-end scenario, with the tests at the bottom of the policy file
@@ -33,7 +33,7 @@ echo "-- applying the example policy"
 fresh "$DB"
 quiet -d "$DB" -f example/app_schema.sql >/dev/null || exit 1
 run apply example/docs.authz
-[ "$out" = "example/docs.authz: applied" ] && ok "rowfence apply, on a database with no extension" || bad "apply" "$out"
+[ "$out" = "example/docs.authz: applied" ] && ok "rowstile apply, on a database with no extension" || bad "apply" "$out"
 [ "$(PSQL -c "SELECT count(*) FROM pg_extension WHERE extname <> 'plpgsql'")" = 0 ] &&
   ok "... which needs nothing installed but plpgsql" || bad "extensions" "$(PSQL -c "SELECT string_agg(extname, ',') FROM pg_extension")"
 run apply example/docs.authz; [ "$out" = "example/docs.authz: unchanged" ] && ok "... again: unchanged" || bad "apply unchanged" "$out"
@@ -73,13 +73,13 @@ run apply "$T/docs.authz" --force
   ok "... and once nothing uses it, applying drops it" || bad "apply after dropping the view" "$out"
 PSQL -c "DROP VIEW app.my_files" >/dev/null
 PSQL -c "UPDATE authz.policy_versions SET version = '0.0.1' WHERE id = (SELECT max(id) FROM authz.policy_versions)" >/dev/null
-run apply "$T/docs.authz"; [ "$out" = "$T/docs.authz: applied" ] && ok "... and so is a policy another version of rowfence applied" || bad "apply after upgrade" "$out"
+run apply "$T/docs.authz"; [ "$out" = "$T/docs.authz: applied" ] && ok "... and so is a policy another version of rowstile applied" || bad "apply after upgrade" "$out"
 [ "$(PSQL -c "SELECT version FROM authz.policy_versions ORDER BY id DESC LIMIT 1")" = "$(python3 -c 'import authzlib; print(authzlib.BUILD)')" ] &&
   ok "the history records which version applied it" || bad "version in history"
-# the other way round: a database a newer rowfence wrote is not put back to this version's work
+# the other way round: a database a newer rowstile wrote is not put back to this version's work
 PSQL -c "UPDATE authz.policy_versions SET version = '99.0.0' WHERE id = (SELECT max(id) FROM authz.policy_versions)" >/dev/null
 run apply "$T/docs.authz"
-case "$out" in *"last written by rowfence 99.0.0, which is newer than this command"*"[AZ616]"*"--downgrade"*) [ $rc -ne 0 ] &&
+case "$out" in *"last written by rowstile 99.0.0, which is newer than this command"*"[AZ616]"*"--downgrade"*) [ $rc -ne 0 ] &&
   ok "a policy a newer version applied is refused, naming both versions" || bad "apply over a newer version: rc" "$rc";;
   *) bad "apply over a newer version" "$out";; esac
 [ "$(PSQL -c "SELECT version FROM authz.policy_versions ORDER BY id DESC LIMIT 1")" = 99.0.0 ] && ok "... and nothing is changed" || bad "the refused apply changed the history"
@@ -118,12 +118,12 @@ echo "-- tests"
 TDB=${DB}_tests
 fresh "$TDB"
 quiet -d "$TDB" -f example/app_schema.sql >/dev/null || exit 1
-TCLI() { python3 cli/rowfence_cli.py --db "dbname=$TDB" "$@"; }
+TCLI() { python3 cli/rowstile_cli.py --db "dbname=$TDB" "$@"; }
 TCLI apply example/docs.authz >/dev/null 2>&1
 psql -X -q -d "$TDB" -c "SET ROLE app_user" -c "SET authz.user_id = 5" -c "SELECT authz.share('folder', 1, 'viewer', 'org', 1, 'member')" \
      -c "SELECT authz.share('file', 13, 'viewer', 'user', 4, '', now() + interval '1 day')" >/dev/null
 out=$(TCLI test 2>&1); rc=$?
-[ $rc -eq 0 ] && echo "$out" | grep -q "policy tests passed" && ok "rowfence test passes ($(echo "$out" | grep -c 'ok '))" || bad "test" "$out"
+[ $rc -eq 0 ] && echo "$out" | grep -q "policy tests passed" && ok "rowstile test passes ($(echo "$out" | grep -c 'ok '))" || bad "test" "$out"
 sed 's/user 3 can view file 11/user 3 cannot view file 11/' example/docs.authz > "$T/failing.authz"
 TCLI apply "$T/failing.authz" >/dev/null 2>&1
 out=$(TCLI test 2>&1); rc=$?
@@ -159,7 +159,7 @@ run diff example/docs.authz; case "$out" in *"0 changes (nobody gains"*) ok "dif
 echo "-- who may apply"
 PSQL -c "DROP ROLE IF EXISTS authz_apply_other" -c "CREATE ROLE authz_apply_other LOGIN" -c "GRANT CREATE ON DATABASE $DB TO authz_apply_other" \
      -c "GRANT USAGE, CREATE ON SCHEMA authz TO authz_apply_other" >/dev/null
-out=$(python3 cli/rowfence_cli.py --db "dbname=$DB user=authz_apply_other" apply example/docs.authz --force 2>&1)
+out=$(python3 cli/rowstile_cli.py --db "dbname=$DB user=authz_apply_other" apply example/docs.authz --force 2>&1)
 case "$out" in *"must be owner"*|*"permission denied"*) ok "a role that doesn't own the tables can't apply: Postgres refuses";; *) bad "non-owner apply" "$out";; esac
 [ "$(PSQL -c "SELECT authz.verify()")" = t ] && ok "... and nothing changed" || bad "state after refused apply"
 out=$(PSQL -c "SET ROLE app_user" -c "SELECT count(*) FROM authz.policy_versions" 2>&1)
@@ -182,15 +182,15 @@ cmp -s /tmp/authz_apply_access_before /tmp/authz_apply_access_after &&
   bad "access differs after restore" "$(diff /tmp/authz_apply_access_before /tmp/authz_apply_access_after | head -4)"
 [ "$(psql -X -At -d "${DB}_restored" -c "SELECT nextval('authz.audit_id_seq') > (SELECT max(id) FROM authz.audit) AND nextval('authz.policy_versions_id_seq') > (SELECT max(id) FROM authz.policy_versions)")" = t ] &&
   ok "sequences carry on after the restore" || bad "sequences restart"
-out=$(python3 cli/rowfence_cli.py --db "dbname=${DB}_restored" reapply 2>&1 && psql -X -At -d "${DB}_restored" -c "SELECT authz.verify()")
+out=$(python3 cli/rowstile_cli.py --db "dbname=${DB}_restored" reapply 2>&1 && psql -X -At -d "${DB}_restored" -c "SELECT authz.verify()")
 case "$out" in *t) ok "the restored database can apply its policy again";; *) bad "reapply after restore" "$out";; esac
 # writes made with the triggers off (a bulk load) are not followed: verify() says so, and --force computes the trees again
 R() { psql -X -q -At -d "${DB}_restored" "$@"; }
 R -c "ALTER TABLE app.folders DISABLE TRIGGER USER" -c "UPDATE app.folders SET parent_id = 2 WHERE id = 4" -c "ALTER TABLE app.folders ENABLE TRIGGER USER" >/dev/null
 [ "$(R -c "SELECT authz.verify()")" = f ] && ok "a move made with the triggers off leaves the inheritance tables behind: verify() is false" || bad "verify after a write without triggers"
-out=$(python3 cli/rowfence_cli.py --db "dbname=${DB}_restored" reapply 2>&1 && R -c "SELECT authz.verify()")
+out=$(python3 cli/rowstile_cli.py --db "dbname=${DB}_restored" reapply 2>&1 && R -c "SELECT authz.verify()")
 case "$out" in *f) ok "... applying again keeps them as they are (unchanged tables are kept)";; *) bad "reapply rebuilt a kept tree" "$out";; esac
-out=$(python3 cli/rowfence_cli.py --db "dbname=${DB}_restored" reapply --force 2>&1 && R -c "SELECT authz.verify()")
+out=$(python3 cli/rowstile_cli.py --db "dbname=${DB}_restored" reapply --force 2>&1 && R -c "SELECT authz.verify()")
 case "$out" in *t) ok "... reapply --force computes them again";; *) bad "reapply --force" "$out";; esac
 # a delete with the triggers off leaves the gone folder's rows behind: verify() looks for them too
 R -c "INSERT INTO app.folders (id, org_id, parent_id, name) SELECT 9001, org_id, 4, 'gone' FROM app.folders WHERE id = 4" \
@@ -198,11 +198,11 @@ R -c "INSERT INTO app.folders (id, org_id, parent_id, name) SELECT 9001, org_id,
   -c "ALTER TABLE app.folders ENABLE TRIGGER USER" >/dev/null
 [ "$(R -c "SELECT authz.verify()")" = f ] && ok "a delete made with the triggers off leaves rows of a gone folder: verify() is false" ||
   bad "verify after a delete without triggers"
-out=$(python3 cli/rowfence_cli.py --db "dbname=${DB}_restored" reapply --force 2>&1 && R -c "SELECT authz.verify()")
+out=$(python3 cli/rowstile_cli.py --db "dbname=${DB}_restored" reapply --force 2>&1 && R -c "SELECT authz.verify()")
 case "$out" in *t) ok "... and reapply --force takes them out";; *) bad "reapply --force after a delete" "$out";; esac
 R -c "ALTER TABLE app.folders DISABLE TRIGGER USER" -c "UPDATE app.folders SET parent_id = 3 WHERE id = 4" -c "ALTER TABLE app.folders ENABLE TRIGGER USER" >/dev/null
 R -c "SELECT policy FROM authz.policy_versions ORDER BY id DESC LIMIT 1" > "$T/in_force.authz"
-out=$(python3 cli/rowfence_cli.py --db "dbname=${DB}_restored" apply "$T/in_force.authz" --force 2>&1 && R -c "SELECT authz.verify()")
+out=$(python3 cli/rowstile_cli.py --db "dbname=${DB}_restored" apply "$T/in_force.authz" --force 2>&1 && R -c "SELECT authz.verify()")
 case "$out" in *t) ok "... and so does apply --force";; *) bad "apply --force" "$out";; esac
 dropdb "${DB}_restored"
 
@@ -226,7 +226,7 @@ case "$out" in *"applied"*t*removed) ok "a removed policy can be applied again, 
 echo "-- the second policy: masks, UUIDs, caveats"
 fresh "$DB"
 quiet -d "$DB" -f tests/multi_schema.sql >/dev/null || exit 1
-run apply tests/multi.authz; case "$out" in *"tests/multi.authz: applied") ok "rowfence apply multi.authz";; *) bad "apply multi" "$out";; esac
+run apply tests/multi.authz; case "$out" in *"tests/multi.authz: applied") ok "rowstile apply multi.authz";; *) bad "apply multi" "$out";; esac
 psql -X -q -v ON_ERROR_STOP=1 -d "$DB" -f tests/multi_scenario.sql > /tmp/authz_apply_multi.log 2>&1
 rc=$?; n=$(grep -c 'ok  ' /tmp/authz_apply_multi.log)
 [ $rc -eq 0 ] && ok "its scenario passes ($n checks)" || bad "multi scenario" "$(grep 'FAIL\|ERROR' /tmp/authz_apply_multi.log | head -3)"
@@ -274,7 +274,7 @@ CLI remove --yes >/dev/null 2>&1
 out=$(PSQL -c "GRANT SELECT ON mt.docs TO app_user" 2>&1); [ -z "$out" ] && ok "... and later grants aren't refused any more" || bad "mask guard left" "$out"
 
 echo "-- a condition Postgres refuses"
-# rowfence check can't see these (they need the tables): applying names the condition's line
+# rowstile check can't see these (they need the tables): applying names the condition's line
 fresh "$DB"
 quiet -d "$DB" -f example/app_schema.sql >/dev/null || exit 1
 for cond in "confidential or nme = 'x'|column \"nme\" does not exist" "confidential or name = |syntax error at or near \")\"" "confidential or nosuchfn(name)|function nosuchfn(text) does not exist"; do
@@ -323,7 +323,7 @@ owned() {
                EXECUTE format('ALTER TABLE %s OWNER TO authz_apply_owner', r.t);
              END LOOP; END \$o\$" >/dev/null
 }
-OWNER() { db=$1; shift; python3 cli/rowfence_cli.py --db "dbname=$db user=authz_apply_owner" "$@"; }
+OWNER() { db=$1; shift; python3 cli/rowstile_cli.py --db "dbname=$db user=authz_apply_owner" "$@"; }
 owned "$DB"
 out=$(OWNER "$DB" apply example/docs.authz 2>&1); rc=$?
 case "$out" in *"example/docs.authz: applied"*) [ $rc -eq 0 ] && ok "the owner applies the policy, with no superuser" || bad "owner apply exit" "$rc";; *) bad "owner apply" "$out";; esac
@@ -362,17 +362,17 @@ members() {  # the policy, its condition naming the project's id as $1
 seen() { psql -X -q -At -d "$CDB" -c "SET ROLE app_user" -c "SET authz.user_id = 2" \
            -c "SELECT coalesce(string_agg(id::text, ',' ORDER BY id), '') FROM app.projects" | tail -n 1; }
 members id
-out=$(python3 cli/rowfence_cli.py --db "dbname=$CDB" apply "$T/members.authz" 2>&1)
+out=$(python3 cli/rowstile_cli.py --db "dbname=$CDB" apply "$T/members.authz" 2>&1)
 case "$out" in *"names id, a column of app.projects's rows, but reads it from another table"*"this.id"*)
   ok "a bare column a subquery's table takes is warned about when applying, with this.id to write" ;;
   *) bad "the capture warning" "$out";; esac
 members this.id
-out=$(python3 cli/rowfence_cli.py --db "dbname=$CDB" apply "$T/members.authz" 2>&1)
+out=$(python3 cli/rowstile_cli.py --db "dbname=$CDB" apply "$T/members.authz" 2>&1)
 case "$out" in *"names id"*) bad "this.id is warned about" "$out";;
   *) [ "$(seen)" = 10 ] && ok "this.id is the row's: user 2 sees the project they are a member of, and only that" ||
        bad "this.id" "user 2 sees $(seen)";; esac
 members projects.id
-out=$(python3 cli/rowfence_cli.py --db "dbname=$CDB" apply "$T/members.authz" 2>&1); rc=$?
+out=$(python3 cli/rowstile_cli.py --db "dbname=$CDB" apply "$T/members.authz" 2>&1); rc=$?
 case "$out" in *"[AZ613]"*"for the row the condition is about, write this.id"*) [ $rc -ne 0 ] &&
   ok "the table's name for the row is refused, saying to write this.id" || bad "projects.id exit" "$rc";;
   *) bad "projects.id" "$out";; esac
@@ -384,7 +384,7 @@ printf '%s\n' "app role app_user" "type user = app.users" "type project = app.pr
   "type membership = app.memberships" "rules app.projects" "  select : view" \
   "rules app.memberships" "  select : {user_id = authz.uid()}" > "$T/members.authz"
 quiet -d "$CDB" -c "INSERT INTO app.projects VALUES (12, 1)" -c "INSERT INTO app.memberships VALUES (12, 12, 1)" >/dev/null
-out=$(python3 cli/rowfence_cli.py --db "dbname=$CDB" apply "$T/members.authz" 2>&1)
+out=$(python3 cli/rowstile_cli.py --db "dbname=$CDB" apply "$T/members.authz" 2>&1)
 listed=$(psql -X -q -At -d "$CDB" -c "SET ROLE app_user" -c "SET authz.user_id = 2" \
   -c "SELECT coalesce(string_agg(x, ',' ORDER BY x), '') FROM authz.list('project', 'view') x" | tail -n 1)
 [ "$(seen)" = "10,12" ] && [ "$listed" = "10,12" ] &&
@@ -397,7 +397,7 @@ quiet -d "$CDB" -c "CREATE FUNCTION app.\"Member\"(p bigint) RETURNS boolean LAN
   -c "CREATE OPERATOR public.=!= (FUNCTION = app.\"Member\", RIGHTARG = bigint)" >/dev/null || exit 1
 for call in 'app."Member"(this.id)' '"app"."Member"(this.id)' 'app . "Member" /* c */ (this.id)' '=!= this.id'; do
   sed "s|{exists .*}|{$call}|" "$T/members.authz" > "$T/members_fn.authz"
-  out=$(python3 cli/rowfence_cli.py --db "dbname=$CDB" apply "$T/members_fn.authz" 2>&1)
+  out=$(python3 cli/rowstile_cli.py --db "dbname=$CDB" apply "$T/members_fn.authz" 2>&1)
   [ "$(seen)" = "10,12" ] && ok "... and a function it calls by a quoted name or as an operator: {$call}" ||
     bad "a quoted function's rights" "{$call}: select $(seen): $out"
 done
@@ -405,7 +405,7 @@ dropdb "$CDB"
 # a write rule that follows a relation kept in shares or a link table: the app role may not read authz.shares
 fresh "$CDB"
 quiet -d "$CDB" -f tests/alt_schema.sql >/dev/null || exit 1
-python3 cli/rowfence_cli.py --db "dbname=$CDB" apply tests/alt.authz >/dev/null 2>&1
+python3 cli/rowstile_cli.py --db "dbname=$CDB" apply tests/alt.authz >/dev/null 2>&1
 quiet -d "$CDB" -c "INSERT INTO alt.users VALUES (1), (2)" -c "INSERT INTO alt.docs (doc_no, owner_id) VALUES (10, 1)" >/dev/null
 out=$(psql -X -q -At -d "$CDB" -c "SET ROLE app_user" -c "SET authz.user_id = 1" \
         -c "UPDATE alt.docs SET locked = true WHERE doc_no = 10 RETURNING doc_no" 2>&1)
@@ -433,7 +433,7 @@ sees() { psql -X -q -At -d "$CDB" -c "SET ROLE app_user" -c "SET authz.user_id =
            -c "SELECT coalesce(string_agg(id::text, ','), '') FROM app.folders" | tail -n 1; }
 for policy in teams teams_shared; do
   quiet -d "$CDB" -c "UPDATE app.teams SET name = 'sub' WHERE id = 911" >/dev/null
-  out=$(python3 cli/rowfence_cli.py --db "dbname=$CDB" apply "$T/$policy.authz" 2>&1)
+  out=$(python3 cli/rowstile_cli.py --db "dbname=$CDB" apply "$T/$policy.authz" 2>&1)
   before="$(sees 902)"
   quiet -d "$CDB" -c "UPDATE app.teams SET name = 'disbanded' WHERE id = 911" >/dev/null
   [ "$before" = 9100 ] && [ "$(sees 902)" = "" ] && [ "$(sees 901)" = 9100 ] &&

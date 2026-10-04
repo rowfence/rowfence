@@ -1,6 +1,6 @@
 # Managed Postgres
 
-rowfence needs no extension and no superuser, so it runs on a managed Postgres as it does on your own. This
+rowstile needs no extension and no superuser, so it runs on a managed Postgres as it does on your own. This
 page is what we found running it on Neon and Supabase: the command, both SDKs' conformance suites (the
 [FastAPI](stacks/fastapi.md) and [Next.js](stacks/nextjs.md) apps), direct and through each service's pooler.
 The other services (RDS, Cloud SQL, Azure) have not been tried yet; the first part applies to them too.
@@ -15,7 +15,7 @@ as that owner:
 CREATE ROLE app_user LOGIN PASSWORD 'a long random password' NOSUPERUSER NOBYPASSRLS;
 ALTER ROLE app_user SET jit = off;
 
--- the owner may then look at the data as the app does (rowfence test, sql --as, plans, bench, Studio)
+-- the owner may then look at the data as the app does (rowstile test, sql --as, plans, bench, Studio)
 GRANT app_user TO CURRENT_USER;
 ```
 
@@ -23,14 +23,14 @@ GRANT app_user TO CURRENT_USER;
   members of `neon_superuser`, which has BYPASSRLS, and row-level security does not apply to them. As the app's
   connection, `SELECT * FROM authz.connection_check()` says when the role skips the rules.
 - **The owner gives itself the app role.** Since PostgreSQL 16 a role that makes another one only administers
-  it. Without the `GRANT`, the commands that switch to the app role stop and say so (`rowfence help AZ618`).
+  it. Without the `GRANT`, the commands that switch to the app role stop and say so (`rowstile help AZ618`).
   The app is not affected: it logs in as the app role.
 - **JIT off for the app role.** Neon leaves JIT on; Supabase has it off.
 - **The command, migrations and the change feed** connect to the database directly, or through a pooler in
   *session* mode. The app may go through a pooler in *transaction* mode ([Behind a pooler](operations.md#behind-a-pooler)
   says what each driver needs there).
 - **Every round trip counts** when the app is far from the database: a signed-in read is three (sign in, the
-  query, commit). `rowfence plans` gives the server's time; `rowfence bench` times each statement from where it
+  query, commit). `rowstile plans` gives the server's time; `rowstile bench` times each statement from where it
   runs, and its first line says what a statement that does nothing takes from there.
 
 ## Neon
@@ -46,7 +46,7 @@ as they are:
 
 | | host | for |
 |---|---|---|
-| direct | `ep-....neon.tech` | the command, migrations, the change feed (`ROWFENCE_FEED_URL`) |
+| direct | `ep-....neon.tech` | the command, migrations, the change feed (`ROWSTILE_FEED_URL`) |
 | pooled | `ep-...-pooler....neon.tech` | the app (PgBouncer in transaction mode) |
 
 The owner is the role the project was made with (`neondb_owner`, or the one you named).
@@ -88,8 +88,8 @@ user name carries the project's id:
 More databases work too: `CREATE DATABASE`, then its name in the URL; Supavisor routes by it.
 
 **The owner's search path.** The owner, `postgres`, has `extensions` on its search path, and Supabase's
-`dashboard_user` may create objects there. rowfence's functions that run as the owner look names up on that path,
-so the first `rowfence apply` stops:
+`dashboard_user` may create objects there. rowstile's functions that run as the owner look names up on that path,
+so the first `rowstile apply` stops:
 
 ```
 the search path has schemas that roles other than the owner may create objects in: extensions (dashboard_user) [AZ612]
@@ -124,10 +124,10 @@ your policy that calls such a function writes `extensions.` too.
   add `-c statement_timeout=0` to the migration connection's `options`.
 - **Supabase's Data API sees nothing in a governed table.** Its roles, `anon` and `authenticated`, are not the app
   role, and a table with row-level security and no rules for them shows them no rows, even where they have
-  `SELECT`. Tables the policy doesn't govern are open to whoever is granted them, as always. rowfence does not
+  `SELECT`. Tables the policy doesn't govern are open to whoever is granted them, as always. rowstile does not
   take Supabase Auth's JWTs from the Data API: your backend signs in as the app role.
 - **Settings outlive a client.** A session-level `SET` one client left on a server connection reached another
-  client's transaction through the transaction pooler. rowfence refused it ("authz.user_id was set directly,
+  client's transaction through the transaction pooler. rowstile refused it ("authz.user_id was set directly,
   so it is not believed"); your own session settings get no such check
   ([nothing may outlive a transaction](operations.md#behind-a-pooler)).
 - **A password set again takes a few minutes to reach Supavisor.** `ALTER ROLE ... PASSWORD`, even with the

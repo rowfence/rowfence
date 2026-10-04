@@ -3,7 +3,7 @@
 Relations and permissions are sets of ids, computed as a least fixpoint over some data. It is independent of
 the SQL the compiler writes, so the tests compare the two (tests/difftest.py), and it answers questions about
 a policy without a database: whether two policies grant the same in every small world (the review's check
-that a refactor changed nothing, `rowfence prove`), and the smallest world where they don't.
+that a refactor changed nothing, `rowstile prove`), and the smallest world where they don't.
 
 The data (Data; difftest reads it from a database, World makes it up):
     ids[type]                                   every id of the type (text)

@@ -13,7 +13,7 @@ const authz = JSON.parse(readFileSync(join(REPO, "editor", "syntaxes", "authz.tm
 // it are resolved from here, and the server bundle leaves Vue out (it imports it at run time, from site/.vitepress)
 const SITE = join(REPO, "site");
 const vueFromSite: Plugin = {
-  name: "rowfence:vue-from-site",
+  name: "rowstile:vue-from-site",
   enforce: "pre",
   async resolveId(id, importer, options) {
     if (!/^(vue|@vue\/[^/]+)(\/|$)/.test(id) || !importer) return null;
@@ -28,7 +28,7 @@ const guide = [
   { text: "Getting started", link: "/getting-started" },
   { text: "Cookbook", link: "/cookbook" },
   { text: "Troubleshooting", link: "/troubleshooting" },
-  { text: "Running rowfence", link: "/operations" },
+  { text: "Running rowstile", link: "/operations" },
   { text: "Managed Postgres: Neon, Supabase", link: "/managed-postgres" },
   { text: "Files in S3-compatible storage", link: "/signed-urls" },
   { text: "Threat model", link: "/threat-model" },
@@ -62,7 +62,7 @@ const reference = [
   { text: "Words", link: "/words" },
   { text: "Editor", link: "/editor" },
   { text: "Scale benchmark", link: "/benchmark" },
-  { text: "Working on rowfence", link: "/development" },
+  { text: "Working on rowstile", link: "/development" },
 ];
 const examples = [
   { text: "Examples", link: "/examples/" },
@@ -71,7 +71,7 @@ const examples = [
 ];
 
 export default defineConfig({
-  title: "rowfence",
+  title: "rowstile",
   description: "Access rules for Postgres: a policy file compiled into row-level security",
   srcDir: "..",
   srcExclude: notPages(),

@@ -1,12 +1,12 @@
 # Releasing
 
-How rowfence is numbered and released. For maintainers; [CONTRIBUTING.md](CONTRIBUTING.md) is how a change
+How rowstile is numbered and released. For maintainers; [CONTRIBUTING.md](CONTRIBUTING.md) is how a change
 gets into `main`.
 
 ## Versions
 
-rowfence follows [semantic versioning](https://semver.org/). One version covers everything a release ships:
-the `rowfence` command, the Python package, the TypeScript packages (`@rowfence/*` and the command's
+rowstile follows [semantic versioning](https://semver.org/). One version covers everything a release ships:
+the `rowstile` command, the Python package, the TypeScript packages (`@rowstile/*` and the command's
 platform packages), the image, and the review for CI. `packaging/version.py` sets it in every file, and a
 unit test fails if two files disagree. The editor extensions (VS Code, Zed) have their own versions, raised
 when they change: the Marketplace takes no alphas or release candidates. A release publishes the VS Code extension
@@ -21,15 +21,15 @@ on the Marketplace and Open VSX when its version isn't there yet, each once its 
 | `0.2.0-rc.1` | a release candidate for 0.2.0 (PyPI: `0.2.0rc1`): meant to become 0.2.0 as it is | npm's `next`, a GitHub pre-release; never `latest` |
 | `0.2.0-dev` | `main` between releases, on its way to 0.2.0 (PyPI: `0.2.0.dev0`) | never: the release workflow refuses it |
 
-An alpha or a candidate is installed by asking for it: `npm i rowfence@next`, `pip install --pre rowfence` (or
-`rowfence==0.2.0a1`), the image by its version. A version's alphas come before its candidates, and the
+An alpha or a candidate is installed by asking for it: `npm i rowstile@next`, `pip install --pre rowstile` (or
+`rowstile==0.2.0a1`), the image by its version. A version's alphas come before its candidates, and the
 command orders them so: `0.2.0-alpha.2`, then `0.2.0-rc.1`, then `0.2.0`.
 
 Every release upgrades from the one before it, and that is tested. What 1.0 promises beyond that is decided
 before 1.0.
 
 A build from `main` records its version with a hash of the compiler's sources (`0.2.0-dev+3f2a9c1e8b7d`), so
-`rowfence apply` never takes a database applied by one build as up to date for another.
+`rowstile apply` never takes a database applied by one build as up to date for another.
 
 ## The cycle
 
@@ -64,9 +64,9 @@ A build from `main` records its version with a hash of the compiler's sources (`
         **Unreleased**'s lines move into that section, and the first candidate after alphas turns its
         heading into `(release candidate)`. For the final release, the heading gets its date:
         `## X.Y.Z (YYYY-MM-DD)`
-      - the apps' migrations, where `rowfence migrate --check` asks for one: in `examples/filemanager`,
+      - the apps' migrations, where `rowstile migrate --check` asks for one: in `examples/filemanager`,
         `examples/messenger`, `integrations/fastapi` and `integrations/nextjs`, run
-        `python3 ../../core/cli/rowfence_cli.py migrate --name rowfence_X_Y_Z`. This is the upgrade users
+        `python3 ../../core/cli/rowstile_cli.py migrate --name rowstile_X_Y_Z`. This is the upgrade users
         will make, run by CI on each app
    2. `main`'s next version: `python3 packaging/version.py X.(Y+1).0-dev` after a final release,
       `X.Y.Z-dev` after an alpha or a candidate, with the subject line that version.
@@ -75,7 +75,7 @@ A build from `main` records its version with a hash of the compiler's sources (`
 
        git fetch origin
        sha=$(git log origin/main --format=%H -1 --grep '^X.Y.Z-rc.N$')
-       git tag -a vX.Y.Z-rc.N -m "rowfence X.Y.Z-rc.N" "$sha"
+       git tag -a vX.Y.Z-rc.N -m "rowstile X.Y.Z-rc.N" "$sha"
        git push origin vX.Y.Z-rc.N
 
 4. **The release workflow** (`.github/workflows/release.yml`) runs on the tag. It checks that the tag and the
@@ -83,9 +83,9 @@ A build from `main` records its version with a hash of the compiler's sources (`
    packages, the image, and a GitHub release holding the wheel, the sdist, the npm launcher and the VS Code
    extension, with the changelog's section as its notes. Where it publishes follows the repository: private
    places while it is private, PyPI, npm and ghcr.io once public. The tag also deploys the docs site at
-   rowfence.dev (`.github/workflows/site.yml`), built from the tag, when the release is what a plain install
+   rowstile.dev (`.github/workflows/site.yml`), built from the tag, when the release is what a plain install
    gets, or while no final release exists: `gh workflow run site.yml -f tag=vX.Y.Z` deploys another one.
-5. **Check it** as a user would: install from the registries on Linux, macOS and Windows, then `rowfence
+5. **Check it** as a user would: install from the registries on Linux, macOS and Windows, then `rowstile
    init`, `migrate` and `test` on a small app, and the review action on a pull request. Then the next
    alpha, the next candidate or the final release. A tag pushed is not a release made: look at the workflow's
    run, and at what it published.

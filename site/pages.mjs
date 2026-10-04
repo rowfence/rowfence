@@ -7,7 +7,7 @@ import { dirname, join, posix, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-export const GITHUB = "https://github.com/rowfence/rowfence";
+export const GITHUB = "https://github.com/rowstile/rowstile";
 const BRANCH = "main";
 
 const errorPages = readdirSync(join(REPO, "docs", "errors")).filter((f) => /^AZ\d+\.md$/.test(f)).sort();
@@ -57,7 +57,7 @@ export const PAGES = {
 };
 
 /** Titles for pages whose first heading says something else on the site. @type {Record<string, string>} */
-export const TITLES = { "development.md": "Working on rowfence", "words.md": "Words" };
+export const TITLES = { "development.md": "Working on rowstile", "words.md": "Words" };
 
 /** A page's URL: "/reference", "/stacks/". @param {string} address */
 export function url(address) {

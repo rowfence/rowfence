@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""client_types: the generated TypeScript client (rowfence client ts) under tsc --strict. It accepts correct
+"""client_types: the generated TypeScript client (rowstile client ts) under tsc --strict. It accepts correct
 calls and refuses names the policy doesn't have. No database.
 
     python3 tests/client_types.py        # needs tsc: on PATH, or the repository's (npm ci at the root)

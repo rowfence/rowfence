@@ -42,7 +42,7 @@ rules app.files view app.files_visible          -- also make a view with masked 
   delete                            : edit
 
 invariants
-  never folder: share and not org.member        -- checked by the tests and authz.check_invariants(); rowfence prove
+  never folder: share and not org.member        -- checked by the tests and authz.check_invariants(); rowstile prove
                                                 -- finds a folder owner outside the org: the policy doesn't forbid it
 
 test
@@ -106,7 +106,7 @@ test "a folder's owner edits what is inside"    -- brings its own data, rolled b
   another type's rule through `rel.perm`), as relations do: a subquery sees every row of the tables it reads,
   not only those the signed-in user may. A condition that is NULL holds nothing: `{not archived}` is false
   where `archived` is NULL, `not {archived}` is true there. Where a relation says the same, write the
-  relation: `insert : folder.edit and owner` rather than `{owner_id = authz.uid()}`, which `rowfence prove`
+  relation: `insert : folder.edit and owner` rather than `{owner_id = authz.uid()}`, which `rowstile prove`
   and the review read as a fact about the row; your own row is a relation too (`self : user = id`, then
   `can edit = self`).
 - **Inheritance**: `or rel.perm` back to the same type (or across types, like projects
@@ -146,8 +146,8 @@ test "a folder's owner edits what is inside"    -- brings its own data, rolled b
   {SQL}` or `as user X sees N {SELECT ...}`, which run as the app role signed in as X. A write is
   refused if a rule or a missing privilege stops it, or if it changes no row (the rows it meant are
   hidden from X). Any other error, a unique key say, fails the check whichever was expected. Each named test runs in a transaction that is rolled back.
-  Named tests may live in their own files (only `test "..."` blocks); `rowfence test` and
-  `rowfence dev` run them, never `apply`. A failing check explains itself.
+  Named tests may live in their own files (only `test "..."` blocks); `rowstile test` and
+  `rowstile dev` run them, never `apply`. A failing check explains itself.
 
 ## Permissions the runtime asks for
 

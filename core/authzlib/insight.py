@@ -418,7 +418,7 @@ END $f$;"""
                 f"            PERFORM authz_int.sign();\n"
                 f"            IF authz.can(p_type, p_id, p_perm) THEN RETURN NEXT v_c; END IF;\n"
                 f"          END LOOP;" for p in self.public_perms(t))
-            return f"      CASE p_perm\n{cases}\n        ELSE RAISE EXCEPTION 'no permission %.% in the policy', p_type, p_perm USING HINT = 'rowfence help AZ707';\n      END CASE;"
+            return f"      CASE p_perm\n{cases}\n        ELSE RAISE EXCEPTION 'no permission %.% in the policy', p_type, p_perm USING HINT = 'rowstile help AZ707';\n      END CASE;"
 
         def why_branch(t: Type) -> str | None:
             if not t.perms:
@@ -426,7 +426,7 @@ END $f$;"""
             cases = "\n".join(
                 f"        WHEN {lit(p)} THEN RETURN QUERY SELECT * FROM {self.why_fn(t, p)}(v_{t.pktype}, 1, '{{}}');"
                 for p in self.public_perms(t))
-            return f"      CASE p_perm\n{cases}\n        ELSE RAISE EXCEPTION 'no permission %.% in the policy', p_type, p_perm USING HINT = 'rowfence help AZ707';\n      END CASE;"
+            return f"      CASE p_perm\n{cases}\n        ELSE RAISE EXCEPTION 'no permission %.% in the policy', p_type, p_perm USING HINT = 'rowstile help AZ707';\n      END CASE;"
 
         self._invalid = "NULL"
         who_body = self.dispatch_type(who_branch).replace("RETURN NULL;", "RETURN;")
@@ -452,7 +452,7 @@ DECLARE v_me text := coalesce(current_setting('authz.user_id', true), ''); v_c t
         v_scopes text := coalesce(current_setting('authz.scopes', true), '');{self.id_vars()}
 BEGIN
   IF NOT authz_int.may_inspect(p_type, p_id) OR NOT authz_int.scope_perm(p_type, p_perm) THEN
-    RAISE EXCEPTION 'you cannot see who has access to % %', p_type, p_id USING ERRCODE = 'insufficient_privilege', HINT = 'rowfence help AZ705';
+    RAISE EXCEPTION 'you cannot see who has access to % %', p_type, p_id USING ERRCODE = 'insufficient_privilege', HINT = 'rowstile help AZ705';
   END IF;
   BEGIN
     PERFORM set_config('authz.scopes', '', true);   -- each candidate is checked with full rights
@@ -482,7 +482,7 @@ BEGIN
   -- a service whose id is a user's may not)
   IF p_user IS NOT NULL AND authz_int.canon('user', p_user) IS DISTINCT FROM authz.uid()::text
      AND NOT authz_int.may_inspect(p_type, p_id) THEN
-    RAISE EXCEPTION 'you cannot inspect access to % %', p_type, p_id USING ERRCODE = 'insufficient_privilege', HINT = 'rowfence help AZ705';
+    RAISE EXCEPTION 'you cannot inspect access to % %', p_type, p_id USING ERRCODE = 'insufficient_privilege', HINT = 'rowstile help AZ705';
   END IF;
   -- people who can't see the object learn nothing about it, whatever else they hold on it (as for a missing one)
   IF p_user IS NULL AND NOT authz_int.may_inspect(p_type, p_id) AND NOT authz_int.visible(p_type, p_id) THEN
@@ -518,7 +518,7 @@ LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = pg_catalog, pg_temp A
 BEGIN
   p_id := authz_int.canon(p_type, p_id);
   IF NOT authz_int.may_inspect(p_type, p_id) THEN
-    RAISE EXCEPTION 'you cannot see the shares of % %', p_type, p_id USING ERRCODE = 'insufficient_privilege', HINT = 'rowfence help AZ705';
+    RAISE EXCEPTION 'you cannot see the shares of % %', p_type, p_id USING ERRCODE = 'insufficient_privilege', HINT = 'rowstile help AZ705';
   END IF;
   RETURN QUERY SELECT g.relation, (SELECT r.name FROM authz.roles r WHERE 'role:' || r.id = g.relation),
     g.subject_type, CASE WHEN g.subject_type = 'link' THEN '(link)' ELSE g.subject_id END, g.subject_relation,

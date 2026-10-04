@@ -4,7 +4,7 @@
     python3 tests/test_rows.py "dbname=authz_devx" tests/a.authz [more.authz ...]
 
 Runs the policy in force's tests and the named tests in these files (keyed by file name, as
-`rowfence test` does) through authzlib.database, in a transaction that is rolled back. Prints one
+`rowstile test` does) through authzlib.database, in a transaction that is rolled back. Prints one
 row per check: test, line, ok (t or f), detail, separated by tabs; newlines in detail become " | ".
 """
 import os
@@ -14,7 +14,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path[:0] = [os.path.join(ROOT, "cli"), ROOT]
 import pgwire  # noqa: E402
 from authzlib import database  # noqa: E402
-from rowfence_cli import transaction  # noqa: E402
+from rowstile_cli import transaction  # noqa: E402
 
 
 def main(dsn: str, paths: list[str]) -> None:

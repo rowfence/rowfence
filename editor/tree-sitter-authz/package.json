@@ -1,10 +1,10 @@
 {
   "name": "tree-sitter-authz",
   "version": "0.1.0",
-  "description": "Tree-sitter grammar for rowfence policies (.authz)",
+  "description": "Tree-sitter grammar for rowstile policies (.authz)",
   "license": "Apache-2.0",
   "private": true,
-  "repository": { "type": "git", "url": "git+https://github.com/rowfence/rowfence.git", "directory": "editor/tree-sitter-authz" },
+  "repository": { "type": "git", "url": "git+https://github.com/rowstile/rowstile.git", "directory": "editor/tree-sitter-authz" },
   "scripts": {
     "generate": "tree-sitter generate",
     "test": "tree-sitter test"

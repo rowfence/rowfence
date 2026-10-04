@@ -1,13 +1,13 @@
 # The playground
 
-rowfence in the browser, with nothing installed: write a policy, its tables and its tests, and see Postgres
+rowstile in the browser, with nothing installed: write a policy, its tables and its tests, and see Postgres
 enforce it. The compiler (`core/authzlib`, standard library only) runs in Pyodide, in a worker; the SQL it
 writes runs in PGlite, Postgres 18 in WebAssembly. On each change the policy is compiled, applied to a fresh
 database with the tables, and its tests run. A mistake shows its line, its code and the code's page; "Ask as
 someone" runs a statement as the app role, signed in as whoever you name, and rolls it back. "Copy link" puts
 the whole state in the link.
 
-One thing it can't show is signed sessions. PGlite has a single session, the owner's, and rowfence believes
+One thing it can't show is signed sessions. PGlite has a single session, the owner's, and rowstile believes
 the owner's settings without a signature: a statement under "Ask as someone" may `SET authz.user_id` and
 become someone else. On a server the app role's session is believed only after `authz.act_as()` (the page says
 so under the box).

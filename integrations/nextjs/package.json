@@ -1,5 +1,5 @@
 {
-  "name": "rowfence-conformance-nextjs",
+  "name": "rowstile-conformance-nextjs",
   "private": true,
   "type": "module",
   "scripts": {
@@ -8,13 +8,13 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@rowfence/client": "*",
-    "@rowfence/drizzle": "*",
-    "@rowfence/next": "*",
-    "@rowfence/pg": "*",
-    "@rowfence/postgres": "*",
-    "@rowfence/prisma": "*",
-    "@rowfence/react": "*",
+    "@rowstile/client": "*",
+    "@rowstile/drizzle": "*",
+    "@rowstile/next": "*",
+    "@rowstile/pg": "*",
+    "@rowstile/postgres": "*",
+    "@rowstile/prisma": "*",
+    "@rowstile/react": "*",
     "@prisma/adapter-pg": "7.10.0",
     "@prisma/client": "7.10.0",
     "drizzle-orm": "^0.45.3",
@@ -25,7 +25,7 @@
     "react-dom": "^19.3.0"
   },
   "devDependencies": {
-    "@rowfence/vitest": "*",
+    "@rowstile/vitest": "*",
     "@testing-library/react": "^16.3.0",
     "@types/node": "^24",
     "@types/pg": "^8.23.1",

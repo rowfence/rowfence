@@ -1,21 +1,21 @@
 /**
- * rowfence for TypeScript apps.
+ * rowstile for TypeScript apps.
  *
  * Every transaction signs in as whoever the request (or the job) acts for, with `authz.act_as()`; the
  * database's refusals become `Refused` (a 403 with the reason), rows the user can't see become `NotFound`
- * (a 404). This package holds no rowfence logic: it calls the `authz.*` functions the policy made, and
- * translates their answers. The drivers' packages (`@rowfence/pg`, `/postgres`, `/prisma`, `/drizzle`) use it.
+ * (a 404). This package holds no rowstile logic: it calls the `authz.*` functions the policy made, and
+ * translates their answers. The drivers' packages (`@rowstile/pg`, `/postgres`, `/prisma`, `/drizzle`) use it.
  *
- *     import { actingAs } from "@rowfence/client";
+ *     import { actingAs } from "@rowstile/client";
  *     await actingAs(42, async () => { ... });        // every transaction in here signs in as user 42
  *
- * The names the policy declares come from the generated file (`rowfence client`, e.g. `src/authz.gen.ts`),
+ * The names the policy declares come from the generated file (`rowstile client`, e.g. `src/authz.gen.ts`),
  * which registers them here, so a misspelled type or permission doesn't type-check.
  */
 import { AsyncLocalStorage } from "node:async_hooks";
 
 // --- the policy's names ----------------------------------------------------------------------------------
-/** Filled in by the generated file: `declare module "@rowfence/client" { interface Register { ... } }`. */
+/** Filled in by the generated file: `declare module "@rowstile/client" { interface Register { ... } }`. */
 // eslint-disable-next-line @typescript-eslint/no-empty-interface
 export interface Register {}
 type Registered = Register extends { permissions: infer P } ? P : { readonly [type: string]: readonly string[] };
@@ -90,7 +90,7 @@ interface Shared {
   store: AsyncLocalStorage<Principal>;
   hooks: ((p: Principal) => unknown)[];
 }
-const KEY = Symbol.for("rowfence.context");
+const KEY = Symbol.for("rowstile.context");
 const shared: Shared = ((globalThis as Record<symbol, unknown>)[KEY] as Shared | undefined) ??
   ((globalThis as Record<symbol, unknown>)[KEY] = { store: new AsyncLocalStorage<Principal>(), hooks: [] }) as Shared;
 
@@ -167,13 +167,13 @@ export interface Problem {
 /** The database refused a write, and said why: the rule (table and command), and the explanation. */
 export class Refused extends Error {
   readonly status = 403;
-  readonly code = "AZ709";                         // rowfence help AZ709
+  readonly code = "AZ709";                         // rowstile help AZ709
   constructor(message: string, public table?: string, public command?: string, public why: string[] = [], options?: { cause?: unknown }) {
     super(message, options);
     this.name = "Refused";
   }
   problem(): Problem {
-    return { type: "https://rowfence.dev/problems/refused", title: "Forbidden", status: 403, detail: this.message,
+    return { type: "https://rowstile.dev/problems/refused", title: "Forbidden", status: 403, detail: this.message,
              table: this.table ?? null, command: this.command ?? null, why: this.why, code: this.code };
   }
 }
@@ -186,13 +186,13 @@ export class NotFound extends Error {
     this.name = "NotFound";
   }
   problem(): Problem {
-    return { type: "https://rowfence.dev/problems/not-found", title: "Not Found", status: 404, detail: this.message };
+    return { type: "https://rowstile.dev/problems/not-found", title: "Not Found", status: 404, detail: this.message };
   }
 }
 
 /** A query that needs to know who is asking ran in a transaction nobody signed in to (strict sign-in). */
 export class NotSignedIn extends Error {
-  readonly code = "AZ701";                         // rowfence help AZ701
+  readonly code = "AZ701";                         // rowstile help AZ701
   constructor(message: string, options?: { cause?: unknown }) {
     super(message, options);
     this.name = "NotSignedIn";
@@ -202,7 +202,7 @@ export class NotSignedIn extends Error {
 /** authz.connection_check() found that the app's connection skips row-level security (or worse). */
 export class ConnectionProblem extends Error {
   constructor(public problems: string[]) {
-    super("the app's database connection can't be used with rowfence: " + problems.join("; "));
+    super("the app's database connection can't be used with rowstile: " + problems.join("; "));
     this.name = "ConnectionProblem";
   }
 }
@@ -252,12 +252,12 @@ export function dbError(e: unknown): DbError | null {
   return null;
 }
 
-/** rowfence's code for a database error (AZ709; `rowfence help AZ709` says what it means): from its HINT, where
- *  the runtime puts it, or its message. Undefined for an error rowfence didn't raise. */
+/** rowstile's code for a database error (AZ709; `rowstile help AZ709` says what it means): from its HINT, where
+ *  the runtime puts it, or its message. Undefined for an error rowstile didn't raise. */
 export function errorCode(e: unknown): string | undefined {
   const err = dbError(e);
   for (const text of [err?.hint, err?.message]) {
-    const m = /rowfence help (AZ\d{3})|\[(AZ\d{3})\]/.exec(text ?? "");
+    const m = /(?:rowstile|rowfence) help (AZ\d{3})|\[(AZ\d{3})\]/.exec(text ?? "");
     if (m) return m[1] ?? m[2];
   }
   return undefined;
@@ -270,7 +270,7 @@ export function sqlstate(e: unknown): string | undefined {
 const RLS_GENERIC = /^new row violates row-level security policy (\(USING expression\) )?for table "([^"]+)"/;
 const OURS = /may not (insert|update|delete) this row (?:into|of) (\S+?)(?: to these values)?$/;
 
-/** A Refused for an error that is the database refusing a write (SQLSTATE 42501, raised by rowfence's
+/** A Refused for an error that is the database refusing a write (SQLSTATE 42501, raised by rowstile's
  *  policies with the rule and why), else null. `schemaOf` qualifies a bare table name (Prisma knows it).
  *  Another 42501 (a table the app role was never granted) is the app's mistake, not a refusal: null. */
 export function refusal(e: unknown, schemaOf?: (table: string) => string | undefined): Refused | null {
@@ -285,7 +285,7 @@ export function refusal(e: unknown, schemaOf?: (table: string) => string | undef
       return new Refused(`${err.message}: the row is there already, and the update rule (or the select rule) doesn't ` +
         "let this user change it (ON CONFLICT DO UPDATE)", table, "update", [], { cause: e });
     }
-    // Postgres's own words, not rowfence's: the row was allowed in, but may not be read back (INSERT ...
+    // Postgres's own words, not rowstile's: the row was allowed in, but may not be read back (INSERT ...
     // RETURNING, or an ORM that reads the new row, as Prisma's create does), which the select rule decides
     return new Refused(`${err.message}: the write was allowed, but the select rule doesn't let this user read the row ` +
       "back (RETURNING); read it back only if the select rule allows it", table, "select", [], { cause: e });
@@ -302,7 +302,7 @@ export function notSignedIn(e: unknown): boolean {
   return sqlstate(e) === "28000";
 }
 
-/** e as rowfence's error: Refused, NotFound or NotSignedIn as they are, a database refusal as Refused, strict
+/** e as rowstile's error: Refused, NotFound or NotSignedIn as they are, a database refusal as Refused, strict
  *  sign-in's error as NotSignedIn; null for anything else. */
 export function translate(e: unknown, schemaOf?: (table: string) => string | undefined): Refused | NotFound | NotSignedIn | null {
   if (e instanceof Refused || e instanceof NotFound || e instanceof NotSignedIn) return e;

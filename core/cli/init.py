@@ -1,4 +1,4 @@
-"""rowfence init: a first policy drafted from the database's catalog, a test file, and rowfence.toml."""
+"""rowstile init: a first policy drafted from the database's catalog, a test file, and rowstile.toml."""
 from __future__ import annotations
 
 import os
@@ -6,9 +6,9 @@ import re
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from rowfence_cli import Config
+    from rowstile_cli import Config
 
-CONFIG = "rowfence.toml"
+CONFIG = "rowstile.toml"
 
 
 def write_new(path: str, text: str, written: list[str]) -> None:
@@ -22,7 +22,7 @@ def write_new(path: str, text: str, written: list[str]) -> None:
 
 
 def init(policy: str, opts: dict[str, str], cfg: Config) -> None:
-    """Writes the drafted policy, a first test file and rowfence.toml, keeping any that exist."""
+    """Writes the drafted policy, a first test file and rowstile.toml, keeping any that exist."""
     out = opts.get("--out", "db")
     written: list[str] = []
     policy_path = os.path.join(out, "policy.authz")
@@ -31,7 +31,7 @@ def init(policy: str, opts: dict[str, str], cfg: Config) -> None:
     role = m.group(1) if m else "app_user"      # a draft always has one
     first = re.search(r"^type (?!user\b)(\w+) = (\S+)", policy, re.M)
     example = first.group(1) if first else "user"
-    write_new(os.path.join(out, "tests", "first.authz"), f'''-- Named tests: each brings its own data and rolls it back. rowfence test (or rowfence dev) runs them.
+    write_new(os.path.join(out, "tests", "first.authz"), f'''-- Named tests: each brings its own data and rolls it back. rowstile test (or rowstile dev) runs them.
 -- A test's lines:
 --   given name = {{INSERT ... RETURNING id}}      rows it needs; $name is what RETURNING gave
 --   user $name can|cannot PERM TYPE $id           a permission, as someone
@@ -48,7 +48,7 @@ test "nobody signed in sees a {example}"
         print(f"found   {', '.join(found.found)}, Postgres{via}")
     if cfg.path is None:
         database = "env:DATABASE_URL"
-        extra = stack.config_lines(found) or ['# [clients]                    # generated on each change by rowfence dev',
+        extra = stack.config_lines(found) or ['# [clients]                    # generated on each change by rowstile dev',
                                               '# py = "app/authz_client.py"', '# ts = "src/authz.ts"']
         write_new(CONFIG, f'''policy   = "{policy_path.replace(os.sep, "/")}"
 tests    = ["{os.path.join(out, "tests").replace(os.sep, "/")}/*.authz"]
@@ -92,5 +92,5 @@ database = "{database}"     # a DSN or URL, or env:NAME for an environment varia
     print(f"""
 Next:
   1. Read {policy_path}: every '-- decide:' is a choice only you can make.{setup}
-  3. rowfence dev      applies the policy on each save, runs the tests, writes the clients
+  3. rowstile dev      applies the policy on each save, runs the tests, writes the clients
                        (set DATABASE_URL, or database in {CONFIG}, to a development database)""")

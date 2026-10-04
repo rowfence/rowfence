@@ -3,7 +3,7 @@
 Patterns for common access rules, each with the policy lines and a test. They all come from one policy on
 one set of tables, `docs/cookbook/` (`schema.sql`, `policy.authz`, `tests/patterns.authz`), which CI applies
 and tests: every line shown here is in those files (`core/tests/cookbook.sh` checks it). To try one:
-copy the lines, then `rowfence dev`.
+copy the lines, then `rowstile dev`.
 
 The language in one breath: a **type** is a table; a **relation** says who or what a row is linked to (a
 column, a link table, or shares people make); a **permission** combines relations with `or`, `and`, `not`,
@@ -196,7 +196,7 @@ rules cb.posts
 A relation on the user type (who this person blocked) can be followed from any row that names a person:
 `recipient.has_blocked` holds when the recipient blocked whoever is signed in. It is read with the policy's
 rights, so it sees every block, not only the ones you may read (so would a `{condition}`, but the relation
-says it in the policy's words, and `rowfence prove` and the review can read it).
+says it in the policy's words, and `rowstile prove` and the review can read it).
 
 ```authz
 type user = cb.users

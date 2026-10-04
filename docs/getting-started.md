@@ -3,23 +3,23 @@
 From an empty folder to access rules enforced by Postgres, tested, in about fifteen minutes. You need Docker
 and Python 3.11 or newer. (This guide runs as written in the tests: `core/tests/docs_test.sh`.)
 
-## 1. Postgres with rowfence
+## 1. Postgres with rowstile
 
 From the repository root:
 
-    docker build -t rowfence:16 --build-arg PG_MAJOR=16 -f core/Dockerfile .
-    docker run -d --name pga -e POSTGRES_PASSWORD=secret -p 5432:5432 rowfence:16
-    export PATH="$PWD/core/cli:$PATH"                              # the rowfence command
+    docker build -t rowstile:16 --build-arg PG_MAJOR=16 -f core/Dockerfile .
+    docker run -d --name pga -e POSTGRES_PASSWORD=secret -p 5432:5432 rowstile:16
+    export PATH="$PWD/core/cli:$PATH"                              # the rowstile command
     export DATABASE_URL=postgresql://postgres:secret@localhost:5432/postgres
 
-The image is the stock Postgres 16 (or 17, 18 with `PG_MAJOR`) with the `rowfence` command in it. rowfence
-needs nothing installed in the database: the `rowfence` command compiles your policy and
+The image is the stock Postgres 16 (or 17, 18 with `PG_MAJOR`) with the `rowstile` command in it. rowstile
+needs nothing installed in the database: the `rowstile` command compiles your policy and
 applies plain SQL, connected as the owner of your tables (`DATABASE_URL`; here the `postgres` user). Your app
 will connect as its own role. Work in an empty folder from here on. For SQL, `docker exec -it pga psql -U postgres`.
 
 ## 2. Your tables, and the role your app connects as
 
-rowfence governs tables you already have. A small example:
+rowstile governs tables you already have. A small example:
 
 ```sql
 CREATE SCHEMA app;
@@ -31,7 +31,7 @@ CREATE TABLE app.projects (id bigserial PRIMARY KEY, owner_id bigint NOT NULL RE
 CREATE TABLE app.notes (id bigserial PRIMARY KEY, project_id bigint NOT NULL REFERENCES app.projects,
                         author_id bigint NOT NULL REFERENCES app.users, body text);
 CREATE INDEX ON app.team_members (user_id);     -- the columns the rules will look rows up by
-CREATE INDEX ON app.projects (owner_id);        -- (rowfence dev names the ones that are missing)
+CREATE INDEX ON app.projects (owner_id);        -- (rowstile dev names the ones that are missing)
 CREATE INDEX ON app.notes (project_id);
 CREATE INDEX ON app.notes (author_id);
 
@@ -49,14 +49,14 @@ INSERT INTO app.projects (owner_id, name) VALUES (1, 'Novel');
 INSERT INTO app.notes (project_id, author_id, body) VALUES (1, 1, 'Chapter one');
 ```
 
-## 3. A first draft: `rowfence init`
+## 3. A first draft: `rowstile init`
 
 ```sh
-rowfence init --schema app --role app_backend
+rowstile init --schema app --role app_backend
 ```
 
 It reads your tables and foreign keys and writes three files: `db/policy.authz` (a policy that compiles),
-`db/tests/first.authz` (a first test) and `rowfence.toml` (where things are, for the other commands).
+`db/tests/first.authz` (a first test) and `rowstile.toml` (where things are, for the other commands).
 Tables became types, foreign keys became relations (`owner_id` is `owner : user = owner_id`; `project_id`
 is `project : project = project_id`, and a note inherits view and edit from its project), and
 `app.team_members` became `member : user = app.team_members(team_id -> user_id)` on teams. Every line
@@ -106,7 +106,7 @@ rules app.notes
 ```
 
 `shared` relations hold what people give each other with `authz.share()`; who may give them is the type's
-`can share`. The layout is `rowfence fmt`'s: run it on your own files, and `rowfence fmt --check` in CI.
+`can share`. The layout is `rowstile fmt`'s: run it on your own files, and `rowstile fmt --check` in CI.
 
 With an editor that speaks the Language Server Protocol, mistakes show while you type, and hovering
 `project.edit` shows what it means (`editor/README.md`).
@@ -136,30 +136,30 @@ test "a project's owner and editors write notes; nobody else sees them"
 `user X can PERM TYPE ID` asks the policy. `as user X allowed|refused|sees N {SQL}` runs the statement as
 your app's role, signed in as X, so it tests row-level security itself.
 
-## 5. The edit loop: `rowfence dev`
+## 5. The edit loop: `rowstile dev`
 
 ```sh
-rowfence dev --once
+rowstile dev --once
 ```
 
 Without `--once`, it watches the policy and the tests. On every save it checks the policy, shows who would
 gain or lose access, applies it, runs the tests and writes your clients:
 
 ```text
-rowfence dev: db/policy.authz -> postgres on localhost:5432
+rowstile dev: db/policy.authz -> postgres on localhost:5432
 10:04:31 start
   ok   compiles
   ok   applied in 0.12 s (the whole policy)
   ok   7 check(s) pass; 7 branches no test reaches (line 13: owner, line 14: share, ...)
 ```
 
-The last line counts the branches of the policy no test makes true yet (`rowfence test --coverage` lists
+The last line counts the branches of the policy no test makes true yet (`rowstile test --coverage` lists
 them). From the second run on, a line says who gains or loses access (`~    access: nobody gains or loses
 anything`), and a lookup that no index serves is named, with the index to add.
 
 A mistake stops it before anything is applied (`db/policy.authz: line 14: project has no relation or
 permission 'edtor' (it has: edit, editor, owner, share, view, viewer) [AZ203]`), and a failing check prints
-why, from the database. Every mistake ends with its code: `rowfence help AZ203` says what it means and shows
+why, from the database. Every mistake ends with its code: `rowstile help AZ203` says what it means and shows
 it fixed (`docs/errors/`).
 
 ## 6. Ask as a user
@@ -203,14 +203,14 @@ DETAIL:  no   insert : project.edit and author  (line 33)
 The same from a terminal, as anyone, without writing anything:
 
 ```sh
-rowfence explain-rule --as user:3 app.notes insert --row '{"project_id": 1, "author_id": 3}'
-rowfence sql --as user:2 "SELECT id, body FROM app.notes"
+rowstile explain-rule --as user:3 app.notes insert --row '{"project_id": 1, "author_id": 3}'
+rowstile sql --as user:2 "SELECT id, body FROM app.notes"
 ```
 
 ## 7. From your app
 
-`rowfence.toml` can name clients to write on every change (`[clients] py = "app/authz_client.py"`), or:
-`rowfence client py > authz_client.py` (or `ts`). Commit it next to your code.
+`rowstile.toml` can name clients to write on every change (`[clients] py = "app/authz_client.py"`), or:
+`rowstile client py > authz_client.py` (or `ts`). Commit it next to your code.
 
 ```python
 import psycopg
@@ -239,13 +239,13 @@ transaction, so a pooled connection never carries one user's identity into anoth
 
 ## 8. Ship it: migrations
 
-`rowfence dev` applies straight to your development database. Production takes the policy as
+`rowstile dev` applies straight to your development database. Production takes the policy as
 migrations, written for the tool your app already uses (`alembic`, `prisma`, `drizzle`, `sql`, `goose`,
-`dbmate` or `flyway`). Name it in `rowfence.toml`, then write the first one:
+`dbmate` or `flyway`). Name it in `rowstile.toml`, then write the first one:
 
 ```sh
-printf '[migrations]\ntool = "sql"\ndir = "migrations"\n' >> rowfence.toml
-rowfence migrate
+printf '[migrations]\ntool = "sql"\ndir = "migrations"\n' >> rowstile.toml
+rowstile migrate
 ```
 
 ```text
@@ -257,7 +257,7 @@ wrote .gitattributes (reviews show the generated files collapsed)
 
 Commit all three. From then on each change to the policy is the next migration, holding only what
 changed (a new permission is a few statements) and starting with what changed, as comments.
-`rowfence dev` writes it once you stop editing, and `rowfence migrate --check` in CI fails a policy
+`rowstile dev` writes it once you stop editing, and `rowstile migrate --check` in CI fails a policy
 change that has no migration. Deploy them as you deploy the others: there is no extra step.
 
 ## Next

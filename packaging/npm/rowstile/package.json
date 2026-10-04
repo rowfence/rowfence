@@ -1,0 +1,11 @@
+{
+  "name": "rowstile",
+  "version": "0.0.0",
+  "description": "Access rules for Postgres: the rowstile command (policies compiled to row-level security, shipped as migrations), with its own Python",
+  "license": "Apache-2.0",
+  "repository": { "type": "git", "url": "git+https://github.com/rowstile/rowstile.git", "directory": "packaging/npm/rowstile" },
+  "bin": { "rowstile": "bin/rowstile.js" },
+  "files": ["bin", "command", "README.md"],
+  "engines": { "node": ">=18" },
+  "optionalDependencies": {}
+}

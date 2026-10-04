@@ -1,4 +1,4 @@
-# The file manager: the web app built, then the backend serving it. Build context: the repository root (for the rowfence command)
+# The file manager: the web app built, then the backend serving it. Build context: the repository root (for the rowstile command)
 FROM node:24-slim AS web
 WORKDIR /web
 COPY examples/filemanager/frontend/package.json examples/filemanager/frontend/package-lock.json ./
@@ -13,7 +13,7 @@ COPY examples/filemanager/backend/pyproject.toml examples/filemanager/backend/uv
 RUN uv sync --frozen --no-dev --no-install-project
 COPY examples/filemanager/backend/ ./
 COPY examples/filemanager/db/ /fm/db/
-# the rowfence command, which migrate.py runs to apply the policy
+# the rowstile command, which migrate.py runs to apply the policy
 COPY core/authzlib /core/authzlib
 COPY core/cli /core/cli
 COPY --from=web /web/dist /fm/frontend/dist

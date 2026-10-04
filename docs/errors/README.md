@@ -1,6 +1,6 @@
 # Error codes
 
-Every mistake rowfence reports ends with its code: `line 4: folder.owner: unknown type 'person' [AZ201]`. `rowfence help AZ201` prints its page in the terminal.
+Every mistake rowstile reports ends with its code: `line 4: folder.owner: unknown type 'person' [AZ201]`. `rowstile help AZ201` prints its page in the terminal.
 
 ## Reading the policy
 

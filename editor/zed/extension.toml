@@ -1,18 +1,18 @@
-id = "rowfence"
-name = "rowfence"
-description = "rowfence policies (.authz): highlighting, outline, and errors, hover, go to definition and completion from the rowfence language server"
+id = "rowstile"
+name = "rowstile"
+description = "rowstile policies (.authz): highlighting, outline, and errors, hover, go to definition and completion from the rowstile language server"
 version = "0.1.0"
 schema_version = 1
-authors = ["The rowfence authors"]
-repository = "https://github.com/rowfence/rowfence"
+authors = ["The rowstile authors"]
+repository = "https://github.com/rowstile/rowstile"
 
 # Zed fetches the grammar from git: rev is a commit that holds editor/tree-sitter-authz as it is now. After a
 # change to the grammar, commit it, then set rev to that commit (unit_test.py checks they match).
 [grammars.authz]
-repository = "https://github.com/rowfence/rowfence"
+repository = "https://github.com/rowstile/rowstile"
 rev = "caff74d7c26c4227a07e7d71820317fa29c9e95f"
 path = "editor/tree-sitter-authz"
 
-[language_servers.rowfence]
-name = "rowfence"
+[language_servers.rowstile]
+name = "rowstile"
 languages = ["Authz"]

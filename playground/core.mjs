@@ -15,7 +15,7 @@
 
 const GLUE = `
 import json, re, sys
-sys.path.insert(0, "/rowfence")
+sys.path.insert(0, "/rowstile")
 from authzlib import Compiler, PolicyError, parse_policy, errors
 
 LINE = re.compile(r"(?:(\\S+) )?line (\\d+): (.*)", re.S)
@@ -54,8 +54,8 @@ def pg_help(code):
 /** The compiler, in a Pyodide that has loaded: the bundle's files (authzlib) written into its file system.
  *  @param {import("pyodide").PyodideAPI} py @param {Record<string, string>} files @returns {Compiler} */
 export function compiler(py, files) {
-  py.FS.mkdirTree("/rowfence/authzlib");
-  for (const [name, text] of Object.entries(files)) py.FS.writeFile(`/rowfence/authzlib/${name}`, text);
+  py.FS.mkdirTree("/rowstile/authzlib");
+  for (const [name, text] of Object.entries(files)) py.FS.writeFile(`/rowstile/authzlib/${name}`, text);
   py.runPython(GLUE);
   /** @param {string} name @param {unknown[]} args @returns {unknown} */
   const call = (name, ...args) => {

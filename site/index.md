@@ -1,9 +1,9 @@
 ---
 layout: home
 hero:
-  name: rowfence
+  name: rowstile
   text: Access rules for Postgres
-  tagline: Write who can do what in one small file. rowfence compiles it into row-level security, and Postgres enforces it on every query.
+  tagline: Write who can do what in one small file. rowstile compiles it into row-level security, and Postgres enforces it on every query.
   actions:
     - theme: brand
       text: Get started

@@ -26,7 +26,7 @@ PREVIOUS_KEYWORDS = {"signed_in": KEYWORDS["signed_in"], "everyone": "true"}
 
 class PolicyError(Exception):
     """A mistake in a policy: 'line 12: message [AZ201]'. code is the mistake's stable code (authzlib/errors.py,
-    a page in docs/errors/, `rowfence help AZ201`)."""
+    a page in docs/errors/, `rowstile help AZ201`)."""
 
     def __init__(self, message: str, code: str | None = None) -> None:
         super().__init__(f"{message} [{code}]" if code else message)
@@ -692,7 +692,7 @@ def parse_policy(text: str, path: str | None = None, files: dict[str, str] | Non
                  previous: bool = False) -> Policy:
     """previous: read the policy in the language before this one, its old forms as it meant them, each noted in
     pol.previous: what a review reads its base in when this language refuses it (a pull request that upgrades
-    rowfence and rewrites the policy). Everywhere else they are refused, saying what to write."""
+    rowstile and rewrites the policy). Everywhere else they are refused, saying what to write."""
     pol = Policy(previous=[] if previous else None)
     section: str | None = None
     # the block the indented lines below belong to

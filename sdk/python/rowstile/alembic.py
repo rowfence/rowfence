@@ -1,11 +1,11 @@
-"""rowfence with Alembic: autogenerate leaves what rowfence made alone.
+"""rowstile with Alembic: autogenerate leaves what rowstile made alone.
 
 In migrations/env.py:
 
-    from rowfence.alembic import include_name, include_object
+    from rowstile.alembic import include_name, include_object
     context.configure(..., include_name=include_name, include_object=include_object)
 
-rowfence's migrations themselves are written by `rowfence migrate` (tool = "alembic" in rowfence.toml):
+rowstile's migrations themselves are written by `rowstile migrate` (tool = "alembic" in rowstile.toml):
 a revision after the current head, with its SQL beside it.
 """
 from __future__ import annotations
@@ -22,16 +22,16 @@ ParentNames = MutableMapping[Literal["schema_name", "table_name", "schema_qualif
 
 
 def include_name(name: str | None, type_: str, parent_names: ParentNames) -> bool:
-    """Leaves out rowfence's schemas (with include_schemas=True)."""
+    """Leaves out rowstile's schemas (with include_schemas=True)."""
     if type_ == "schema":
         return name not in SCHEMAS
     return parent_names.get("schema_name") not in SCHEMAS
 
 
 def include_object(obj: SchemaItem, name: str | None, type_: str, reflected: bool, compare_to: SchemaItem | None) -> bool:
-    """Leaves out rowfence's tables and indexes, and the masked views it makes in the app's schemas."""
+    """Leaves out rowstile's tables and indexes, and the masked views it makes in the app's schemas."""
     schema = getattr(obj, "schema", None) or getattr(getattr(obj, "table", None), "schema", None)
     if schema in SCHEMAS:
         return False
     info = getattr(obj, "info", None) or {}
-    return not info.get("rowfence")
+    return not info.get("rowstile")

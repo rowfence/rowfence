@@ -1,10 +1,10 @@
 [project]
-name = "rowfence-conformance-fastapi"
+name = "rowstile-conformance-fastapi"
 version = "0.0.0"
 description = "The Python SDK's conformance suite: a small FastAPI app on SQLAlchemy (async, asyncpg), migrated with Alembic"
 requires-python = ">=3.11"
 dependencies = [
-  "rowfence[fastapi,sqlalchemy,psycopg,asyncpg]",
+  "rowstile[fastapi,sqlalchemy,psycopg,asyncpg]",
   "sqlalchemy[asyncio]>=2.0",
   "asyncpg>=0.29",
   "psycopg[binary]>=3.1",
@@ -19,7 +19,7 @@ dependencies = [
 package = false
 
 [tool.uv.sources]
-rowfence = {path = "../../sdk/python", editable = true}
+rowstile = {path = "../../sdk/python", editable = true}
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

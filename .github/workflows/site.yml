@@ -1,4 +1,4 @@
-# The docs site on GitHub Pages (rowfence.dev), built from a release tag so it shows what was released. A tag
+# The docs site on GitHub Pages (rowstile.dev), built from a release tag so it shows what was released. A tag
 # deploys it when that release becomes what a plain install gets (npm's `latest`), or while no final release exists
 # yet; an alpha or a candidate after one doesn't. Run by hand, it deploys the tag it is given:
 #   gh workflow run site.yml -f tag=v0.1.0

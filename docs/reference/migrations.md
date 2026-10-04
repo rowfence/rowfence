@@ -1,17 +1,17 @@
 # Deploying a policy: migrations
 
-The compiler runs in the `rowfence` command, never in the database. A policy change is a
-migration, written for the tool in `rowfence.toml`, reviewed and deployed with the app's
+The compiler runs in the `rowstile` command, never in the database. A policy change is a
+migration, written for the tool in `rowstile.toml`, reviewed and deployed with the app's
 other migrations. The database needs nothing installed first: `plpgsql`, which every Postgres has, is
 enough. `core/Dockerfile` builds a Postgres for development and tests: the stock image, with the command in it.
 
-    rowfence migrate                          # the next migration, and db/policy.lock (no database needed)
-    rowfence migrate --check                  # in CI: exit 1 if the policy has a change no migration has
-    rowfence push                             # a development database, with the same migration
-    rowfence diff                             # who gains and loses what; changes nothing
-    rowfence test                             # the tests and invariants
+    rowstile migrate                          # the next migration, and db/policy.lock (no database needed)
+    rowstile migrate --check                  # in CI: exit 1 if the policy has a change no migration has
+    rowstile push                             # a development database, with the same migration
+    rowstile diff                             # who gains and loses what; changes nothing
+    rowstile test                             # the tests and invariants
 
-| tool | what `rowfence migrate` writes |
+| tool | what `rowstile migrate` writes |
 |---|---|
 | `alembic` | a revision after the current head, `<rev>_authz_<name>.py`, with its SQL beside it (`.sql`) |
 | `prisma` | `prisma/migrations/<time>_authz_<name>/migration.sql` |
@@ -43,17 +43,17 @@ enough. `core/Dockerfile` builds a Postgres for development and tests: the stock
   read other tables, one that takes links from shares, or one whose link tables the policy in force
   doesn't watch yet is rebuilt in one migration, under lock. `--one-phase` asks for one migration.
 - **The first migration** is the whole policy, which also applies over a database that already has
-  one (applied with `rowfence apply`).
-- **Upgrading rowfence** is the next migration when the new version makes something differently:
-  `rowfence migrate --check` says so, and `rowfence migrate` writes it. A new version that makes the same
+  one (applied with `rowstile apply`).
+- **Upgrading rowstile** is the next migration when the new version makes something differently:
+  `rowstile migrate --check` says so, and `rowstile migrate` writes it. A new version that makes the same
   needs no migration. The other way round is refused: a command older than the version that last wrote the
   lock file or the database stops (`AZ616`), unless told `--downgrade`.
-- **Development**: `rowfence push` (and `rowfence dev`, on every save) runs the migration from the policy
-  in force to this one, directly; `rowfence apply` applies the whole policy again. Neither is for
+- **Development**: `rowstile push` (and `rowstile dev`, on every save) runs the migration from the policy
+  in force to this one, directly; `rowstile apply` applies the whole policy again. Neither is for
   production, which takes migrations. Push only changes a development database: the first push to a
   database that never had a policy marks it as one; mark one your migrations set up with
-  `rowfence push --development`, once. A database with a policy and no mark is refused (`AZ610`), and stays
-  refused after `rowfence remove`: taking the policy out doesn't make a database a development one.
+  `rowstile push --development`, once. A database with a policy and no mark is refused (`AZ610`), and stays
+  refused after `rowstile remove`: taking the policy out doesn't make a database a development one.
 
 The version (semantic versioning; 1.0 will freeze the public surface) is the compiler's, in
 `core/authzlib/__init__.py`; every package carries the same one (`packaging/version.py` sets them).
@@ -61,11 +61,11 @@ The version (semantic versioning; 1.0 will freeze the public surface) is the com
 - **Who may apply**: whoever may change the tables' policies and triggers, which is their owner (or a
   superuser). The `{...}` conditions are SQL that runs with the rights of whoever applies the policy,
   so applying is as powerful as being that role.
-- **Every applied policy is kept** in `authz.policy_versions`, with the rowfence version that applied
+- **Every applied policy is kept** in `authz.policy_versions`, with the rowstile version that applied
   it and the lock's hash (not readable by the app role).
 - **Backups**: everything is an ordinary table, view, function or policy, so `pg_dump` keeps it all:
   shares, audit trail, change feed, policy history, and what the policy made.
-- **Removing**: `rowfence remove --yes` drops everything the policy made and gives back the
+- **Removing**: `rowstile remove --yes` drops everything the policy made and gives back the
   table-wide SELECT that masks replaced; shares and history stay, and row-level security stays on
   (with a warning), so nothing becomes readable by accident.
 - **Nothing needs a superuser**: later grants on masked columns are reported by `authz.lint()`, not

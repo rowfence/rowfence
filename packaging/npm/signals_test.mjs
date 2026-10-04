@@ -1,14 +1,14 @@
 // The npm launcher when the command is stopped: it ends by the same signal (or the shell's code for it), never
 // with 0, so a script or a CI step doesn't go on as if the command had finished. Run by packaging/test.sh where
 // the packages are installed (Linux: it reads /proc):
-//   node signals_test.mjs node_modules/rowfence/bin/rowfence.js
+//   node signals_test.mjs node_modules/rowstile/bin/rowstile.js
 // Plain JavaScript, typed with JSDoc and checked strictly (packaging/npm/tsconfig.json).
 import { spawn } from "node:child_process";
 import { readdirSync, readFileSync } from "node:fs";
 import { constants } from "node:os";
 
 const launcher = process.argv[2];
-if (!launcher) throw new Error("usage: node signals_test.mjs path/to/rowfence.js");
+if (!launcher) throw new Error("usage: node signals_test.mjs path/to/rowstile.js");
 /** @param {number} ms @returns {Promise<void>} */
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -29,7 +29,7 @@ async function childOf(pid) {
   throw new Error("the launcher started no process");
 }
 
-/** `rowfence lsp` (it waits for its input), stopped by `signal` sent to the launcher or to the Python under it:
+/** `rowstile lsp` (it waits for its input), stopped by `signal` sent to the launcher or to the Python under it:
  *  how the launcher ended. @param {NodeJS.Signals} signal @param {"launcher" | "python"} to */
 async function stopped(signal, to) {
   const p = spawn(process.execPath, [launcher, "lsp"], { detached: true, stdio: ["pipe", "ignore", "ignore"] });

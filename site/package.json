@@ -1,5 +1,5 @@
 {
-  "name": "rowfence-site",
+  "name": "rowstile-site",
   "private": true,
   "description": "The docs site: the repository's Markdown, built with VitePress, with the playground and llms.txt beside it",
   "type": "module",

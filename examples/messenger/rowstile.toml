@@ -1,7 +1,7 @@
-# rowfence dev / test / migrate read this (see core/cli/rowfence_cli.py --help)
+# rowstile dev / test / migrate read this (see core/cli/rowstile_cli.py --help)
 policy   = "db/policy.authz"
 tests    = ["db/tests/*.authz"]
-database = "env:FM_ADMIN_URL"
+database = "env:MS_ADMIN_URL"
 [clients]
 py = "backend/app/authz_client.py"
 [migrations]

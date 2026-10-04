@@ -49,7 +49,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         problems = [str(r["problem"]) for r in tx.authz.connection_check() if r["severity"] == "error"]
     if problems:
         db.close_pool()
-        raise RuntimeError("MS_DATABASE_URL can't be used with rowfence: " + "; ".join(problems))
+        raise RuntimeError("MS_DATABASE_URL can't be used with rowstile: " + "; ".join(problems))
     stop = threading.Event()
     threading.Thread(target=events.listen, args=(settings.database_url, asyncio.get_running_loop(), stop),
                      daemon=True).start()
@@ -419,7 +419,7 @@ def remove_member(chat_id: int, user_id: UUID, user: DictRow = Depends(auth.curr
         tx.authz.expect(n, "ms.members", "delete", (chat_id, user_id))
 
 
-# --- invite links: rowfence share links ----------------------------------------------------------
+# --- invite links: rowstile share links ----------------------------------------------------------
 @app.post("/api/chats/{chat_id}/invite", status_code=201)
 def invite(chat_id: int, user: DictRow = Depends(auth.current_user)) -> dict[str, str | datetime]:
     """A link anyone may use to join, for a week (authz.create_link: only its hash is stored)."""

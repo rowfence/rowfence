@@ -1,17 +1,17 @@
 # File manager
 
-The first adopter of rowfence: a product for storing and sharing files. FastAPI backend, React
-frontend, Postgres governed by rowfence, and RustFS (S3-compatible) for the file contents.
+The first adopter of rowstile: a product for storing and sharing files. FastAPI backend, React
+frontend, Postgres governed by rowstile, and RustFS (S3-compatible) for the file contents.
 The name is a placeholder.
 
-It uses rowfence like any outside adopter:
+It uses rowstile like any outside adopter:
 its own policy (`db/policy.authz`), applied from its own migrations, and only the public surface
-(the `rowfence` command, `authz.*` functions and settings, the generated Python client). `check_public_surface.py` enforces
-that, and CI runs it against the rowfence image built from the same commit.
+(the `rowstile` command, `authz.*` functions and settings, the generated Python client). `check_public_surface.py` enforces
+that, and CI runs it against the rowstile image built from the same commit.
 
 ## Running it
 
-    docker compose up -d --build        # Postgres + rowfence, RustFS, the app: http://localhost:8000
+    docker compose up -d --build        # Postgres + rowstile, RustFS, the app: http://localhost:8000
 
 Create an account on the sign-in page (open sign-up is on by default: `FM_OPEN_SIGNUP=false` turns it
 off). To work on it:
@@ -31,7 +31,7 @@ off). To work on it:
 |---|---|
 | `db/migrations/` | the tables (`fm.users`, `fm.groups`, `fm.folders`, `fm.files`, ...) and the app role's grants |
 | `db/policy.authz` | who may do what: folders nest and pass access down unless a folder stops it; sharing with people and groups (nested), with expiry; support staff may break the glass |
-| `db/migrate.py` | runs the migrations, applies the policy when it changed (`rowfence apply`), writes `backend/app/authz_client.py` (`rowfence client py`) |
+| `db/migrate.py` | runs the migrations, applies the policy when it changed (`rowstile apply`), writes `backend/app/authz_client.py` (`rowstile client py`) |
 | `backend/app/main.py` | the HTTP API. Every call runs in a transaction signed in as the user (`authz.user_id`), so row-level security decides what it sees and changes; the backend adds no permission checks of its own (one exception: listing and revoking share links, a table of the app's, ask `authz.can` first). At start it refuses a connection that skips row-level security (`authz.connection_check()`) |
 | `backend/app/storage.py` | file contents in RustFS. A download link is signed only after the file's row was read through row-level security, and lives 10 minutes. A browser uploads to a place of its own; confirming the upload moves the bytes to the file's object, so the upload link can't change a confirmed file |
 | `frontend/` | the web app (see Features) |
@@ -56,5 +56,5 @@ Thumbnails, full-text search, and quotas per group.
 
 A folder can't be deleted while it holds something, also something its owner can't see: an editor may make
 a folder inside and stop inheritance on it, and the owner of the folder above then gets "the folder isn't
-empty" until that editor removes theirs. The foreign key says so whoever asks (rowfence's threat model, "Side
+empty" until that editor removes theirs. The foreign key says so whoever asks (rowstile's threat model, "Side
 channels"); deleting hidden things on the owner's word would be a rule of the app's own to write.

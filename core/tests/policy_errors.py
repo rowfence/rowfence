@@ -303,7 +303,7 @@ CREATE FUNCTION alt.is_active(boolean) RETURNS boolean LANGUAGE sql IMMUTABLE AS
 """
 
 
-# Included files passed as a map, the way the rowfence command passes them: never read from disk.
+# Included files passed as a map, the way the rowstile command passes them: never read from disk.
 # (what, main policy, files, expected start of the message)
 INCLUDES = [
     ("an include missing from the files", 'include "roles.authz"\n', {}, "line 1: can't find roles.authz"),

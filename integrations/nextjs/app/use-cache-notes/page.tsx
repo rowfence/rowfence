@@ -2,7 +2,7 @@
 // that cache either. Next gives a cached function no request and nothing of what was set around it
 // (actingAs), so the SDK asks the app's `user` function, which reads the request's headers: Next refuses
 // that inside a cache, and the page fails instead of serving one user's notes to the next.
-import { actingAs } from "@rowfence/client";
+import { actingAs } from "@rowstile/client";
 import { db, requestUser } from "@/db";
 
 async function cachedNotes() {

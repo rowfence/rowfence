@@ -1,6 +1,6 @@
 # Code of conduct
 
-rowfence follows the [Contributor Covenant, version 2.1](https://www.contributor-covenant.org/version/2/1/code_of_conduct/),
+rowstile follows the [Contributor Covenant, version 2.1](https://www.contributor-covenant.org/version/2/1/code_of_conduct/),
 in its issues, pull requests, reviews and anywhere else people work on it together.
 
 In short: be kind and patient, assume good intent, criticise the work and not the person, and accept that

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-// rowfence for npm: runs the command (Python, standard library only, in ../command) on the Python that came
-// with it, from the package for this platform (@rowfence/cli-<platform>-<arch>, -musl on a Linux with musl), so
-// a TypeScript app needs no Python. ROWFENCE_PYTHON names another; without either, a python3 of 3.11 or later
+// rowstile for npm: runs the command (Python, standard library only, in ../command) on the Python that came
+// with it, from the package for this platform (@rowstile/cli-<platform>-<arch>, -musl on a Linux with musl), so
+// a TypeScript app needs no Python. ROWSTILE_PYTHON names another; without either, a python3 of 3.11 or later
 // on PATH.
 // Plain JavaScript, typed with JSDoc and checked strictly (packaging/npm/tsconfig.json).
 "use strict";
@@ -12,7 +12,7 @@ const path = require("node:path");
 
 const PLATFORMS = ["linux-x64", "linux-arm64", "linux-x64-musl", "linux-arm64-musl", "darwin-x64", "darwin-arm64",
   "win32-x64"];
-const command = path.join(__dirname, "..", "command", "cli", "rowfence_cli.py");
+const command = path.join(__dirname, "..", "command", "cli", "rowstile_cli.py");
 
 /** Whether this Linux's C library is musl (Alpine) and not glibc: Node's report names glibc's version when
  *  that is what Node runs on. @returns {boolean} */
@@ -39,8 +39,8 @@ function bundled() {
   for (const k of keys) {
     if (!PLATFORMS.includes(k)) continue;
     try {
-      const manifest = require.resolve(`@rowfence/cli-${k}/package.json`);
-      const exe = path.join(path.dirname(manifest), JSON.parse(fs.readFileSync(manifest, "utf8")).rowfencePython);
+      const manifest = require.resolve(`@rowstile/cli-${k}/package.json`);
+      const exe = path.join(path.dirname(manifest), JSON.parse(fs.readFileSync(manifest, "utf8")).rowstilePython);
       if (!fs.existsSync(exe)) continue;
       if (process.platform !== "win32") {
         try { fs.accessSync(exe, fs.constants.X_OK); } catch { fs.chmodSync(exe, 0o755); }
@@ -64,11 +64,11 @@ function onPath() {
   return null;
 }
 
-const python = process.env.ROWFENCE_PYTHON || bundled() || onPath();
+const python = process.env.ROWSTILE_PYTHON || process.env.ROWFENCE_PYTHON || bundled() || onPath();   // ROWFENCE_PYTHON: the name before the rename
 if (!python) {
-  console.error(`rowfence: no Python to run on. The package for this platform (@rowfence/cli-${key}) isn't installed` +
+  console.error(`rowstile: no Python to run on. The package for this platform (@rowstile/cli-${key}) isn't installed` +
     (PLATFORMS.includes(key) ? " (optional dependencies turned off?)" : `, and there is none for ${key}`) +
-    "; install Python 3.11 or later, or set ROWFENCE_PYTHON");
+    "; install Python 3.11 or later, or set ROWSTILE_PYTHON");
   process.exit(1);
 }
 // -E -s: the bundled Python ignores PYTHON* variables and user site-packages; -X utf8: one encoding everywhere
@@ -82,8 +82,8 @@ for (const signal of SIGNALS) {
   });
 }
 child.on("error", (e) => {
-  console.error(`rowfence: could not run ${python}: ${e.message}` +
-    (process.env.ROWFENCE_PYTHON ? "" : "; install Python 3.11 or later, or set ROWFENCE_PYTHON"));
+  console.error(`rowstile: could not run ${python}: ${e.message}` +
+    (process.env.ROWSTILE_PYTHON ? "" : "; install Python 3.11 or later, or set ROWSTILE_PYTHON"));
   process.exit(1);
 });
 child.on("exit", (code, signal) => {

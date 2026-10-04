@@ -17,8 +17,8 @@ for v in $VERSIONS; do
     || { echo "FAIL  installing Vitest $v"; fails=$((fails + 1)); continue; }
   # the built packages, after npm (which removes what its package.json doesn't name)
   for p in client vitest; do
-    mkdir -p "$dir/node_modules/@rowfence/$p"
-    cp -r "$SDK/$p/package.json" "$SDK/$p/dist" "$dir/node_modules/@rowfence/$p/"
+    mkdir -p "$dir/node_modules/@rowstile/$p"
+    cp -r "$SDK/$p/package.json" "$SDK/$p/dist" "$dir/node_modules/@rowstile/$p/"
   done
   got=$(cd "$dir" && node -p 'require("./node_modules/vitest/package.json").version')
   if (cd "$dir" && npx tsc -p .); then echo "ok    the matchers' types with Vitest $got"

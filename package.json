@@ -1,5 +1,5 @@
 {
-  "name": "rowfence-workspace",
+  "name": "rowstile-workspace",
   "private": true,
   "description": "The TypeScript SDK's packages (sdk/typescript) and their conformance app (integrations/nextjs), in one npm workspace so they share one React and one pg",
   "workspaces": [

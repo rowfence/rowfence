@@ -1,12 +1,12 @@
 name: A bug
-description: Something rowfence does that it shouldn't, or doesn't do that the docs say it does.
+description: Something rowstile does that it shouldn't, or doesn't do that the docs say it does.
 labels: [bug]
 body:
   - type: markdown
     attributes:
       value: |
         A row seen or written that the policy doesn't allow is a security problem: report it privately
-        ([SECURITY.md](https://github.com/rowfence/rowfence/blob/main/SECURITY.md)), not here.
+        ([SECURITY.md](https://github.com/rowstile/rowstile/blob/main/SECURITY.md)), not here.
   - type: textarea
     id: what
     attributes:
@@ -26,11 +26,11 @@ body:
     id: versions
     attributes:
       label: Versions
-      description: "`rowfence --version`, PostgreSQL's (`SELECT version()`), and the SDK's if one is involved."
+      description: "`rowstile --version`, PostgreSQL's (`SELECT version()`), and the SDK's if one is involved."
     validations:
       required: true
   - type: input
     id: how
     attributes:
-      label: How rowfence is installed and run
+      label: How rowstile is installed and run
       description: npm, pip, the image or this repository; the operating system; a managed Postgres or a pooler, if any.

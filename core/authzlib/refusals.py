@@ -131,8 +131,8 @@ END $f$;"""
         schema, name = table.split(".")
         what = ("insert this row into " if rule.command == "insert" else "update this row of ") + table + \
             ("" if rule.command == "insert" else " to these values")
-        hint = ("the update rule must hold on the row after the change too (Postgres checks both) (rowfence help AZ709)"
-                if rule.command == "update" else "rowfence help AZ709")
+        hint = ("the update rule must hold on the row after the change too (Postgres checks both) (rowstile help AZ709)"
+                if rule.command == "update" else "rowstile help AZ709")
         constraint = "authz_insert" if rule.command == "insert" else "authz_update"
         return f"""CREATE FUNCTION {self.rule_fn(table, rule.command, 'refuse')}(p_row {qt(table)}) RETURNS boolean
 LANGUAGE plpgsql VOLATILE SET search_path FROM CURRENT AS $f$
@@ -195,7 +195,7 @@ BEGIN
     RETURN {insert};
   END IF;
   IF p_id IS NULL THEN
-    RAISE EXCEPTION 'which row? authz.explain_rule(%, %, id)', {lit(table)}, p_command USING ERRCODE = 'invalid_parameter_value', HINT = 'rowfence help AZ710';
+    RAISE EXCEPTION 'which row? authz.explain_rule(%, %, id)', {lit(table)}, p_command USING ERRCODE = 'invalid_parameter_value', HINT = 'rowstile help AZ710';
   END IF;
   {fetch}
   IF NOT FOUND THEN
@@ -218,11 +218,11 @@ CREATE FUNCTION authz.explain_rule(p_table text, p_command text, p_id text DEFAU
 RETURNS text[] LANGUAGE plpgsql STABLE SET search_path = pg_catalog, pg_temp AS $f$
 BEGIN
   IF p_command IS NULL OR p_command NOT IN ('insert', 'update', 'delete') THEN
-    RAISE EXCEPTION 'explain_rule explains insert, update or delete, not %', p_command USING ERRCODE = 'invalid_parameter_value', HINT = 'rowfence help AZ710';
+    RAISE EXCEPTION 'explain_rule explains insert, update or delete, not %', p_command USING ERRCODE = 'invalid_parameter_value', HINT = 'rowstile help AZ710';
   END IF;
   CASE p_table
 {cases}
-    ELSE RAISE EXCEPTION 'the policy has no rules for table %', p_table USING ERRCODE = 'undefined_table', HINT = 'rowfence help AZ707';
+    ELSE RAISE EXCEPTION 'the policy has no rules for table %', p_table USING ERRCODE = 'undefined_table', HINT = 'rowstile help AZ707';
   END CASE;
 END $f$;"""
 
@@ -243,7 +243,7 @@ DECLARE v_me text := nullif(current_setting('authz.user_id', true), '');
 BEGIN
   IF coalesce(current_setting('authz.scopes', true), '') <> '' OR coalesce(current_setting('authz.acting_user', true), '') <> '' THEN
     RAISE EXCEPTION 'authz.who_among() signs people in, which a session limited by scopes or view-as may not'
-      USING ERRCODE = 'insufficient_privilege', HINT = 'rowfence help AZ704';
+      USING ERRCODE = 'insufficient_privilege', HINT = 'rowstile help AZ704';
   END IF;
   BEGIN
     FOREACH v_u IN ARRAY coalesce(p_users, '{{}}') LOOP

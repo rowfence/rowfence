@@ -1,9 +1,9 @@
 /**
- * rowfence with Vitest (and Jest: the matchers are plain functions).
+ * rowstile with Vitest (and Jest: the matchers are plain functions).
  *
  *     // vitest.setup.ts
  *     import { expect } from "vitest";
- *     import { matchers } from "@rowfence/vitest";
+ *     import { matchers } from "@rowstile/vitest";
  *     expect.extend(matchers);
  *
  *     await expect(asUser(bob, () => rename(f.id, "x"))).rejects.toBeRefused("update", "folder.edit");
@@ -12,7 +12,7 @@
  * A database per worker: databasePerWorker(ownerUrl) copies the migrated test database (with the policy) once
  * for each worker, so tests that write don't meet each other.
  */
-import { actingAs, translate, NotFound, Refused, type Who } from "@rowfence/client";
+import { actingAs, translate, NotFound, Refused, type Who } from "@rowstile/client";
 import type {} from "vitest";
 
 /** Runs fn acting for `who`: every transaction it begins signs in as them. */
@@ -25,7 +25,7 @@ interface Result {
   message: () => string;
 }
 
-/** The error as rowfence's, whichever driver raised it. */
+/** The error as rowstile's, whichever driver raised it. */
 const asAuthz = (received: unknown) => translate(received) ?? received;
 
 export const matchers = {
@@ -98,7 +98,7 @@ export async function databasePerWorker(url: string, options: { appUrl?: string;
       } catch (e) {
         // 55006: something is connected to the original (Postgres has waited five seconds for it to leave)
         if ((e as { code?: string }).code !== "55006") throw e;
-        throw new Error(`@rowfence/vitest: ${template} can't be copied while anything is connected to it: close ` +
+        throw new Error(`@rowstile/vitest: ${template} can't be copied while anything is connected to it: close ` +
           "what holds it (the app, a migration tool, a console). Where the service keeps a connection of its own " +
           "for minutes after yours (Neon does), a copy per worker can't be made: use one test database, where " +
           "each test rolls back, or a branch for each run", { cause: e });

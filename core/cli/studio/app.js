@@ -1,4 +1,4 @@
-// rowfence Studio: the page. Everything it shows comes from the command's API (studio.py), asked with the
+// rowstile Studio: the page. Everything it shows comes from the command's API (studio.py), asked with the
 // token from the URL; text goes into the page as text, never as HTML.
 // Plain JavaScript, typed with JSDoc and checked strictly (core/cli/tsconfig.studio.json).
 "use strict";
@@ -32,12 +32,12 @@ class Refusal extends Error {
   }
 }
 
-const token = new URLSearchParams(location.search).get("token") || sessionStorage.getItem("rowfence-token") || "";
-sessionStorage.setItem("rowfence-token", token);
+const token = new URLSearchParams(location.search).get("token") || sessionStorage.getItem("rowstile-token") || "";
+sessionStorage.setItem("rowstile-token", token);
 if (location.search) history.replaceState(null, "", location.pathname);
 
 /** @type {{overview: Overview | null, as: string, table: string | null, offset: number, rows: Rows | null, selected: Row | null}} */
-const state = { overview: null, as: localStorage.getItem("rowfence-as") || "", table: null, offset: 0, rows: null, selected: null };
+const state = { overview: null, as: localStorage.getItem("rowstile-as") || "", table: null, offset: 0, rows: null, selected: null };
 
 // --- small helpers --------------------------------------------------------------------------------------
 /** @typedef {string | number | boolean | null | undefined | ((ev: Event) => unknown)} AttrValue */
@@ -113,13 +113,13 @@ document.querySelectorAll("nav button").forEach((b) => b.addEventListener("click
 $("as-form").addEventListener("submit", (e) => {
   e.preventDefault();
   state.as = input("as").value.trim();
-  localStorage.setItem("rowfence-as", state.as);
+  localStorage.setItem("rowstile-as", state.as);
   if (state.table) loadRows(state.table, state.offset);
 });
 
 async function start() {
   if (!token) {
-    $("grid-head").textContent = "Open Studio from the address rowfence printed (it carries the token).";
+    $("grid-head").textContent = "Open Studio from the address rowstile printed (it carries the token).";
     return;
   }
   try {
@@ -271,7 +271,7 @@ async function loadGraph() {
     const mermaid = await script(MERMAID, MERMAID_HASH);
     const dark = matchMedia("(prefers-color-scheme: dark)").matches;
     mermaid.initialize({ startOnLoad: false, securityLevel: "strict", theme: dark ? "dark" : "default" });
-    // drawn again each time the tab is opened: under rowfence dev the policy changes
+    // drawn again each time the tab is opened: under rowstile dev the policy changes
     const { svg } = await mermaid.render(`policy-graph-${++graphs}`, g.mermaid);
     view.innerHTML = svg;               // mermaid's own output, from the policy's names (strict mode)
     view.querySelectorAll("g.node").forEach((n) => n.addEventListener("click", () => detail(n.id)));
@@ -363,7 +363,7 @@ async function loadShares(type, id) {
       el("td", { class: "muted" }, s.expires_at ? `until ${s.expires_at}` : ""), el("td", { class: "muted" }, s.created_by ? `by ${s.created_by}` : ""),
       w ? el("td", {}, el("button", { onclick: () => change("unshare", { type, id, relation: s.relation, subject_type: s.subject_type, subject_id: s.subject_id, subject_relation: s.subject_relation }, () => loadShares(type, id)) }, "Unshare")) : null))))
       : el("p", { class: "muted" }, `No shares on ${type} ${id}.`),
-    w && t ? shareForm(t, id) : el("p", { class: "muted" }, "Read-only: start Studio with --write (or rowfence dev) to change shares."));
+    w && t ? shareForm(t, id) : el("p", { class: "muted" }, "Read-only: start Studio with --write (or rowstile dev) to change shares."));
 }
 /** @param {Type} t @param {string} id */
 function shareForm(t, id) {

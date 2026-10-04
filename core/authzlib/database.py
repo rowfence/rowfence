@@ -1,4 +1,4 @@
-"""What the rowfence command does to a database: apply a policy, preview it, test it, draft one, remove it.
+"""What the rowstile command does to a database: apply a policy, preview it, test it, draft one, remove it.
 
 The compiler runs here, outside the database; the database only runs the SQL it writes.
 Every function takes `db`, a connection.Db:
@@ -31,7 +31,7 @@ from .connection import Db, Value, flag, number, text, text_or_none
 from .governance import DIFF_ROWS
 from .output import DROP_MASKED_VIEWS, DROP_OLD_POLICIES, LOST_RULES
 from .parse import KEYWORDS, Expr, Loc, braced, read_lines
-from .sqlutil import lit, q, qt, row_cond, sql_code, this_spans, with_uid
+from .sqlutil import POLICY_MARKS, lit, q, qt, row_cond, sql_code, this_spans, with_uid
 from .testing import FN as TESTS_FN
 
 if TYPE_CHECKING:
@@ -99,9 +99,9 @@ def older_than(mine: str, theirs: str | None) -> bool:
 def refuse_older(theirs: str | None, what: str) -> None:
     """An older command would put its own, older work in place of a newer version's, as if it were an upgrade."""
     if older_than(BUILD, theirs):
-        raise Error(f"{what} was last written by rowfence {theirs}, which is newer than this command "
+        raise Error(f"{what} was last written by rowstile {theirs}, which is newer than this command "
                     f"({__version__}): going on would put this older version's work back [AZ616]", "55000",
-                    hint="upgrade the rowfence command; to go back to this version on purpose, add --downgrade")
+                    hint="upgrade the rowstile command; to go back to this version on purpose, add --downgrade")
 
 
 def files_map(files: Mapping[str, object] | str | None) -> Files:
@@ -308,7 +308,7 @@ def applied(db: Db) -> tuple[str, Files]:
     if there(db, "authz.policy_versions"):
         rows = db.rows("SELECT action, policy, files::text AS files FROM authz.policy_versions ORDER BY id DESC LIMIT 1")
     if not rows or rows[0]["action"] != "apply":
-        raise Error("no policy is applied [AZ609]", "55000", hint="rowfence apply db/policy.authz")
+        raise Error("no policy is applied [AZ609]", "55000", hint="rowstile apply db/policy.authz")
     return text(rows[0], "policy"), files_map(text_or_none(rows[0], "files") or "{}")
 
 
@@ -324,7 +324,7 @@ def apply(db: Db, policy: str, files: Mapping[str, object] | str | None = None, 
     The whole compiled policy: everything it makes is made again (trees that didn't change keep their rows,
     unless rebuild: then each is computed again from the app's tables, which is what brings back a tree that
     writes made with the triggers off left behind).
-    Refused when a newer version of rowfence last changed the database, unless downgrade."""
+    Refused when a newer version of rowstile last changed the database, unless downgrade."""
     files = files_map(files)
     one_at_a_time(db)
     if only_if_changed and unchanged(db, policy, files):
@@ -358,10 +358,10 @@ def push(db: Db, policy: str, files: Mapping[str, object] | str | None = None, m
          downgrade: bool = False) -> str:
     """Brings a development database to this policy with the migration from the policy in force, as the next
     migration file would: 'pushed', 'unchanged', or 'applied' (the whole policy, when the one in
-    force was applied by another version of rowfence, or isn't as its record says).
+    force was applied by another version of rowstile, or isn't as its record says).
 
     Only a development database: one marked as one (authz.settings), which the first push to a database that
-    never had a policy does, and mark=True (rowfence push --development, a person's say-so) does for any other.
+    never had a policy does, and mark=True (rowstile push --development, a person's say-so) does for any other.
     A database with a policy and no mark takes migrations; removing the policy doesn't make it a development
     database (the record of what it took stays)."""
     files = files_map(files)
@@ -374,8 +374,8 @@ def push(db: Db, policy: str, files: Mapping[str, object] | str | None = None, m
         except Error:
             what = "had a policy (removed since)"
         raise Error(f"this database {what} and isn't marked as a development database, so push won't change "
-                    "it: production takes migrations (rowfence migrate) [AZ610]", "55000",
-                    hint="if it is a development database, mark it once: rowfence push --development")
+                    "it: production takes migrations (rowstile migrate) [AZ610]", "55000",
+                    hint="if it is a development database, mark it once: rowstile push --development")
     state = _push(db, policy, files, downgrade)
     db.rows("INSERT INTO authz.settings VALUES ('development', 'true') ON CONFLICT (key) DO UPDATE SET value = 'true'")
     return state
@@ -414,7 +414,7 @@ def _push(db: Db, policy: str, files: Files, downgrade: bool = False) -> str:
 
 
 def unchanged(db: Db, policy: str, files: Files) -> bool:
-    """The policy in force is this one (text and files), applied by this version of rowfence, and what it
+    """The policy in force is this one (text and files), applied by this version of rowstile, and what it
     made is still there: its schemas, each row-level security policy its rules make, row-level security on
     each table with rules, and each trigger it makes (enabled)."""
     if not there(db, "authz.policy_versions"):
@@ -439,7 +439,7 @@ def unchanged(db: Db, policy: str, files: Files) -> bool:
         "SELECT to_regnamespace('authz_int') IS NOT NULL AND to_regnamespace('authz_gen') IS NOT NULL "
         "AND NOT EXISTS (SELECT 1 FROM unnest($1::text[], $2::text[]) m(tbl, name) WHERE NOT EXISTS ("
         "  SELECT 1 FROM pg_catalog.pg_policy p JOIN pg_catalog.pg_description d ON d.objoid = p.oid "
-        "  AND d.classoid = 'pg_catalog.pg_policy'::regclass AND d.description = 'rowfence' "
+        f"  AND d.classoid = 'pg_catalog.pg_policy'::regclass AND d.description IN {POLICY_MARKS} "
         "  WHERE p.polrelid = to_regclass(m.tbl) AND p.polname = m.name)) "
         "AND NOT EXISTS (SELECT 1 FROM unnest($3::text[]) g(tbl) WHERE NOT coalesce("
         "  (SELECT c.relrowsecurity FROM pg_catalog.pg_class c WHERE c.oid = to_regclass(g.tbl)), false)) "
@@ -690,7 +690,7 @@ def coverage(db: Db, tests: Mapping[str, object] | str | None = None) -> tuple[l
     return [test_row(r) for r in rows if r["test"] != COVERAGE], report
 
 
-SNAPSHOT_HEAD = ("# rowfence snapshot: who holds what on this database's data (rowfence snapshot writes it).\n"
+SNAPSHOT_HEAD = ("# rowstile snapshot: who holds what on this database's data (rowstile snapshot writes it).\n"
                  "# Commit it with the review data: a pull request that changes access changes these lines.\n")
 
 
@@ -724,7 +724,7 @@ def snapshot(db: Db, limit: int = 500) -> list[str]:
 
 def review_run(db: Db, policy: str, files: Mapping[str, object] | str | None, tests: Mapping[str, object] | str | None,
                lock_text: str | None, explain: Iterable[tuple[str, str, str, str]] = ()) -> ReviewRun:
-    """For rowfence review, on a database at the base branch's state (its migrations and review data): the
+    """For rowstile review, on a database at the base branch's state (its migrations and review data): the
     pull request's policy brought in the way it will be deployed (the migrations from the base branch's
     lock, or the whole policy without one), then its tests, all undone afterwards: how long the deploy took
     (or why it failed), the tests' rows, and for each (user, type, id, perm) in explain, the lines of

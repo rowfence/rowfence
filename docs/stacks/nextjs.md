@@ -14,19 +14,19 @@ postgres.js: [Node apps](node.md).
 ## Install
 
 ```sh
-npm install @rowfence/client @rowfence/prisma @rowfence/next @rowfence/react
-npm install --save-dev rowfence@next @rowfence/vitest    # @next while only an alpha is published
-npx rowfence init        # a first policy from your tables, a test file, rowfence.toml
+npm install @rowstile/client @rowstile/prisma @rowstile/next @rowstile/react
+npm install --save-dev rowstile@next @rowstile/vitest    # @next while only an alpha is published
+npx rowstile init        # a first policy from your tables, a test file, rowstile.toml
 ```
 
-The `rowfence` package is the command, with its own Python: nothing else to install. `init` finds Next.js and
-Prisma, and writes `rowfence.toml` for them. The conformance app's, with its own name for the variable that
+The `rowstile` package is the command, with its own Python: nothing else to install. `init` finds Next.js and
+Prisma, and writes `rowstile.toml` for them. The conformance app's, with its own name for the variable that
 holds the owner's connection:
 
 ```toml
 policy   = "db/policy.authz"
 tests    = ["db/tests/*.authz"]
-database = "env:ROWFENCE_OWNER_DSN"
+database = "env:ROWSTILE_OWNER_DSN"
 [clients]
 ts = "src/authz.gen.ts"
 [migrations]
@@ -34,24 +34,24 @@ tool = "prisma"
 dir  = "prisma/migrations"
 ```
 
-Two roles connect. The owner of the tables runs the migrations (`ROWFENCE_OWNER_DSN`), and the app connects
-as the role the policy names, which row-level security applies to (`ROWFENCE_APP_URL`).
+Two roles connect. The owner of the tables runs the migrations (`ROWSTILE_OWNER_DSN`), and the app connects
+as the role the policy names, which row-level security applies to (`ROWSTILE_APP_URL`).
 
 ## The database client
 
 `signedIn` wraps Prisma's driver adapter: every transaction Prisma begins signs in as whoever `user` returns
 for the request (`null`: nobody, who sees only what `anyone` may). `authz()` turns Prisma's "record not found"
 into 404 or 403 with the reason, and adds `db.$authz`. Use the client `$extends(authz())` returns, and only
-that one: the client it was made from is refused whenever it is used. Importing `@rowfence/next` keeps
-signed-in reads out of Next.js's caches, and `authz.gen.ts` (written by `rowfence client`) gives the SDK the
+that one: the client it was made from is refused whenever it is used. Importing `@rowstile/next` keeps
+signed-in reads out of Next.js's caches, and `authz.gen.ts` (written by `rowstile client`) gives the SDK the
 policy's names, so a misspelled permission doesn't type-check.
 
 ```ts
 import { PrismaPg } from "@prisma/adapter-pg";
 import { headers } from "next/headers";
 import pg from "pg";
-import { authz, signedIn } from "@rowfence/prisma";
-import "@rowfence/next";                              // signed-in reads never land in a cache
+import { authz, signedIn } from "@rowstile/prisma";
+import "@rowstile/next";                              // signed-in reads never land in a cache
 import { PrismaClient } from "./generated/prisma/client.ts";
 import "./authz.gen.ts";                              // the policy's names, for the SDK's types
 
@@ -60,7 +60,7 @@ export async function requestUser(): Promise<string | null> {
   return (await headers()).get("x-user");
 }
 
-const url = process.env.ROWFENCE_APP_URL;
+const url = process.env.ROWSTILE_APP_URL;
 export const pool = new pg.Pool({ connectionString: url, max: Number(process.env.PG_POOL_MAX ?? 5) });
 export const db = new PrismaClient({ adapter: signedIn(new PrismaPg(pool), { user: requestUser }) }).$extends(authz());
 ```
@@ -70,7 +70,7 @@ owner), where the database would filter nothing:
 
 ```ts
 // instrumentation.ts
-import { checkAtStart } from "@rowfence/next";
+import { checkAtStart } from "@rowstile/next";
 
 export async function register() {
   if (process.env.NEXT_RUNTIME === "nodejs") await checkAtStart((await import("./src/db.ts")).db.$authz);
@@ -90,7 +90,7 @@ export default async function Notes() {
 reason for one they may not change.
 
 ```ts
-import { route } from "@rowfence/next";
+import { route } from "@rowstile/next";
 import { db } from "@/db";
 
 type Params = { params: Promise<{ id: string }> };
@@ -109,7 +109,7 @@ Next.js hides a server action's thrown error from the browser, so `action()` ret
 
 ```ts
 "use server";
-import { action } from "@rowfence/next";
+import { action } from "@rowstile/next";
 
 export const renameNote = action(async (id: number, body: string) => {
   await db.note.update({ where: { id }, data: { body } });
@@ -134,18 +134,18 @@ from the change feed.
 
 ```ts
 // app/api/authz/[...authz]/route.ts
-import { authzRoutes } from "@rowfence/next";
+import { authzRoutes } from "@rowstile/next";
 import { db, feed } from "@/db";
 
 export const { GET, POST } = authzRoutes({ calls: db.$authz, changes: feed });
 ```
 
 ```ts
-import { changes } from "@rowfence/pg";
+import { changes } from "@rowstile/pg";
 
-// live updates for @rowfence/react: one connection that LISTENs, beside the pool, straight to Postgres
-// (through a pooler in transaction mode LISTEN hears nothing: ROWFENCE_FEED_URL is the direct URL then)
-export const feed = changes(new pg.Pool({ connectionString: process.env.ROWFENCE_FEED_URL ?? url, max: 1 }));
+// live updates for @rowstile/react: one connection that LISTENs, beside the pool, straight to Postgres
+// (through a pooler in transaction mode LISTEN hears nothing: ROWSTILE_FEED_URL is the direct URL then)
+export const feed = changes(new pg.Pool({ connectionString: process.env.ROWSTILE_FEED_URL ?? url, max: 1 }));
 ```
 
 `usePerms` answers a list's buttons in one call, and `<Can>` shows what the user may do:
@@ -168,7 +168,7 @@ A job acts for a principal of its own (`type service = app.services principal` i
 started it: `after()`, a queue worker, a cron route.
 
 ```ts
-import { current, job } from "@rowfence/client";
+import { current, job } from "@rowstile/client";
 
 export const digest = job(["service", 1], async () => ({ count: await db.project.count(), who: current() }));
 ```
@@ -177,25 +177,25 @@ Anywhere else, `actingAs("3", () => ...)` signs in what runs inside it.
 
 ## Migrations
 
-The policy ships as Prisma migrations. `rowfence migrate` writes the next one (only what changed since
+The policy ships as Prisma migrations. `rowstile migrate` writes the next one (only what changed since
 `db/policy.lock`), and Prisma applies it with the others; Prisma's own diff then shows no change.
 
 ```sh
-npx rowfence migrate               # after changing the policy
+npx rowstile migrate               # after changing the policy
 npx prisma migrate deploy
-npx rowfence migrate --check       # in CI: exit 1 if a policy change has no migration
+npx rowstile migrate --check       # in CI: exit 1 if a policy change has no migration
 ```
 
-While you edit, `npx rowfence dev` checks, pushes to the development database, runs the tests and rewrites
+While you edit, `npx rowstile dev` checks, pushes to the development database, runs the tests and rewrites
 `src/authz.gen.ts` on every save (and writes the migration once you stop editing).
 
 ## Tests
 
-The policy's own tests run with `rowfence test`. In Vitest, the matchers read the refusal:
+The policy's own tests run with `rowstile test`. In Vitest, the matchers read the refusal:
 
 ```ts
 import { expect } from "vitest";
-import { matchers } from "@rowfence/vitest";
+import { matchers } from "@rowstile/vitest";
 
 expect.extend(matchers);
 ```

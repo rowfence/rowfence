@@ -1,4 +1,4 @@
-"""rowfence review: what a policy change does, for the pull request.
+"""rowstile review: what a policy change does, for the pull request.
 
 A reviewer who has never read the policy should understand the change from the review alone:
 
@@ -28,7 +28,7 @@ from .evaluate import Difference, Reference, compare, worlds_to_try
 from .parse import Expr, Loc, Policy, Rule, Type, read_lines
 from .statements import split
 
-MARK = "<!-- rowfence review -->"
+MARK = "<!-- rowstile review -->"
 
 
 class BaseMistake(Exception):
@@ -38,7 +38,7 @@ class BaseMistake(Exception):
 WIDE = ("anyone", "link")
 
 
-# --- what review() returns (as JSON too: rowfence review --json) ------------------------------------
+# --- what review() returns (as JSON too: rowstile review --json) ------------------------------------
 class Changed(TypedDict):
     what: str                   # the entity's key: 'folder.edit', 'rule app.folders update', ...
     before: str | None
@@ -311,7 +311,7 @@ class Side:
         """previous: read in the language before this one (parse_policy), for a base this one refuses."""
         self.policy, self.files, self.tests, self.previous = policy, files or {}, tests or {}, previous
         self.pol = parse_policy(policy, None, files=self.files, previous=previous)
-        # what `rowfence check` refuses is refused here, with its message: the rest reads a policy that compiles
+        # what `rowstile check` refuses is refused here, with its message: the rest reads a policy that compiles
         # (a copy: compiling changes the policy it is given)
         copy = parse_policy(policy, None, files=self.files, previous=previous)
         Compiler(copy).compile("the policy", transaction=False)
@@ -323,7 +323,7 @@ def review(base: Given, head: Given, base_lock: str | None = None, head_lock: st
            db: Db | None = None, worlds: int = 200) -> Review:
     """base, head: (policy text, files, tests {name: text}). base_lock/head_lock: the lock files' text (for
     Deploy). db: a database at the base branch's state with the review data (for Access and Tests).
-    A base this language refuses is read in the one before (a pull request that upgrades rowfence, and rewrites
+    A base this language refuses is read in the one before (a pull request that upgrades rowstile, and rewrites
     the policy for it): Meaning then says whether the rewrite says the same."""
     try:
         b = Side(*base)
@@ -753,7 +753,7 @@ def table_locks(sql: str) -> dict[str, tuple[str, str]]:
 def deploy(b: Side, h: Side, base_lock: str | None, head_lock: str | None) -> Deploy:
     out: Deploy = {"migrations": [], "lock_current": None}
     if base_lock is None and head_lock is None:
-        # no lock file at the base or here: the project keeps no migrations (rowfence apply). Reading the change as
+        # no lock file at the base or here: the project keeps no migrations (rowstile apply). Reading the change as
         # the first migration would call every change a whole policy that locks every table and rebuilds every tree.
         return {"migrations": [], "lock_current": None, "no_lock": True}
     try:
@@ -838,7 +838,7 @@ def summary(r: Review) -> dict[str, str]:
         lines["Meaning"] = ", ".join(parts)
     a = r["access"]
     if a is None:
-        lines["Access"] = "not computed (no review database: rowfence review --db)"
+        lines["Access"] = "not computed (no review database: rowstile review --db)"
     elif a.get("error"):
         lines["Access"] = f"not computed: {a['error']}"
     else:
@@ -875,7 +875,7 @@ def summary(r: Review) -> dict[str, str]:
     if d.get("error"):
         lines["Deploy"] = f"not computed: {d['error']}"
     elif d.get("no_lock"):
-        lines["Deploy"] = ("no lock file, so no migrations: `rowfence apply` applies the policy, and keeps the "
+        lines["Deploy"] = ("no lock file, so no migrations: `rowstile apply` applies the policy, and keeps the "
                            "inheritance tables whose definition didn't change.")
     elif not d["migrations"]:
         lines["Deploy"] = "no migration: nothing the database holds changes."
@@ -893,7 +893,7 @@ def summary(r: Review) -> dict[str, str]:
             text += (f" **It fails on the review database: {ran['error']}**" if ran["error"] else
                      f" Applied on the review database in {ran['seconds']} s.")
         if d["lock_current"] is False:
-            text += " **The lock file is behind the policy: run `rowfence migrate` and commit what it writes.**"
+            text += " **The lock file is behind the policy: run `rowstile migrate` and commit what it writes.**"
         lines["Deploy"] = text.strip()
     return lines
 
@@ -904,11 +904,11 @@ def previous_note(r: Review) -> str | None:
     if old is None:
         return None
     shown = "; ".join(old[:4]) + (f"; and {len(old) - 4} more" if len(old) > 4 else "")
-    return ("The policy at the base is written in the language before this version of rowfence, and was read as "
+    return ("The policy at the base is written in the language before this version of rowstile, and was read as "
             "that version meant it" + (f": {shown}." if shown else "."))
 
 
-def markdown(r: Review, title: str = "rowfence: what this pull request changes") -> str:
+def markdown(r: Review, title: str = "rowstile: what this pull request changes") -> str:
     s = summary(r)
     out = [MARK, f"### {title}", ""]
     note = previous_note(r)
@@ -1024,7 +1024,7 @@ def annotations(r: Review, path: str) -> str:
         file = folder + m.group(1) if m and m.group(1) else path
         where = f"file={file},line={m.group(2)}" if m else f"file={path}"
         msg = f"{f['why']}: {f['flag']}".replace("%", "%25").replace("\n", "%0A").replace("`", "")
-        out.append(f"::warning {where},title=rowfence review::{msg}")
+        out.append(f"::warning {where},title=rowstile review::{msg}")
     return "\n".join(out) + ("\n" if out else "")
 
 

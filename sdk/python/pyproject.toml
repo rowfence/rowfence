@@ -1,7 +1,7 @@
 [project]
-name = "rowfence"
+name = "rowstile"
 dynamic = ["version"]
-description = "Access rules for Postgres: the rowfence command, and the SDK for Python apps (FastAPI, SQLAlchemy, psycopg, asyncpg, Alembic, pytest)"
+description = "Access rules for Postgres: the rowstile command, and the SDK for Python apps (FastAPI, SQLAlchemy, psycopg, asyncpg, Alembic, pytest)"
 readme = "README.md"
 requires-python = ">=3.11"
 license = "Apache-2.0"
@@ -15,10 +15,10 @@ psycopg = ["psycopg>=3.1"]
 asyncpg = ["asyncpg>=0.28"]
 
 [project.scripts]
-rowfence = "rowfence.command:main"
+rowstile = "rowstile.command:main"
 
 [project.entry-points.pytest11]
-rowfence = "rowfence.testing"
+rowstile = "rowstile.testing"
 
 [build-system]
 requires = ["hatchling"]
@@ -27,16 +27,16 @@ build-backend = "hatchling.build"
 # the version is written once, in the compiler (core/authzlib/__init__.py): _version.py reads it
 [tool.hatch.version]
 source = "code"
-path = "rowfence/_version.py"
+path = "rowstile/_version.py"
 
 # hatch_build.py puts the command (core/authzlib and core/cli, standard library only) inside the
-# package, rowfence/_command, so nothing of it is importable at the top level but rowfence
+# package, rowstile/_command, so nothing of it is importable at the top level but rowstile
 [tool.hatch.build.targets.wheel]
-packages = ["rowfence"]
+packages = ["rowstile"]
 exclude = ["__pycache__", "*.pyc"]
 
 [tool.hatch.build.targets.sdist]
-include = ["rowfence", "README.md", "LICENSE", "hatch_build.py"]
+include = ["rowstile", "README.md", "LICENSE", "hatch_build.py"]
 exclude = ["__pycache__", "*.pyc"]
 
 [tool.hatch.build.hooks.custom]

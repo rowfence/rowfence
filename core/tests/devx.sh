@@ -1,7 +1,7 @@
 #!/bin/bash
 # devx.sh: what developers use day to day. Named tests that bring their own data, refusals that say why
 # (the error, authz.explain_rule), authz.who_among, applying only when changed, the warning for rule
-# conditions that read governed tables, drafting a policy, and the rowfence command: dev, test, init, --as.
+# conditions that read governed tables, drafting a policy, and the rowstile command: dev, test, init, --as.
 #   PGHOST=... PGUSER=postgres tests/devx.sh [database]
 set -u
 cd "$(dirname "$0")/.."
@@ -10,7 +10,7 @@ fails=0
 PSQL() { psql -X -q -At -v ON_ERROR_STOP=1 -d "$DB" "$@"; }
 ok() { echo "ok    $1"; }
 bad() { echo "FAIL  $1${2:+: $2}"; fails=$((fails + 1)); }
-CLI() { python3 cli/rowfence_cli.py --db "dbname=$DB" "$@"; }
+CLI() { python3 cli/rowstile_cli.py --db "dbname=$DB" "$@"; }
 run() { out=$(CLI "$@" 2>&1); rc=$?; }
 # a statement as the app role, signed in as user $1: its error (message and detail), or 'ok'
 as() { psql -X -q -At -d "$DB" -v VERBOSITY=verbose -c "SET ROLE app_user" -c "SET authz.user_id = '$1'" -c "$2" 2>&1; }
@@ -110,26 +110,26 @@ case "$out $qual" in *"row-level security"*) bad "a rule condition that reads a 
   *) bad "the rule condition" "$qual";; esac
 CLI apply example/docs.authz >/dev/null 2>&1
 
-echo "-- drafting a policy (rowfence init)"
-mkdir -p "$T/i" && ( cd "$T/i" && python3 "$OLDPWD/cli/rowfence_cli.py" --db "dbname=$DB" init --schema app ) > "$T/init.log" 2>&1
+echo "-- drafting a policy (rowstile init)"
+mkdir -p "$T/i" && ( cd "$T/i" && python3 "$OLDPWD/cli/rowstile_cli.py" --db "dbname=$DB" init --schema app ) > "$T/init.log" 2>&1
 out=$(cat "$T/i/db/policy.authz" 2>/dev/null)
 case "$out" in *"type folder = app.folders"*"parent : folder = parent_id"*"member : user = app.org_members(org_id -> user_id)"*"update parent_id after : parent.edit"*)
   ok "a draft: types, relations from columns and link tables, rules";; *) bad "draft" "${out:0:400} $(cat "$T/init.log")";; esac
 run apply "$T/i/db/policy.authz"; case "$out" in *": applied") ok "... which applies";; *) bad "draft applies" "$out";; esac
 CLI apply example/docs.authz >/dev/null 2>&1
-out=$(mkdir -p "$T/j" && cd "$T/j" && python3 "$OLDPWD/cli/rowfence_cli.py" --db "dbname=$DB" init --schema nosuch 2>&1)
+out=$(mkdir -p "$T/j" && cd "$T/j" && python3 "$OLDPWD/cli/rowstile_cli.py" --db "dbname=$DB" init --schema nosuch 2>&1)
 case "$out" in *"no tables to draft a policy from in nosuch"*) ok "a schema with no tables is named";; *) bad "draft empty" "$out";; esac
 # in a Next.js app on Prisma: the tool, the generated names, the SDK packages and the setup line
 mkdir -p "$T/k/prisma" "$T/k/src"
 printf '{\n    "name": "shop",\n    "dependencies": {"next": "16", "@prisma/client": "7", "react": "19"}\n}\n' > "$T/k/package.json"
 printf 'datasource db {\n  provider = "postgresql"\n}\n' > "$T/k/prisma/schema.prisma"
 printf 'export const db = new PrismaClient({ adapter });\n' > "$T/k/src/db.ts"
-out=$(cd "$T/k" && python3 "$OLDPWD/cli/rowfence_cli.py" --db "dbname=$DB" init --schema app 2>&1)
-case "$out" in *"found   Next.js, Prisma (prisma/schema.prisma)"*"added   @rowfence/prisma, @rowfence/next, @rowfence/react, rowfence"*"in src/db.ts"*"signedIn("*)
+out=$(cd "$T/k" && python3 "$OLDPWD/cli/rowstile_cli.py" --db "dbname=$DB" init --schema app 2>&1)
+case "$out" in *"found   Next.js, Prisma (prisma/schema.prisma)"*"added   @rowstile/prisma, @rowstile/next, @rowstile/react, rowstile"*"in src/db.ts"*"signedIn("*)
   ok "init finds Next.js and Prisma, adds the SDK, says which line to change";; *) bad "init stack" "$out";; esac
-grep -q 'tool = "prisma"' "$T/k/rowfence.toml" && grep -q 'dir  = "prisma/migrations"' "$T/k/rowfence.toml" && grep -q 'ts = "src/authz.gen.ts"' "$T/k/rowfence.toml" &&
-  grep -q '"@rowfence/prisma": "^' "$T/k/package.json" && grep -q '^    "name": "shop"' "$T/k/package.json" && grep -q 'linguist-generated' "$T/k/.gitattributes" &&
-  ok "... in rowfence.toml, package.json (its layout kept) and .gitattributes" || bad "init stack files" "$(cat "$T/k/rowfence.toml" "$T/k/package.json")"
+grep -q 'tool = "prisma"' "$T/k/rowstile.toml" && grep -q 'dir  = "prisma/migrations"' "$T/k/rowstile.toml" && grep -q 'ts = "src/authz.gen.ts"' "$T/k/rowstile.toml" &&
+  grep -q '"@rowstile/prisma": "^' "$T/k/package.json" && grep -q '^    "name": "shop"' "$T/k/package.json" && grep -q 'linguist-generated' "$T/k/.gitattributes" &&
+  ok "... in rowstile.toml, package.json (its layout kept) and .gitattributes" || bad "init stack files" "$(cat "$T/k/rowstile.toml" "$T/k/package.json")"
 # a schema as Prisma names it (capitals), a column named like an SQL word, a link table named like a permission,
 # one through a unique column, a name with a space, and the migration tool's own table: the draft compiles and applies
 dropdb --if-exists "${DB}_names" 2>/dev/null; createdb "${DB}_names"
@@ -145,13 +145,13 @@ CREATE TABLE pr."_prisma_migrations" (id varchar(36) PRIMARY KEY);
 CREATE TABLE pr."owner list" (id serial PRIMARY KEY, "owner id" int REFERENCES pr."User");
 SQL
 mkdir -p "$T/n"
-out=$(cd "$T/n" && python3 "$OLDPWD/cli/rowfence_cli.py" --db "dbname=${DB}_names" init --schema pr 2>&1)
+out=$(cd "$T/n" && python3 "$OLDPWD/cli/rowstile_cli.py" --db "dbname=${DB}_names" init --schema pr 2>&1)
 draft=$(cat "$T/n/db/policy.authz" 2>/dev/null)
 case "$draft" in *'type user = pr.User'*'author : user = authorId'*'viewer : user = pr.post_views(post_id -> user_id)'*'{"authorId" = authz.uid()}'*'pr._prisma_migrations: the migration tool'*'pr.owner list: a name the policy language'*)
   ok "a draft of a schema with capitals and awkward names: quoted where SQL reads it, the rest left out and said";; *) bad "draft names" "$out $draft";; esac
-out=$(cd "$T/n" && python3 "$OLDPWD/cli/rowfence_cli.py" check 2>&1); rc=$?
+out=$(cd "$T/n" && python3 "$OLDPWD/cli/rowstile_cli.py" check 2>&1); rc=$?
 [ $rc -eq 0 ] && ok "... which compiles" || bad "draft names compile" "$out"
-out=$(cd "$T/n" && python3 "$OLDPWD/cli/rowfence_cli.py" --db "dbname=${DB}_names" apply 2>&1); rc=$?
+out=$(cd "$T/n" && python3 "$OLDPWD/cli/rowstile_cli.py" --db "dbname=${DB}_names" apply 2>&1); rc=$?
 case "$out" in *": applied") ok "... and applies";; *) bad "draft names apply" "$out";; esac
 dropdb --if-exists "${DB}_names" 2>/dev/null
 # shapes real apps have (Chatwoot, GitLab, Documenso, Plausible): accounts beside users, a foreign key declared
@@ -176,16 +176,16 @@ CREATE TABLE lo.projects (id bigserial PRIMARY KEY, org_id bigint REFERENCES lo.
 CREATE TABLE lo.tasks (id bigserial PRIMARY KEY, project_id bigint REFERENCES lo.projects, author_id bigint REFERENCES lo.users);
 SQL
 mkdir -p "$T/a"
-out=$(cd "$T/a" && python3 "$OLDPWD/cli/rowfence_cli.py" --db "dbname=${DB}_apps" init --schema lo 2>&1)
+out=$(cd "$T/a" && python3 "$OLDPWD/cli/rowstile_cli.py" --db "dbname=${DB}_apps" init --schema lo 2>&1)
 draft=$(cat "$T/a/db/policy.authz" 2>/dev/null)
 case "$draft" in *'type user = lo.users'*'type domain = lo.domains'*'membership : user = lo.org_memberships(org_id -> user_id)'*'can view = author or project.view'*)
   ok "a draft of real apps' shapes: users, not accounts; a membership with an id; each parent named once";; *) bad "draft apps" "$out $draft";; esac
 [ "$(grep -c 'update domain_id after' <<<"$draft")" = 1 ] && ok "... a foreign key declared twice is one relation" || bad "draft apps: the key twice" "$draft"
-out=$(cd "$T/a" && python3 "$OLDPWD/cli/rowfence_cli.py" check 2>&1); rc=$?
+out=$(cd "$T/a" && python3 "$OLDPWD/cli/rowstile_cli.py" check 2>&1); rc=$?
 [ $rc -eq 0 ] && ok "... which compiles (the loop of foreign keys too)" || bad "draft apps compile" "$out"
-out=$(cd "$T/a" && python3 "$OLDPWD/cli/rowfence_cli.py" --db "dbname=${DB}_apps" apply 2>&1); rc=$?
+out=$(cd "$T/a" && python3 "$OLDPWD/cli/rowstile_cli.py" --db "dbname=${DB}_apps" apply 2>&1); rc=$?
 case "$out" in *": applied") ok "... and applies";; *) bad "draft apps apply" "$out";; esac
-out=$(cd "$T/a" && python3 "$OLDPWD/cli/rowfence_cli.py" --db "dbname=${DB}_apps" lint 2>&1)
+out=$(cd "$T/a" && python3 "$OLDPWD/cli/rowstile_cli.py" --db "dbname=${DB}_apps" lint 2>&1)
 case "$out" in *"name others more than once"*) bad "draft apps: lint warns of views written out again" "$out";;
   *) ok "... and lint finds no permission named again and again";; esac
 # round the loop as the org's owner: the domain, its address, the settings that use it, and the org
@@ -198,21 +198,21 @@ out=$(psql -X -q -At -d "${DB}_apps" -c "SET authz.user_id = '1'" -c "SELECT aut
 [ "$out" = "t|t|t|t f " ] && ok "... and round the loop the org's owner edits each in turn, the other owner none of them" || bad "draft apps: the loop" "$out"
 dropdb --if-exists "${DB}_apps" 2>/dev/null
 
-echo "-- the rowfence command"
+echo "-- the rowstile command"
 mkdir -p "$T/p/tests"
 sed '/^test$/,$d' example/docs.authz > "$T/p/policy.authz"     # its old test section needs the scenario's shares
 cp example/docs.test.authz "$T/p/tests/docs.authz"
-printf 'policy = "policy.authz"\ntests = ["tests/*.authz"]\ndatabase = "dbname=%s"\n[clients]\npy = "out/authz_client.py"\n' "$DB" > "$T/p/rowfence.toml"
-( cd "$T/p" && python3 "$OLDPWD/cli/rowfence_cli.py" dev --once ) > "$T/dev.log" 2>&1; rc=$?
+printf 'policy = "policy.authz"\ntests = ["tests/*.authz"]\ndatabase = "dbname=%s"\n[clients]\npy = "out/authz_client.py"\n' "$DB" > "$T/p/rowstile.toml"
+( cd "$T/p" && python3 "$OLDPWD/cli/rowstile_cli.py" dev --once ) > "$T/dev.log" 2>&1; rc=$?
 case "$(cat "$T/dev.log")" in *"isn't marked as a development database"*"[AZ610]"*"nothing applied"*) [ $rc -eq 1 ] &&
   ok "dev won't push to a database with a policy that isn't marked as a development database" || bad "dev unmarked exit" "$rc";;
   *) bad "dev on an unmarked database" "$(cat "$T/dev.log")";; esac
 CLI push --development example/docs.authz >/dev/null 2>&1 || bad "push --development"
-( cd "$T/p" && python3 "$OLDPWD/cli/rowfence_cli.py" dev --once ) > "$T/dev.log" 2>&1; rc=$?
+( cd "$T/p" && python3 "$OLDPWD/cli/rowstile_cli.py" dev --once ) > "$T/dev.log" 2>&1; rc=$?
 case "$(cat "$T/dev.log")" in *"ok   compiles"*"applied in"*"check(s) pass"*"wrote out/authz_client.py"*) [ $rc -eq 0 ] &&
   ok "dev --once: compiles, applies, tests, writes the client" || bad "dev exit" "$rc";; *) bad "dev --once" "$(cat "$T/dev.log")";; esac
 sed -i 's/can edit  = share or editor or/can edit  = share or edtor or/' "$T/p/policy.authz"
-( cd "$T/p" && python3 "$OLDPWD/cli/rowfence_cli.py" dev --once ) > "$T/dev.log" 2>&1; rc=$?
+( cd "$T/p" && python3 "$OLDPWD/cli/rowstile_cli.py" dev --once ) > "$T/dev.log" 2>&1; rc=$?
 case "$(cat "$T/dev.log")" in *"policy.authz: line "*"edtor"*"nothing applied"*) [ $rc -eq 1 ] && ok "... a mistake stops it before applying, exit 1" || bad "dev mistake exit" "$rc";;
   *) bad "dev mistake" "$(cat "$T/dev.log")";; esac
 run test example/docs.test.authz
@@ -228,8 +228,8 @@ run sql --as user:2 "SELECT count(*) AS n FROM app.folders"; case "$out" in *"(1
 run sql --as user:2 "DELETE FROM app.users"; [ "$(PSQL -c "SELECT count(*) > 0 FROM app.users")" = t ] && ok "... and rolls back" || bad "sql rollback" "$out"
 run explain-rule --as user:1 app.files insert --row '{"folder_id": 6, "owner_id": 2}'
 case "$out" in "no   insert"*"no   owner"*) ok "explain-rule --as";; *) bad "explain-rule" "$out";; esac
-[ -f "$T/i/db/policy.authz" ] && [ -f "$T/i/rowfence.toml" ] && [ -f "$T/i/db/tests/first.authz" ] && grep -q "authz.act_as" "$T/init.log" &&
-  ok "init writes a policy, a test file and rowfence.toml, and says what's next" || bad "init" "$(cat "$T/init.log")"
+[ -f "$T/i/db/policy.authz" ] && [ -f "$T/i/rowstile.toml" ] && [ -f "$T/i/db/tests/first.authz" ] && grep -q "authz.act_as" "$T/init.log" &&
+  ok "init writes a policy, a test file and rowstile.toml, and says what's next" || bad "init" "$(cat "$T/init.log")"
 
 rm -r "$T"
 [ -z "${KEEP:-}" ] && { dropdb "$DB"; psql -X -q -d postgres -c "DROP ROLE IF EXISTS authz_devx_other" >/dev/null 2>&1; }

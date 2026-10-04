@@ -7,36 +7,51 @@ Each release upgrades from the one before it. How releases are numbered and made
 
 ## Unreleased
 
+**rowfence is now rowstile.** Another product, a proxy for DuckDB, was already called Rowfence, so the project
+takes a name of its own. The command is `rowstile`, the packages are `rowstile` on PyPI and npm and
+`@rowstile/*`, the image is `ghcr.io/rowstile/rowstile`, the docs are at https://rowstile.dev, and the
+repository is github.com/rowstile/rowstile. The policy language, the `authz` schema, the `authz.*` functions,
+`.authz` files and the AZ error codes keep their names. The `rowfence` packages stay at 0.1.0-alpha.1.
+
 ### Added
 
-- The docs site, at https://rowfence.dev: the guides, the reference, the error codes and the playground,
+- The docs site, at https://rowstile.dev: the guides, the reference, the error codes and the playground,
   as of the latest release.
 - The VS Code extension is published on Open VSX, as a preview, by the release workflow whenever its own
   version is new (VSCodium, Cursor, Gitpod and other editors install from there).
 
 ### Changed
 
-- The Zed extension carries the licence in its own folder, as Zed's registry asks, and when `rowfence` isn't
+- The name: rowfence is rowstile (above). What it writes says rowstile: the hints of the errors the runtime
+  raises (`rowstile help AZ709`), `rowstile graph`'s first line, the generated clients, the compiled SQL, and
+  the comments that mark its own RLS policies and masked views in the database (`'rowstile'`,
+  `'rowstile masked view'`). The SDKs still read the code from the hints of a database applied by rowfence.
+  The problem bodies the SDKs write have their `type` at rowstile.dev (`https://rowstile.dev/problems/refused`).
+- The Zed extension carries the licence in its own folder, as Zed's registry asks, and when `rowstile` isn't
   on the PATH it points to the Installing page (the install lines it showed get the placeholder while only an
   alpha is published).
-- What rowfence writes names rowfence, not the old internal name `authzc`: `rowfence graph`'s first line, the
-  generated clients (`rowfence client`), the compiled SQL, and the comments that mark rowfence's own RLS
-  policies and masked views in the database (`'rowfence'`, `'rowfence masked view'`). The compiler's script in
-  the repository is `core/compile_policy.py`.
+- The compiler's script in the repository is `core/compile_policy.py` (it was `authzc.py`).
 
 ### Upgrading
 
-- The next migration (`rowfence migrate`) marks rowfence's RLS policies and masked views anew; the next
-  `rowfence client` rewrites the clients' first line.
+- Install `rowstile` in place of `rowfence`: `pip install --pre rowstile` (or `rowstile[fastapi]`, ...), `npm i
+  rowstile@next` and `@rowstile/*` in place of `@rowfence/*`; in Python, `import rowstile` in place of
+  `import rowfence`.
+- Rename `rowfence.toml` to `rowstile.toml`. Until then the command reads `rowfence.toml` and says so. The npm
+  launcher reads `ROWFENCE_PYTHON` when `ROWSTILE_PYTHON` isn't set. The GitLab review template's variables
+  are `ROWSTILE_REVIEW_TOKEN`, `ROWSTILE_VERSION` and `ROWSTILE_PACKAGE`.
+- The next migration (`rowstile migrate`) marks the RLS policies and masked views anew; until then the command
+  still recognizes the marks rowfence wrote (`'rowfence'`, and `'authzc'` before them). The next
+  `rowstile client` rewrites the clients' first line.
 
 ### Fixed
 
 - The policies readers copy (the docs app, the cookbook, the example apps' policies and tests) are laid out as
-  `rowfence fmt` writes them, so `rowfence fmt --check` in CI passes on a copy; only spacing changed.
-- While only an alpha is published, a plain `pip install rowfence` finds nothing and `npm i rowfence` gets the
-  0.0.0 placeholder: `rowfence init` now tells a Python app to add `rowfence[...]>=0.1.0a1` (at least its own
-  version, which lets pip and uv take a pre-release), and the stack pages, the Python SDK's README and
-  `llms.txt` ask for the alpha (`--pre`, `rowfence@next`, `uv add --prerelease=allow`).
+  `rowstile fmt` writes them, so `rowstile fmt --check` in CI passes on a copy; only spacing changed.
+- While only an alpha is published, a plain `pip install rowstile` finds nothing: `rowstile init` now tells a
+  Python app to add `rowstile[...]>=` its own version (which lets pip and uv take a pre-release), and the stack
+  pages, the Python SDK's README and `llms.txt` ask for the alpha (`--pre`, `rowstile@next`,
+  `uv add --prerelease=allow`).
 
 ## 0.1.0 (alpha)
 

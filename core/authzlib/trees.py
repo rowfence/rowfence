@@ -190,7 +190,7 @@ END $k$;"""
         Trees whose conditions read other tables are always rebuilt: those tables are found at apply time."""
         if reads:
             return
-        text = re.sub(r" \[AZ\d{3}\]|, HINT = 'rowfence help AZ\d{3}'", "", re.sub(r"\bline \d+", "line", "\n\n".join(sql)))
+        text = re.sub(r" \[AZ\d{3}\]|, HINT = 'rowstile help AZ\d{3}'", "", re.sub(r"\bline \d+", "line", "\n\n".join(sql)))
         self.tree_keep[name] = (hashlib.sha256(text.encode()).hexdigest()[:32], sorted(set(tables)))
 
     def tree_name(self, types: list[str], edges: Edges) -> str:
@@ -493,7 +493,7 @@ BEGIN
       {each_source(parents, '_child', 'up.id')}) e)
   SELECT start::text INTO bad FROM up WHERE id = start LIMIT 1;
   IF bad IS NOT NULL THEN
-    RAISE EXCEPTION '{t.name} % cannot be moved inside itself', bad USING ERRCODE = 'check_violation', HINT = 'rowfence help AZ713';
+    RAISE EXCEPTION '{t.name} % cannot be moved inside itself', bad USING ERRCODE = 'check_violation', HINT = 'rowstile help AZ713';
   END IF;
 END $f$;""")
             cycle_check = f"\n  IF TG_OP <> 'DELETE' THEN PERFORM {f('_check_loops')}(ids); END IF;"
@@ -610,7 +610,7 @@ DECLARE v authz_int.next_trees;
 BEGIN
   SELECT * INTO v FROM authz_int.next_trees WHERE name = {lit(name)};
   IF v.name IS NULL OR NOT EXISTS (SELECT 1 FROM pg_temp.authz_kept WHERE name = {lit(name)}) THEN
-    RAISE EXCEPTION 'rowfence: {name} was not built beside the one in use (the migration before this one does that) [AZ608]';
+    RAISE EXCEPTION 'rowstile: {name} was not built beside the one in use (the migration before this one does that) [AZ608]';
   END IF;
   IF {full} THEN
     PERFORM {f('_rebuild')}();          -- the feed doesn't say everything that changed since: all of it
@@ -851,7 +851,7 @@ BEGIN
       {chr(10) + '      UNION ALL '.join(loop_steps)}) e)
   SELECT _st || ' ' || _s INTO bad FROM up WHERE _n = 1 AND (_at, _a) = (_st, _s) LIMIT 1;
   IF bad IS NOT NULL THEN
-    RAISE EXCEPTION '% cannot be moved inside itself', bad USING ERRCODE = 'check_violation', HINT = 'rowfence help AZ713';
+    RAISE EXCEPTION '% cannot be moved inside itself', bad USING ERRCODE = 'check_violation', HINT = 'rowstile help AZ713';
   END IF;
 END $f$;""")
 

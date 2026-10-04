@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""lsp_test.py: the language server (`rowfence lsp`) over its protocol, as an editor would use it.
+"""lsp_test.py: the language server (`rowstile lsp`) over its protocol, as an editor would use it.
 No database needed.   python3 tests/lsp_test.py"""
 import json
 import os
@@ -26,7 +26,7 @@ def ok(what: str, cond: object, got: Answer = None) -> None:
 
 class Client:
     def __init__(self, cwd: str) -> None:
-        self.p = subprocess.Popen([sys.executable, os.path.join(ROOT, "cli", "rowfence_cli.py"), "lsp"], cwd=cwd,
+        self.p = subprocess.Popen([sys.executable, os.path.join(ROOT, "cli", "rowstile_cli.py"), "lsp"], cwd=cwd,
                                   stdin=subprocess.PIPE, stdout=subprocess.PIPE)
         assert self.p.stdin is not None and self.p.stdout is not None
         self.stdin, self.stdout = self.p.stdin, self.p.stdout
@@ -92,7 +92,7 @@ with tempfile.TemporaryDirectory() as d:
     path = os.path.join(d, "policy.authz")
     with open(path, "w", encoding="utf-8") as fh:
         fh.write(policy)
-    with open(os.path.join(d, "rowfence.toml"), "w", encoding="utf-8") as fh:
+    with open(os.path.join(d, "rowstile.toml"), "w", encoding="utf-8") as fh:
         fh.write('policy = "policy.authz"\n')
     u = uri(path)
     c = Client(d)
@@ -106,7 +106,7 @@ with tempfile.TemporaryDirectory() as d:
     d1 = c.diagnostics(u)
     want = pos(broken, "edtor")["line"]
     ok("a mistake shows up while typing, on its line", d1 and d1[0]["range"]["start"]["line"] == want and "edtor" in d1[0]["message"], d1)
-    ok("... with its code beside the message (rowfence help AZ203)", d1 and d1[0].get("code") == "AZ203"
+    ok("... with its code beside the message (rowstile help AZ203)", d1 and d1[0].get("code") == "AZ203"
        and not d1[0]["message"].endswith("]"), d1)
     c.notify("textDocument/didChange", {"textDocument": {"uri": u, "version": 3}, "contentChanges": [{"text": policy}]})
     ok("... and goes away when fixed", c.diagnostics(u) == [])
@@ -148,16 +148,16 @@ with tempfile.TemporaryDirectory() as d:
     good = 'test "owner"\n  given ann = {INSERT INTO app.users (id, name) VALUES (1, \'Ann\') RETURNING id}\n  user $ann cannot view file 1\n'
     tu = uri(tests)
     c.notify("textDocument/didOpen", {"textDocument": {"uri": tu, "languageId": "authz", "version": 1, "text": good}})
-    ok("a test file is checked against the policy in rowfence.toml", c.diagnostics(tu) == [], c.diagnostics(tu))
+    ok("a test file is checked against the policy in rowstile.toml", c.diagnostics(tu) == [], c.diagnostics(tu))
     bad = good.replace("cannot view file", "cannot vew file")
     c.notify("textDocument/didChange", {"textDocument": {"uri": tu, "version": 2}, "contentChanges": [{"text": bad}]})
     d2 = c.diagnostics(tu)
     ok("... and a permission that doesn't exist is marked on its line", d2 and d2[0]["range"]["start"]["line"] == 2 and "vew" in d2[0]["message"], d2)
     c.close()
 
-    # rowfence.toml names a variable for the database, and the editor's environment doesn't have it
-    with open(os.path.join(d, "rowfence.toml"), "a", encoding="utf-8") as fh:
-        fh.write('database = "env:ROWFENCE_LSP_TEST_NOT_SET"\n')
+    # rowstile.toml names a variable for the database, and the editor's environment doesn't have it
+    with open(os.path.join(d, "rowstile.toml"), "a", encoding="utf-8") as fh:
+        fh.write('database = "env:ROWSTILE_LSP_TEST_NOT_SET"\n')
     c = Client(d)
     c.request("initialize", {"capabilities": {}})
     c.notify("textDocument/didOpen", {"textDocument": {"uri": u, "languageId": "authz", "version": 1, "text": policy}})
@@ -175,7 +175,7 @@ with tempfile.TemporaryDirectory() as d:
     org_text = "type org = app.orgs\n  member : user = app.org_members(org_id -> user_id)\n  can see = member\n"
     tests_text = 'test "first"\n  user 1 can view doc 1\n\ntest "second"\n  user 1 can view doc 1\n'
     for name, body in (("policy.authz", main_text), ("org.authz", org_text), ("t.authz", tests_text),
-                       ("rowfence.toml", 'policy = "policy.authz"\n')):
+                       ("rowstile.toml", 'policy = "policy.authz"\n')):
         with open(os.path.join(d, name), "w", encoding="utf-8") as fh:
             fh.write(body)
     # the included file's URI as an editor may spell it: not the way the server would (VS Code on Windows: c%3A)

@@ -43,15 +43,15 @@ above takes 290 ms instead of 32). The audit trail and change feed add about 15 
   opening a folder took 4.5 to 5 ms on the server for a member who held 4,000 folders directly, against the
   1.2 ms above for one who holds a hundred. Access through one membership of something big costs nothing of
   the kind: an org's admin, who reaches every folder, reads faster than any member in the benchmark.
-- **Reads through the rules run on one CPU.** rowfence's functions aren't marked parallel safe: a session's
+- **Reads through the rules run on one CPU.** rowstile's functions aren't marked parallel safe: a session's
   signature is bound to its backend, which a parallel worker isn't. So Postgres never splits a read through
   the rules between workers: counting 200,000 files took 28 ms through them, 5.5 ms as the owner with two
   workers.
 - **A big policy needs room in Postgres's lock table.** Applying it whole (or a first migration) takes a lock
   on each object it makes, in one transaction, and the table holds `max_locks_per_transaction` for each
-  connection: 6,400 by default. GitLab's thousand tables, drafted by `rowfence init`, make about 45,000; applying
+  connection: 6,400 by default. GitLab's thousand tables, drafted by `rowstile init`, make about 45,000; applying
   stopped after two and a half minutes with "out of shared memory", and took 163 s with
-  `max_locks_per_transaction = 1024`. `rowfence apply` warns before it starts and names the value to set (a
+  `max_locks_per_transaction = 1024`. `rowstile apply` warns before it starts and names the value to set (a
   restart; on managed Postgres, a parameter).
 - **Identity providers**: `authz.sync_members` takes the member list; there is no SCIM
   endpoint. JWTs are HS256 only (no RS256/JWKS in plpgsql); for asymmetric tokens,
@@ -77,7 +77,7 @@ above takes 290 ms instead of 32). The audit trail and change feed add about 15 
 - **Link rows are trusted as they are**: a row in a link table (`team_members`,
   `folder_teams`) grants what it says even when the object it names was deleted. Give link
   tables foreign keys to their objects with `ON DELETE CASCADE` (and `ON UPDATE CASCADE` for
-  keys that change), as you would anyway. Shares are removed with their objects by rowfence.
+  keys that change), as you would anyway. Shares are removed with their objects by rowstile.
   (A type with a `where` looks its rows up, so a leftover row naming one of its objects counts
   for nothing; don't rely on it.)
 - **A permission named many times over is slow to plan.** Each permission is a view, and Postgres
@@ -94,8 +94,8 @@ above takes 290 ms instead of 32). The audit trail and change feed add about 15 
 
 ## What a 0.x release promises
 
-rowfence is a preview until 1.0. A minor release (0.1 to 0.2) may change the policy language, the `authz.*`
-functions, the SDKs, the error codes and the file formats (`rowfence.toml`, the lock file). What it does keep:
+rowstile is a preview until 1.0. A minor release (0.1 to 0.2) may change the policy language, the `authz.*`
+functions, the SDKs, the error codes and the file formats (`rowstile.toml`, the lock file). What it does keep:
 
 - **Each release upgrades from the one before it**: a database applied by 0.1 is migrated by 0.2, and the
   suites test it. Skipping a release is not tested.

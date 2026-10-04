@@ -1,7 +1,7 @@
-"""rowfence with SQLAlchemy 2 (sync and async engines, the ORM, SQLModel).
+"""rowstile with SQLAlchemy 2 (sync and async engines, the ORM, SQLModel).
 
     engine = create_async_engine(url)
-    rowfence.sqlalchemy.install(engine)           # every transaction signs in as rowfence.current()
+    rowstile.sqlalchemy.install(engine)           # every transaction signs in as rowstile.current()
 
 Queries by permission use set checks, never a function call per row:
 
@@ -70,7 +70,7 @@ _recent: list[_Write] = []                          # when no request or acting_
 
 
 def install(engine: AnyEngine, user: Callable[[], Who] | None = None) -> AnyEngine:
-    """Signs every transaction on `engine` in as whoever the code acts for (rowfence.acting_as, or the web
+    """Signs every transaction on `engine` in as whoever the code acts for (rowstile.acting_as, or the web
     integration), else as user() if given, else as nobody. Also remembers the rows each ORM flush updates
     or deletes, for why_stale()."""
     global _mapper_events
@@ -143,7 +143,7 @@ def why_stale_sync(exc: BaseException | None = None) -> NotFound | Refused | Non
     for engine, table, command, key in _flush(exc):
         original = _engines.get(engine, engine)
         if isinstance(original, AsyncEngine):
-            raise TypeError("an async engine's write: await rowfence.sqlalchemy.why_stale()")
+            raise TypeError("an async engine's write: await rowstile.sqlalchemy.why_stale()")
         with original.connect() as conn:
             lines = conn.execute(_explain_sql(table, command, key)).scalar()
             conn.rollback()

@@ -28,7 +28,7 @@
   in REPEATABLE READ or SERIALIZABLE a writer with an old snapshot gets a
   serialization error to retry instead of storing stale ancestors. What they can't follow is a write made
   with the triggers off (`session_replication_role = replica`, `ALTER TABLE ... DISABLE TRIGGER`, a bulk
-  load or a restore that turns them off): `authz.verify()` then says false, and `rowfence reapply --force`
+  load or a restore that turns them off): `authz.verify()` then says false, and `rowstile reapply --force`
   computes the tables again.
 - **No loops through columns**, even across several rows or two concurrent
   transactions. Loops through link tables are allowed and harmless.
@@ -50,5 +50,5 @@ the database owner and the backend that says who is signed in are trusted. What 
 the attacks tried and the known limits (side channels such as `EXPLAIN ANALYZE` row counts, for
 code that can run arbitrary SQL as the app role) are in [the threat model](../threat-model.md).
 
-**rowfence has not been audited by anyone outside the project.** It has had self-review and the
+**rowstile has not been audited by anyone outside the project.** It has had self-review and the
 [tests](../../core/README.md#tested), including an adversarial suite and a parser fuzzer.

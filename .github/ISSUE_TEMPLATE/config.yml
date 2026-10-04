@@ -1,8 +1,8 @@
 blank_issues_enabled: false
 contact_links:
   - name: A security problem
-    url: https://github.com/rowfence/rowfence/security/advisories/new
+    url: https://github.com/rowstile/rowstile/security/advisories/new
     about: Report it privately, never in an issue (SECURITY.md says why and what to send).
   - name: The docs
-    url: https://github.com/rowfence/rowfence#docs
+    url: https://github.com/rowstile/rowstile#docs
     about: Getting started, the cookbook, troubleshooting and the reference.

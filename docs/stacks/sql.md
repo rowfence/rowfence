@@ -2,7 +2,7 @@
 
 <!-- tested: every line of code below is in docs/getting-started.md (run as written by tests/docs_test.sh) or in the SDKs' sources -->
 
-Go, Ruby, Java, Rust, Elixir, or a Python or Node app without the SDKs: rowfence needs no library. The SDKs
+Go, Ruby, Java, Rust, Elixir, or a Python or Node app without the SDKs: rowstile needs no library. The SDKs
 send the few statements on this page and translate the answers; any language that speaks to Postgres can do
 the same.
 
@@ -44,8 +44,8 @@ A transaction that forgets gets an error, not an empty page: SQLSTATE `28000`, w
 
 ## Answer refusals
 
-Every error rowfence raises names its code in the HINT, `rowfence help AZ709`: branch on the code, and
-`rowfence help` (or `docs/errors/`) says what it means.
+Every error rowstile raises names its code in the HINT, `rowstile help AZ709`: branch on the code, and
+`rowstile help` (or `docs/errors/`) says what it means.
 
 - **A refused INSERT, or an UPDATE whose new row the rules refuse**: SQLSTATE `42501`. The message names the
   table and the command (`may not insert this row into app.notes`), the constraint is `authz_<command>`, and
@@ -76,7 +76,7 @@ To filter a query to the objects the user holds a permission on, join `authz.lis
 ## Migrations
 
 Policy changes ship as migrations for your tool: `tool = "goose"`, `"dbmate"`, `"flyway"` or `"sql"`
-(numbered or timestamped files) in `rowfence.toml`. `rowfence migrate` writes the next one, and your tool
-applies it with the others; `rowfence migrate --check` in CI fails if a policy change has none. The command
-installs with `pip install --pre rowfence`, `npm install rowfence@next` (while only an alpha is published), or
+(numbered or timestamped files) in `rowstile.toml`. `rowstile migrate` writes the next one, and your tool
+applies it with the others; `rowstile migrate --check` in CI fails if a policy change has none. The command
+installs with `pip install --pre rowstile`, `npm install rowstile@next` (while only an alpha is published), or
 as a Docker image: [Installing](../installing.md).

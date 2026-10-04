@@ -1,11 +1,11 @@
-# The file manager and what it needs: Postgres with the rowfence command (built from this repository,
-# like the rowfence command in the app's image, so both are of the same commit), RustFS for file contents, and the app.
+# The file manager and what it needs: Postgres with the rowstile command (built from this repository,
+# like the rowstile command in the app's image, so both are of the same commit), RustFS for file contents, and the app.
 #   docker compose up -d --build            # everything; the app on http://localhost:8000
 #   docker compose up -d db storage         # just the services, for running the backend on the host
 services:
   db:
     build: {context: ../.., dockerfile: core/Dockerfile, args: {PG_MAJOR: "16"}}
-    image: rowfence:16
+    image: rowstile:16
     environment: {POSTGRES_PASSWORD: postgres, POSTGRES_DB: filemanager}
     ports: ["25432:5432"]
     volumes: [db:/var/lib/postgresql/data]

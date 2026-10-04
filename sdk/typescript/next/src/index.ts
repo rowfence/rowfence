@@ -1,5 +1,5 @@
 /**
- * rowfence with Next.js (App Router).
+ * rowstile with Next.js (App Router).
  *
  * Importing it keeps signed-in reads out of caches: before a transaction signs in as someone, it calls
  * Next's connection(), which makes the render dynamic, and throws inside "use cache" and unstable_cache, so
@@ -8,13 +8,13 @@
  *
  *     export const PATCH = route(async (req, { params }) => { ... });   // Refused: 403, NotFound: 404
  *     export const rename = action(async (id: number, name: string) => { ... });   // { ok, value } or { ok: false, problem }
- *     export const { GET, POST } = authzRoutes({ calls: db.$authz, changes: changes(pool) });   // for @rowfence/react
+ *     export const { GET, POST } = authzRoutes({ calls: db.$authz, changes: changes(pool) });   // for @rowstile/react
  */
 import { connection } from "next/server.js";   // next has no exports map: Node needs the file name
 import {
   beforeSignIn, problemOf, problemResponse, translate,
   type AuthzCalls, type Principal, type Problem,
-} from "@rowfence/client";
+} from "@rowstile/client";
 
 async function keepOutOfCaches(p: Principal): Promise<void> {
   if (p.id === null) return;
@@ -40,7 +40,7 @@ export async function checkAtStart(calls: { check(): Promise<void> }): Promise<v
   try {
     await calls.check();
   } catch (e) {
-    console.error(`rowfence: ${e instanceof Error ? e.message : String(e)}`);
+    console.error(`rowstile: ${e instanceof Error ? e.message : String(e)}`);
     process.exit(1);
   }
 }
@@ -78,7 +78,7 @@ export function action<A extends unknown[], R>(fn: (...args: A) => Promise<R>): 
 export interface RoutesOptions {
   /** The runtime's functions, each signed in as the request's user: db.$authz (Prisma), authz(pool) (pg), ... */
   calls: AuthzCalls;
-  /** Subscribe to the change feed for live updates (changes(pool) from @rowfence/pg); without it, no /events. */
+  /** Subscribe to the change feed for live updates (changes(pool) from @rowstile/pg); without it, no /events. */
   changes?: (onChange: () => void) => () => void;
   /** The most event streams open at once (1000): one more answers 503. A stream tells only that something
    *  changed, to whoever asks, signed in or not; each open one holds a subscriber, so their number has a limit. */
@@ -88,7 +88,7 @@ export interface RoutesOptions {
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 
-/** The routes @rowfence/react calls, for a catch-all route (app/api/authz/[...authz]/route.ts):
+/** The routes @rowstile/react calls, for a catch-all route (app/api/authz/[...authz]/route.ts):
  *  GET perms?type=folder&ids=1&ids=2 (POST perms {type, ids} for a long list), GET shares?type=folder&id=3,
  *  GET events (server-sent events), POST share, POST unshare, POST request. Each answers as the signed-in
  *  user, and only what they may see. The POST routes take application/json only: a form on another site

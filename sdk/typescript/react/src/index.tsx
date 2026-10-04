@@ -1,7 +1,7 @@
 /**
- * rowfence for React: which buttons to show, a headless share dialog, access requests, kept current.
+ * rowstile for React: which buttons to show, a headless share dialog, access requests, kept current.
  *
- *     <AuthzProvider endpoint="/api/authz">          // the routes of @rowfence/next's authzRoutes
+ *     <AuthzProvider endpoint="/api/authz">          // the routes of @rowstile/next's authzRoutes
  *       const perms = usePerms("folder", folderIds); // one call for the whole list
  *       {perms(id).can("edit") && <RenameButton id={id} />}
  *       <Can type="folder" id={id} perm="edit"><RenameButton id={id} /></Can>
@@ -13,7 +13,7 @@
  * without a page load, and the hooks ask again for the new one.
  */
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
-import type { Id, ObjectType, Permission, Problem, Share, SharedRelation, SharedType } from "@rowfence/client";
+import type { Id, ObjectType, Permission, Problem, Share, SharedRelation, SharedType } from "@rowstile/client";
 
 interface Settings {
   endpoint: string;
@@ -68,7 +68,7 @@ export function AuthzProvider({ endpoint = "/api/authz", live = true, fetch: f, 
 
 function useSettings(): Settings {
   const s = useContext(Context);
-  if (!s) throw new Error("@rowfence/react: wrap the app in <AuthzProvider>");
+  if (!s) throw new Error("@rowstile/react: wrap the app in <AuthzProvider>");
   return s;
 }
 
@@ -89,7 +89,7 @@ async function call<R>(s: Settings, path: string, body?: object): Promise<R> {
 }
 
 // an id as the database writes it: a composite key as a row, every field quoted; a key of one column given as
-// an array is that value (idText in @rowfence/client)
+// an array is that value (idText in @rowstile/client)
 const key = (id: Id): string => (Array.isArray(id)
   ? id.length === 1 ? String(id[0]) : "(" + id.map((v) => '"' + String(v).replace(/["\\]/g, (c) => "\\" + c) + '"').join(",") + ")"
   : String(id));

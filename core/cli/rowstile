@@ -1,0 +1,3 @@
+#!/bin/sh
+# rowstile: see rowstile_cli.py (put this folder on PATH, or link this file into it)
+exec python3 "$(dirname "$(readlink -f "$0")")/rowstile_cli.py" "$@"

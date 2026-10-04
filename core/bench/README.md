@@ -1,6 +1,6 @@
 # Scale benchmark
 
-Measures rowfence against its scale target (the gate): with 20 tree writes/s arriving steadily
+Measures rowstile against its scale target (the gate): with 20 tree writes/s arriving steadily
 (90% folder creates, 9% moves of small folders, 1% links) and 400 reads/s beside them, tree writes
 p95 < 50 ms, reads through RLS p95 < 5 ms, and no failed writes; a big move may pause other tree
 writes, and the run reports for how long.
@@ -18,7 +18,7 @@ off), loads
 the example app at scale (`load.sql`: a folder tree exactly 20 levels deep, each level about 1.5 times
 wider than the one above; 5% of folders also linked into a folder nearer the top, so no folder ends up
 inside itself; 25 folders for each user and for each team from `--large` up, so a user holds the same at
-every size), applies `example/docs.authz` with `rowfence apply`, adds shares (`shares.sql`),
+every size), applies `example/docs.authz` with `rowstile apply`, adds shares (`shares.sql`),
 then runs `pgbench` (`workload/`, driven by `run.sh`):
 
 1. reads through RLS alone, 400/s: open a file, open a folder, `authz.can`, as random users, a
@@ -75,5 +75,5 @@ little to spare on reads. What `--full` needs from the machine:
 Before `authz.verify()` and the backfill went through the rows in batches, verify at this size took more than
 2.4 GB of memory and was killed on the 6 GB VM; it now holds 146 MB.
 
-Reads through the rules run on one CPU: rowfence's functions are not marked parallel safe (a session's signature
+Reads through the rules run on one CPU: rowstile's functions are not marked parallel safe (a session's signature
 is bound to its backend, which a parallel worker is not), so Postgres never splits such a read between workers.

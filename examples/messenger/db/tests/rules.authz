@@ -1,5 +1,5 @@
 -- The messenger's rules, one test each (the table in README.md). Each test brings its own people and chats,
--- and rolls them back. Run: rowfence test (from messenger/), or rowfence dev while editing the policy.
+-- and rolls them back. Run: rowstile test (from messenger/), or rowstile dev while editing the policy.
 
 test "only members read a chat"
   given ann = {INSERT INTO ms.users (phone, name) VALUES ('t-ann', 'Ann') RETURNING id}

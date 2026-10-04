@@ -1,13 +1,13 @@
-"""The conformance app: no permission checks anywhere. rowfence signs each request's transactions in, the
+"""The conformance app: no permission checks anywhere. rowstile signs each request's transactions in, the
 database filters reads and refuses writes, and the SDK turns refusals into 403 and hidden rows into 404."""
 import os
 
-import rowfence
+import rowstile
 from fastapi import FastAPI, Request
 from pydantic import BaseModel
-from rowfence import NotFound, Principal
-from rowfence import sqlalchemy as authz_sa
-from rowfence.fastapi import Rowfence
+from rowstile import NotFound, Principal
+from rowstile import sqlalchemy as authz_sa
+from rowstile.fastapi import Rowstile
 from sqlalchemy import delete, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
@@ -20,17 +20,17 @@ def user_of(request: Request) -> str | None:
 
 
 def signed_in() -> int:
-    """The user the request acts for (Rowfence set it from user_of), as the tables' key."""
-    who = rowfence.current()
+    """The user the request acts for (Rowstile set it from user_of), as the tables' key."""
+    who = rowstile.current()
     return int(who.id) if who is not None and who.id is not None else 0
 
 
 def make_app(url: str | None = None, check_connection: bool = True, pool_size: int = 5) -> FastAPI:
-    engine = create_async_engine(url or os.environ["ROWFENCE_APP_URL"], pool_size=pool_size, max_overflow=0)
+    engine = create_async_engine(url or os.environ["ROWSTILE_APP_URL"], pool_size=pool_size, max_overflow=0)
     Session = async_sessionmaker(engine, expire_on_commit=False)
     app = FastAPI()
     app.state.engine, app.state.Session = engine, Session
-    authz = Rowfence(app, engine, user=user_of, check_connection=check_connection)
+    authz = Rowstile(app, engine, user=user_of, check_connection=check_connection)
     app.state.authz = authz
 
     @app.get("/projects")
@@ -107,8 +107,8 @@ def make_app(url: str | None = None, check_connection: bool = True, pool_size: i
     return app
 
 
-@rowfence.job(("service", 1))
+@rowstile.job(("service", 1))
 async def digest(Session: async_sessionmaker[AsyncSession]) -> tuple[int, Principal | None]:
     """A background job: it signs in as service 1, whatever request started it."""
     async with Session() as s:
-        return (await s.scalar(select(func.count()).select_from(Project))) or 0, rowfence.current()
+        return (await s.scalar(select(func.count()).select_from(Project))) or 0, rowstile.current()

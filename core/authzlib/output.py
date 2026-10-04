@@ -11,7 +11,17 @@ from .identity import SESSION_OK, IdentityMixin
 from .insight import InsightMixin
 from .parse import Expr, Ref, Rule, Type, fail
 from .refusals import RefusalMixin
-from .sqlutil import STUB_COLUMNS, ident, lit, on_row, q, qt, row_cond
+from .sqlutil import (
+    POLICY_MARKS,
+    STUB_COLUMNS,
+    VIEW_MARKS,
+    ident,
+    lit,
+    on_row,
+    q,
+    qt,
+    row_cond,
+)
 from .trees import TreeMixin
 
 DEFINER = "SECURITY DEFINER SET search_path = pg_catalog, pg_temp"
@@ -133,7 +143,7 @@ BEGIN
       v_lines := 'no explanation: ' || SQLERRM;
     END;
     RAISE EXCEPTION {lit(msg)}, {self.key(t, 'OLD')} USING ERRCODE = 'insufficient_privilege', DETAIL = v_lines,
-      SCHEMA = {lit(schema)}, TABLE = {lit(table)}, CONSTRAINT = 'authz_update', HINT = 'rowfence help AZ709';
+      SCHEMA = {lit(schema)}, TABLE = {lit(table)}, CONSTRAINT = 'authz_update', HINT = 'rowstile help AZ709';
   END IF;
   RETURN NEW;
 END $f$;
@@ -205,7 +215,7 @@ CREATE OR REPLACE FUNCTION authz.uid() RETURNS {u.pktype} {attrs} AS $uid$ {body
 
     def api_sql(self) -> str:
         perms_of = {t.name: self.public_perms(t) for t in self.types.values()}
-        no_perm = "RAISE EXCEPTION 'no permission %.% in the policy', p_type, p_perm USING HINT = 'rowfence help AZ707';"
+        no_perm = "RAISE EXCEPTION 'no permission %.% in the policy', p_type, p_perm USING HINT = 'rowstile help AZ707';"
 
         def can_branch(t: Type) -> str | None:
             if not t.perms:
@@ -260,12 +270,12 @@ BEGIN
   -- a page cursor or size from a request: the caller's mistake, said plainly (the queries below would cast it)
   IF p_limit < 0 THEN
     RAISE EXCEPTION 'the page size must not be negative (got %)', p_limit
-      USING ERRCODE = 'invalid_parameter_value', HINT = 'rowfence help AZ710';
+      USING ERRCODE = 'invalid_parameter_value', HINT = 'rowstile help AZ710';
   END IF;
   IF p_after IS NOT NULL AND NOT coalesce(pg_catalog.pg_input_is_valid(p_after,
                                             (SELECT keytype FROM authz_int.types WHERE name = p_type)), true) THEN
     RAISE EXCEPTION 'the page cursor % is not a % id', quote_literal(left(p_after, 40)), p_type
-      USING ERRCODE = 'invalid_parameter_value', HINT = 'rowfence help AZ710';
+      USING ERRCODE = 'invalid_parameter_value', HINT = 'rowstile help AZ710';
   END IF;
   IF NOT authz_int.scope_perm(p_type, p_perm) THEN RETURN; END IF;
   CASE p_type || '.' || p_perm
@@ -282,7 +292,7 @@ DECLARE names text[];
 BEGIN
   CASE p_type
 {perms_cases or "    WHEN NULL THEN NULL;"}
-    ELSE RAISE EXCEPTION 'no type % in the policy', p_type USING HINT = 'rowfence help AZ707';
+    ELSE RAISE EXCEPTION 'no type % in the policy', p_type USING HINT = 'rowstile help AZ707';
   END CASE;
   RETURN ARRAY(SELECT n FROM unnest(names) n WHERE authz.can(p_type, p_id, n));
 END $f$;
@@ -399,13 +409,13 @@ BEGIN
   p_id := authz_int.canon(p_type, p_id);
   p_subject_id := authz_int.canon(p_subject_type, p_subject_id);
   IF NOT EXISTS (SELECT 1 FROM authz.principal()) THEN
-    RAISE EXCEPTION 'you cannot share % %', p_type, p_id USING ERRCODE = 'insufficient_privilege', HINT = 'rowfence help AZ705';
+    RAISE EXCEPTION 'you cannot share % %', p_type, p_id USING ERRCODE = 'insufficient_privilege', HINT = 'rowstile help AZ705';
   END IF;
   -- lock the object (FOR KEY SHARE): a concurrent delete waits for us, or we for it
   SELECT t.tbl, t.find INTO v_tbl, v_find FROM authz_int.types t WHERE t.name = p_type;
-  IF v_tbl IS NULL THEN RAISE EXCEPTION 'no type % in the policy', p_type USING HINT = 'rowfence help AZ707'; END IF;
+  IF v_tbl IS NULL THEN RAISE EXCEPTION 'no type % in the policy', p_type USING HINT = 'rowstile help AZ707'; END IF;
   IF NOT pg_catalog.pg_input_is_valid(p_id, (SELECT keytype FROM authz_int.types WHERE name = p_type)) THEN
-    RAISE EXCEPTION 'you cannot share % %', p_type, p_id USING ERRCODE = 'insufficient_privilege', HINT = 'rowfence help AZ705';
+    RAISE EXCEPTION 'you cannot share % %', p_type, p_id USING ERRCODE = 'insufficient_privilege', HINT = 'rowstile help AZ705';
   END IF;
   EXECUTE format('SELECT EXISTS (SELECT 1 FROM %s x WHERE %s FOR KEY SHARE)', v_tbl, v_find) INTO v_found USING p_id;
   -- a caller who may share nothing on the object gets the answer a missing object gets (this same RAISE),
@@ -417,7 +427,7 @@ BEGIN
     WHERE CASE WHEN EXISTS (SELECT 1 FROM authz_int.perms WHERE type = p_type AND perm = x.perm)
                THEN authz.can(p_type, p_id, x.perm) ELSE false END);
   IF NOT v_found THEN
-    RAISE EXCEPTION 'you cannot share % %', p_type, p_id USING ERRCODE = 'insufficient_privilege', HINT = 'rowfence help AZ705';
+    RAISE EXCEPTION 'you cannot share % %', p_type, p_id USING ERRCODE = 'insufficient_privilege', HINT = 'rowstile help AZ705';
   END IF;
   v_key := CASE WHEN p_subject_type IN ('anyone', 'link') THEN p_subject_type
                 WHEN p_subject_id = '*' AND p_subject_relation = '' THEN p_subject_type || ':*'
@@ -433,54 +443,54 @@ BEGIN
         INTO v_found USING p_subject_id;
     END IF;
     IF NOT v_found THEN
-      RAISE EXCEPTION 'there is no % %', p_subject_type, p_subject_id USING ERRCODE = 'foreign_key_violation', HINT = 'rowfence help AZ708';
+      RAISE EXCEPTION 'there is no % %', p_subject_type, p_subject_id USING ERRCODE = 'foreign_key_violation', HINT = 'rowstile help AZ708';
     END IF;
   END IF;
   IF p_relation LIKE 'role:%' THEN
     -- a custom role: its type must match, the subject must be allowed, and you must hold all it grants
     SELECT * INTO v_role FROM authz.roles WHERE 'role:' || id = p_relation;
     IF v_role.id IS NULL OR v_role.object_type <> p_type THEN
-      RAISE EXCEPTION 'no role % for %', p_relation, p_type USING HINT = 'rowfence help AZ706';
+      RAISE EXCEPTION 'no role % for %', p_relation, p_type USING HINT = 'rowstile help AZ706';
     END IF;
     IF NOT authz_int.role_owned(p_type, p_id, v_role.owner_type, v_role.owner_id) THEN
       RAISE EXCEPTION 'role % belongs to % %, which doesn''t own % %', v_role.name, v_role.owner_type, v_role.owner_id,
-        p_type, p_id USING HINT = 'rowfence help AZ706';
+        p_type, p_id USING HINT = 'rowstile help AZ706';
     END IF;
     IF NOT EXISTS (SELECT 1 FROM authz_int.role_subjects WHERE object_type = p_type AND subject = v_key) THEN
-      RAISE EXCEPTION 'custom roles on % cannot be given to %', p_type, v_key USING HINT = 'rowfence help AZ706';
+      RAISE EXCEPTION 'custom roles on % cannot be given to %', p_type, v_key USING HINT = 'rowstile help AZ706';
     END IF;
     IF NOT EXISTS (SELECT 1 FROM authz_int.perms WHERE type = p_type AND perm = 'share')
        OR NOT authz.can(p_type, p_id, 'share') THEN
-      RAISE EXCEPTION 'you cannot share % %', p_type, p_id USING ERRCODE = 'insufficient_privilege', HINT = 'rowfence help AZ705';
+      RAISE EXCEPTION 'you cannot share % %', p_type, p_id USING ERRCODE = 'insufficient_privilege', HINT = 'rowstile help AZ705';
     END IF;
     SELECT string_agg(permission, ', ') INTO v_need FROM authz.role_permissions
     WHERE role_id = v_role.id AND NOT authz.can(p_type, p_id, permission);
     IF v_need IS NOT NULL THEN
       RAISE EXCEPTION 'you cannot give role % on % %: you do not hold %', v_role.name, p_type, p_id, v_need
-        USING ERRCODE = 'insufficient_privilege', HINT = 'rowfence help AZ705';
+        USING ERRCODE = 'insufficient_privilege', HINT = 'rowstile help AZ705';
     END IF;
   ELSE
     SELECT * INTO v_rel FROM authz_int.shared_relations s
     WHERE s.object_type = p_type AND s.relation = p_relation AND s.subject = v_key;
     IF v_rel.relation IS NULL THEN
-      RAISE EXCEPTION 'the policy does not allow sharing %.% with %', p_type, p_relation, v_key USING HINT = 'rowfence help AZ706';
+      RAISE EXCEPTION 'the policy does not allow sharing %.% with %', p_type, p_relation, v_key USING HINT = 'rowstile help AZ706';
     END IF;
     IF NOT EXISTS (SELECT 1 FROM authz_int.perms WHERE type = p_type AND perm = v_rel.shared_by)
        OR NOT authz.can(p_type, p_id, v_rel.shared_by) THEN
-      RAISE EXCEPTION 'you cannot share % % (needs %)', p_type, p_id, v_rel.shared_by USING ERRCODE = 'insufficient_privilege', HINT = 'rowfence help AZ705';
+      RAISE EXCEPTION 'you cannot share % % (needs %)', p_type, p_id, v_rel.shared_by USING ERRCODE = 'insufficient_privilege', HINT = 'rowstile help AZ705';
     END IF;
     SELECT string_agg(n, ', ') INTO v_need FROM unnest(v_rel.required) n WHERE NOT authz.can(p_type, p_id, n);
     IF v_need IS NOT NULL THEN
       RAISE EXCEPTION 'you cannot grant %.% on % %: you do not hold %', p_type, p_relation, p_type, p_id, v_need
-        USING ERRCODE = 'insufficient_privilege', HINT = 'rowfence help AZ705';
+        USING ERRCODE = 'insufficient_privilege', HINT = 'rowstile help AZ705';
     END IF;
     IF NOT authz_int.share_if(p_type || '.' || p_relation || '.' || v_key, p_id, p_subject_type,
                               p_subject_id, p_subject_relation) THEN
-      RAISE EXCEPTION 'the policy does not allow this share (%)', {self.line_sql(None, None, 'v_rel.loc')} USING ERRCODE = 'insufficient_privilege', HINT = 'rowfence help AZ706';
+      RAISE EXCEPTION 'the policy does not allow this share (%)', {self.line_sql(None, None, 'v_rel.loc')} USING ERRCODE = 'insufficient_privilege', HINT = 'rowstile help AZ706';
     END IF;
   END IF;
   IF p_caveat IS NOT NULL AND NOT EXISTS (SELECT 1 FROM authz_int.caveats WHERE name = p_caveat) THEN
-    RAISE EXCEPTION 'no caveat % in the policy', p_caveat USING HINT = 'rowfence help AZ707';
+    RAISE EXCEPTION 'no caveat % in the policy', p_caveat USING HINT = 'rowstile help AZ707';
   END IF;
   INSERT INTO authz.shares (object_type, object_id, relation, subject_type, subject_id, subject_relation,
                             expires_at, created_by, starts_at, caveat, caveat_args)
@@ -516,7 +526,7 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM authz.principal()) OR v_by IS NULL
      OR NOT EXISTS (SELECT 1 FROM authz_int.perms WHERE type = p_type AND perm = v_by)
      OR NOT authz.can(p_type, p_id, v_by) THEN
-    RAISE EXCEPTION 'you cannot share % %', p_type, p_id USING ERRCODE = 'insufficient_privilege', HINT = 'rowfence help AZ705';
+    RAISE EXCEPTION 'you cannot share % %', p_type, p_id USING ERRCODE = 'insufficient_privilege', HINT = 'rowstile help AZ705';
   END IF;
   DELETE FROM authz.shares WHERE object_type = p_type AND object_id = p_id
     AND relation = p_relation AND subject_type = p_subject_type
@@ -549,19 +559,19 @@ DECLARE v_id bigint; v_bad text;
 BEGIN
   PERFORM authz_int.check_writable();
   IF NOT EXISTS (SELECT 1 FROM authz_int.perms WHERE type = p_owner_type AND perm = 'manage_roles') THEN
-    RAISE EXCEPTION '% has no manage_roles permission in the policy', p_owner_type USING HINT = 'rowfence help AZ707';
+    RAISE EXCEPTION '% has no manage_roles permission in the policy', p_owner_type USING HINT = 'rowstile help AZ707';
   END IF;
   IF authz.uid() IS NULL OR NOT authz.can(p_owner_type, p_owner_id, 'manage_roles') THEN
-    RAISE EXCEPTION 'you cannot manage roles of % %', p_owner_type, p_owner_id USING ERRCODE = 'insufficient_privilege', HINT = 'rowfence help AZ705';
+    RAISE EXCEPTION 'you cannot manage roles of % %', p_owner_type, p_owner_id USING ERRCODE = 'insufficient_privilege', HINT = 'rowstile help AZ705';
   END IF;
   IF p_owner_type IS DISTINCT FROM coalesce(authz_int.role_owner_type(p_object_type), p_owner_type) THEN
     RAISE EXCEPTION 'custom roles on % belong to a % (the policy says where they come from), not to a %',
-      p_object_type, authz_int.role_owner_type(p_object_type), p_owner_type USING HINT = 'rowfence help AZ706';
+      p_object_type, authz_int.role_owner_type(p_object_type), p_owner_type USING HINT = 'rowstile help AZ706';
   END IF;
   SELECT string_agg(p, ', ') INTO v_bad FROM unnest(p_permissions) p
   WHERE NOT EXISTS (SELECT 1 FROM authz_int.role_grantable g WHERE g.object_type = p_object_type AND g.permission = p);
   IF v_bad IS NOT NULL THEN
-    RAISE EXCEPTION 'custom roles on % cannot grant %', p_object_type, v_bad USING HINT = 'rowfence help AZ706';
+    RAISE EXCEPTION 'custom roles on % cannot grant %', p_object_type, v_bad USING HINT = 'rowstile help AZ706';
   END IF;
   INSERT INTO authz.roles (owner_type, owner_id, object_type, name, created_by)
   VALUES (p_owner_type, authz_int.canon(p_owner_type, p_owner_id), p_object_type, p_name, authz.uid()::text)
@@ -579,11 +589,11 @@ BEGIN
   PERFORM authz_int.check_writable();
   SELECT * INTO v FROM authz.roles WHERE id = p_role;
   IF v.id IS NULL OR authz.uid() IS NULL OR NOT authz.can(v.owner_type, v.owner_id, 'manage_roles') THEN
-    RAISE EXCEPTION 'you cannot manage role %', p_role USING ERRCODE = 'insufficient_privilege', HINT = 'rowfence help AZ705';
+    RAISE EXCEPTION 'you cannot manage role %', p_role USING ERRCODE = 'insufficient_privilege', HINT = 'rowstile help AZ705';
   END IF;
   SELECT string_agg(p, ', ') INTO v_bad FROM unnest(p_permissions) p
   WHERE NOT EXISTS (SELECT 1 FROM authz_int.role_grantable g WHERE g.object_type = v.object_type AND g.permission = p);
-  IF v_bad IS NOT NULL THEN RAISE EXCEPTION 'custom roles on % cannot grant %', v.object_type, v_bad USING HINT = 'rowfence help AZ706'; END IF;
+  IF v_bad IS NOT NULL THEN RAISE EXCEPTION 'custom roles on % cannot grant %', v.object_type, v_bad USING HINT = 'rowstile help AZ706'; END IF;
   DELETE FROM authz.role_permissions WHERE role_id = p_role;
   INSERT INTO authz.role_permissions SELECT p_role, p FROM unnest(p_permissions) p ON CONFLICT DO NOTHING;
 END $f$;
@@ -593,7 +603,7 @@ BEGIN
   PERFORM authz_int.check_writable();
   SELECT * INTO v FROM authz.roles WHERE id = p_role;
   IF v.id IS NULL OR authz.uid() IS NULL OR NOT authz.can(v.owner_type, v.owner_id, 'manage_roles') THEN
-    RAISE EXCEPTION 'you cannot manage role %', p_role USING ERRCODE = 'insufficient_privilege', HINT = 'rowfence help AZ705';
+    RAISE EXCEPTION 'you cannot manage role %', p_role USING ERRCODE = 'insufficient_privilege', HINT = 'rowstile help AZ705';
   END IF;
   DELETE FROM authz.roles WHERE id = p_role;
 END $f$;
@@ -606,7 +616,7 @@ BEGIN
         AND authz.can(p_owner_type, p_owner_id, 'manage_roles'))
     OR (EXISTS (SELECT 1 FROM authz_int.perms WHERE type = p_owner_type AND perm = 'view')
         AND authz.can(p_owner_type, p_owner_id, 'view'))) THEN
-    RAISE EXCEPTION 'you cannot see roles of % %', p_owner_type, p_owner_id USING ERRCODE = 'insufficient_privilege', HINT = 'rowfence help AZ705';
+    RAISE EXCEPTION 'you cannot see roles of % %', p_owner_type, p_owner_id USING ERRCODE = 'insufficient_privilege', HINT = 'rowstile help AZ705';
   END IF;
   RETURN QUERY SELECT r.id, r.object_type, r.name,
     ARRAY(SELECT p.permission FROM authz.role_permissions p WHERE p.role_id = r.id ORDER BY 1)
@@ -631,7 +641,7 @@ BEGIN
   SELECT pg_catalog.string_agg(pg_catalog.format('%I (%s)', pw.schema, pw.who), ', ') INTO v_bad FROM ({writers}) pw;
   IF v_bad IS NOT NULL THEN
     RAISE EXCEPTION 'the search path has schemas that roles other than the owner may create objects in: % [AZ612]', v_bad
-      USING HINT = 'rowfence''s functions that run as the owner resolve names on this path, so a function made there could run as the owner: revoke CREATE on those schemas, or apply with a search path without them';
+      USING HINT = 'rowstile''s functions that run as the owner resolve names on this path, so a function made there could run as the owner: revoke CREATE on those schemas, or apply with a search path without them';
   END IF;
   SELECT pg_catalog.string_agg(pg_catalog.quote_ident(s.name), ', ' ORDER BY s.i) INTO v_path
   FROM pg_catalog.unnest(pg_catalog.current_schemas(false)) WITH ORDINALITY s(name, i)
@@ -651,7 +661,7 @@ END $sp$;"""
         """Nobody but the owner keeps a privilege on authz, authz_gen, authz_int or what is in them, except what
         the policy grants below (a previous version of the policy may have named another role; the owner's default
         privileges give new objects to others)."""
-        return f"""-- Privileges the policy doesn't give on rowfence's schemas and what is in them are taken back
+        return f"""-- Privileges the policy doesn't give on rowstile's schemas and what is in them are taken back
 DO $r$
 DECLARE g record; v_taken int := 0;
 BEGIN
@@ -660,7 +670,7 @@ BEGIN
     v_taken := v_taken + 1;
   END LOOP;
   IF v_taken > 0 THEN
-    RAISE WARNING 'took back % privileges on rowfence''s schemas that the policy doesn''t give (default privileges of the owner, or grants made since the last apply)', v_taken;
+    RAISE WARNING 'took back % privileges on rowstile''s schemas that the policy doesn''t give (default privileges of the owner, or grants made since the last apply)', v_taken;
   END IF;
 END $r$;"""
 
@@ -704,7 +714,7 @@ BEGIN
                    cols, {lit(where)});
   END;
 END $mv$;
-COMMENT ON VIEW {qt(view)} IS 'rowfence masked view';
+COMMENT ON VIEW {qt(view)} IS 'rowstile masked view';
 REVOKE ALL ON {qt(view)} FROM PUBLIC;
 GRANT SELECT ON {qt(view)} TO {self.role};""")
         masked: dict[str, list[str]] = {}
@@ -758,7 +768,7 @@ BEGIN
            FROM pg_depend d WHERE d.refclassid = 'pg_class'::regclass AND d.refobjid = c.oid AND d.deptype = 'n'
              AND NOT (d.classid = 'pg_rewrite'::regclass AND d.objid IN (SELECT oid FROM pg_rewrite WHERE ev_class = c.oid))) || ')', '; ')
   INTO v_old FROM pg_class c JOIN pg_description d ON d.objoid = c.oid AND d.classoid = 'pg_class'::regclass
-  WHERE c.relkind = 'v' AND d.description = 'rowfence masked view' AND c.oid <> ALL (ARRAY[{ours}]::oid[]);
+  WHERE c.relkind = 'v' AND d.description IN {VIEW_MARKS} AND c.oid <> ALL (ARRAY[{ours}]::oid[]);
   IF v_old IS NOT NULL THEN
     RAISE EXCEPTION 'this policy no longer makes a masked view that something in the database is built on: % [AZ617]', v_old
       USING HINT = 'Drop or change what is built on it, then apply again.';
@@ -767,7 +777,7 @@ END $kv$;"""
 
     def compile(self, source_name: str, transaction: bool = True) -> str:
         """The SQL that applies the policy, base tables included. With transaction (for psql), it is one
-        transaction; without, it runs inside the caller's (the rowfence command's)."""
+        transaction; without, it runs inside the caller's (the rowstile command's)."""
         for t in self.types.values():
             for p in t.perms.values():
                 self.ensure_view(t, p)
@@ -817,7 +827,7 @@ END $kv$;"""
                 else:
                     policies.append(f"{head}CREATE POLICY {name} ON {qt(table)} FOR {r.command.upper()} TO {self.role}\n"
                                     f"  USING ({sql});")
-                policies.append(f"COMMENT ON POLICY {name} ON {qt(table)} IS 'rowfence';")
+                policies.append(f"COMMENT ON POLICY {name} ON {qt(table)} IS 'rowstile';")
 
         shared_types = {t.name for t in self.types.values()
                         for r in t.relations.values() for src in r.sources if src.kind in ("shared", "roles")}
@@ -951,7 +961,7 @@ END $w$;"""
         # everything); 'always', in every migration; 'changed', when its SQL changed; 'created', also when
         # anything was made; 'objects', what changed of its functions, views, tables, triggers and policies;
         # 'tree', an inheritance tree, rebuilt when its definition changed.
-        parts = [("full", "header", f"-- Generated by rowfence from {source_name}. Edit the policy file, not this file."),
+        parts = [("full", "header", f"-- Generated by rowstile from {source_name}. Edit the policy file, not this file."),
                  ("full", "begin", "BEGIN;" if transaction else ""),
                  ("full", "lock_timeout",
                   "-- Applying locks the app's tables. Wait for them 10 s at most (unless lock_timeout is set) instead\n"
@@ -1129,19 +1139,19 @@ CREATE TRIGGER authz_shares_canon BEFORE INSERT OR UPDATE OF object_type, object
         return "\n".join(types + [canon, trigger])
 
 
-DROP_OLD_POLICIES = """-- Remove the policies the previous version of this policy made (remembering their tables)
+DROP_OLD_POLICIES = f"""-- Remove the policies the previous version of this policy made (remembering their tables)
 CREATE TEMP TABLE authz_old_tables ON COMMIT DROP AS
   SELECT DISTINCT p.polrelid::regclass AS tbl
   FROM pg_policy p
   LEFT JOIN pg_description d ON d.objoid = p.oid AND d.classoid = 'pg_policy'::regclass
-  WHERE d.description = 'rowfence' OR p.polname IN ('authz_select', 'authz_insert', 'authz_update', 'authz_delete');
+  WHERE d.description IN {POLICY_MARKS} OR p.polname IN ('authz_select', 'authz_insert', 'authz_update', 'authz_delete');
 DO $d$
 DECLARE old record;
 BEGIN
   FOR old IN SELECT pol.polname, pol.polrelid::regclass AS tbl
              FROM pg_policy pol
              LEFT JOIN pg_description d ON d.objoid = pol.oid AND d.classoid = 'pg_policy'::regclass
-             WHERE d.description = 'rowfence' OR pol.polname IN ('authz_select', 'authz_insert', 'authz_update', 'authz_delete') LOOP
+             WHERE d.description IN {POLICY_MARKS} OR pol.polname IN ('authz_select', 'authz_insert', 'authz_update', 'authz_delete') LOOP
     EXECUTE format('DROP POLICY %I ON %s', old.polname, old.tbl);
   END LOOP;
 END $d$;"""
@@ -1182,24 +1192,24 @@ BEGIN
   END LOOP;
 END $rls$;"""
 
-DROP_MASKED_VIEWS = """-- The masked views the previous version made (views built on them stop this: drop those first)
+DROP_MASKED_VIEWS = f"""-- The masked views the previous version made (views built on them stop this: drop those first)
 DO $mv$
 DECLARE v record;
 BEGIN
   FOR v IN SELECT c.oid::regclass AS name FROM pg_class c JOIN pg_description d ON d.objoid = c.oid
-           AND d.classoid = 'pg_class'::regclass WHERE c.relkind = 'v' AND d.description = 'rowfence masked view' LOOP
+           AND d.classoid = 'pg_class'::regclass WHERE c.relkind = 'v' AND d.description IN {VIEW_MARKS} LOOP
     EXECUTE format('DROP VIEW %s', v.name);
   END LOOP;
 END $mv$;"""
 
 # What apply does with them: gone, to be made again; one that something of the app's is built on (a view over it)
 # can't be dropped, so it is emptied in place, and CREATE OR REPLACE VIEW defines it again further down
-RESET_MASKED_VIEWS = """-- The masked views the previous version made are made again; one that something is built on stays, emptied
+RESET_MASKED_VIEWS = f"""-- The masked views the previous version made are made again; one that something is built on stays, emptied
 DO $mv$
 DECLARE v record; cols text;
 BEGIN
   FOR v IN SELECT c.oid, c.oid::regclass AS name FROM pg_class c JOIN pg_description d ON d.objoid = c.oid
-           AND d.classoid = 'pg_class'::regclass WHERE c.relkind = 'v' AND d.description = 'rowfence masked view' LOOP
+           AND d.classoid = 'pg_class'::regclass WHERE c.relkind = 'v' AND d.description IN {VIEW_MARKS} LOOP
     BEGIN
       EXECUTE format('DROP VIEW %s', v.name);
     EXCEPTION WHEN dependent_objects_still_exist THEN

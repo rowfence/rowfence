@@ -1,84 +1,84 @@
 #!/usr/bin/env python3
-"""rowfence: compile policies and apply them to a database, from a terminal, CI or a migration.
+"""rowstile: compile policies and apply them to a database, from a terminal, CI or a migration.
 
-    rowfence dev     [--once] [--no-studio] [--studio-port N]
+    rowstile dev     [--once] [--no-studio] [--studio-port N]
                                                    on each save: check, diff, push, test, write the clients;
                                                    Studio on http://localhost:4983 beside it
-    rowfence studio  [--port N] [--write]          Studio: the tables as anyone, why and how to grant, the graph,
+    rowstile studio  [--port N] [--write]          Studio: the tables as anyone, why and how to grant, the graph,
                                                    the access diff, shares and requests (read-only unless --write)
-    rowfence migrate [POLICY.authz] [--name NAME] [--check] [--tool T] [--dir D] [--one-phase]
+    rowstile migrate [POLICY.authz] [--name NAME] [--check] [--tool T] [--dir D] [--one-phase]
                                                    write the policy's changes since the lock file as a migration
                                                    for the app's migration tool (no database needed); two when
                                                    inheritance trees are built beside the ones in use first
                                                    (--one-phase: one); --check: exit 1 if there are changes no
                                                    migration has (for CI)
-    rowfence review  [--base REF] [--markdown|--json|--annotations] [--db DSN]
+    rowstile review  [--base REF] [--markdown|--json|--annotations] [--db DSN]
                                                    what the change since REF (default main) does: meaning,
                                                    access (with --db: a database at REF with review data),
                                                    risk, tests, deploy; the pull request comment with --markdown
                                                    (exit 0 whatever it finds: test and migrate --check gate)
-    rowfence fmt     [--check] [FILE.authz ...]     write policies and test files one way (--check: exit 1 if
+    rowstile fmt     [--check] [FILE.authz ...]     write policies and test files one way (--check: exit 1 if
                                                    one isn't; for CI); line endings stay the file's own
-    rowfence push    [POLICY.authz] [--development]
+    rowstile push    [POLICY.authz] [--development]
                                                    bring a development database to the policy with the same
                                                    migration (never production: that takes migrations); a
                                                    database with a policy must be marked as one first, once:
                                                    --development (the first push to one with none marks it)
-    rowfence apply   [POLICY.authz] [--force]      apply it whole (and the files it includes), unless it is in force;
+    rowstile apply   [POLICY.authz] [--force]      apply it whole (and the files it includes), unless it is in force;
                                                    --force: in any case, and every inheritance table computed again
                                                    (after authz.verify() said false)
                                                    (apply, push and migrate refuse a database or lock file a newer
-                                                   rowfence wrote; --downgrade goes back on purpose)
-    rowfence check   [POLICY.authz]                report its first mistake, as 'file: line N: message'
-    rowfence prove   [POLICY.authz] [--worlds N]   every invariant in many small worlds (no database): the
+                                                   rowstile wrote; --downgrade goes back on purpose)
+    rowstile check   [POLICY.authz]                report its first mistake, as 'file: line N: message'
+    rowstile prove   [POLICY.authz] [--worlds N]   every invariant in many small worlds (no database): the
                                                    smallest counterexample, or that none was found
-    rowfence diff    [POLICY.authz] [--users 1,2] [--limit N]
+    rowstile diff    [POLICY.authz] [--users 1,2] [--limit N]
                                                    who would gain and lose what; changes nothing
-    rowfence test    [TESTS.authz ...] [--coverage]
+    rowstile test    [TESTS.authz ...] [--coverage]
                                                    the policy's tests, these named tests, and the invariants;
                                                    --coverage: the branches of each permission no test makes true
-    rowfence graph   [POLICY.authz]                Mermaid diagram (of the current policy if none given)
-    rowfence lint                                  the ways around row-level security the database leaves open
+    rowstile graph   [POLICY.authz]                Mermaid diagram (of the current policy if none given)
+    rowstile lint                                  the ways around row-level security the database leaves open
                                                    (authz.lint()); exit 1 if there are errors or warnings
-    rowfence indexes [--check]                     the lookups the policy makes into the app's tables that no
+    rowstile indexes [--check]                     the lookups the policy makes into the app's tables that no
                                                    index serves, and the line to add for the migration tool
-    rowfence plans   [--as WHO]                    each governed table read as someone (EXPLAIN ANALYZE): the
+    rowstile plans   [--as WHO]                    each governed table read as someone (EXPLAIN ANALYZE): the
                                                    time, and full scans or per-row subplans that would be slow
-    rowfence bench   [--people N] [--rounds N]     p50 and p95 of reads, lists, checks and updates (undone), as
+    rowstile bench   [--people N] [--rounds N]     p50 and p95 of reads, lists, checks and updates (undone), as
                                                    people in the data
-    rowfence snapshot [--check] [--out FILE]      who holds what on this database's data, one sorted line per
+    rowstile snapshot [--check] [--out FILE]      who holds what on this database's data, one sorted line per
                                                    object and permission (for review data: commit it, and a
                                                    pull request that changes access changes it); --check: exit 1
                                                    if it is out of date
-    rowfence client  [py|ts] [POLICY.authz]        typed helpers for app code; with neither, writes the
-                                                   clients rowfence.toml names
-    rowfence init    [--schema app,...] [--users app.users] [--role app_user] [--out db]
-                                                   a first policy from the database's tables, and rowfence.toml
-    rowfence lsp                                   the language server, for editors (stdin and stdout)
-    rowfence mcp                                   the MCP server, for coding agents (stdin and stdout): check,
+    rowstile client  [py|ts] [POLICY.authz]        typed helpers for app code; with neither, writes the
+                                                   clients rowstile.toml names
+    rowstile init    [--schema app,...] [--users app.users] [--role app_user] [--out db]
+                                                   a first policy from the database's tables, and rowstile.toml
+    rowstile lsp                                   the language server, for editors (stdin and stdout)
+    rowstile mcp                                   the MCP server, for coding agents (stdin and stdout): check,
                                                    prove, review, test, why, lint, and push to a development database
-    rowfence --version                             the version, and the Python it runs on
-    rowfence help AZ201                            what a mistake's code means, and how to fix it (help errors: all)
+    rowstile --version                             the version, and the Python it runs on
+    rowstile help AZ201                            what a mistake's code means, and how to fix it (help errors: all)
 
   asking the database as someone (--as user:42, bot:7, or anyone):
-    rowfence can     --as WHO TYPE ID PERM         yes or no
-    rowfence explain --as WHO TYPE ID PERM         why, or what is missing
-    rowfence perms   --as WHO TYPE ID              every permission WHO holds on it
-    rowfence list    --as WHO TYPE PERM            every id WHO holds PERM on
-    rowfence who     TYPE ID PERM                  everyone who holds PERM on it
-    rowfence why     --as WHO TYPE ID PERM         yes and why; or no, why not, and the smallest changes that
+    rowstile can     --as WHO TYPE ID PERM         yes or no
+    rowstile explain --as WHO TYPE ID PERM         why, or what is missing
+    rowstile perms   --as WHO TYPE ID              every permission WHO holds on it
+    rowstile list    --as WHO TYPE PERM            every id WHO holds PERM on
+    rowstile who     TYPE ID PERM                  everyone who holds PERM on it
+    rowstile why     --as WHO TYPE ID PERM         yes and why; or no, why not, and the smallest changes that
                                                    would grant it (each tried and undone)
-    rowfence explain-rule --as WHO TABLE insert|update|delete [ID] [--row JSON]
+    rowstile explain-rule --as WHO TABLE insert|update|delete [ID] [--row JSON]
                                                    why a write is (or would be) refused
-    rowfence sql     --as WHO "SELECT ..."         a statement as the app role signed in as WHO; rolled back
+    rowstile sql     --as WHO "SELECT ..."         a statement as the app role signed in as WHO; rolled back
 
-    rowfence reapply [--force]                     apply the policy in force again (after upgrading rowfence);
+    rowstile reapply [--force]                     apply the policy in force again (after upgrading rowstile);
                                                    --force: and compute every inheritance table again
-    rowfence remove  --yes                         remove everything the current policy made
+    rowstile remove  --yes                         remove everything the current policy made
 
 The database is --db DSN (host=... port=... user=... password=... dbname=..., or a postgresql:// URL), else
-rowfence.toml's `database` (in this folder or a folder above it), else DATABASE_URL, else the PG* environment variables.
-rowfence.toml:
+rowstile.toml's `database` (in this folder or a folder above it), else DATABASE_URL, else the PG* environment variables.
+rowstile.toml:
 
     policy   = "db/policy.authz"
     tests    = ["db/tests/*.authz"]
@@ -90,8 +90,8 @@ rowfence.toml:
     tool = "alembic"                       # alembic, prisma, drizzle, sql, goose, dbmate or flyway
     dir  = "alembic/versions"              # where the tool keeps them (each tool has a default)
     lock = "db/policy.lock"                # what the migrations made so far (default: next to the policy)
-    write_after = 300                      # rowfence dev writes the migration this long after the last save
-                                           # (seconds; 0: never, run rowfence migrate yourself)
+    write_after = 300                      # rowstile dev writes the migration this long after the last save
+                                           # (seconds; 0: never, run rowstile migrate yourself)
 
 The compiler runs here: the database only runs the SQL it writes, and the authz.* functions
 apps call. Applying, previewing and testing each run in one transaction on the database.
@@ -114,10 +114,12 @@ import pgwire  # noqa: E402
 from authzlib import database  # noqa: E402
 from authzlib.connection import Row, Value  # noqa: E402
 from authzlib.parse import collect_includes, disk_reader, within  # noqa: E402
+from authzlib.sqlutil import POLICY_MARKS  # noqa: E402
 
 T = TypeVar("T")
 
-CONFIG = "rowfence.toml"
+CONFIG = "rowstile.toml"
+OLD_CONFIG = "rowfence.toml"   # the file's name before rowstile was renamed, read with a warning
 EXPLAIN_SHOWN = 12          # lines of a failing check's explanation shown
 
 
@@ -207,9 +209,9 @@ def table(rows: Sequence[Sequence[object]], cols: list[str]) -> str:
     return "\n".join([line(cols), line(["-" * w for w in width])] + [line(r) for r in cells])
 
 
-# --- rowfence.toml -----------------------------------------------------------------------------
+# --- rowstile.toml -----------------------------------------------------------------------------
 class Config:
-    """rowfence.toml, read with a typed accessor per setting."""
+    """rowstile.toml, read with a typed accessor per setting."""
 
     def __init__(self, path: str | None = None, data: Mapping[str, object] | None = None) -> None:
         self.path = path
@@ -220,7 +222,7 @@ class Config:
         return os.path.normpath(os.path.join(self.dir, name))
 
     def inside(self, name: str, what: str) -> str:
-        """A file rowfence.toml names to be read (the policy, the tests, the lock): in rowfence.toml's folder, also
+        """A file rowstile.toml names to be read (the policy, the tests, the lock): in rowstile.toml's folder, also
         through links. The file may be a pull request's, read by CI: it must not name the runner's own files."""
         path = self.file(name)
         top = os.path.realpath(self.dir)
@@ -259,7 +261,7 @@ class Config:
     @property
     def clients(self) -> dict[str, str]:
         """{language: path}; the TypeScript one is only the policy's names when the app uses the SDK
-        (a dependency on @rowfence/* in its package.json): the SDK has the rest."""
+        (a dependency on @rowstile/* in its package.json): the SDK has the rest."""
         out: dict[str, str] = {}
         for lang, p in self.section("clients").items():
             if isinstance(p, str):
@@ -273,7 +275,7 @@ class Config:
 
     @property
     def write_after(self) -> float:
-        """[migrations] write_after: seconds after the last save that rowfence dev writes the migration (0: never)."""
+        """[migrations] write_after: seconds after the last save that rowstile dev writes the migration (0: never)."""
         if "migrations" not in self.data:
             return 0
         value = self.section("migrations").get("write_after", 300)
@@ -286,7 +288,7 @@ class Config:
                 with open(os.path.join(d, "package.json"), encoding="utf-8") as fh:
                     import stack
                     deps = stack.dependencies(json.load(fh))
-                return any(name.startswith("@rowfence/") for name in deps)
+                return any(name.startswith("@rowstile/") for name in deps)
             except (OSError, ValueError):
                 pass
             parent = os.path.dirname(d)
@@ -305,7 +307,7 @@ class Config:
         return db
 
 
-# what rowfence.toml may hold: {setting: its type in words}, top-level and per [table]
+# what rowstile.toml may hold: {setting: its type in words}, top-level and per [table]
 SETTINGS: dict[str, dict[str, str]] = {
     "": {"policy": "text", "tests": "a list of patterns", "database": "text"},
     "clients": {"py": "text", "python": "text", "ts": "text", "typescript": "text", "ts-sdk": "text"},
@@ -315,7 +317,7 @@ SETTINGS: dict[str, dict[str, str]] = {
 
 
 def check_settings(path: str, data: Mapping[str, object]) -> None:
-    """Refuses a setting rowfence doesn't know, or one of the wrong type: left alone, `tests = "..."` runs no test."""
+    """Refuses a setting rowstile doesn't know, or one of the wrong type: left alone, `tests = "..."` runs no test."""
     def right(value: object, kind: str) -> bool:
         if kind == "text":
             return isinstance(value, str)
@@ -332,7 +334,7 @@ def check_settings(path: str, data: Mapping[str, object]) -> None:
                 check(key, {str(k): v for k, v in value.items()})
             elif key not in SETTINGS[table]:
                 known = ", ".join(SETTINGS[table]) + (", and the tables [clients], [migrations], [review]" if not table else "")
-                fail(f"{path}: {name} is not a setting rowfence knows ({known})", 2)
+                fail(f"{path}: {name} is not a setting rowstile knows ({known})", 2)
             elif not right(value, SETTINGS[table][key]):
                 example = 'tests = ["db/tests/*.authz"]' if key == "tests" else f"{key} = ..."
                 fail(f"{path}: {name} is {SETTINGS[table][key]}: {example}", 2)
@@ -343,6 +345,9 @@ def load_config() -> Config:
     d = os.getcwd()
     while True:
         path = os.path.join(d, CONFIG)
+        if not os.path.exists(path) and os.path.exists(old := os.path.join(d, OLD_CONFIG)):
+            print(f"{old}: rowstile was called rowfence; rename this file {CONFIG} (it is read for now)", file=sys.stderr)
+            path = old
         if os.path.exists(path):
             try:
                 import tomllib
@@ -389,7 +394,7 @@ def sign_in(q: Query, who: str) -> None:
 
 def app_role(q: Query) -> str:
     rows = q("SELECT DISTINCT r.rolname FROM pg_catalog.pg_policy p JOIN pg_catalog.pg_description d ON d.objoid = p.oid "
-             "AND d.classoid = 'pg_catalog.pg_policy'::regclass AND d.description = 'rowfence' "
+             f"AND d.classoid = 'pg_catalog.pg_policy'::regclass AND d.description IN {POLICY_MARKS} "
              "CROSS JOIN unnest(p.polroles) ro JOIN pg_catalog.pg_roles r ON r.oid = ro")
     if not rows:
         fail("no policy with rules is applied, so there is no app role to run as", 1)
@@ -412,8 +417,8 @@ class Unreadable(Exception):
 
 
 def write_clients(cfg: Config, text: str, files: dict[str, str]) -> list[str]:
-    """Writes the clients rowfence.toml names; returns the files that changed. Every client is made before any
-    file is opened: a mistake in the policy, or a language rowfence doesn't know, leaves the files as they were."""
+    """Writes the clients rowstile.toml names; returns the files that changed. Every client is made before any
+    file is opened: a mistake in the policy, or a language rowstile doesn't know, leaves the files as they were."""
     made = {path: database.client(lang, text, files) for lang, path in cfg.clients.items()}
     written: list[str] = []
     for path, code in made.items():
@@ -449,7 +454,7 @@ def report_tests(rows: list[database.TestRow], out: Callable[[str], None] = prin
             for r in rest[:EXPLAIN_SHOWN]:
                 out(f"          {r}")
             if len(rest) > EXPLAIN_SHOWN:
-                out(f"          ... {len(rest) - EXPLAIN_SHOWN} more lines (rowfence explain --as ... shows them all)")
+                out(f"          ... {len(rest) - EXPLAIN_SHOWN} more lines (rowstile explain --as ... shows them all)")
     return failed
 
 
@@ -481,7 +486,7 @@ class Dev:
         self.conn: pgwire.Connection | None = None
         self.notices: list[pgwire.Fields] = []
         self.lint: set[str] | None = None
-        self.studio_port: int | None = None     # rowfence dev starts Studio on it (None: not)
+        self.studio_port: int | None = None     # rowstile dev starts Studio on it (None: not)
 
     def connect(self) -> pgwire.Connection:
         if self.conn is None:
@@ -492,7 +497,7 @@ class Dev:
         return self.conn
 
     def index_warnings(self) -> None:
-        """The lookups the policy makes into the app's tables that no index serves (rowfence indexes), once."""
+        """The lookups the policy makes into the app's tables that no index serves (rowstile indexes), once."""
         from authzlib import perf
         try:
             missing = transaction(self.connect(), lambda db: perf.missing_indexes(
@@ -591,7 +596,7 @@ class Dev:
             return
         parts = [f"{users} user(s) {change.rstrip('s')} {what} on {objs} of {type_}"
                  for change, type_, what, users, objs in rows[:8]]
-        more = f"\n... and {len(rows) - 8} more (rowfence diff)" if len(rows) > 8 else ""
+        more = f"\n... and {len(rows) - 8} more (rowstile diff)" if len(rows) > 8 else ""
         self.say("~", "access:\n" + "\n".join(parts) + more)
 
     def tests(self, conn: pgwire.Connection) -> bool:
@@ -600,7 +605,7 @@ class Dev:
         rows, report = transaction(conn, lambda db: database.coverage(db, tests), keep=False)
         failed = report_tests(rows, out=lambda s: None)
         if not rows:
-            self.say("ok", "no tests yet (rowfence.toml: tests = [\"db/tests/*.authz\"])")
+            self.say("ok", "no tests yet (rowstile.toml: tests = [\"db/tests/*.authz\"])")
             return True
         if not failed:
             missing = coverage.summary(report)
@@ -616,7 +621,7 @@ class Dev:
         if reconfigure is not None:
             reconfigure(line_buffering=True)     # a line as it happens, even into a pipe or a log
         target = pgwire.parse_dsn(self.dsn)
-        print(f"rowfence dev: {relative(self.policy)} -> {target['database']} on {target['host']}:{target['port']}")
+        print(f"rowstile dev: {relative(self.policy)} -> {target['database']} on {target['host']}:{target['port']}")
         passed = self.cycle("start")
         if passed:
             self.index_warnings()
@@ -630,11 +635,11 @@ class Dev:
                                     read_policy=read_policy).start(background=True)
                 print(f"Studio on {url}")
             except OSError as e:
-                print(f"Studio didn't start ({e}): rowfence dev --studio-port N for another port")
+                print(f"Studio didn't start ({e}): rowstile dev --studio-port N for another port")
         files = watched(self.cfg, self.policy)
         seen = stamp(files)
-        # with [migrations] in rowfence.toml, the migration is written once you stop editing (write_after
-        # seconds after the last save that passed; 0: never, run rowfence migrate yourself)
+        # with [migrations] in rowstile.toml, the migration is written once you stop editing (write_after
+        # seconds after the last save that passed; 0: never, run rowstile migrate yourself)
         after = self.cfg.write_after
         pending: float | None = None
         print(f"watching {len(files)} file(s); Ctrl-C to stop")
@@ -680,7 +685,7 @@ ARGUMENTS: dict[str, int | None] = {
 def main(argv: list[str]) -> None:
     dsn: str | None = None
     opts: dict[str, str] = {}
-    # options are read wherever they are on the line: `rowfence --db URL lint` and `rowfence lint --db URL`
+    # options are read wherever they are on the line: `rowstile --db URL lint` and `rowstile lint --db URL`
     # (for `sql`, not in its last argument: that is the statement, which may hold anything)
     def options() -> list[str]:
         return argv[:-1] if "sql" in argv else argv
@@ -711,13 +716,13 @@ def main(argv: list[str]) -> None:
         elif code in ("ERRORS", "CODES"):
             sys.stdout.write(errors.index())
         else:
-            fail(f"rowfence help: no code {argv[1]} (rowfence help errors lists them)", 2)
+            fail(f"rowstile help: no code {argv[1]} (rowstile help errors lists them)", 2)
         return
     if not argv or argv[0] in ("-h", "--help", "help") or "--help" in argv:
         fail(__doc__, 0 if argv else 2)
     if argv[0] in ("--version", "version"):
         from authzlib import __version__
-        print(f"rowfence {__version__} (Python {sys.version.split()[0]})")
+        print(f"rowstile {__version__} (Python {sys.version.split()[0]})")
         return
     cmd, args = argv[0], argv[1:]
     if cmd not in ARGUMENTS:
@@ -725,10 +730,10 @@ def main(argv: list[str]) -> None:
     most = ARGUMENTS[cmd]
     unknown = [a for a in args if a.startswith("--")] if cmd != "sql" else []
     if unknown:
-        fail(f"rowfence {cmd}: {unknown[0]} is not an option it has (rowfence --help)", 2)
+        fail(f"rowstile {cmd}: {unknown[0]} is not an option it has (rowstile --help)", 2)
     if most is not None and len(args) > most:
-        fail(f"rowfence {cmd} takes {most or 'no'} argument{'' if most == 1 else 's'}: what is "
-             f"{' '.join(args[most:])}? (rowfence --help)", 2)
+        fail(f"rowstile {cmd} takes {most or 'no'} argument{'' if most == 1 else 's'}: what is "
+             f"{' '.join(args[most:])}? (rowstile --help)", 2)
     cfg = load_config()
 
     if cmd == "lsp":
@@ -743,7 +748,7 @@ def main(argv: list[str]) -> None:
     def policy_arg() -> tuple[str, str, dict[str, str]]:
         path = args[-1] if args else cfg.policy
         if not path:
-            fail(f"rowfence {cmd}: which policy file? (or name it in {CONFIG}: policy = \"db/policy.authz\")", 2)
+            fail(f"rowstile {cmd}: which policy file? (or name it in {CONFIG}: policy = \"db/policy.authz\")", 2)
         try:
             text, files = read_policy(path)
         except OSError as e:
@@ -765,14 +770,14 @@ def main(argv: list[str]) -> None:
             return
         if cmd == "client" and args[1:]:
             if args[0] not in ("py", "ts"):
-                fail("rowfence client: which language, py or ts?", 2)
+                fail("rowstile client: which language, py or ts?", 2)
             _, text, files = policy_arg()
             sys.stdout.write(database.client(args[0], text, files))
             return
         if cmd == "prove":
             from authzlib import parse_policy, prove
             path, text, files = policy_arg()
-            # the policy as `rowfence check` sees it: one the compiler refuses has nothing to prove
+            # the policy as `rowstile check` sees it: one the compiler refuses has nothing to prove
             msg = database.check(text, files)
             if msg:
                 fail(f"{relative(path)}: {msg.removeprefix('policy ')}")
@@ -804,13 +809,13 @@ def main(argv: list[str]) -> None:
     except Unreadable as e:
         fail(str(e), 2)
     except RecursionError:
-        fail(f"rowfence {cmd}: an expression in the policy is nested too deep to read", 1)
+        fail(f"rowstile {cmd}: an expression in the policy is nested too deep to read", 1)
 
     dsn = dsn if dsn is not None else (cfg.database or os.environ.get("DATABASE_URL"))
     if cmd == "dev":
         path = args[0] if args else cfg.policy
         if not path:
-            fail(f"rowfence dev: which policy file? (or name it in {CONFIG}: policy = \"db/policy.authz\")", 2)
+            fail(f"rowstile dev: which policy file? (or name it in {CONFIG}: policy = \"db/policy.authz\")", 2)
         dev = Dev(cfg, dsn, path)
         dev.studio_port = None if "--no-studio" in flags else int(opts.get("--studio-port", "4983"))
         sys.exit(0 if dev.run("--once" in flags) else 1)
@@ -916,11 +921,11 @@ def main(argv: list[str]) -> None:
                     print(f"wrote {relative(path)}")
                 return
             if not args or args[0] not in ("py", "ts"):
-                fail("rowfence client: which language, py or ts?", 2)
+                fail("rowstile client: which language, py or ts?", 2)
             sys.stdout.write(database.client(args[0], text, files))
         elif cmd == "why":
             if len(args) != 3 or not opts.get("--as"):
-                fail("rowfence why --as user:42 TYPE ID PERM", 2)
+                fail("rowstile why --as user:42 TYPE ID PERM", 2)
             from authzlib import grant
             kind, ident = principal(opts["--as"])
             type_name, oid, perm = args
@@ -939,7 +944,7 @@ def main(argv: list[str]) -> None:
             print("applied again")
         elif cmd == "remove":
             if "--yes" not in flags:
-                fail("rowfence remove drops every view, trigger and row-level security policy the current policy made "
+                fail("rowstile remove drops every view, trigger and row-level security policy the current policy made "
                      "(shares and history stay). Run it again with --yes.", 2)
             transaction(conn, database.remove)
             print("removed")
@@ -949,7 +954,7 @@ def main(argv: list[str]) -> None:
         fail(str(e) + (f"\nHINT: {e.hint}" if e.hint else ""))
     except pgwire.PgError as e:
         if (e.code == "3F000" and 'schema "authz"' in e.message) or (e.code == "42883" and "function authz." in e.message):
-            fail("no policy is applied [AZ609]\nHINT: rowfence apply db/policy.authz")     # as the other commands say it
+            fail("no policy is applied [AZ609]\nHINT: rowstile apply db/policy.authz")     # as the other commands say it
         if e.fields.get("S") in ("FATAL", "PANIC"):
             fail(f"lost the database: {e.message}", 2)
         detail = e.fields.get("D")
@@ -960,7 +965,7 @@ def main(argv: list[str]) -> None:
     except Unreadable as e:
         fail(str(e), 2)
     except RecursionError:
-        fail(f"rowfence {cmd}: an expression in the policy is nested too deep to read", 1)
+        fail(f"rowstile {cmd}: an expression in the policy is nested too deep to read", 1)
     except KeyboardInterrupt:
         fail("stopped: nothing was kept", 130)
     finally:
@@ -973,7 +978,7 @@ def git(*args: str) -> str | None:
     try:
         p = subprocess.run(["git", *args], capture_output=True, text=True, encoding="utf-8")
     except FileNotFoundError:
-        fail("rowfence: git is not installed (the review reads the base branch with it)", 2)
+        fail("rowstile: git is not installed (the review reads the base branch with it)", 2)
     return p.stdout if p.returncode == 0 else None
 
 
@@ -993,7 +998,7 @@ def base_policy(ref: str, path: str) -> tuple[str | None, dict[str, str]]:
 
 
 def base_tests(cfg: Config, ref: str) -> dict[str, str]:
-    """The test files rowfence.toml names, as they were at a commit."""
+    """The test files rowstile.toml names, as they were at a commit."""
     import fnmatch
     root = git("rev-parse", "--show-toplevel")
     listed = git("ls-tree", "-r", "--name-only", "--full-tree", ref)   # from the top folder, wherever this runs
@@ -1016,7 +1021,7 @@ def default_base() -> str:
     for ref in ("origin/main", "main", "origin/master", "master"):
         if git("rev-parse", "--verify", "--quiet", ref) is not None:
             return ref
-    fail("rowfence review: which commit to compare with? --base main (or a commit)", 2)
+    fail("rowstile review: which commit to compare with? --base main (or a commit)", 2)
 
 
 def review_cmd(cfg: Config, args: list[str], opts: dict[str, str], flags: set[str], dsn: str | None) -> int:
@@ -1026,11 +1031,11 @@ def review_cmd(cfg: Config, args: list[str], opts: dict[str, str], flags: set[st
     from authzlib import review
     path = args[-1] if args else cfg.policy
     if not path:
-        fail(f"rowfence review: which policy file? (or name it in {CONFIG}: policy = \"db/policy.authz\")", 2)
+        fail(f"rowstile review: which policy file? (or name it in {CONFIG}: policy = \"db/policy.authz\")", 2)
     ref = opts.get("--base") or default_base()
     # a commit git doesn't know would read as "no policy there": the whole policy reviewed as new
     if ref.startswith("-") or git("rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}") is None:
-        fail(f"rowfence review: git doesn't know the commit to compare with, {ref} (a shallow checkout? fetch the "
+        fail(f"rowstile review: git doesn't know the commit to compare with, {ref} (a shallow checkout? fetch the "
              "base branch: fetch-depth: 0 with actions/checkout)", 2)
     try:
         head_text, head_files = read_policy(path)
@@ -1098,7 +1103,7 @@ def fmt_cmd(cfg: Config, args: list[str], check: bool) -> int:
     from authzlib.fmt import FormatError, format
     paths = args or ([cfg.policy] if cfg.policy else []) + cfg.tests()
     if not paths:
-        fail(f"rowfence fmt: which files? (or name the policy in {CONFIG})", 2)
+        fail(f"rowstile fmt: which files? (or name the policy in {CONFIG})", 2)
     bad = 0
     for path in paths:
         try:
@@ -1114,7 +1119,7 @@ def fmt_cmd(cfg: Config, args: list[str], check: bool) -> int:
         if done == text:
             continue
         if check:
-            print(f"{relative(path)}: not formatted (rowfence fmt)")
+            print(f"{relative(path)}: not formatted (rowstile fmt)")
             bad += 1
         else:
             with open(path, "w", encoding="utf-8", newline=line_ending(path)) as fh:
@@ -1140,13 +1145,13 @@ def migration_name(summary: list[str]) -> str:
 
 def migrate_cmd(cfg: Config, path: str, text: str, files: dict[str, str], opts: dict[str, str], check: bool,
                 one_phase: bool = False, downgrade: bool = False) -> int:
-    """Writes the migration from the lock file to this policy, for the tool rowfence.toml names (two, when
+    """Writes the migration from the lock file to this policy, for the tool rowstile.toml names (two, when
     inheritance trees are built beside the ones in use first); with --check, only says whether there is one
     to write (exit 1 if so). Needs no database."""
     import migrations
     tool = opts.get("--tool") or cfg.tool or "sql"
     if tool not in migrations.TOOLS:
-        fail(f"rowfence migrate: unknown tool '{tool}' (use one of {', '.join(migrations.TOOLS)})", 2)
+        fail(f"rowstile migrate: unknown tool '{tool}' (use one of {', '.join(migrations.TOOLS)})", 2)
     folder = cfg.file(opts.get("--dir") or cfg.setting("migrations", "dir") or migrations.DEFAULT_DIRS[tool])
     lock = lock_path(cfg, path)
     try:
@@ -1163,7 +1168,7 @@ def migrate_cmd(cfg: Config, path: str, text: str, files: dict[str, str], opts: 
         return 0
     summary = ms[-1].summary
     if check:
-        print(f"{relative(path)} has changes no migration has: run rowfence migrate")
+        print(f"{relative(path)} has changes no migration has: run rowstile migrate")
         for line in summary[:20]:
             print(f"  {line}")
         return 1
@@ -1176,7 +1181,7 @@ def migrate_cmd(cfg: Config, path: str, text: str, files: dict[str, str], opts: 
             written += migrations.write_migration(tool, folder, f"build_{name}" if i < len(ms) - 1 else name, m.sql,
                                                   now=now + i)
     except migrations.Error as e:
-        fail(f"rowfence migrate: {e}", 2)
+        fail(f"rowstile migrate: {e}", 2)
     os.makedirs(os.path.dirname(lock) or ".", exist_ok=True)
     with open(lock, "w", encoding="utf-8", newline="\n") as fh:
         fh.write(ms[-1].lock)
@@ -1216,10 +1221,10 @@ def ask(conn: pgwire.Connection, cmd: str, args: list[str], opts: dict[str, str]
     q = conn.query
     need = {"can": 3, "explain": 3, "perms": 2, "list": 2, "who": 3, "sql": 1}
     if cmd in need and len(args) != need[cmd]:
-        fail(f"rowfence {cmd}: see rowfence --help", 2)
+        fail(f"rowstile {cmd}: see rowstile --help", 2)
     who = opts.get("--as")
     if who is None and cmd not in ("who",):
-        fail(f"rowfence {cmd}: as whom? --as user:42 (or bot:7, or anyone)", 2)
+        fail(f"rowstile {cmd}: as whom? --as user:42 (or bot:7, or anyone)", 2)
     q("BEGIN")
     try:
         if who is not None:
@@ -1241,7 +1246,7 @@ def ask(conn: pgwire.Connection, cmd: str, args: list[str], opts: dict[str, str]
                 print(x)
         elif cmd == "explain-rule":
             if len(args) not in (2, 3):
-                fail("rowfence explain-rule --as WHO TABLE insert|update|delete [ID] [--row JSON]", 2)
+                fail("rowstile explain-rule --as WHO TABLE insert|update|delete [ID] [--row JSON]", 2)
             row = opts.get("--row")
             if row is not None:
                 try:
@@ -1270,7 +1275,7 @@ def ask(conn: pgwire.Connection, cmd: str, args: list[str], opts: dict[str, str]
 
 
 def snapshot_path(cfg: Config, opts: dict[str, str]) -> str:
-    """--out, else [review] snapshot in rowfence.toml, else access.snapshot next to the policy."""
+    """--out, else [review] snapshot in rowstile.toml, else access.snapshot next to the policy."""
     if opts.get("--out"):
         return opts["--out"]
     snapshot = cfg.setting("review", "snapshot")
@@ -1295,8 +1300,8 @@ def snapshot_cmd(conn: pgwire.Connection, cfg: Config, opts: dict[str, str], che
             return
         before = {x for x in (old or "").split("\n") if x and not x.startswith("#")}
         after = set(lines)
-        print(f"{relative(path)} is out of date: rowfence snapshot writes it" if old is not None
-              else f"{relative(path)} is missing: rowfence snapshot writes it")
+        print(f"{relative(path)} is out of date: rowstile snapshot writes it" if old is not None
+              else f"{relative(path)} is missing: rowstile snapshot writes it")
         for x in sorted(after - before)[:20]:
             print(f"  + {x}")
         for x in sorted(before - after)[:20]:

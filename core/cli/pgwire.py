@@ -1,5 +1,5 @@
 """A small PostgreSQL client (protocol 3, extended query protocol, text results), standard
-library only. Enough for the rowfence command and tests: trust, password, MD5 and
+library only. Enough for the rowstile command and tests: trust, password, MD5 and
 SCRAM-SHA-256 authentication (bound to the TLS channel when the server offers it, as channel_binding
 says); TCP (with TLS, as sslmode says) or Unix sockets.
 
@@ -185,7 +185,7 @@ class Connection:
                  channel_binding: str = "prefer") -> None:
         body = struct.pack("!i", 196608)
         params = {"user": user, "database": database, "client_encoding": "UTF8",
-                  "application_name": "rowfence"}
+                  "application_name": "rowstile"}
         if options:
             params["options"] = options
         for k, v in params.items():
@@ -524,7 +524,7 @@ def parse_dsn(text: str | None) -> ConnectArgs:
 
     def setting(k: str, v: str, strict: bool) -> None:
         if k in REFUSED:
-            raise ValueError(f"the connection asks for {REFUSED[k]} ({k}={v}), which the rowfence command doesn't do")
+            raise ValueError(f"the connection asks for {REFUSED[k]} ({k}={v}), which the rowstile command doesn't do")
         if k in KEYS:
             out[KEYS[k]] = v
         elif strict and k not in ("application_name", "target_session_attrs"):

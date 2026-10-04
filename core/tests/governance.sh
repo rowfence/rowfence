@@ -272,7 +272,7 @@ admin "... one for a role the app role isn't in is nobody's way around" "0" \
   "SELECT count(*) FROM authz.lint() WHERE problem LIKE '%theirs%'"
 PSQL -c "DROP POLICY mine ON app.files" -c "DROP POLICY theirs ON app.files" -c "DROP POLICY everyone ON app.folders" \
      -c "DROP POLICY narrower ON app.folders" -c "DROP ROLE authz_gov_other" >/dev/null
-admin "... rowfence's own policies are not reported" "0" "SELECT count(*) FROM authz.lint() WHERE problem LIKE '%not rowfence''s%'"
+admin "... rowstile's own policies are not reported" "0" "SELECT count(*) FROM authz.lint() WHERE problem LIKE '%not rowstile''s%'"
 PSQL -c "GRANT CREATE ON SCHEMA app TO app_user" -c "ALTER TABLE app.files OWNER TO app_user" >/dev/null
 [ "$(PSQL -c "SELECT count(*) FROM authz.lint() WHERE object = 'app.files' AND problem LIKE 'is owned by%'")" = "1" ] &&
   echo "ok    lint finds: a governed table owned by the app role" || { echo "FAIL  lint misses the owner"; fails=$((fails + 1)); }

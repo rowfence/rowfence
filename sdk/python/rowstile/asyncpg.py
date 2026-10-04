@@ -1,6 +1,6 @@
-"""rowfence with asyncpg, without SQLAlchemy.
+"""rowstile with asyncpg, without SQLAlchemy.
 
-    async with rowfence.asyncpg.transaction(conn, 42):
+    async with rowstile.asyncpg.transaction(conn, 42):
         rows = await conn.fetch("SELECT id, body FROM app.notes")
 
 Inside a transaction already open the block is a savepoint: when it ends, the transaction acts again for

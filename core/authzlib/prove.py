@@ -1,4 +1,4 @@
-"""rowfence prove: every invariant checked in many small worlds, with no database.
+"""rowstile prove: every invariant checked in many small worlds, with no database.
 
 An invariant (`never folder: share and not org.member`) says no one may ever hold that on any object. The
 reference evaluator (evaluate.py) computes what the policy grants in made-up worlds, smallest first (1 object
@@ -6,7 +6,7 @@ of each type, then up to 4, every kind of link and share, columns that simple co
 {condition} true or false per row), as each
 person who can sign in and as nobody. A world where someone holds it is a counterexample, shrunk link by link
 to the smallest that still breaks the invariant, and printed as a reviewer can read it. The same engine checks
-that a refactor changed nothing in rowfence review.
+that a refactor changed nothing in rowstile review.
 """
 from __future__ import annotations
 

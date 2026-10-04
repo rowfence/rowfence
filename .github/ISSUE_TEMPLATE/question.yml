@@ -1,5 +1,5 @@
 name: A question
-description: How to write a rule, set rowfence up, or read what it says.
+description: How to write a rule, set rowstile up, or read what it says.
 labels: [question]
 body:
   - type: textarea
@@ -13,4 +13,4 @@ body:
     id: versions
     attributes:
       label: Versions
-      description: "`rowfence --version` and PostgreSQL's."
+      description: "`rowstile --version` and PostgreSQL's."

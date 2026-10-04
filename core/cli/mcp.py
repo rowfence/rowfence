@@ -1,11 +1,11 @@
-"""The rowfence MCP server: `rowfence mcp`, the Model Context Protocol over stdin and stdout, for coding agents.
+"""The rowstile MCP server: `rowstile mcp`, the Model Context Protocol over stdin and stdout, for coding agents.
 
 Its tools are the command's own: check, prove, review, test, why, lint, and push to a development database. Each
-call runs the command once, in its own process, in the folder the server was started in (so rowfence.toml, the
+call runs the command once, in its own process, in the folder the server was started in (so rowstile.toml, the
 policy and the database are found as the command finds them), and returns what the command printed. Nothing is
 kept between calls.
 
-    {"mcpServers": {"rowfence": {"command": "rowfence", "args": ["mcp"]}}}
+    {"mcpServers": {"rowstile": {"command": "rowstile", "args": ["mcp"]}}}
 """
 from __future__ import annotations
 
@@ -22,23 +22,23 @@ from authzlib.connection import (
 )
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-COMMAND = os.path.join(HERE, "rowfence_cli.py")
+COMMAND = os.path.join(HERE, "rowstile_cli.py")
 VERSIONS = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"]     # newest first
 TIMEOUT = 600                                                           # seconds, for one call
 ERROR = re.compile(r"^(?P<file>.+?): (?:(?P<inc>\S+) )?line (?P<line>\d+): (?P<message>.*)$", re.S)
 
-INSTRUCTIONS = """rowfence compiles an access policy (.authz) into row-level security for Postgres.
-The policy file and the database come from rowfence.toml in this project.
+INSTRUCTIONS = """rowstile compiles an access policy (.authz) into row-level security for Postgres.
+The policy file and the database come from rowstile.toml in this project.
 The loop after editing the policy: `check` (the first mistake, with its line), then `push` (the development
 database only), then `test` (the policy's tests; `coverage` lists branches no test makes true).
 `why` answers whether someone holds a permission, why, and the smallest changes that would grant it.
 `prove` checks the invariants in many small worlds; `review` says what a change since a git ref does.
 `lint` lists the ways around row-level security the database leaves open.
-Production takes migrations (`rowfence migrate`), never `push`."""
+Production takes migrations (`rowstile migrate`), never `push`."""
 
 Message = dict[str, Json]
 
-POLICY: Json = {"type": "string", "description": "the policy file (default: rowfence.toml's `policy`)"}
+POLICY: Json = {"type": "string", "description": "the policy file (default: rowstile.toml's `policy`)"}
 WHO: Json = {"type": "string", "description": "who asks: user:42, bot:7 (a principal type and id), or anyone"}
 OUTPUT: Json = {"type": "object", "properties": {
     "ok": {"type": "boolean", "description": "true when the command found nothing wrong"},
@@ -73,9 +73,9 @@ TOOLS: dict[str, Tool] = {
         [], {"readOnlyHint": True},
         lambda a: ["review", "--markdown", *opt("--base", a.get("base")), *opt_policy(a)]),
     "test": Tool(
-        "Run the policy's tests, the test files rowfence.toml names (or these), and the invariants, on the "
+        "Run the policy's tests, the test files rowstile.toml names (or these), and the invariants, on the "
         "database; nothing stays. With coverage, the branches of each permission no test makes true.",
-        {"files": {"type": "array", "items": {"type": "string"}, "description": "test files (default: rowfence.toml's `tests`)"},
+        {"files": {"type": "array", "items": {"type": "string"}, "description": "test files (default: rowstile.toml's `tests`)"},
          "coverage": {"type": "boolean"}},
         [], {"readOnlyHint": True},
         lambda a: ["test", *(["--coverage"] if a.get("coverage") else []), *strings(a.get("files"))]),
@@ -93,8 +93,8 @@ TOOLS: dict[str, Tool] = {
         lambda a: ["lint"]),
     "push": Tool(
         "Bring the development database to the policy, with the migration production would get. Only a database "
-        "marked as a development database (a person marks one with rowfence push --development; the first push "
-        "to one with no policy marks it): production takes migrations (rowfence migrate).",
+        "marked as a development database (a person marks one with rowstile push --development; the first push "
+        "to one with no policy marks it): production takes migrations (rowstile migrate).",
         {"policy": POLICY}, [], {"readOnlyHint": False, "destructiveHint": True, "idempotentHint": True},
         lambda a: ["push", *opt_policy(a)]),
 }
@@ -134,7 +134,7 @@ def strings(items: Json) -> list[str]:
 
 
 def tool_list() -> list[Json]:
-    return [{"name": name, "title": f"rowfence {name}", "description": desc,
+    return [{"name": name, "title": f"rowstile {name}", "description": desc,
              "inputSchema": {"type": "object", "properties": props, "required": required},
              "outputSchema": OUTPUT, "annotations": {"openWorldHint": False, **notes}}
             for name, (desc, props, required, notes, _) in TOOLS.items()]
@@ -148,7 +148,7 @@ def run(dsn: str | None, args: list[str]) -> tuple[int, str]:
         p = subprocess.run(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                            timeout=TIMEOUT, env=env)
     except subprocess.TimeoutExpired:
-        return 2, f"rowfence {args[0]} took more than {TIMEOUT} s and was stopped"
+        return 2, f"rowstile {args[0]} took more than {TIMEOUT} s and was stopped"
     return p.returncode, p.stdout.decode("utf-8", "replace").replace("\r\n", "\n")
 
 
@@ -196,7 +196,7 @@ class Server:
             asked = params.get("protocolVersion")
             return ok(mid, {"protocolVersion": asked if asked in VERSIONS else VERSIONS[0],
                             "capabilities": {"tools": {"listChanged": False}},
-                            "serverInfo": {"name": "rowfence", "title": "rowfence", "version": __version__},
+                            "serverInfo": {"name": "rowstile", "title": "rowstile", "version": __version__},
                             "instructions": INSTRUCTIONS})
         if method == "ping":
             return ok(mid, {})
