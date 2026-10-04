@@ -647,6 +647,13 @@ class Statements(unittest.TestCase):
         self.assertIsNone(made("INSERT INTO authz_int.x VALUES (1)"))
 
 
+def replaced(text: str, old: str, new: str) -> str:
+    """text with old replaced: a test that edits a policy fails when the text it edits isn't there (rowfence fmt
+    realigning a file would otherwise leave the policy as it was, and the test checking nothing)."""
+    assert old in text, f"not in the policy: {old!r}"
+    return text.replace(old, new)
+
+
 class Migrations(unittest.TestCase):
     """What rowfence migrate writes, without a database (tests/migrate_test.py applies them)."""
 
@@ -689,7 +696,7 @@ class Migrations(unittest.TestCase):
         self.assertNotIn("$authz_guard$", m.sql)
 
     def test_a_new_permission_is_a_small_migration(self) -> None:
-        new = self.text.replace("  can share = owner or folder.share\n", "  can share = owner or folder.share\n  can comment = folder.view\n")
+        new = replaced(self.text, "  can share = owner or folder.share\n", "  can share = owner or folder.share\n  can comment = folder.view\n")
         m = database.migration(new, {}, self.lock(self.text))
         self.assertIn('CREATE VIEW authz_gen."file__comment"', m.sql)
         self.assertIn("CREATE OR REPLACE FUNCTION authz.can(p_type text, p_id text, p_perm text)", m.sql)
@@ -700,7 +707,7 @@ class Migrations(unittest.TestCase):
         self.assertIn("> type file: can comment = folder.view", m.lock)
 
     def test_lines_that_only_move_need_no_migration(self) -> None:
-        moved = self.text.replace("app role app_user\n", "app role app_user\n\n-- a note\n")
+        moved = replaced(self.text, "app role app_user\n", "app role app_user\n\n-- a note\n")
         self.assertTrue(database.migration(moved, {}, self.lock(self.text)).empty)
         sql, comp, _ = database.migratable(moved, {})
         pushed = self.migrate.migration(sql, comp, self.migrate.parse_lock(self.lock(self.text)), lines=True)
@@ -732,7 +739,7 @@ class Migrations(unittest.TestCase):
         self.assertEqual(m.summary, [f"rowfence 0.0.1 -> {authzlib.__version__}: what the new version makes differently"])
 
     def test_a_tree_that_changes_is_built_beside_first(self) -> None:
-        new = self.text.replace("can view  = edit or viewer or (parent.view and {inherit})", "can view  = edit or viewer or parent.view")
+        new = replaced(self.text, "can view  = edit or viewer or (parent.view and {inherit})", "can view  = edit or viewer or parent.view")
         ms = database.migrations(new, {}, self.lock(self.text))
         self.assertEqual(len(ms), 2)
         self.assertIn('INSERT INTO authz_int."folder__linked_into_parent__tree__next"', ms[0].sql)
@@ -765,13 +772,13 @@ class Review(unittest.TestCase):
                                   worlds=120)
 
     def test_comments_only(self) -> None:
-        r = self.run_review(self.text.replace("app role app_user\n", "app role app_user   -- the app's role\n\n"))
+        r = self.run_review(replaced(self.text, "app role app_user\n", "app role app_user   -- the app's role\n\n"))
         self.assertEqual(r["meaning"]["equivalent"], "text")
         self.assertEqual(r["deploy"]["migrations"], [])
         self.assertIn("**Meaning**: unchanged", self.review.markdown(r))
 
     def test_a_refactor_is_checked_in_small_worlds(self) -> None:
-        r = self.run_review(self.text.replace("can edit  = share or editor or (parent.edit and {inherit})",
+        r = self.run_review(replaced(self.text, "can edit  = share or editor or (parent.edit and {inherit})",
                                               "can edit  = editor or share or ({inherit} and parent.edit)"))
         self.assertEqual(r["meaning"]["equivalent"], "120 small worlds")
         md = self.review.markdown(r)
@@ -779,7 +786,7 @@ class Review(unittest.TestCase):
         self.assertNotIn("<details>", md)
 
     def test_what_changes_through_it(self) -> None:
-        r = self.run_review(self.text.replace("can view  = edit or viewer or (parent.view and {inherit})",
+        r = self.run_review(replaced(self.text, "can view  = edit or viewer or (parent.view and {inherit})",
                                               "can view  = edit or viewer or parent.view"))
         m = r["meaning"]
         self.assertEqual([c["what"] for c in m["changed"]], ["folder.view"])
@@ -789,13 +796,13 @@ class Review(unittest.TestCase):
         self.assertTrue(r["deploy"]["migrations"][0]["builds_beside"])
 
     def test_risk_flags(self) -> None:
-        widened = self.text.replace("  viewer : user, team#member  shared\n", "  viewer : user, team#member, anyone  shared\n")
+        widened = replaced(self.text, "  viewer : user, team#member shared\n", "  viewer : user, team#member, anyone shared\n")
         flags = {f["why"] for f in self.run_review(widened)["risk"]}
         self.assertIn("access widened", flags)
-        no_deny = self.text.replace("           or (folder.view and not {confidential})", "           or folder.view")
+        no_deny = replaced(self.text, "           or (folder.view and not {confidential})", "           or folder.view")
         flags = {f["why"] for f in self.run_review(no_deny)["risk"]}
         self.assertIn("a deny removed", flags)
-        looser = self.text.replace("  delete                        : edit", "  delete                        : view")
+        looser = replaced(self.text, "  delete                            : edit", "  delete                            : view")
         risk = self.run_review(looser)["risk"]
         self.assertIn("a write rule loosened", {f["why"] for f in risk})
         self.assertTrue(all(f["line"] for f in risk))
@@ -805,7 +812,7 @@ class Review(unittest.TestCase):
     def test_a_condition_it_cannot_read_reworded(self) -> None:
         """A subquery's `id` rewritten as `this.id` (two real changes, d62fa2e and e853285) was reported as a widening
         with a made-up example: the small worlds hold such a condition as rows of their own, per text."""
-        reworded = self.text.replace("and b.user_id = this.id)}", "and b.user_id = this.id and true)}")
+        reworded = replaced(self.text, "and b.user_id = this.id)}", "and b.user_id = this.id and true)}")
         self.assertNotEqual(reworded, self.text)
         r = self.run_review(reworded)
         self.assertEqual(r["meaning"].get("unreadable"), ["user.impersonate"])
@@ -815,14 +822,14 @@ class Review(unittest.TestCase):
         self.assertIn("read both, it can't tell more from less", r["risk"][0]["flag"])
         self.assertIn("can't tell: user.impersonate", self.review.text(r))
         # a condition it reads still says what widened
-        r = self.run_review(self.text.replace("can share = owner or org.admin", "can share = owner or org.admin or {true}"))
+        r = self.run_review(replaced(self.text, "can share = owner or org.admin", "can share = owner or org.admin or {true}"))
         self.assertIn("a permission widened", [f["why"] for f in r["risk"]])
         self.assertNotIn("unreadable", r["meaning"])
 
     def test_no_lock_file_is_no_migration(self) -> None:
         """A project that applies its policy keeps no lock file: Deploy said every change was the whole policy, a
         migration that locks every table and rebuilds every tree."""
-        r = self.run_review(self.text.replace("app role app_user\n", "app role app_user   -- the app's role\n"), lock=False)
+        r = self.run_review(replaced(self.text, "app role app_user\n", "app role app_user   -- the app's role\n"), lock=False)
         self.assertEqual(r["deploy"]["migrations"], [])
         self.assertIn("no lock file, so no migrations: `rowfence apply`", self.review.summary(r)["Deploy"])
 
@@ -835,7 +842,7 @@ class Review(unittest.TestCase):
         self.assertEqual([x["check"] for x in t["removed"]], ["user 3 cannot view file 12"])
 
     def test_a_new_permission_no_test_names(self) -> None:
-        new = self.text.replace("  can share = owner or folder.share\n", "  can share = owner or folder.share\n  can comment = folder.view\n")
+        new = replaced(self.text, "  can share = owner or folder.share\n", "  can share = owner or folder.share\n  can comment = folder.view\n")
         r = self.run_review(new)
         self.assertEqual([x["what"] for x in r["tests"]["untested"]], ["file.comment"])
         self.assertEqual(r["deploy"]["migrations"][0]["locks"], {})
@@ -1784,6 +1791,18 @@ class DocPages(unittest.TestCase):
         for name, body in blocks:
             self.assertEqual(fmt.format(body), body, f"docs/getting-started.md: {name} isn't as rowfence fmt writes it "
                                                      "(the reference tells readers to run fmt --check in CI)")
+
+    def test_the_repositorys_policies_are_laid_out_as_fmt_writes_them(self) -> None:
+        # what readers copy (the docs app, the cookbook, the example apps, the conformance apps): run through
+        # `rowfence fmt --check` in their CI, as the reference says, they must pass. The suites' own fixtures are
+        # left as they are (some are wrong on purpose)
+        from authzlib import fmt
+        files = subprocess.run(["git", "ls-files", "*.authz"], cwd=self.REPO, capture_output=True, text=True,
+                               check=True).stdout.split()
+        files = [f for f in files if not f.startswith(("core/tests/", "editor/"))]
+        self.assertGreater(len(files), 10, "the policies aren't found")
+        loose = [f for f in files if fmt.format_policy(self.page(f)) != self.page(f)]
+        self.assertEqual(loose, [], "not as rowfence fmt writes them: run rowfence fmt on each")
 
     def test_the_guides_path_is_the_commands_folder(self) -> None:
         folder = search(r'export PATH="\$PWD/([\w/]+):\$PATH"', self.page("docs", "getting-started.md")).group(1)

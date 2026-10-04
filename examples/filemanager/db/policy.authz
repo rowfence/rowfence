@@ -8,7 +8,7 @@ type user = fm.users (id uuid)
 
 type group = fm.groups (id uuid)
   member : user         = fm.group_members(group_id -> user_id)
-  member : group#member = fm.groups(parent_id -> id)          -- members of sub-groups count too
+  member : group#member = fm.groups(parent_id -> id)  -- members of sub-groups count too
   owner  : user         = owner_id
   admin  : user         = fm.group_members(group_id -> user_id) where {is_admin}
   parent : group        = parent_id
@@ -17,8 +17,8 @@ type group = fm.groups (id uuid)
   can manage = owner or admin or parent.manage
 
 type membership = fm.group_members
-  group : group = group_id
-  person : user = user_id
+  group  : group = group_id
+  person : user  = user_id
 
   can manage = group.manage
 
@@ -26,7 +26,7 @@ type folder = fm.folders
   parent : folder = parent_id
   owner  : user   = owner_id
   viewer : user, group#member, link shared by share
-  editor : user, group#member       shared by share
+  editor : user, group#member shared by share
 
   can share = owner or (parent.share and {inherit})
   can edit  = share or editor or (parent.edit and {inherit})
@@ -38,7 +38,7 @@ type file = fm.files
   folder : folder = folder_id
   owner  : user   = owner_id
   viewer : user, group#member, link shared by share
-  editor : user, group#member       shared by share
+  editor : user, group#member shared by share
 
   can share = owner or folder.share
   can edit  = share or editor or folder.edit
@@ -52,12 +52,12 @@ type version = fm.file_versions
   can edit = file.edit
 
 rules fm.folders
-  select                 : view
-  insert                 : ({parent_id is null} or parent.edit) and owner
-  update                 : edit
-  update parent_id after : parent.edit or ({parent_id is null} and share)
+  select                       : view
+  insert                       : ({parent_id is null} or parent.edit) and owner
+  update                       : edit
+  update parent_id after       : parent.edit or ({parent_id is null} and share)
   update id, owner_id, inherit : share
-  delete                 : share
+  delete                       : share
 
 rules fm.files
   select                 : view
@@ -67,14 +67,14 @@ rules fm.files
   update id, owner_id    : share
   -- a file shows one of its own versions, never another file's object
   update object_key after : {object_key IN (SELECT v.object_key FROM fm.file_versions v WHERE v.file_id = files.id AND v.ready)}
-  delete                 : edit
+  delete                  : edit
 
 rules fm.file_versions
-  select                 : view
-  insert                 : file.edit and {created_by = authz.uid()}
-  update                 : edit
-  update id, file_id, object_key, created_by : nobody              -- what a version is never changes
-  delete                 : edit
+  select                                     : view
+  insert                                     : file.edit and {created_by = authz.uid()}
+  update                                     : edit
+  update id, file_id, object_key, created_by : nobody  -- what a version is never changes
+  delete                                     : edit
 
 -- everyone signed in sees the groups and who is in them (to share with them)
 rules fm.groups
@@ -86,9 +86,9 @@ rules fm.groups
   delete                 : manage
 
 rules fm.group_members
-  select                 : signed_in
-  insert                 : manage
-  update                 : manage
-  update group_id after  : manage
-  update id, user_id     : nobody                              -- a membership's person never changes
-  delete                 : manage or person                    -- anyone may leave a group
+  select                : signed_in
+  insert                : manage
+  update                : manage
+  update group_id after : manage
+  update id, user_id    : nobody            -- a membership's person never changes
+  delete                : manage or person  -- anyone may leave a group
