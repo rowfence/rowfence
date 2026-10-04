@@ -7,6 +7,12 @@ Each release upgrades from the one before it. How releases are numbered and made
 
 ## Unreleased
 
+### Changed
+
+- The Zed extension carries the licence in its own folder, as Zed's registry asks, and when `rowfence` isn't
+  on the PATH it points to the Installing page (the install lines it showed get the placeholder while only an
+  alpha is published).
+
 ## 0.1.0 (alpha)
 
 The first release, as an alpha: for trying rowfence early. Anything in it may still change before 0.1.0

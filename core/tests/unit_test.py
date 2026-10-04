@@ -1856,12 +1856,18 @@ class LlmsTxt(unittest.TestCase):
 
 
 class Licence(unittest.TestCase):
-    """The Python package ships the licence: its copy (sdk/python/LICENSE, what the build takes) is the repository's."""
+    """The Python package and the Zed extension ship the licence: their copies (sdk/python/LICENSE, what the build
+    takes; editor/zed/LICENSE, what Zed's registry reads) are the repository's."""
     REPO = os.path.dirname(ROOT)
 
     def test_the_python_package_has_the_repositorys_licence(self) -> None:
         with open(os.path.join(self.REPO, "LICENSE"), encoding="utf-8") as a,                 open(os.path.join(self.REPO, "sdk", "python", "LICENSE"), encoding="utf-8") as b:
             self.assertEqual(a.read(), b.read(), "sdk/python/LICENSE: copy the repository's LICENSE")
+
+    def test_the_zed_extension_has_the_repositorys_licence(self) -> None:
+        # Zed's registry reads the licence in the extension's own folder: one at the repository's root doesn't count
+        with open(os.path.join(self.REPO, "LICENSE"), encoding="utf-8") as a, open(os.path.join(self.REPO, "editor", "zed", "LICENSE"), encoding="utf-8") as b:
+            self.assertEqual(a.read(), b.read(), "editor/zed/LICENSE: copy the repository's LICENSE")
 
 
 class Delivery(unittest.TestCase):
