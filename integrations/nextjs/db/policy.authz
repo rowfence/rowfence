@@ -1,0 +1,44 @@
+-- The conformance app's policy (integrations/fastapi's, over integer keys, and with viewers people share projects
+-- with): projects with an owner and members, public ones anyone may read, a service that reads the projects it
+-- is added to, notes in projects, and an inbox only its recipient reads.
+
+app role conf_app
+
+type user = app.users(id integer)
+
+type service = app.services(id integer) principal
+
+type project = app.projects(id integer)
+  owner   : user    = owner_id
+  member  : user    = app.members(project_id -> user_id)
+  service : service = app.project_services(project_id -> service_id)
+  viewer  : user shared by edit
+
+  can edit  = owner or member
+  can view  = edit or service or viewer or {public}
+  can share = owner
+
+type note = app.notes(id integer)
+  project : project = project_id
+  author  : user    = author_id
+
+  can edit = author or project.owner
+  can view = project.view
+
+type message = app.inbox(id integer)
+  recipient : user = recipient_id
+
+  can read = recipient
+
+rules app.projects
+  select : view
+
+rules app.notes
+  select : view
+  insert : project.edit and author
+  update : edit
+  delete : edit
+
+rules app.inbox
+  select : read
+  insert : signed_in and {sender_id = authz.uid()}

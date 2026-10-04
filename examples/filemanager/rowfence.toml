@@ -1,0 +1,9 @@
+# rowfence dev / test / migrate read this (see core/cli/rowfence_cli.py --help)
+policy   = "db/policy.authz"
+tests    = ["db/tests/*.authz"]
+database = "env:FM_ADMIN_URL"
+[clients]
+py = "backend/app/authz_client.py"
+[migrations]
+tool = "sql"                # migrate.py applies db/migrations/*.sql in order
+dir  = "db/migrations"

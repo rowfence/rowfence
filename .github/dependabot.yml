@@ -1,0 +1,42 @@
+# Updates to what the repository's own tools, apps and tests use: grouped, monthly, a week after each release.
+# The SDKs' dependency ranges (sdk/python/pyproject.toml, peerDependencies) are what users may run with, not
+# versions to bump, so only lock files and workflows are updated: npm keeps every package.json as written (the
+# root is the workspace of the SDK's packages too), and a new major (TypeScript, Vite, Vitest, the VS Code
+# extension's `@types/vscode`, which follows its `engines.vscode`) is a change made on purpose, by hand.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directories: ["/", "/review-ci/github"]
+    schedule: {interval: monthly}
+    cooldown: {default-days: 7}
+    groups:
+      actions: {patterns: ["*"]}
+
+  - package-ecosystem: npm
+    directories: ["/", "/playground", "/site", "/examples/filemanager/frontend", "/examples/messenger/frontend",
+                  "/editor", "/editor/tree-sitter-authz"]
+    schedule: {interval: monthly}
+    cooldown: {default-days: 7}
+    versioning-strategy: lockfile-only
+    groups:
+      npm: {patterns: ["*"]}
+
+  - package-ecosystem: uv
+    directories: ["/examples/filemanager/backend", "/examples/messenger/backend", "/integrations/fastapi"]
+    schedule: {interval: monthly}
+    cooldown: {default-days: 7}
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+    groups:
+      python: {patterns: ["*"]}
+
+  - package-ecosystem: cargo
+    directory: /editor/zed
+    schedule: {interval: monthly}
+    cooldown: {default-days: 7}
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+    groups:
+      rust: {patterns: ["*"]}

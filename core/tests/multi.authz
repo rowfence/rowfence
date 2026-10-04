@@ -1,0 +1,51 @@
+-- multi.authz: UUID keys, suspension, mixed-type hierarchies, public access,
+-- conditional shares and custom roles; checked by difftest.py
+app role app_user
+
+type user = mt.users (id uuid) where {this.active}
+
+type org = mt.orgs where {not suspended}
+  member : user = mt.org_members(org_id -> user_id)
+  admin  : user = mt.org_members(org_id -> user_id) where {role = 'admin'}
+  can manage_roles = admin
+  can view         = member or admin
+
+type team = mt.teams
+  member : user        = mt.team_members(team_id -> user_id)
+  member : team#member shared by manage                        -- teams inside teams, by sharing
+  can manage = member
+
+type project = mt.projects
+  org    : org    = org_id
+  parent : folder = folder_id                                  -- a project can sit inside a folder
+  lead   : user   = lead_id
+  viewer : user, team#member, user:*, anyone, link  shared by edit
+  can edit = lead or org.admin or parent.edit
+  can view = edit or viewer or parent.view
+
+type folder = mt.folders where {not archived}
+  parent : folder, project = (parent_type, parent_id)           -- inside a folder or a project
+  owner  : user = owner_id
+  editor : user, team#member  shared by edit
+  viewer : user, team#member, user:*, link  shared by edit
+           if {subject_type <> 'user' or subject_id = '*'
+               or exists (select 1 from mt.users u where u.id::text = subject_id and u.active)}
+  org    : org = org_id                                      -- whose custom roles count here
+  roles  : user, team#member  from org                        -- custom roles, given where `roles` is written
+  can edit  = owner or editor or (parent.edit and {not locked}) or roles
+  can view  = edit or viewer or parent.view or roles
+  can share = edit
+
+type doc = mt.docs (id uuid)
+  container : folder, project = (container_type, container_id)
+  author    : user = author_id
+  can edit = author or container.edit
+  can view = edit or container.view
+
+caveat business_hours = {authz.ctx('mode') = 'business'}
+caveat from_ip        = {authz.ctx('ip') = arg('ip')}
+
+rules mt.docs view mt.docs_visible                             -- the app reads docs through this view
+  select : view
+  update : edit
+  mask body : edit                                             -- viewers see that a doc exists, not its text

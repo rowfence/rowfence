@@ -1,0 +1,15 @@
+# The Python here is strongly typed: ty checks the types, and Ruff (ruff.toml) that every function says them.
+# From the repository's root, as CI's `unit` job does:
+#   uvx ty@0.0.56 check && uvx ruff@0.15.12 check
+# The command runs on Python 3.11 or newer, standard library only: annotations use nothing else.
+[environment]
+python-version = "3.11"
+extra-paths = ["core", "core/cli", "packaging", "docs"]
+
+# the standard-library code; what needs packages has its own settings (sdk/python, integrations/fastapi, examples/*)
+[src]
+include = ["core/authzlib", "core/cli", "core/authzc.py", "core/tests", "core/bench", "packaging/version.py", "packaging/changelog.py", "docs/llms_full.py"]
+[rules]
+all = "error"
+# typing.override is Python 3.12's, and the command runs on 3.11 with the standard library only
+missing-override-decorator = "ignore"

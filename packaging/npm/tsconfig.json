@@ -1,0 +1,10 @@
+{
+  // The npm packages' scripts are plain JavaScript, typed with JSDoc and checked strictly (@types/node from
+  // the repository's root: npm ci there first):   npx tsc -p packaging/npm
+  "compilerOptions": {
+    "allowJs": true, "checkJs": true, "noEmit": true, "strict": true,
+    "target": "ES2022", "lib": ["ES2022"], "module": "NodeNext", "moduleResolution": "NodeNext", "types": ["node"],
+    "noUnusedLocals": true, "noImplicitReturns": true, "noFallthroughCasesInSwitch": true
+  },
+  "files": ["build.mjs", "rowfence/bin/rowfence.js", "signals_test.mjs"]
+}

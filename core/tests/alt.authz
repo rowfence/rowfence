@@ -1,0 +1,48 @@
+-- alt.authz: shapes the example policy doesn't use, checked by difftest.py
+app role app_user
+
+type user = alt.users
+  self : user = id                              -- your own row
+  can manage_roles = self                       -- the custom roles you own
+
+type grp = alt.groups (gid)
+  owner  : user = owner_id
+  member : user = alt.group_members(group_id -> user_id) where {this.active}
+  member : grp#member  shared                  -- groups inside groups, made by sharing
+  can share = owner
+
+type proj = alt.projects
+  lead : user       = lead_id
+  team : grp#member = alt.project_groups(project_id -> group_id)
+  can view = lead or team
+
+type doc = alt.docs (doc_no)
+  owner    : user = owner_id
+  blocked  : user = blocked_id
+  reader   : user, grp#member  shared
+  writer   : user              shared
+  banned   : user, grp#member  shared           -- denies view here and below
+  parent   : doc  = up
+  parent   : doc  = alt.doc_links(child -> parent)
+  shortcut : doc  shared                        -- inheritance through shares
+  project  : proj = project_id
+  project  : proj = alt.doc_projects(doc_no -> proj_id)
+  roles    : user, grp#member                   -- custom roles: under view's deny and publish's condition
+
+  can share   = owner
+  can edit    = owner or (writer and view)
+             or (parent.edit and {not locked} and not {exists (select 1 from alt.holds h where h.target = this.up)})
+  can hidden  = banned or parent.hidden or shortcut.hidden     -- a deny: it covers everything below
+  can view    = (owner or (reader and not blocked) or project.view or shortcut.view
+                 or (parent.view and {not exists (select 1 from alt.holds h where h.target = this.doc_no)}) or roles)
+                and not hidden
+  can publish = (edit or roles) and not {locked}
+  can mine    = {owner_id = authz.uid()}
+
+rules alt.docs
+  select          : view
+  insert          : {this.owner_id = authz.uid()} and (parent.edit or {up is null})
+  update          : edit
+  update owner_id : share
+  update up after : parent.edit or {up is null}
+  delete          : share and not blocked

@@ -1,0 +1,226 @@
+#!/usr/bin/env python3
+"""tools_test: the diagram, the generated clients and the editor grammar.
+
+    PGHOST=... PGUSER=postgres python3 tests/tools_test.py [--db authz_tools]
+
+Needs only the standard library (the Python client talks to Postgres with cli/pgwire.py);
+the TypeScript client is type-checked when tsc is installed.
+"""
+import importlib
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(HERE)
+sys.path.insert(0, ROOT)
+sys.path.insert(0, os.path.join(ROOT, "cli"))
+import authzc  # noqa: E402
+import client_types  # noqa: E402
+import pgwire  # noqa: E402
+
+fails = 0
+
+
+class Ran:
+    """What a driver hands back for a statement: its rowcount (psycopg's cursor, as conn.execute returns it)."""
+
+    def __init__(self, rowcount: int) -> None:
+        self.rowcount = rowcount
+
+
+def check(label: str, ok: object, detail: object = "") -> None:
+    global fails
+    if ok:
+        print(f"ok    {label}")
+    else:
+        fails += 1
+        print(f"FAIL  {label}{': ' + str(detail) if detail else ''}")
+
+
+def psql(db: str, *cmds: str, check_rc: bool = True) -> str:
+    args = ["psql", "-X", "-q", "-At", "-v", "ON_ERROR_STOP=1", "-d", db]
+    for c in cmds:
+        args += ["-c", c]
+    r = subprocess.run(args, capture_output=True, text=True, env=dict(os.environ, PGOPTIONS="-c client_min_messages=error"))
+    if check_rc and r.returncode:
+        raise SystemExit(f"psql failed: {r.stderr}")
+    return r.stdout.strip()
+
+
+def main() -> None:
+    db = sys.argv[sys.argv.index("--db") + 1] if "--db" in sys.argv else "authz_tools"
+    host = os.environ.get("PGHOST", "/var/run/postgresql")
+    port = int(os.environ.get("PGPORT", "5432"))
+    subprocess.run(["dropdb", "--if-exists", db], capture_output=True)
+    subprocess.run(["createdb", db], check=True)
+    policy = os.path.join(ROOT, "example", "docs.authz")
+    compiler = authzc.load(policy)
+    sql = compiler.compile(policy)
+    for f in (os.path.join(ROOT, "example", "app_schema.sql"),):
+        subprocess.run(["psql", "-X", "-q", "-v", "ON_ERROR_STOP=1", "-d", db, "-f", f], check=True, capture_output=True)
+    subprocess.run(["psql", "-X", "-q", "-v", "ON_ERROR_STOP=1", "-d", db], input=sql, text=True, check=True,
+                   capture_output=True, env=dict(os.environ, PGOPTIONS="-c client_min_messages=error"))
+    psql(db, "SET ROLE app_user; SET authz.user_id = 5; SELECT authz.share('folder', 1, 'viewer', 'org', 1, 'member')")
+
+    print("-- the diagram (--graph)")
+    for name in ("example/docs.authz", "tests/multi.authz", "tests/alt.authz", "tests/composite.authz"):
+        c = authzc.load(os.path.join(ROOT, name))
+        c.compile(name)
+        g = c.graph()
+        declared = set(re.findall(r"^\s+([A-Za-z0-9_]+)(?:\[|\(|\(\()", g, re.M))
+        declared |= set(re.findall(r"^\s+subgraph ([A-Za-z0-9_]+)\[", g, re.M))
+        used = set()
+        for a, b in re.findall(r"^\s+([A-Za-z0-9_]+) [-=.]+>(?:\|[^|]*\|)? ([A-Za-z0-9_]+)$", g, re.M):
+            used |= {a, b}
+        check(f"{name}: every node an arrow uses is declared", used <= declared, sorted(used - declared))
+        check(f"{name}: arrows were drawn", len(used) > 3)
+
+    print("-- the Python client (--client py)")
+    tmp = tempfile.mkdtemp()
+    with open(os.path.join(tmp, "authz_client.py"), "w", encoding="utf-8") as fh:
+        fh.write(compiler.client("py", "docs.authz"))
+    sys.path.insert(0, tmp)
+    authz_client = importlib.import_module("authz_client")    # written above, for this database
+    conn = pgwire.connect(host=host, port=port, user=os.environ.get("PGUSER", "postgres"), database=db)
+    conn.execute("BEGIN")
+    conn.execute("SET LOCAL ROLE app_user")
+    a = authz_client.Authz(conn)
+    a.sign_in(3)
+    check("can: carol may view file 11", a.can("file", 11, "view") is True)
+    cur = conn.cursor()
+    cur.execute("UPDATE app.files SET name = name WHERE id = %s", (12,))        # file 12 is hidden from carol: no row changes
+    for label, given in (("a count of 0", 0), ("no rows", []), ("the cursor that ran it", Ran(0))):
+        try:
+            a.expect(given, "app.files", "update", 12)
+            check(f"expect, given {label}: NotFound", False, "it returned")
+        except authz_client.NotFound:
+            check(f"expect, given {label}: NotFound", True)
+    check("expect, given a cursor that changed a row: returned", isinstance(a.expect(Ran(1), "app.files", "update", 11), Ran))
+    try:
+        a.expect(Ran(0), "app.files", "update", 11)                               # carol sees file 11 and may not edit it
+        check("expect, a row the user may not change: Refused", False, "it returned")
+    except authz_client.Refused as e:
+        check("expect, a row the user may not change: Refused, with why", bool(e.why) and e.why[0].startswith("no"), e.why)
+    check("can: carol may not edit it", a.can("file", 11, "edit") is False)
+    check("list: the files carol may view", sorted(a.list("file", "view")) == ["10", "11", "16"], a.list("file", "view"))
+    check("perms: on folder 1", a.perms("folder", 1) == ["view", "break_glass"], a.perms("folder", 1))
+    try:
+        a.can("file", 11, "fly")
+        check("an unknown permission is refused before asking the database", False)
+    except ValueError:
+        check("an unknown permission is refused before asking the database", True)
+    rid = a.request_access("folder", 2, "viewer", "need it", "1 day")
+    check("request_access returns the request's id", isinstance(rid, int) and rid > 0, rid)
+    other = a.request_access("folder", 2, "editor", "maybe", "1 day")
+    check("pending_requests: the requester sees their own", {r["id"] for r in a.pending_requests() if r["mine"]} >= {rid, other},
+          a.pending_requests())
+    a.cancel_request(other)
+    check("cancel_request", other not in {r["id"] for r in a.pending_requests()})
+    conn.execute("COMMIT")
+    conn.execute("BEGIN")
+    conn.execute("SET LOCAL ROLE app_user")
+    a.sign_in(5)
+    # erin may edit file 12: an UPDATE of it that matched nothing (a WHERE with more than the key) is no refusal
+    check("erin may edit file 12", a.can("file", 12, "edit") is True)
+    try:
+        a.expect(Ran(0), "app.files", "update", 12)
+        check("expect, when the rule allows the write: NotFound", False, "it returned")
+    except authz_client.NotFound:
+        check("expect, when the rule allows the write: NotFound", True)
+    except authz_client.Refused as e:
+        check("expect, when the rule allows the write: NotFound", False, e.why)
+    check("explain: says why", any("erin" in e or "admin" in e for e in a.explain("file", 12, "view")) or
+          bool(a.explain("file", 12, "view")), a.explain("file", 12, "view"))
+    a.decide_request(rid, True, "fine")
+    a.share("file", 11, "viewer", "user", 4)
+    check("share, then who", "4" in a.who("file", 11, "view"), a.who("file", 11, "view"))
+    shares = a.list_shares("file", 11)
+    check("list_shares: rows as dicts", any(r["subject_id"] == "4" and r["relation"] == "viewer" for r in shares), shares)
+    everything = a.list("folder", "view")
+    first = a.list("folder", "view", limit=2)
+    rest = a.list("folder", "view", after=first[-1])
+    check("list in pages, in key order", first + rest == sorted(everything, key=int), (first, rest, everything))
+    a.unshare("file", 11, "viewer", "user", 4)
+    check("unshare", "4" not in a.who("file", 11, "view"))
+    try:
+        a.create_link("file", 11, "owner")
+        check("create_link refuses a relation that isn't shared, before asking the database", False)
+    except ValueError:
+        check("create_link refuses a relation that isn't shared, before asking the database", True)
+    a.use_links(["not-a-token"])
+    a.use_links([])
+    conn.execute("COMMIT")
+    client_sql = re.findall(r'"(SELECT [^"]+)"', compiler.client("py", "docs.authz"))
+    bad = []
+    for i, text in enumerate(client_sql):
+        n = text.count("%s")
+        text = text.replace("%s", "$@")
+        for k in range(1, n + 1):
+            text = text.replace("$@", f"${k}", 1)
+        try:
+            conn.query(f"PREPARE py_{i} AS {text}")
+        except pgwire.PgError as e:
+            bad.append((text, e.message))
+    check(f"every statement of the Python client prepares ({len(client_sql)})", not bad, bad)
+
+    print("-- the TypeScript client (--client ts)")
+    ts = compiler.client("ts", "docs.authz")
+    ts_sql = re.findall(r'"(SELECT [^"]+)"', ts)
+    bad = []
+    for i, text in enumerate(ts_sql):
+        try:
+            conn.query(f"PREPARE ts_{i} AS {text}")
+        except pgwire.PgError as e:
+            bad.append((text, e.message))
+    check(f"every statement of the TypeScript client prepares ({len(ts_sql)})", not bad, bad)
+    typed = client_types.type_check(ts)
+    if typed:
+        check("tsc --strict accepts correct calls and rejects wrong names", typed[0], typed[1])
+    else:
+        print("skip  tsc not installed (tests/client_types.py is the same check, and CI's javascript job runs it)")
+    conn.close()
+
+    print("-- the editor grammar (../editor/)")
+    gram = os.path.join(ROOT, "..", "editor", "syntaxes", "authz.tmLanguage.json")
+    try:
+        with open(gram, encoding="utf-8") as fh:
+            g = json.load(fh)
+        pats: list[str] = []
+
+        def walk(x: object) -> None:
+            if isinstance(x, dict):
+                for k, v in x.items():
+                    if k in ("match", "begin", "end") and isinstance(v, str):
+                        pats.append(v)
+                    walk(v)
+            elif isinstance(x, list):
+                for v in x:
+                    walk(v)
+        walk(g)
+        bad = []
+        for p in pats:
+            try:
+                re.compile(p.replace("(?<", "(?P<") if "(?<!" not in p and "(?<=" not in p else p)
+            except re.error as e:
+                bad.append((p, str(e)))
+        check(f"the grammar's patterns compile ({len(pats)})", not bad, bad)
+        with open(os.path.join(ROOT, "..", "editor", "package.json"), encoding="utf-8") as fh:
+            pkg = json.load(fh)
+        check("the extension declares the .authz language", any(".authz" in lang.get("extensions", [])
+                                                                for lang in pkg["contributes"]["languages"]))
+    except FileNotFoundError as e:
+        check("the editor grammar exists", False, e)
+
+    shutil.rmtree(tmp, ignore_errors=True)
+    subprocess.run(["dropdb", db], capture_output=True)
+    print("tools: all passed" if not fails else f"tools: {fails} failed")
+    sys.exit(1 if fails else 0)
+
+
+if __name__ == "__main__":
+    main()

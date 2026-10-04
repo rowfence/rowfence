@@ -1,0 +1,19 @@
+{
+  "grammars": [
+    {
+      "name": "authz",
+      "camelcase": "Authz",
+      "scope": "source.authz",
+      "path": ".",
+      "file-types": ["authz"],
+      "highlights": "queries/highlights.scm",
+      "injections": "queries/injections.scm"
+    }
+  ],
+  "metadata": {
+    "version": "0.1.0",
+    "license": "Apache-2.0",
+    "description": "rowfence policies (.authz)",
+    "links": { "repository": "https://github.com/rowfence/rowfence" }
+  }
+}

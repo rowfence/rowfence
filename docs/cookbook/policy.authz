@@ -1,0 +1,112 @@
+-- The cookbook's policy (docs/cookbook.md): every pattern, on the tables in schema.sql. Its tests are in
+-- tests/patterns.authz; core/tests/cookbook.sh applies it and runs them.
+app role cb_app
+
+type user = cb.users
+  self        : user = id                                     -- your own row
+  has_blocked : user = cb.blocks(blocker_id -> blocked_id)     -- the people this person blocked
+  can edit = self
+
+-- owner only
+type note = cb.notes
+  owner : user = owner_id
+  can edit = owner
+  can view = owner
+
+-- teams inside teams
+type team = cb.teams
+  member : user        = cb.team_members(team_id -> user_id)
+  member : team#member = cb.teams(parent_id -> id)             -- members of sub-teams count too
+
+-- folders that inherit, and sharing
+type folder = cb.folders
+  parent : folder = parent_id
+  owner  : user   = owner_id
+  viewer : user, team#member, link  shared by share
+  editor : user, team#member        shared by share
+
+  can share = owner or (parent.share and {inherit})
+  can edit  = share or editor or (parent.edit and {inherit})
+  can view  = edit or viewer or (parent.view and {inherit})
+
+-- a deny that inherits
+type page = cb.pages
+  parent : page = parent_id
+  reader : user = cb.page_readers(page_id -> user_id)
+
+  can hidden = {hidden} or parent.hidden
+  can read   = (reader or parent.read) and not hidden
+
+-- tenants, and a key of two columns
+type org = cb.orgs
+  member : user = cb.org_members(org_id -> user_id)
+  admin  : user = cb.org_members(org_id -> user_id) where {role = 'admin'}
+
+type ticket = cb.tickets (org_id, id)
+  org      : org  = org_id
+  assignee : user = assignee_id
+
+  can edit = assignee or org.admin
+  can view = edit or org.member
+
+-- bots
+type service = cb.services principal
+  owner : user = owner_id
+  can manage_keys = owner
+
+-- announcement channels
+type channel = cb.channels
+  member : user    = cb.channel_members(channel_id -> user_id)
+  admin  : user    = cb.channel_members(channel_id -> user_id) where {admin}
+  bot    : service = cb.channel_bots(channel_id -> service_id)
+
+  can read = member or bot
+  can post = (member and ({not announce} or admin)) or bot
+
+type post = cb.posts
+  channel  : channel = channel_id
+  author   : user    = author_id
+  from_bot : service = bot_id
+
+-- blocking
+type direct_message = cb.direct_messages
+  sender    : user = from_id
+  recipient : user = to_id
+
+rules cb.notes
+  select : view
+  insert : owner
+  update : edit
+  update owner_id : nobody
+  delete : edit
+
+rules cb.folders
+  select : view
+  insert : parent.edit and owner
+  update : edit
+  update parent_id after : parent.edit
+  update owner_id, inherit : share
+  delete : share
+
+rules cb.users
+  select : signed_in
+  update : edit
+  update id : nobody
+
+rules cb.pages
+  select : read
+
+rules cb.tickets
+  select : view
+  insert : org.member
+  update : edit
+  update assignee_id : org.admin                          -- only admins reassign
+  update org_id, id : nobody
+
+rules cb.posts
+  select : channel.read
+  insert : channel.post and ((author and {bot_id is null}) or (from_bot and {author_id is null}))
+
+rules cb.direct_messages
+  select : sender or recipient
+  insert : sender and not recipient.has_blocked          -- nobody writes to someone who blocked them

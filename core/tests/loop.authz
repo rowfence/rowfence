@@ -1,0 +1,42 @@
+-- loop.authz: inheritance round a loop of foreign keys through four types (difftest --gen loop). An org's owner
+-- edits its domains, their addresses, the settings that use them, and the orgs those settings belong to.
+-- Settings may also be given an admin; addresses and domains have no starting point of their own, and an
+-- address that isn't verified stops what comes round.
+app role app_user
+
+type user = lp.users
+
+type org = lp.orgs
+  owner    : user    = owner_id
+  settings : setting = settings_id
+  can edit = owner or settings.edit
+  can view = edit
+
+type setting = lp.settings
+  email : email = email_id
+  admin : user  shared by edit
+  can edit = admin or email.edit
+
+type email = lp.emails
+  domain : domain = domain_id
+  can edit = domain.edit and {verified}           -- an unverified address passes nothing on
+
+type domain = lp.domains
+  org : org = org_id
+  can edit = org.edit
+
+rules lp.orgs
+  select : view
+  update : edit
+
+rules lp.settings
+  select : edit
+  update : edit
+
+rules lp.emails
+  select : edit
+
+rules lp.domains
+  select : edit
+  update : edit
+  update org_id after : org.edit

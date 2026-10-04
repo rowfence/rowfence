@@ -1,0 +1,7 @@
+{
+  "files": [],
+  "references": [
+    { "path": "client" }, { "path": "pg" }, { "path": "postgres" }, { "path": "prisma" },
+    { "path": "drizzle" }, { "path": "next" }, { "path": "react" }, { "path": "vitest" }
+  ]
+}

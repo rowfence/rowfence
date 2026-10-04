@@ -1,0 +1,74 @@
+#!/bin/bash
+# test.sh: the TypeScript SDK's conformance suite, against a fresh Postgres in Docker.
+#   integrations/nextjs/test.sh             # PG_MAJOR=17 or 18 for another version; KEEP=1 keeps the database
+#   POOLER=pgbouncer integrations/nextjs/test.sh      # the app through PgBouncer in transaction mode
+# (to look at: check 14 migrates it once more, so the tests run again only on a new one, which this script makes)
+# Check 11 first: a fresh database, migrated with Prisma Migrate (rowfence's policy is one of the migrations),
+# then the policy's tests, then Prisma's own diff, which must show no change. Then the app is built and started
+# twice (a pool of five connections, and a pool of one), and the other checks run (Vitest).
+set -u
+cd "$(dirname "$0")"
+export MSYS_NO_PATHCONV=1
+PG=${PG_MAJOR:-16}
+NAME=rowfence-conformance-ts
+PORT=${CONFORMANCE_PORT:-25441}      # below 49152: above it Windows reserves ranges for itself, and Docker can't publish there
+WEB=${CONFORMANCE_WEB_PORT:-3401}
+ROOT=$(cd ../.. && pwd)
+BIN=$ROOT/node_modules/.bin
+PYTHON=${PYTHON:-python3}
+$PYTHON -c 'pass' 2>/dev/null || PYTHON=python
+export PYTHON
+[ -d "$ROOT/node_modules" ] || (cd "$ROOT" && npm ci --no-audit --no-fund) || exit 1
+docker build -q -t "rowfence:$PG" --build-arg "PG_MAJOR=$PG" -f ../../core/Dockerfile ../.. >/dev/null || exit 1
+docker rm -f "$NAME" >/dev/null 2>&1
+docker run -d --name "$NAME" -e POSTGRES_PASSWORD=postgres -p "$PORT:5432" "rowfence:$PG" >/dev/null || exit 1
+for _ in $(seq 60); do docker exec "$NAME" pg_isready -q -U postgres 2>/dev/null && break; sleep 1; done
+sleep 2
+# the migration role owns the databases: not a superuser, as on managed Postgres (CREATEDB: a test database per worker)
+docker exec "$NAME" psql -q -U postgres -c "CREATE ROLE conf_owner LOGIN PASSWORD 'owner' CREATEROLE CREATEDB" \
+  -c "ALTER ROLE conf_owner SET createrole_self_grant = 'set, inherit'" -c "CREATE DATABASE conf OWNER conf_owner" \
+  -c "CREATE DATABASE conf_tests OWNER conf_owner" >/dev/null || exit 1
+export ROWFENCE_OWNER_DSN="postgresql://conf_owner:owner@localhost:$PORT/conf"
+export ROWFENCE_TESTS_DSN="postgresql://conf_owner:owner@localhost:$PORT/conf_tests"
+APP_PORT=$PORT
+if [ "${POOLER:-}" = pgbouncer ]; then          # the app through PgBouncer in transaction mode (../pooler.sh)
+  source ../pooler.sh
+  APP_PORT=$((PORT + 2))
+  pooler_start "$NAME" "$APP_PORT" conf_app:app || exit 1
+fi
+export ROWFENCE_APP_URL="postgresql://conf_app:app@localhost:$APP_PORT/conf"
+# the change feed LISTENs: its own connection, straight to Postgres (a pooler in transaction mode hears nothing)
+export ROWFENCE_FEED_URL="postgresql://conf_app:app@localhost:$PORT/conf"
+export CONFORMANCE_SERVER="http://localhost:$WEB" CONFORMANCE_SERVER_ONE="http://localhost:$((WEB + 1))"
+LOG=$(mktemp -d)
+rc=0
+servers=()
+stop() { for p in "${servers[@]}"; do kill "$p" 2>/dev/null; done; }
+trap stop EXIT
+$BIN/prisma migrate deploy >"$LOG/migrate.log" 2>&1 || { cat "$LOG/migrate.log"; echo "FAIL  11: prisma migrate deploy"; exit 1; }
+$PYTHON ../../core/cli/rowfence_cli.py test >"$LOG/policy-tests.log" 2>&1 &&
+  echo "ok    11: a fresh database, migrated, passes the policy's tests" || { cat "$LOG/policy-tests.log"; echo "FAIL  11: policy tests"; rc=1; }
+$BIN/prisma migrate diff --from-config-datasource --to-schema prisma/schema.prisma --exit-code >"$LOG/diff.log" 2>&1 &&
+  echo "ok    11: ... and Prisma's own diff shows no change" || { cat "$LOG/diff.log"; echo "FAIL  11: prisma migrate diff"; rc=1; }
+$PYTHON ../../core/cli/rowfence_cli.py migrate --check >/dev/null &&
+  echo "ok    the policy's lock file is up to date" || { echo "FAIL  rowfence migrate --check"; rc=1; }
+# 12: the framework's test database, migrated the same way (the tests copy it for each worker)
+ROWFENCE_OWNER_DSN=$ROWFENCE_TESTS_DSN $BIN/prisma migrate deploy >"$LOG/migrate-tests.log" 2>&1 || { cat "$LOG/migrate-tests.log"; exit 1; }
+(cd "$ROOT" && $BIN/tsc -b sdk/typescript) || { echo "FAIL  the SDK doesn't build"; exit 1; }
+$BIN/prisma generate >/dev/null 2>&1 || { echo "FAIL  prisma generate"; exit 1; }
+$PYTHON ../../core/cli/rowfence_cli.py client >/dev/null || exit 1
+git diff --quiet -- src/authz.gen.ts 2>/dev/null || { echo "FAIL  src/authz.gen.ts is out of date: rowfence client"; rc=1; }
+node ../../node_modules/next/dist/bin/next build >"$LOG/build.log" 2>&1 || { cat "$LOG/build.log"; echo "FAIL  next build"; exit 1; }
+NEXT="node ../../node_modules/next/dist/bin/next"
+$NEXT start -p "$WEB" >"$LOG/server.log" 2>&1 & servers+=($!)
+PG_POOL_MAX=1 $NEXT start -p "$((WEB + 1))" >"$LOG/server-one.log" 2>&1 & servers+=($!)
+# 13: the app refuses to start on a connection that skips row-level security (here, the owner's)
+ROWFENCE_APP_URL=$ROWFENCE_OWNER_DSN timeout 60 $NEXT start -p "$((WEB + 2))" >"$LOG/server-owner.log" 2>&1
+if [ $? = 1 ] && grep -q "owners skip row-level security" "$LOG/server-owner.log"; then
+  echo "ok    13: the app refuses to start on the owner's connection"
+else cat "$LOG/server-owner.log"; echo "FAIL  13: the app started on the owner's connection"; rc=1; fi
+for _ in $(seq 60); do curl -sf "$CONFORMANCE_SERVER/api/projects" >/dev/null && curl -sf "$CONFORMANCE_SERVER_ONE/api/projects" >/dev/null && break; sleep 1; done
+$BIN/vitest run "$@" || { rc=1; echo "(server logs: $LOG)"; }
+stop
+[ -n "${KEEP:-}" ] || { [ "${POOLER:-}" = pgbouncer ] && pooler_stop "$NAME"; docker rm -f "$NAME" >/dev/null; }
+exit $rc

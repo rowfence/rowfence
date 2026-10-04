@@ -1,0 +1,557 @@
+================================================================================
+Types, keys and sources
+================================================================================
+
+app role app_user
+include "roles.authz"
+
+type user = app.users (id uuid) where {active}
+
+type service = app.services principal
+
+type folder = cx.folders (org_id, id)
+  parent  : folder, project = (parent_type, [org_id, parent_id])
+  editor  : team#member = cx.folder_teams(object: [org_id, folder_id], subject: [org_id, team_slug])
+  member  : team#member = app.teams(parent_id -> id)
+  viewer  : user:*, anyone, link shared by share if {expires_at > now()}
+  roles   : user, team#member from org
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (app_role
+    name: (identifier))
+  (include
+    path: (string))
+  (type
+    name: (identifier)
+    table: (table_name
+      schema: (identifier)
+      name: (identifier))
+    (key
+      (key_column
+        name: (identifier)
+        type: (identifier)))
+    (sql
+      (sql_text)))
+  (type
+    name: (identifier)
+    table: (table_name
+      schema: (identifier)
+      name: (identifier))
+    (principal))
+  (type
+    name: (identifier)
+    table: (table_name
+      schema: (identifier)
+      name: (identifier))
+    (key
+      (key_column
+        name: (identifier))
+      (key_column
+        name: (identifier)))
+    (relation
+      name: (identifier)
+      (subject
+        type: (identifier))
+      (subject
+        type: (identifier))
+      (typed_columns
+        (column
+          (identifier))
+        (columns
+          (column
+            (identifier))
+          (column
+            (identifier)))))
+    (relation
+      name: (identifier)
+      (subject
+        type: (identifier)
+        relation: (identifier))
+      (table_source
+        table: (table_name
+          schema: (identifier)
+          name: (identifier))
+        (side
+          (columns
+            (column
+              (identifier))
+            (column
+              (identifier))))
+        (side
+          (columns
+            (column
+              (identifier))
+            (column
+              (identifier))))))
+    (relation
+      name: (identifier)
+      (subject
+        type: (identifier)
+        relation: (identifier))
+      (table_source
+        table: (table_name
+          schema: (identifier)
+          name: (identifier))
+        (column
+          (identifier))
+        (column
+          (identifier))))
+    (relation
+      name: (identifier)
+      (subject
+        type: (identifier))
+      (subject
+        (anyone))
+      (subject
+        (link))
+      (shared
+        permission: (identifier)
+        (sql
+          (sql_text))))
+    (roles
+      (subject
+        type: (identifier))
+      (subject
+        type: (identifier)
+        relation: (identifier))
+      owner: (identifier))))
+
+================================================================================
+Permissions: or < and < not, lines that continue
+================================================================================
+
+type file = app.files
+  can view = edit or viewer
+           or (folder.view and not {confidential})
+  can open = signed_in and not blocked
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (type
+    name: (identifier)
+    table: (table_name
+      schema: (identifier)
+      name: (identifier))
+    (permission
+      name: (identifier)
+      expression: (or
+        (or
+          (ref
+            (identifier))
+          (ref
+            (identifier)))
+        (parenthesized
+          (and
+            (arrow
+              relation: (identifier)
+              permission: (identifier))
+            (not
+              (sql
+                (sql_text)))))))
+    (permission
+      name: (identifier)
+      expression: (and
+        (ref
+          (identifier))
+        (not
+          (ref
+            (identifier)))))))
+
+================================================================================
+Rules, masks, scopes, caveats, invariants
+================================================================================
+
+rules mt.docs view mt.docs_visible
+  select                 : view
+  update id, owner_id    : share
+  update parent_id after : parent.edit or ({parent_id is null} and share)
+  update name before     : edit
+  mask body              : edit
+
+scope files:read = app.files.select, file.view
+caveat from_ip = {authz.ctx('ip') = arg('ip')}
+
+invariants
+  never folder: share and not org.member
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (rules
+    table: (table_name
+      schema: (identifier)
+      name: (identifier))
+    view: (table_name
+      schema: (identifier)
+      name: (identifier))
+    (rule
+      command: (command)
+      expression: (ref
+        (identifier)))
+    (rule
+      command: (command)
+      (column
+        (identifier))
+      (column
+        (identifier))
+      expression: (ref
+        (identifier)))
+    (rule
+      command: (command)
+      (column
+        (identifier))
+      expression: (or
+        (arrow
+          relation: (identifier)
+          permission: (identifier))
+        (parenthesized
+          (and
+            (sql
+              (sql_text))
+            (ref
+              (identifier))))))
+    (rule
+      command: (command)
+      (column
+        (identifier))
+      expression: (ref
+        (identifier)))
+    (mask
+      (column
+        (identifier))
+      expression: (ref
+        (identifier))))
+  (scope
+    name: (scope_name
+      (identifier)
+      (identifier))
+    (scope_item
+      (identifier)
+      (identifier)
+      (identifier))
+    (scope_item
+      (identifier)
+      (identifier)))
+  (caveat
+    name: (identifier)
+    (sql
+      (sql_text)))
+  (invariants
+    (never
+      type: (identifier)
+      expression: (and
+        (ref
+          (identifier))
+        (not
+          (arrow
+            relation: (identifier)
+            permission: (identifier)))))))
+
+================================================================================
+Tests: checks, and named tests with their own data
+================================================================================
+
+test
+  user 3 can view file 11        -- a comment
+  user 'a b' cannot edit file 'x''y'
+
+test "sharing, then a refusal"
+  given ann = {INSERT INTO app.users (name) VALUES ('{not a brace}') RETURNING id}
+  given {INSERT INTO app.folders (owner_id) VALUES ($ann)}
+  anyone can view project $q
+  as user $ann allowed {SELECT authz.share('folder', 1, 'viewer', 'user', 2)}
+  as anyone refused {DELETE FROM app.folders}
+  as bot $b sees 2 {SELECT FROM app.folders WHERE data @> '{"a": {"b": 1}}'}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (test
+    (check
+      principal: (identifier)
+      who: (value)
+      permission: (identifier)
+      type: (identifier)
+      object: (value))
+    (comment)
+    (check
+      principal: (identifier)
+      who: (literal)
+      permission: (identifier)
+      type: (identifier)
+      object: (literal)))
+  (test
+    name: (string)
+    (given
+      name: (identifier)
+      (sql
+        (sql_text)))
+    (given
+      (sql
+        (sql_text)))
+    (check
+      (anyone)
+      permission: (identifier)
+      type: (identifier)
+      object: (variable))
+    (as
+      principal: (identifier)
+      who: (variable)
+      (sql
+        (sql_text)))
+    (as
+      (anyone)
+      (sql
+        (sql_text)))
+    (as
+      principal: (identifier)
+      who: (variable)
+      (number)
+      (sql
+        (sql_text)))))
+
+================================================================================
+Relations named like the words that start a line
+================================================================================
+
+type team = app.teams principal
+  principal : user = lead_id
+  app : user = app.team_apps(team_id -> user_id)
+  roles: user from principal
+  can manage = principal or roles
+
+type doc = app.docs
+  role : user = owner_id
+  type : team = team_id
+  test : user shared
+  scope : user shared by view
+  include : user shared
+  caveat : user shared
+  rules : user = app.doc_rules(doc_id -> user_id)
+  invariants : team#roles = team_id
+  can view = role or type.manage or test or scope or include or caveat or rules or invariants
+  can share = role
+app role admin
+
+type note = app.notes
+  owner : user = owner_id
+  can view = owner
+test
+  user 1 can view doc 1
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (type
+    (identifier)
+    (table_name
+      (identifier)
+      (identifier))
+    (principal)
+    (relation
+      (identifier)
+      (subject
+        (identifier))
+      (column
+        (identifier)))
+    (relation
+      (identifier)
+      (subject
+        (identifier))
+      (table_source
+        (table_name
+          (identifier)
+          (identifier))
+        (column
+          (identifier))
+        (column
+          (identifier))))
+    (roles
+      (subject
+        (identifier))
+      (identifier))
+    (permission
+      (identifier)
+      (or
+        (ref
+          (identifier))
+        (ref
+          (identifier)))))
+  (type
+    (identifier)
+    (table_name
+      (identifier)
+      (identifier))
+    (relation
+      (identifier)
+      (subject
+        (identifier))
+      (column
+        (identifier)))
+    (relation
+      (identifier)
+      (subject
+        (identifier))
+      (column
+        (identifier)))
+    (relation
+      (identifier)
+      (subject
+        (identifier))
+      (shared))
+    (relation
+      (identifier)
+      (subject
+        (identifier))
+      (shared
+        (identifier)))
+    (relation
+      (identifier)
+      (subject
+        (identifier))
+      (shared))
+    (relation
+      (identifier)
+      (subject
+        (identifier))
+      (shared))
+    (relation
+      (identifier)
+      (subject
+        (identifier))
+      (table_source
+        (table_name
+          (identifier)
+          (identifier))
+        (column
+          (identifier))
+        (column
+          (identifier))))
+    (relation
+      (identifier)
+      (subject
+        (identifier)
+        (identifier))
+      (column
+        (identifier)))
+    (permission
+      (identifier)
+      (or
+        (or
+          (or
+            (or
+              (or
+                (or
+                  (or
+                    (ref
+                      (identifier))
+                    (arrow
+                      (identifier)
+                      (identifier)))
+                  (ref
+                    (identifier)))
+                (ref
+                  (identifier)))
+              (ref
+                (identifier)))
+            (ref
+              (identifier)))
+          (ref
+            (identifier)))
+        (ref
+          (identifier))))
+    (permission
+      (identifier)
+      (ref
+        (identifier))))
+  (app_role
+    (identifier))
+  (type
+    (identifier)
+    (table_name
+      (identifier)
+      (identifier))
+    (relation
+      (identifier)
+      (subject
+        (identifier))
+      (column
+        (identifier)))
+    (permission
+      (identifier)
+      (ref
+        (identifier))))
+  (test
+    (check
+      (identifier)
+      (value)
+      (identifier)
+      (identifier)
+      (value))))
+
+================================================================================
+Words for conditions, custom roles where they give, this in conditions
+================================================================================
+
+type folder = app.folders
+  owner : user = owner_id
+  roles : user from org
+  can edit = owner or roles or {exists (select 1 from app.holds h where h.target = this.id)}
+
+rules app.folders
+  select : anyone
+  update id : nobody
+  insert : signed_in and owner
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (type
+    name: (identifier)
+    table: (table_name
+      schema: (identifier)
+      name: (identifier))
+    (relation
+      name: (identifier)
+      (subject
+        type: (identifier))
+      (column
+        (identifier)))
+    (roles
+      (subject
+        type: (identifier))
+      owner: (identifier))
+    (permission
+      name: (identifier)
+      expression: (or
+        (or
+          (ref
+            (identifier))
+          (ref
+            (identifier)))
+        (sql
+          (sql_text)))))
+  (rules
+    table: (table_name
+      schema: (identifier)
+      name: (identifier))
+    (rule
+      command: (command)
+      expression: (ref
+        (identifier)))
+    (rule
+      command: (command)
+      (column
+        (identifier))
+      expression: (ref
+        (identifier)))
+    (rule
+      command: (command)
+      expression: (and
+        (ref
+          (identifier))
+        (ref
+          (identifier))))))

@@ -1,0 +1,131 @@
+#!/bin/bash
+# identity.sh: scopes, API keys, JWT login, view-as and group sync.
+#   PGHOST=... PGPORT=... PGUSER=postgres tests/identity.sh [database]
+set -u
+cd "$(dirname "$0")/.."
+DB=${1:-authz_identity}
+dropdb --if-exists "$DB" 2>/dev/null; createdb "$DB" || exit 1
+fails=0
+PSQL() { psql -X -q -At -v ON_ERROR_STOP=1 -d "$DB" "$@"; }
+check() {   # $1 label, $2 expected, $3 SQL (run as app_user)
+  got=$(PSQL -c "SET ROLE app_user;" -c "$3" 2>&1 | tail -n 1)
+  if [ "$got" = "$2" ]; then echo "ok    $1"; else echo "FAIL  $1: expected '$2', got '$got'"; fails=$((fails + 1)); fi
+}
+state() { psql -X -q -At -d "$DB" -c "SET ROLE app_user;" "$@" 2>&1 | tail -n 1; }
+code() {    # the SQLSTATE of the last statement, or ok
+  psql -X -q -At -d "$DB" -v VERBOSITY=sqlstate -c "SET ROLE app_user;" "$@" 2>&1 | grep -o '^ERROR:  [0-9A-Z]*' | tail -n 1 | cut -c9- || true
+}
+expect_code() {  # $1 label, $2 expected SQLSTATE, rest: -c statements
+  local label=$1 want=$2; shift 2
+  got=$(code "$@"); got=${got:-ok}
+  if [ "$got" = "$want" ]; then echo "ok    $label"; else echo "FAIL  $label: expected $want, got $got"; fails=$((fails + 1)); fi
+}
+
+python3 authzc.py example/docs.authz > /tmp/authz_identity.sql || exit 1
+PGOPTIONS="-c client_min_messages=error" psql -X -q -v ON_ERROR_STOP=1 -d "$DB" -f example/app_schema.sql >/dev/null &&
+PGOPTIONS="-c client_min_messages=error" psql -X -q -v ON_ERROR_STOP=1 -d "$DB" -f /tmp/authz_identity.sql >/dev/null || exit 1
+PSQL -c "SET ROLE app_user; SET authz.user_id = 5; SELECT authz.share('folder', 1, 'viewer', 'org', 1, 'member')" >/dev/null
+
+echo "-- scopes and API keys"
+READ=$(state -c "SET authz.user_id = 1" -c "SELECT authz.create_api_key('laptop', 'read')")
+FILES=$(state -c "SET authz.user_id = 1" -c "SELECT authz.create_api_key('script', 'files')")
+case "$READ" in ak_*) echo "ok    alice creates a read-only key (shown once)";; *) echo "FAIL  key: $READ"; fails=$((fails + 1));; esac
+check "the key signs in as alice" "1" "BEGIN; SELECT authz.login_key('$READ'); SELECT authz.uid(); COMMIT;"
+check "read-only key: may view file 11, not edit it" "true|false" \
+  "BEGIN; SELECT authz.login_key('$READ'); SELECT authz.can('file', 11, 'view') || '|' || authz.can('file', 11, 'edit'); COMMIT;"
+check "read-only key: SELECT works" "3" "BEGIN; SELECT authz.login_key('$READ'); SELECT count(*) FROM app.files; COMMIT;"
+check "read-only key: UPDATE changes nothing" "0" \
+  "BEGIN; SELECT authz.login_key('$READ'); WITH u AS (UPDATE app.files SET body = 'x' WHERE id = 11 RETURNING 1) SELECT count(*) FROM u; ROLLBACK;"
+expect_code "read-only key: cannot share" 42501 -c "BEGIN" -c "SELECT authz.login_key('$READ')" \
+  -c "SELECT authz.share('file', 11, 'viewer', 'user', 4)"
+expect_code "a read-only session cannot mint a broader key" 42501 -c "BEGIN" -c "SELECT authz.login_key('$READ')" \
+  -c "SELECT authz.create_api_key('sneaky', 'files')"
+check "files key: may edit files, and update them" "updated" \
+  "BEGIN; SELECT authz.login_key('$FILES'); SELECT authz.can('file', 11, 'edit'); UPDATE app.files SET body = 'y' WHERE id = 11 RETURNING 'updated'; ROLLBACK;"
+check "files key: sees no folders (not in its scope)" "0|false" \
+  "BEGIN; SELECT authz.login_key('$FILES'); SELECT (SELECT count(*) FROM app.folders) || '|' || authz.can('folder', 3, 'view'); COMMIT;"
+check "alice lists her keys" "2" "SET authz.user_id = 1; SELECT count(*) FROM authz.list_api_keys();"
+check "a key signs in to a read-only transaction (a replica, a GET)" "1"   "BEGIN READ ONLY; SELECT authz.login_key('$FILES'); SELECT authz.uid(); COMMIT;"
+PSQL -c "UPDATE authz.api_keys SET last_used_at = NULL" >/dev/null
+# one request holds the key's row (it signed in first and is still running): another with the key doesn't wait
+(PSQL -c "SET ROLE app_user" -c "BEGIN" -c "SELECT authz.login_key('$FILES')" -c "SELECT pg_sleep(3)" -c "COMMIT" >/dev/null) &
+sleep 1
+check "... and requests with one key don't wait for each other" "1"   "SET statement_timeout = '1500ms'; BEGIN; SELECT authz.login_key('$FILES'); SELECT authz.uid(); COMMIT;"
+wait
+check "... last_used_at is kept, to the minute" "t"   "RESET ROLE; SELECT last_used_at > now() - interval '1 minute' FROM authz.api_keys WHERE name = 'script';"
+KEYID=$(state -c "SET authz.user_id = 1" -c "SELECT id FROM authz.list_api_keys() WHERE name = 'laptop'")
+PSQL -c "SET ROLE app_user; SET authz.user_id = 1; SELECT authz.revoke_api_key($KEYID)" >/dev/null
+expect_code "a revoked key no longer signs in" 28000 -c "BEGIN" -c "SELECT authz.login_key('$READ')"
+expect_code "a made-up key does not either" 28000 -c "BEGIN" -c "SELECT authz.login_key('ak_nope')"
+
+echo "-- JWT (HS256)"
+PSQL -c "INSERT INTO authz.settings VALUES ('jwt_secret', 's3cret-for-tests'), ('jwt_issuer', 'https://id.example')" >/dev/null
+jwt() { python3 - "$@" <<'PY'
+import base64, hashlib, hmac, json, sys, time
+secret, sub, ttl, extra = sys.argv[1], sys.argv[2], int(sys.argv[3]), json.loads(sys.argv[4])
+b = lambda d: base64.urlsafe_b64encode(json.dumps(d, separators=(",", ":")).encode()).rstrip(b"=").decode()
+head = extra.pop("_header", {"alg": "HS256", "typ": "JWT"})
+body = dict({"sub": sub, "exp": int(time.time()) + ttl, "iss": "https://id.example"}, **extra)
+msg = b(head) + "." + b(body)
+sig = base64.urlsafe_b64encode(hmac.new(secret.encode(), msg.encode(), hashlib.sha256).digest()).rstrip(b"=").decode()
+print(msg + "." + sig)
+PY
+}
+T_OK=$(jwt s3cret-for-tests 2 300 '{"scope": "read"}')
+T_BADSIG=$(jwt wrong-secret 2 300 '{}')
+T_EXPIRED=$(jwt s3cret-for-tests 2 -10 '{}')
+T_ISS=$(jwt s3cret-for-tests 2 300 '{"iss": "https://evil.example"}')
+T_NONE=$(jwt s3cret-for-tests 2 300 '{"_header": {"alg": "none"}}')
+T_NOEXP=$(python3 - <<'PY'
+import base64, hashlib, hmac, json
+b = lambda d: base64.urlsafe_b64encode(json.dumps(d, separators=(",", ":")).encode()).rstrip(b"=").decode()
+msg = b({"alg": "HS256", "typ": "JWT"}) + "." + b({"sub": "2", "iss": "https://id.example"})
+print(msg + "." + base64.urlsafe_b64encode(hmac.new(b"s3cret-for-tests", msg.encode(), hashlib.sha256).digest()).rstrip(b"=").decode())
+PY
+)
+check "a valid token signs in as bob, with its scope" "2|read" \
+  "BEGIN; SELECT authz.login_jwt('$T_OK'); SELECT authz.uid() || '|' || current_setting('authz.scopes'); COMMIT;"
+expect_code "wrong signature" 28000 -c "BEGIN" -c "SELECT authz.login_jwt('$T_BADSIG')"
+expect_code "expired" 28000 -c "BEGIN" -c "SELECT authz.login_jwt('$T_EXPIRED')"
+expect_code "another issuer" 28000 -c "BEGIN" -c "SELECT authz.login_jwt('$T_ISS')"
+expect_code "alg none" 28000 -c "BEGIN" -c "SELECT authz.login_jwt('$T_NONE')"
+expect_code "no expiry" 28000 -c "BEGIN" -c "SELECT authz.login_jwt('$T_NOEXP')"
+# nbf is optional; the hours keep these far from a clock that steps a few seconds
+expect_code "not valid yet (nbf in an hour)" 28000 -c "BEGIN" \
+  -c "SELECT authz.login_jwt('$(jwt s3cret-for-tests 2 7200 "{\"nbf\": $(( $(date +%s) + 3600 ))}")')"
+expect_code "an nbf that isn't a number" 28000 -c "BEGIN" -c "SELECT authz.login_jwt('$(jwt s3cret-for-tests 2 300 '{"nbf": "soon"}')')"
+check "valid since an hour (nbf in the past)" "2" \
+  "BEGIN; SELECT authz.login_jwt('$(jwt s3cret-for-tests 2 300 "{\"nbf\": $(( $(date +%s) - 3600 ))}")'); COMMIT;"
+# an audience, once the setting names one: a string or a list holding it
+PSQL -c "INSERT INTO authz.settings VALUES ('jwt_audience', 'docs-api')" >/dev/null
+expect_code "a token for no audience, once one is asked" 28000 -c "BEGIN" -c "SELECT authz.login_jwt('$T_OK')"
+expect_code "a token for another audience" 28000 -c "BEGIN" -c "SELECT authz.login_jwt('$(jwt s3cret-for-tests 2 300 '{"aud": "other-api"}')')"
+check "a token for this audience" "2" "BEGIN; SELECT authz.login_jwt('$(jwt s3cret-for-tests 2 300 '{"aud": "docs-api"}')'); COMMIT;"
+check "... or for a list that holds it" "2" "BEGIN; SELECT authz.login_jwt('$(jwt s3cret-for-tests 2 300 '{"aud": ["other-api", "docs-api"]}')'); COMMIT;"
+PSQL -c "DELETE FROM authz.settings WHERE key = 'jwt_audience'" >/dev/null
+
+echo "-- view as (support)"
+check "erin (Acme admin) views as carol: carol's files, read-only" "3|3|5|false" \
+  "BEGIN; SET LOCAL authz.user_id = 5; SELECT authz.view_as('3', 'ticket 42'); SELECT (SELECT count(*) FROM app.files) || '|' || authz.uid() || '|' || current_setting('authz.acting_user') || '|' || authz.can('file', 11, 'edit'); COMMIT;"
+expect_code "... and cannot change anything" 42501 -c "BEGIN" -c "SET LOCAL authz.user_id = 5" \
+  -c "SELECT authz.view_as('3', 'ticket 42')" -c "SELECT authz.share('folder', 2, 'viewer', 'user', 4)"
+# the scope view-as carries refuses sharing too; without it (the owner's session sets the settings), only the
+# read-only check is left to refuse
+for call in "share('folder', 1, 'viewer', 'user', 4)" "unshare('folder', 1, 'viewer', 'org', 1, 'member')"; do
+  got=$(psql -X -q -At -d "$DB" -c "SET ROLE app_user" -c "SET authz.user_id = 5" -c "SET authz.acting_user = '1'" -c "SELECT authz.$call" 2>&1)
+  case "$got" in *"this session is read-only"*) echo "ok    ... whatever the scopes: ${call%%(*} is refused as read-only";;
+    *) echo "FAIL  ${call%%(*} while viewing as someone, no scope: $got"; fails=$((fails + 1));; esac
+done
+check "the audit trail has the reason" "ticket 42" \
+  "RESET ROLE; SELECT reason FROM authz.audit WHERE action = 'view_as' ORDER BY id DESC LIMIT 1;"
+expect_code "carol cannot view as erin" 42501 -c "SET authz.user_id = 3" -c "SELECT authz.view_as('5', 'curious')"
+expect_code "a reason is required" P0001 -c "SET authz.user_id = 5" -c "SELECT authz.view_as('3', '')"
+
+echo "-- group sync (administrators)"
+check "sync Engineering to alice and carol" "1|0" \
+  "RESET ROLE; SELECT added || '|' || removed FROM authz.sync_members('team', '10', 'member', ARRAY['1', '3']);"
+check "... carol is now in Engineering" "t" "SET authz.user_id = 3; SELECT authz.can('folder', 3, 'edit');"
+expect_code "the app role cannot sync" 42501 -c "SELECT authz.sync_members('team', '10', 'member', ARRAY['4'])"
+
+dropdb "$DB"
+if [ $fails -eq 0 ]; then echo "identity: all passed"; else echo "identity: $fails failed"; exit 1; fi

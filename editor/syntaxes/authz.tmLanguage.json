@@ -1,0 +1,316 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "authz policy",
+  "scopeName": "source.authz",
+  "patterns": [
+    {
+      "include": "#comment"
+    },
+    {
+      "include": "#sql"
+    },
+    {
+      "include": "#headers"
+    },
+    {
+      "include": "#roles"
+    },
+    {
+      "include": "#relation"
+    },
+    {
+      "include": "#permission"
+    },
+    {
+      "include": "#rule"
+    },
+    {
+      "include": "#test"
+    },
+    {
+      "include": "#invariant"
+    },
+    {
+      "include": "#expression"
+    }
+  ],
+  "repository": {
+    "comment": {
+      "match": "--.*$",
+      "name": "comment.line.double-dash.authz"
+    },
+    "sql": {
+      "begin": "\\{",
+      "end": "\\}",
+      "beginCaptures": {
+        "0": {
+          "name": "punctuation.section.embedded.begin.authz"
+        }
+      },
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.section.embedded.end.authz"
+        }
+      },
+      "contentName": "meta.embedded.sql.authz",
+      "patterns": [
+        {
+          "include": "source.sql"
+        }
+      ]
+    },
+    "headers": {
+      "patterns": [
+        {
+          "match": "^(type)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*(=)\\s*([A-Za-z_][A-Za-z0-9_]*\\.[A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": {
+              "name": "keyword.declaration.type.authz"
+            },
+            "2": {
+              "name": "entity.name.type.authz"
+            },
+            "3": {
+              "name": "keyword.operator.assignment.authz"
+            },
+            "4": {
+              "name": "entity.name.tag.table.authz"
+            }
+          }
+        },
+        {
+          "match": "^(rules)\\s+([A-Za-z_][A-Za-z0-9_]*\\.[A-Za-z_][A-Za-z0-9_]*)(?:\\s+(view)\\s+([A-Za-z_][A-Za-z0-9_]*\\.[A-Za-z_][A-Za-z0-9_]*))?",
+          "captures": {
+            "1": {
+              "name": "keyword.declaration.rules.authz"
+            },
+            "2": {
+              "name": "entity.name.tag.table.authz"
+            },
+            "3": {
+              "name": "keyword.other.view.authz"
+            },
+            "4": {
+              "name": "entity.name.tag.table.authz"
+            }
+          }
+        },
+        {
+          "match": "^(app\\s+role|scope|caveat|include)\\b\\s*([A-Za-z_][A-Za-z0-9_:\\-]*)?",
+          "captures": {
+            "1": {
+              "name": "keyword.declaration.authz"
+            },
+            "2": {
+              "name": "entity.name.function.authz"
+            }
+          }
+        },
+        {
+          "match": "^(test|invariants)\\s*$",
+          "name": "keyword.declaration.section.authz"
+        }
+      ]
+    },
+    "relation": {
+      "match": "^\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*(:)(?=[^:]*(=|\\bshared\\b))",
+      "captures": {
+        "1": {
+          "name": "variable.other.relation.authz"
+        },
+        "2": {
+          "name": "punctuation.separator.authz"
+        }
+      }
+    },
+    "permission": {
+      "match": "^\\s+(can)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*(=)",
+      "captures": {
+        "1": {
+          "name": "keyword.declaration.permission.authz"
+        },
+        "2": {
+          "name": "entity.name.function.permission.authz"
+        },
+        "3": {
+          "name": "keyword.operator.assignment.authz"
+        }
+      }
+    },
+    "rule": {
+      "match": "^\\s+(select|insert|update|delete|mask)\\b([^:]*)(:)",
+      "captures": {
+        "1": {
+          "name": "keyword.control.command.authz"
+        },
+        "2": {
+          "patterns": [
+            {
+              "match": "\\bcheck\\b",
+              "name": "keyword.control.check.authz"
+            },
+            {
+              "match": "[A-Za-z_][A-Za-z0-9_]*",
+              "name": "variable.other.column.authz"
+            }
+          ]
+        },
+        "3": {
+          "name": "punctuation.separator.authz"
+        }
+      }
+    },
+    "test": {
+      "patterns": [
+        {
+          "match": "^(test)\\s+(\\\"[^\\\"]*\\\"|'[^']*'|.+)$",
+          "captures": {
+            "1": {
+              "name": "keyword.declaration.section.authz"
+            },
+            "2": {
+              "name": "string.quoted.authz"
+            }
+          }
+        },
+        {
+          "match": "^\\s+(given)\\s+(?:([A-Za-z_][A-Za-z0-9_]*)\\s*(=))?",
+          "captures": {
+            "1": {
+              "name": "keyword.control.authz"
+            },
+            "2": {
+              "name": "variable.other.authz"
+            },
+            "3": {
+              "name": "keyword.operator.assignment.authz"
+            }
+          }
+        },
+        {
+          "match": "^\\s+(as)\\s+(anyone|[A-Za-z_][A-Za-z0-9_]*\\s+\\S+)\\s+(allowed|refused|sees\\s+\\d+)\\b",
+          "captures": {
+            "1": {
+              "name": "keyword.control.authz"
+            },
+            "2": {
+              "name": "variable.other.authz"
+            },
+            "3": {
+              "name": "keyword.control.authz"
+            }
+          }
+        },
+        {
+          "match": "^\\s+(anyone|[A-Za-z_][A-Za-z0-9_]*\\s+\\S+)\\s+(can|cannot)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s+(\\S+)",
+          "captures": {
+            "1": {
+              "name": "variable.other.authz"
+            },
+            "2": {
+              "name": "keyword.control.authz"
+            },
+            "3": {
+              "name": "entity.name.function.permission.authz"
+            },
+            "4": {
+              "name": "entity.name.type.authz"
+            },
+            "5": {
+              "name": "constant.numeric.authz"
+            }
+          }
+        }
+      ]
+    },
+    "invariant": {
+      "match": "^\\s+(never)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*(:)",
+      "captures": {
+        "1": {
+          "name": "keyword.control.never.authz"
+        },
+        "2": {
+          "name": "entity.name.type.authz"
+        },
+        "3": {
+          "name": "punctuation.separator.authz"
+        }
+      }
+    },
+    "expression": {
+      "patterns": [
+        {
+          "match": "\\b(or|and|not)\\b",
+          "name": "keyword.operator.logical.authz"
+        },
+        {
+          "match": "\\b(shared|by|if|where|from)\\b",
+          "name": "keyword.other.authz"
+        },
+        {
+          "match": "\\b(user|anyone|link)(:\\*)?\\b",
+          "name": "support.type.subject.authz"
+        },
+        {
+          "match": "\\b(signed_in|nobody|roles)\\b",
+          "name": "constant.language.authz"
+        },
+        {
+          "match": "([A-Za-z_][A-Za-z0-9_]*)(#)([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": {
+              "name": "entity.name.type.authz"
+            },
+            "2": {
+              "name": "punctuation.accessor.authz"
+            },
+            "3": {
+              "name": "variable.other.relation.authz"
+            }
+          }
+        },
+        {
+          "match": "([A-Za-z_][A-Za-z0-9_]*)(\\.)([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": {
+              "name": "variable.other.relation.authz"
+            },
+            "2": {
+              "name": "punctuation.accessor.authz"
+            },
+            "3": {
+              "name": "entity.name.function.permission.authz"
+            }
+          }
+        },
+        {
+          "match": "->",
+          "name": "keyword.operator.arrow.authz"
+        },
+        {
+          "match": "=",
+          "name": "keyword.operator.assignment.authz"
+        },
+        {
+          "match": "'[^']*'",
+          "name": "string.quoted.single.authz"
+        },
+        {
+          "match": "\\b[0-9]+\\b",
+          "name": "constant.numeric.authz"
+        }
+      ]
+    },
+    "roles": {
+      "match": "^\\s+(roles)\\s*(:)",
+      "captures": {
+        "1": {
+          "name": "keyword.declaration.roles.authz"
+        },
+        "2": {
+          "name": "punctuation.separator.authz"
+        }
+      }
+    }
+  }
+}

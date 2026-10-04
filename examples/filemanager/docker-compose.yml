@@ -1,0 +1,28 @@
+# The file manager and what it needs: Postgres with the rowfence command (built from this repository,
+# like the rowfence command in the app's image, so both are of the same commit), RustFS for file contents, and the app.
+#   docker compose up -d --build            # everything; the app on http://localhost:8000
+#   docker compose up -d db storage         # just the services, for running the backend on the host
+services:
+  db:
+    build: {context: ../.., dockerfile: core/Dockerfile, args: {PG_MAJOR: "16"}}
+    image: rowfence:16
+    environment: {POSTGRES_PASSWORD: postgres, POSTGRES_DB: filemanager}
+    ports: ["25432:5432"]
+    volumes: [db:/var/lib/postgresql/data]
+    healthcheck: {test: ["CMD", "pg_isready", "-U", "postgres", "-d", "filemanager"], interval: 2s, retries: 30}
+  storage:
+    image: rustfs/rustfs:1.0.0-rc.5
+    environment: {RUSTFS_ACCESS_KEY: rustfsadmin, RUSTFS_SECRET_KEY: rustfsadmin}
+    ports: ["29000:9000"]
+    volumes: [files:/data]
+  app:
+    build: {context: ../.., dockerfile: examples/filemanager/backend/Dockerfile}
+    depends_on: {db: {condition: service_healthy}, storage: {condition: service_started}}
+    environment:
+      FM_ADMIN_URL: postgresql://postgres:postgres@db:5432/filemanager
+      FM_APP_PASSWORD: fm_app
+      FM_DATABASE_URL: postgresql://fm_app:fm_app@db:5432/filemanager
+      FM_S3_ENDPOINT: http://storage:9000
+      FM_S3_PUBLIC_ENDPOINT: http://localhost:29000
+    ports: ["8000:8000"]
+volumes: {db: {}, files: {}}

@@ -1,0 +1,177 @@
+# Publishes a version (RELEASING.md): set it with `python3 packaging/version.py X.Y.Z` (or X.Y.Z-alpha.N,
+# X.Y.Z-rc.N), commit,
+# push the tag vX.Y.Z. A -dev version (main between releases) is refused. Where it goes follows the repository:
+#   - public: PyPI (trusted publishing), npm (NPM_TOKEN, with provenance), the image on ghcr.io
+#   - private: the @rowfence/* packages on GitHub Packages' npm registry, a private image; the public steps as
+#     dry runs. PyPI and npm have no private side, so the wheel, the sdist and the unscoped launcher (a
+#     tarball) are on the GitHub release
+# Either way the GitHub release holds the wheel, the sdist, the launcher and the editor extension (.vsix), and
+# the docs site is a workflow artifact. An alpha or a release candidate never moves npm's or the image's `latest`
+# (it is npm's `next`, and a pre-release on GitHub), nor does a
+# patch to an older line (release-X.Y). A release that stopped half-way is finished by running its jobs again: what
+# is published already is skipped.
+# Run by hand (workflow_dispatch), it builds and checks everything and publishes nothing.
+name: release
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+# what a job needs beyond reading the repository, it says itself
+permissions: {contents: read}
+
+jobs:
+  check:
+    runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      publish: ${{ steps.v.outputs.publish }}
+      npm-tag: ${{ steps.v.outputs.npm-tag }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
+        with: {fetch-depth: 0}     # the unit tests check the Zed extension's grammar commit is in the history
+      - id: v
+        env:
+          PRIVATE: ${{ github.event.repository.private }}
+        run: |
+          version=$(python3 packaging/version.py)   # fails when two files disagree
+          if [ "$GITHUB_EVENT_NAME" = push ]; then
+            [ "v$version" = "$GITHUB_REF_NAME" ] || { echo "the tag is $GITHUB_REF_NAME, the version $version"; exit 1; }
+            case "$version" in *-dev) echo "$version is main between releases: it is never published"; exit 1;; esac
+            # its notes: CHANGELOG.md has its section, and nothing is left under Unreleased
+            python3 packaging/changelog.py --tagged "$version" > /dev/null
+            if [ "$PRIVATE" = true ]; then publish=private; else publish=public; fi
+          else
+            publish=none
+          fi
+          # next for an alpha or a candidate, latest for the highest release, release-X.Y for a patch to an older line
+          tag=$(python3 packaging/version.py --dist-tag)
+          echo "version $version: publish $publish, npm tag $tag"
+          { echo "version=$version"; echo "publish=$publish"; echo "npm-tag=$tag"; } >> "$GITHUB_OUTPUT"
+      - run: python3 core/tests/unit_test.py
+      # the lock CI's packaging job holds: both build the image under one name on a machine they share
+      - run: flock /tmp/rowfence-ci-packaging.lock bash packaging/test.sh
+
+  pypi:
+    needs: check
+    if: needs.check.outputs.publish == 'public'
+    runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
+    environment: pypi
+    permissions: {id-token: write, contents: read}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7   # v10.2.0
+        with: {version: "0.12.21"}
+      - run: uv build --out-dir pypi-dist sdk/python
+      # a file PyPI has already is skipped: a release that stopped half-way is finished by running it again
+      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33   # release/v1
+        with: {packages-dir: pypi-dist, skip-existing: true}
+
+  npm:
+    needs: check
+    runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
+    permissions: {id-token: write, contents: read, packages: write}
+    env:
+      PUBLISH: ${{ needs.check.outputs.publish }}
+      TAG: ${{ needs.check.outputs.npm-tag }}
+      VERSION: ${{ needs.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020   # v7.0.0
+        with:
+          node-version: "24"
+          registry-url: ${{ needs.check.outputs.publish == 'public' && 'https://registry.npmjs.org' || 'https://npm.pkg.github.com' }}
+          scope: "@rowfence"
+      - run: node packaging/npm/build.mjs --all
+      - run: npm ci --no-audit --no-fund && npx tsc -b sdk/typescript
+      # each SDK package ships the SDK's README and the licence (npm takes them from the package's folder)
+      - run: for d in sdk/typescript/*/; do cp LICENSE "$d" && cp sdk/typescript/README.md "$d"; done
+      # every package as the public publish would send it, the launcher too
+      - run: for d in packaging/npm/out/cli-* packaging/npm/out/rowfence sdk/typescript/*/; do npm publish --dry-run --tag "$TAG" --access public "$d"; done
+      - if: env.PUBLISH != 'none'
+        env:
+          NODE_AUTH_TOKEN: ${{ needs.check.outputs.publish == 'public' && secrets.NPM_TOKEN || secrets.GITHUB_TOKEN }}
+        run: |
+          flags=(--tag "$TAG")
+          if [ "$PUBLISH" = public ]; then flags+=(--provenance --access public); fi
+          # a version the registry has already is skipped (it refuses it a second time): a release that stopped
+          # half-way is finished by running this job again
+          publish() {
+            local name; name=$(node -p "require('./$1/package.json').name")
+            if [ "$(npm view "$name@$VERSION" version 2>/dev/null)" = "$VERSION" ]; then
+              echo "$name@$VERSION is published already"
+            else
+              npm publish "${flags[@]}" "$1"
+            fi
+          }
+          # the platforms first: rowfence names them as optional dependencies
+          for d in packaging/npm/out/cli-*; do publish "$d"; done
+          # GitHub Packages takes scoped names only: while private, the launcher is on the GitHub release
+          if [ "$PUBLISH" = public ]; then publish packaging/npm/out/rowfence; fi
+          for d in sdk/typescript/*/; do publish "$d"; done
+
+  image:
+    needs: check
+    runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
+    permissions: {packages: write, contents: read}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
+      - if: needs.check.outputs.publish != 'none'
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f   # v4.6.0
+        with: {registry: ghcr.io, username: "${{ github.actor }}", password: "${{ secrets.GITHUB_TOKEN }}"}
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc   # v7.4.0
+        with:
+          context: .
+          file: packaging/docker/Dockerfile
+          push: ${{ needs.check.outputs.publish != 'none' }}
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/rowfence:${{ needs.check.outputs.version }}
+            ${{ needs.check.outputs.npm-tag == 'latest' && format('ghcr.io/{0}/rowfence:latest', github.repository_owner) || '' }}
+
+  # the files a user can download: the wheel and sdist (PyPI's dry run: twine check), the launcher, the extension
+  github-release:
+    needs: check
+    runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
+    permissions: {contents: write}
+    env:
+      VERSION: ${{ needs.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7   # v10.2.0
+        with: {version: "0.12.21"}
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020   # v7.0.0
+        with: {node-version: "24"}
+      - run: uv build --out-dir dist sdk/python && uvx twine check --strict dist/*
+      - run: |
+          node packaging/npm/build.mjs && npm pack --pack-destination dist packaging/npm/out/rowfence
+          mv "dist/rowfence-$VERSION.tgz" "dist/rowfence-npm-$VERSION.tgz"   # not to be taken for the sdist
+      # the extension starts the language server with vscode-languageclient: the .vsix carries it (package.json's
+      # files lists node_modules; vsce keeps the production dependencies only)
+      - run: cp LICENSE editor/ && cd editor && npm ci --omit=dev --no-audit --no-fund && npx --yes @vscode/vsce@3.9.2 package --out ../dist/
+      - if: needs.check.outputs.publish == 'none'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a   # v7.0.1
+        with: {name: release-files, path: dist/}
+      # the notes are the release's section of CHANGELOG.md
+      - run: python3 packaging/changelog.py "$VERSION" > release-notes.md
+      # an action, not the GitHub CLI: a self-hosted runner may not have it
+      - if: needs.check.outputs.publish != 'none'
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64   # v3.0.3
+        with:
+          tag_name: v${{ env.VERSION }}
+          name: rowfence ${{ env.VERSION }}
+          files: dist/*
+          body_path: release-notes.md
+          prerelease: ${{ needs.check.outputs.npm-tag == 'next' }}
+          fail_on_unmatched_files: true
+
+  # the docs site, as an artifact until it has a host
+  site:
+    needs: check
+    runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020   # v7.0.0
+        with: {node-version: "24"}
+      - run: cd site && npm ci --no-audit --no-fund && node build.mjs
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a   # v7.0.1
+        with: {name: site, path: site/dist/}

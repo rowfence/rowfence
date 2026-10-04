@@ -1,0 +1,26 @@
+-- Named tests for docs.authz: each brings its own data and rolls it back.
+-- Run them: rowfence test example/docs.test.authz, or authzc.py example/docs.authz --tests example/docs.test.authz
+
+test "a folder's owner edits what is inside, and others see nothing"
+  given ann  = {INSERT INTO app.users (id, name) VALUES (9001, 'Ann') RETURNING id}
+  given bo   = {INSERT INTO app.users (id, name) VALUES (9002, 'Bo') RETURNING id}
+  given acme = {INSERT INTO app.orgs (id, name) VALUES (9001, 'Acme') RETURNING id}
+  given top  = {INSERT INTO app.folders (org_id, owner_id, name) VALUES ($acme, $ann, 'Top') RETURNING id}
+  given sub  = {INSERT INTO app.folders (org_id, parent_id, name) VALUES ($acme, $top, 'Sub') RETURNING id}
+  given f    = {INSERT INTO app.files (folder_id, name) VALUES ($sub, 'plan.txt') RETURNING id}
+
+  user $ann can edit file $f
+  user $bo cannot view file $f
+  as user $ann sees 2 {SELECT FROM app.folders WHERE org_id = $acme}
+  as user $bo sees 0 {SELECT FROM app.folders WHERE org_id = $acme}
+  as user $bo refused {INSERT INTO app.files (folder_id, owner_id, name) VALUES ($sub, $bo, 'mine.txt')}
+  as user $bo refused {UPDATE app.files SET name = 'x' WHERE id = $f}
+  as user $ann allowed {INSERT INTO app.files (folder_id, owner_id, name) VALUES ($sub, $ann, 'notes.txt')}
+
+test "turning inheritance off stops it there"
+  given ann  = {INSERT INTO app.users (id, name) VALUES (9001, 'Ann') RETURNING id}
+  given acme = {INSERT INTO app.orgs (id, name) VALUES (9001, 'Acme') RETURNING id}
+  given top  = {INSERT INTO app.folders (org_id, owner_id, name) VALUES ($acme, $ann, 'Top') RETURNING id}
+  given sub  = {INSERT INTO app.folders (org_id, parent_id, name, inherit) VALUES ($acme, $top, 'Private', false) RETURNING id}
+  user $ann can view folder $top
+  user $ann cannot view folder $sub

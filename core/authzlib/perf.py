@@ -1,0 +1,325 @@
+"""Fast without tuning: the indexes the policy's lookups need, plans that would be slow, and a benchmark.
+
+Indexes. The policy looks rows up by columns of the app's tables: a relation read from a column finds the
+objects a subject is linked to by that column (`owner_id`, `parent_id`); one read from a link table looks it
+up by the subject (lists, select rules) and by the object (checks, explanations). Without an index each is a
+full scan. rowfence doesn't create them: they are the app's schema, and an index its ORM doesn't know about
+would show as drift in Prisma's, Drizzle Kit's and Alembic's own diffs. It names each missing one, why it is
+needed (the policy line), and the line to add for the app's migration tool.
+
+Plans. Each governed table read as someone (EXPLAIN ANALYZE, as the app role), with the time it took, a full
+scan of a large table other than the one read, and subplans run once per row.
+
+Bench. The app's read paths (each governed table, authz.list per permission), checks (authz.can) and write
+paths (an update of a visible row, undone), as several people, on the database's own data: p50 and p95.
+"""
+from __future__ import annotations
+
+import json
+import random
+import time
+from collections.abc import Sequence
+from typing import TYPE_CHECKING, TypeAlias, TypedDict
+
+from .connection import Db, Value, text
+from .parse import Loc, Type, cols
+from .sqlutil import lit, q, qt
+
+if TYPE_CHECKING:
+    from . import Compiler
+
+BIG = 10_000             # rows: a full scan of a table this size is worth a warning
+SLOW_MS = 100            # a read slower than this on the data there is worth a warning
+
+# a lookup the policy makes: (table, columns, why, the policy line)
+Lookup: TypeAlias = "tuple[str, tuple[str, ...], str, str]"
+
+
+class TablePlan(TypedDict):
+    table: str
+    ms: float | None           # None: the read failed
+    rows: int | None
+    warnings: list[str]
+
+
+# 'as': who the tables were read as ('user:7', or 'anyone'); 'tables': each table (a keyword, so no class syntax)
+Plans = TypedDict("Plans", {"as": str, "tables": list[TablePlan]})
+
+
+class Path(TypedDict):
+    path: str
+    n: int
+    p50: float | None
+    p95: float | None
+
+
+class Bench(TypedDict):
+    round_trip: float | None    # ms: what any statement costs from where the command runs, before the server's work
+    people: int
+    rounds: int
+    paths: list[Path]
+
+
+def an(word: str) -> str:
+    return ("an " if word[:1].lower() in "aeiou" else "a ") + word
+
+
+def needed_indexes(c: Compiler) -> list[Lookup]:
+    """[(table, columns, why, line)]: the lookups the policy makes into app tables, one per table and columns."""
+    out: list[Lookup] = []
+    seen: set[tuple[str, tuple[str, ...]]] = set()
+
+    def add(table: str, columns: tuple[str, ...], why: str, loc: Loc) -> None:
+        key = (table, tuple(columns))
+        if key not in seen:
+            seen.add(key)
+            out.append((table, columns, why, str(loc)))
+    for t in c.types.values():
+        own = tuple(k for k, _ in t.key) if t.key else ((t.pk,) if t.pk else ())
+        for r in t.relations.values():
+            for src in r.sources:
+                lead = (src.type_col,) if src.type_col else ()
+                if src.kind == "column":
+                    columns = lead + cols(c.source_columns(src))
+                    if columns != own:
+                        add(t.table, columns, f"finding the {t.name}s by their {t.name}.{r.name} (lists, select rules)", r.loc)
+                elif src.kind == "table":
+                    table = c.source_table(src)
+                    add(table, lead + cols(c.source_columns(src)), f"finding the {t.name}s by their {t.name}.{r.name} "
+                                                                  f"(lists, select rules)", r.loc)
+                    add(table, cols(c.source_obj_columns(src)), f"finding the {r.name}s of {an(t.name)} (checks, explanations)", r.loc)
+    return out
+
+
+def table_indexes(db: Db, table: str) -> list[tuple[str, ...]]:
+    """The column lists of the table's indexes (a primary key and unique constraints included): the columns
+    each one starts with, up to its first expression (an index on (lower(name), team_id) serves no lookup by
+    team_id). Valid indexes only."""
+    rows = db.rows("SELECT array(SELECT a.attname::text FROM unnest(i.indkey::int2[]) WITH ORDINALITY k(n, o) "
+                   "LEFT JOIN pg_catalog.pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = k.n ORDER BY k.o) AS cols "
+                   "FROM pg_catalog.pg_index i WHERE i.indrelid = to_regclass($1) AND i.indpred IS NULL AND i.indisvalid",
+                   [table])
+    out: list[tuple[str, ...]] = []
+    for r in rows:
+        leading: list[str] = []
+        for x in r["cols"] or []:
+            if not isinstance(x, str):          # an expression: what comes after it leads nothing
+                break
+            leading.append(x)
+        out.append(tuple(leading))
+    return out
+
+
+def missing_indexes(db: Db, c: Compiler) -> list[Lookup]:
+    """[(table, columns, why, line)] for the needed lookups no index serves (its columns lead no index)."""
+    out: list[Lookup] = []
+    cache: dict[str, list[tuple[str, ...]]] = {}
+    for table, columns, why, line in needed_indexes(c):
+        if table not in cache:
+            cache[table] = table_indexes(db, table)
+        if not any(ix[:len(columns)] == columns or set(ix[:len(columns)]) == set(columns) for ix in cache[table]):
+            out.append((table, columns, why, line))
+    return out
+
+
+def advice(table: str, columns: Sequence[str], tool: str | None) -> str:
+    """The line to add, for the app's migration tool."""
+    name = f"{table.split('.')[-1]}_{'_'.join(columns)}_idx"
+    fields = ", ".join(columns)
+    if tool == "prisma":
+        return f"@@index([{fields}]) on the model for {table} (prisma/schema.prisma)"
+    if tool == "drizzle":
+        return f"index({lit(name)}).on({', '.join('t.' + x for x in columns)}) in the table for {table}"
+    if tool == "alembic":
+        return (f"Index({lit(name)}, {', '.join(lit(x) for x in columns)}) in {table}'s model "
+                f"(or index=True on the column), then alembic revision --autogenerate")
+    return f"CREATE INDEX CONCURRENTLY {q(name)} ON {qt(table)} ({', '.join(q(x) for x in columns)});"
+
+
+def describe_missing(missing: list[Lookup], tool: str | None) -> str:
+    lines = []
+    for table, columns, why, line in missing:
+        lines.append(f"{table} has no index on ({', '.join(columns)}): {why} ({line})")
+        lines.append(f"  add: {advice(table, columns, tool)}")
+    return "\n".join(lines)
+
+
+# --- plans ---------------------------------------------------------------------------------------------
+def app_role(db: Db) -> str | None:
+    rows = db.rows("SELECT DISTINCT r.rolname AS r FROM pg_catalog.pg_policy p JOIN pg_catalog.pg_description d "
+                   "ON d.objoid = p.oid AND d.classoid = 'pg_catalog.pg_policy'::regclass AND d.description = 'authzc' "
+                   "CROSS JOIN unnest(p.polroles) ro JOIN pg_catalog.pg_roles r ON r.oid = ro")
+    return text(rows[0], "r") if rows else None
+
+
+def sample_principal(db: Db, c: Compiler) -> tuple[str | None, str | None]:
+    """Someone to look as: the first user (by key) in the data."""
+    for t in c.types.values():
+        if t.name == "user" or t.principal:
+            r = db.rows(f"SELECT ({c.key(t, 'r')})::text AS id FROM {qt(t.table)} r ORDER BY 1 LIMIT 1")
+            if r:
+                return t.name, text(r[0], "id")
+    return None, None
+
+
+def _str(plan: dict[str, Value], key: str) -> str | None:
+    v = plan.get(key)
+    return v if isinstance(v, str) else None
+
+
+def _num(plan: dict[str, Value], key: str, default: float) -> float:
+    v = plan.get(key)
+    return float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else default
+
+
+def walk(plan: dict[str, Value], out: list[str], governed: str) -> None:
+    """Warnings from one plan node (EXPLAIN's JSON) and those under it."""
+    node = _str(plan, "Node Type") or ""
+    rel = _str(plan, "Relation Name")
+    schema = _str(plan, "Schema")
+    table = f"{schema}.{rel}" if schema and rel else rel
+    loops = _num(plan, "Actual Loops", 1)
+    # the rows the scan read: the ones it gave and the ones its filter dropped (a missing index shows as a scan
+    # that reads everything and keeps little)
+    read = (_num(plan, "Actual Rows", 0) + _num(plan, "Rows Removed by Filter", 0)) * loops
+    if node == "Seq Scan" and table and table != governed and read >= BIG:
+        out.append(f"reads all of {table} ({int(read)} rows): an index missing?")
+    subplan = _str(plan, "Subplan Name")
+    if subplan and _num(plan, "Actual Loops", 0) >= 1000:
+        out.append(f"{subplan} runs once per row ({int(loops)} times)")
+    children = plan.get("Plans")
+    for child in children if isinstance(children, list) else []:
+        if isinstance(child, dict):
+            walk(child, out, governed)
+
+
+def plans(db: Db, c: Compiler, who: tuple[str, str] | None = None) -> Plans:
+    """Each governed table read as someone (default: a user in the data), with EXPLAIN ANALYZE as the app
+    role: how long it took, how many rows, and what looks slow. Runs in the caller's transaction (roll it back)."""
+    from .database import Error, may_take, savepoint
+    role = app_role(db)
+    if role is None:
+        raise Error("no policy with rules is applied, so there is no app role to read as", "55000")
+    may_take(db, role)
+    ptype, pid = who or sample_principal(db, c)
+    out: list[TablePlan] = []
+    for table in sorted({r.table for r in c.pol.rules if r.command == "select"}):
+        db.rows("SELECT authz.act_as($1, $2)", [ptype, pid])
+        try:
+            with savepoint(db, "authz_plan"):
+                db.rows(f'SET LOCAL ROLE "{role}"')
+                db.rows("SET LOCAL statement_timeout = '10s'")
+                # VERBOSE: each scan's table with its schema
+                raw = next(iter(db.rows(f"EXPLAIN (ANALYZE, VERBOSE, FORMAT JSON) SELECT count(*) FROM {qt(table)}")[0].values()))
+                data = json.loads(raw) if isinstance(raw, str) else raw
+                top = data[0] if isinstance(data, list) and data and isinstance(data[0], dict) else {}
+                plan = top.get("Plan")
+                plan = plan if isinstance(plan, dict) else {}
+                warnings: list[str] = []
+                walk(plan, warnings, table)
+                ms = round(_num(top, "Execution Time", 0.0), 2)
+                if ms > SLOW_MS:
+                    warnings.insert(0, f"took {ms} ms")
+                count = _num(plan, "Actual Rows", 0)
+                out.append({"table": table, "ms": ms, "rows": int(count), "warnings": list(dict.fromkeys(warnings))})
+                db.rows("RESET ROLE")
+        except db.errors as e:
+            out.append({"table": table, "ms": None, "rows": None, "warnings": [f"failed: {getattr(e, 'message', e)}"]})
+    return {"as": f"{ptype}:{pid}" if pid else "anyone", "tables": out}
+
+
+def describe_plans(p: Plans) -> str:
+    lines = [f"as {p['as']}:"]
+    for t in p["tables"]:
+        head = f"  {t['table']}: {t['ms']} ms" if t["ms"] is not None else f"  {t['table']}"
+        lines.append(head + ("" if not t["warnings"] else "  <- " + "; ".join(t["warnings"])))
+    return "\n".join(lines)
+
+
+# --- bench ---------------------------------------------------------------------------------------------
+def pct(values: list[float], p: float) -> float | None:
+    if not values:
+        return None
+    v = sorted(values)
+    return round(v[min(len(v) - 1, round(p / 100 * (len(v) - 1)))], 2)
+
+
+def bench(db: Db, c: Compiler, people: int = 10, rounds: int = 20, seed: int = 0) -> Bench:
+    """p50 and p95 (ms) of the app's paths as several people in the data: reads of each governed table, authz.list
+    per permission, authz.can on objects, and updates of visible rows (undone). Runs in the caller's transaction."""
+    from .database import Undo, may_take, savepoint
+    rng = random.Random(seed)
+    role = app_role(db)
+    may_take(db, role)
+    users: list[tuple[str | None, str | None]] = []
+    for t in c.types.values():
+        if t.principal:
+            ids = [text(r, "id") for r in db.rows(f"SELECT ({c.key(t, 'r')})::text AS id FROM {qt(t.table)} r ORDER BY 1 LIMIT 1000")]
+            users += [(t.name, i) for i in rng.sample(ids, min(len(ids), people))]
+    users = users[:people] or [(None, None)]
+    timings: dict[str, list[float]] = {}
+
+    def timed(label: str, sql: str, args: Sequence[Value] = (), as_app: bool = False) -> None:
+        took = 0.0
+        try:
+            with savepoint(db, "authz_bench"):
+                if as_app and role:
+                    db.rows(f'SET LOCAL ROLE "{role}"')
+                start = time.perf_counter()             # the statement alone: one round trip, and the server's work
+                db.rows(sql, list(args))
+                took = (time.perf_counter() - start) * 1000
+                raise Undo
+        except Undo:
+            pass
+        except db.errors:
+            return
+        timings.setdefault(label, []).append(took)
+
+    for _ in range(5):
+        timed("", "SELECT 1")
+    round_trip = pct(timings.pop("", []), 50)
+
+    reads = sorted({r.table for r in c.pol.rules if r.command == "select"})
+    updates = sorted({r.table for r in c.pol.rules if r.command == "update"})
+    perms = [(t, p) for t in c.types.values() for p in c.public_perms(t)]
+    ids = {t.name: [text(r, "id") for r in db.rows(f"SELECT ({c.key(t, 'r')})::text AS id FROM {qt(t.table)} r LIMIT 200")]
+           for t in c.types.values()}
+    for _ in range(rounds):
+        ptype, pid = rng.choice(users)
+        db.rows("SELECT authz.act_as($1, $2)", [ptype, pid])
+        for table in reads:
+            timed(f"read {table}", f"SELECT count(*) FROM {qt(table)}", as_app=True)
+        for t, p in perms:
+            timed(f"authz.list {t.name} {p}", "SELECT count(*) FROM authz.list($1, $2)", [t.name, p])
+            if ids[t.name]:
+                timed(f"authz.can {t.name} {p}", "SELECT authz.can($1, $2, $3)", [t.name, rng.choice(ids[t.name]), p])
+        for table in updates:
+            t = next((x for x in c.types.values() if x.table == table), None)
+            col = plain_column(db, c, t) if t else None
+            if t and ids[t.name] and col:
+                oid = rng.choice(ids[t.name])
+                timed(f"update {table}", f"UPDATE {qt(table)} r SET {q(col)} = r.{q(col)} WHERE {c.key_is(t, 'r', lit(oid))}",
+                      as_app=True)
+    return {"round_trip": round_trip, "people": len(users), "rounds": rounds,
+            "paths": [{"path": k, "n": len(v), "p50": pct(v, 50), "p95": pct(v, 95)} for k, v in sorted(timings.items())]}
+
+
+def plain_column(db: Db, c: Compiler, t: Type) -> str | None:
+    """A column of t's table to write back unchanged: not in its key, and read by no relation (so no tree moves)."""
+    used = {k for k, _ in t.key}
+    for r in t.relations.values():
+        for src in r.sources:
+            if src.kind == "column":
+                used |= set(cols(c.source_columns(src))) | ({src.type_col} if src.type_col else set())
+    rows = db.rows("SELECT attname::text AS a FROM pg_catalog.pg_attribute WHERE attrelid = to_regclass($1) AND attnum > 0 "
+                   "AND NOT attisdropped AND attgenerated = '' ORDER BY attnum", [t.table])
+    return next((text(r, "a") for r in rows if r["a"] not in used), None)
+
+
+def describe_bench(b: Bench) -> str:
+    width = max([len(x["path"]) for x in b["paths"]] + [4])
+    lines = [f"{b['rounds']} rounds as {b['people']} people (ms, from here: a statement that does nothing takes "
+             f"{b['round_trip']}):", f"  {'path'.ljust(width)}   p50      p95"]
+    for x in b["paths"]:
+        lines.append(f"  {x['path'].ljust(width)}  {x['p50']:>6}  {x['p95']:>7}")
+    return "\n".join(lines)

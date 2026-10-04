@@ -1,0 +1,10 @@
+{
+  // grammar.js is checked strictly against the grammar DSL's types, which tree-sitter-cli ships (npm ci here
+  // first):   npx tsc -p editor/tree-sitter-authz
+  "compilerOptions": {
+    "allowJs": true, "checkJs": true, "noEmit": true, "strict": true, "skipLibCheck": true,
+    "target": "ES2022", "lib": ["ES2022"], "module": "NodeNext", "moduleResolution": "NodeNext",
+    "types": ["tree-sitter-cli/dsl"], "noUnusedLocals": true
+  },
+  "files": ["grammar.js"]
+}

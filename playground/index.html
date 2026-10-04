@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>rowfence playground</title>
+<meta name="description" content="Write an access policy, and see Postgres enforce it: rowfence's compiler and a real Postgres, in your browser.">
+<style>
+  :root {
+    --bg: #fbfaf8; --panel: #ffffff; --ink: #1d1d1b; --muted: #6b6a66; --line: #e4e1db; --soft: #f3f1ed;
+    --accent: #2f5fd0; --accent-ink: #ffffff; --ok: #1f7a4a; --bad: #b3261e; --warn: #8a5a00;
+    --ok-bg: #e8f4ed; --bad-bg: #fbeceb; --code: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #161615; --panel: #1f1f1d; --ink: #ecebe7; --muted: #9c9a94; --line: #34332f; --soft: #262624;
+      --accent: #7ea2ff; --accent-ink: #10131a; --ok: #6fcf97; --bad: #ff8a80; --warn: #e0b45c;
+      --ok-bg: #1d2e24; --bad-bg: #3a2220; color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #161615; --panel: #1f1f1d; --ink: #ecebe7; --muted: #9c9a94; --line: #34332f; --soft: #262624;
+    --accent: #7ea2ff; --accent-ink: #10131a; --ok: #6fcf97; --bad: #ff8a80; --warn: #e0b45c;
+    --ok-bg: #1d2e24; --bad-bg: #3a2220; color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--ink); }
+  body { font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; display: flex; flex-direction: column; height: 100vh; }
+  header { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; padding: 12px 16px;
+           border-bottom: 1px solid var(--line); background: var(--panel); }
+  header h1 { font-size: 17px; margin: 0; font-weight: 650; letter-spacing: -0.01em; }
+  header h1 span { color: var(--muted); font-weight: 450; }
+  header .grow { flex: 1; }
+  select, input, button, textarea { font: inherit; color: inherit; }
+  select, input { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; }
+  button { background: var(--soft); border: 1px solid var(--line); border-radius: 6px; padding: 5px 12px; cursor: pointer; }
+  button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  button:disabled { opacity: 0.5; cursor: default; }
+  .pill { font-size: 13px; padding: 3px 10px; border-radius: 999px; background: var(--soft); color: var(--muted); }
+  .pill.ok { background: var(--ok-bg); color: var(--ok); }
+  .pill.bad { background: var(--bad-bg); color: var(--bad); }
+  main { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; padding: 16px;
+         flex: 1; min-height: 0; min-width: 0; }
+  header select { max-width: 100%; }
+  section { display: flex; flex-direction: column; min-height: 0; min-width: 0; background: var(--panel); border: 1px solid var(--line);
+            border-radius: 10px; overflow: hidden; }
+  .bar { display: flex; gap: 4px; align-items: center; padding: 6px 8px; border-bottom: 1px solid var(--line);
+         overflow-x: auto; flex-shrink: 0; }
+  .bar .title { font-weight: 600; padding: 0 6px; }
+  .tab { background: none; border: none; padding: 5px 10px; border-radius: 6px; color: var(--muted); white-space: nowrap; }
+  .tab[aria-selected="true"] { background: var(--soft); color: var(--ink); }
+  .tab .count { font-size: 12px; margin-left: 4px; }
+  .editor { position: relative; flex: 1; display: flex; min-height: 0; font: 13px/20px var(--code); }
+  .gutter { padding: 10px 8px 10px 10px; text-align: right; color: var(--muted); user-select: none; overflow: hidden;
+            background: var(--soft); min-width: 44px; white-space: pre; }
+  .gutter .err { color: var(--bad); font-weight: 700; }
+  textarea.code { flex: 1; min-width: 0; border: 0; outline: 0; resize: none; padding: 10px; background: var(--panel);
+                  font: 13px/20px var(--code); white-space: pre; overflow: auto; tab-size: 2; }
+  .status { padding: 8px 12px; border-top: 1px solid var(--line); font-size: 14px; flex-shrink: 0; max-height: 40%; overflow: auto; }
+  .status.ok { color: var(--ok); }
+  .status.bad { color: var(--bad); background: var(--bad-bg); }
+  .status code { font-family: var(--code); font-size: 13px; }
+  .status a { color: inherit; font-weight: 600; }
+  .pane { flex: 1; overflow: auto; min-height: 0; display: none; }
+  .pane.on { display: flex; flex-direction: column; }
+  .pad { padding: 12px 14px; }
+  pre { font: 12.5px/1.5 var(--code); margin: 0; white-space: pre-wrap; word-break: break-word; }
+  .results .test { font-weight: 600; margin: 12px 0 4px; }
+  .results .test:first-child { margin-top: 0; }
+  .check { display: grid; grid-template-columns: 48px 1fr; gap: 6px; font: 13px/1.5 var(--code); padding: 2px 0; }
+  .check .mark.ok { color: var(--ok); }
+  .check .mark.bad { color: var(--bad); font-weight: 700; }
+  .check pre { grid-column: 2; color: var(--muted); }
+  .error { background: var(--bad-bg); color: var(--bad); border-radius: 8px; padding: 10px 12px; }
+  .error pre { color: var(--ink); margin-top: 6px; }
+  .ask { display: grid; gap: 8px; padding: 12px 14px; border-bottom: 1px solid var(--line); flex-shrink: 0; }
+  .ask .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .ask textarea { min-height: 84px; border: 1px solid var(--line); border-radius: 6px; padding: 8px;
+                  font: 13px/20px var(--code); background: var(--panel); resize: vertical; }
+  table { border-collapse: collapse; font: 13px/1.4 var(--code); }
+  th, td { text-align: left; padding: 4px 12px 4px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; }
+  .muted { color: var(--muted); }
+  .help h2 { font-size: 18px; margin: 0 0 8px; }
+  .help h3 { font-size: 15px; margin: 16px 0 6px; }
+  .help pre { background: var(--soft); padding: 8px 10px; border-radius: 6px; margin: 6px 0; }
+  .help code { font-family: var(--code); font-size: 13px; background: var(--soft); padding: 0 3px; border-radius: 3px; }
+  .help pre code { background: none; padding: 0; }
+  .graph svg { max-width: 100%; height: auto; }
+  @media (max-width: 860px) {
+    body { height: auto; }
+    main { grid-template-columns: minmax(0, 1fr); }
+    section { height: 70vh; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>rowfence <span>playground</span></h1>
+  <select id="example" aria-label="Example"></select>
+  <span class="grow"></span>
+  <span id="state" class="pill">loading Python and Postgres…</span>
+  <button id="share" disabled>Copy link</button>
+</header>
+<main>
+  <section aria-label="Policy">
+    <div class="bar"><span class="title">Policy</span><span class="muted" style="font-size:13px">policy.authz</span></div>
+    <div class="editor">
+      <div class="gutter" id="gutter" aria-hidden="true"></div>
+      <textarea class="code" id="policy" spellcheck="false" aria-label="Policy"></textarea>
+    </div>
+    <div class="status" id="status">loading…</div>
+  </section>
+  <section aria-label="Results">
+    <div class="bar" role="tablist">
+      <button class="tab" role="tab" data-pane="results" aria-selected="true">Tests<span class="count" id="count"></span></button>
+      <button class="tab" role="tab" data-pane="ask">Ask as someone</button>
+      <button class="tab" role="tab" data-pane="data">Tables &amp; data</button>
+      <button class="tab" role="tab" data-pane="tests">Named tests</button>
+      <button class="tab" role="tab" data-pane="graph">Graph</button>
+      <button class="tab" role="tab" data-pane="sql">SQL</button>
+      <button class="tab" role="tab" data-pane="help">Help</button>
+    </div>
+    <div class="pane on results pad" id="pane-results"><p class="muted">The tests run here once Python and Postgres have loaded.</p></div>
+    <div class="pane" id="pane-ask">
+      <div class="ask">
+        <div class="row">
+          <label for="who">Signed in as</label>
+          <input id="who" value="user:1" size="10" spellcheck="false" aria-describedby="who-help">
+          <span class="muted" id="who-help" style="font-size:13px">user:1, bot:7, or empty for nobody</span>
+          <span class="grow"></span>
+          <button class="primary" id="run-ask" disabled>Run</button>
+        </div>
+        <textarea id="query" spellcheck="false" aria-label="SQL to run as that person"></textarea>
+        <span class="muted" style="font-size:13px">Runs as the app role, filtered by row-level security, and is rolled back.
+          One thing differs from a server: this Postgres has a single session, the owner's, so a statement here may
+          set <code>authz.user_id</code> itself. On a server the app role's session is believed only after <code>authz.act_as()</code>.</span>
+      </div>
+      <div class="pad" id="answer"></div>
+    </div>
+    <div class="pane" id="pane-data"><div class="editor"><textarea class="code" id="data" spellcheck="false" aria-label="Tables and data"></textarea></div></div>
+    <div class="pane" id="pane-tests"><div class="editor"><textarea class="code" id="tests" spellcheck="false" aria-label="Named tests"></textarea></div></div>
+    <div class="pane graph pad" id="pane-graph"></div>
+    <div class="pane pad" id="pane-sql"><pre id="sql"></pre></div>
+    <div class="pane help pad" id="pane-help"><p class="muted">A mistake's code (like AZ203) opens its page here.</p></div>
+  </section>
+</main>
+<script type="module" src="./playground.mjs"></script>
+</body>
+</html>

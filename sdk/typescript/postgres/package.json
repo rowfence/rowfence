@@ -1,0 +1,15 @@
+{
+  "name": "@rowfence/postgres",
+  "version": "0.1.0-dev",
+  "description": "rowfence with postgres.js: transactions signed in as the request's user",
+  "license": "Apache-2.0",
+  "repository": { "type": "git", "url": "git+https://github.com/rowfence/rowfence.git", "directory": "sdk/typescript/postgres" },
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": { ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" } },
+  "files": ["dist"],
+  "sideEffects": false,
+  "dependencies": { "@rowfence/client": "0.1.0-dev" },
+  "peerDependencies": { "postgres": ">=3.4" }
+}

@@ -1,0 +1,26 @@
+name: An idea or a missing piece
+description: Something new in the language, the authz.* functions, the command or an SDK.
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        These are design decisions, so they start here, before a pull request
+        ([CONTRIBUTING.md](https://github.com/rowfence/rowfence/blob/main/CONTRIBUTING.md), "Before you start").
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What you are trying to do, and where rowfence gets in the way. A policy or a query helps.
+    validations:
+      required: true
+  - type: textarea
+    id: today
+    attributes:
+      label: What you do today
+      description: The workaround, if you have one.
+  - type: textarea
+    id: idea
+    attributes:
+      label: What you would like
+      description: How it could look, if you have an idea. The problem matters more than the solution.

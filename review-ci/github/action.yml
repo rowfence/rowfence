@@ -1,0 +1,96 @@
+# rowfence review for GitHub pull requests: one comment, updated in place, that says what the
+# policy change does (meaning, access, risk, tests, deploy), and a warning on each policy line it flags.
+#
+#   - uses: actions/checkout@v4
+#     with: {fetch-depth: 0}                      # the base branch's policy is read with git
+#   - uses: rowfence/rowfence/review-ci/github@v0.1.0-dev
+#     with:
+#       database-url: ${{ env.REVIEW_DATABASE_URL }}   # optional: the base branch's migrations and review data
+#
+# Access and the tests' results need a database at the base branch's state (its migrations, then the review
+# data); prepare one in the steps before (a Postgres service, your migration tool) and pass its URL. Without
+# one, the review says what changes in meaning, risk, tests and deploy, and leaves Access out.
+#
+# The command comes from PyPI, the release the action's tag names; `version` picks another.
+name: rowfence review
+description: Says in the pull request what a rowfence policy change does
+inputs:
+  version:
+    description: the rowfence release to review with (PyPI), or `source` for the repository that holds this action
+    default: "0.1.0-dev"
+  base:
+    description: the commit to compare with (default the pull request's base)
+    default: ""
+  database-url:
+    description: a database at the base branch's state, with the review data (for Access and tests)
+    default: ""
+  working-directory:
+    description: where rowfence.toml is
+    default: "."
+  comment:
+    description: post (or update) the comment on the pull request
+    default: "true"
+  github-token:
+    description: a token that may comment on pull requests
+    default: ${{ github.token }}
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97   # v7.0.0
+      with:
+        python-version: "3.12"
+    - name: install
+      shell: bash
+      env:
+        VERSION: ${{ inputs.version }}
+      run: |
+        if [ "$VERSION" = source ]; then
+          python3 -m pip install -q "$GITHUB_ACTION_PATH/../../sdk/python"
+        else
+          python3 -m pip install -q "rowfence==$VERSION"
+        fi
+    - name: review
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        BASE: ${{ inputs.base || github.event.pull_request.base.sha }}
+        DATABASE: ${{ inputs.database-url }}
+      run: |
+        set -o pipefail
+        db=()
+        [ -n "$DATABASE" ] && db=(--db "$DATABASE")
+        rowfence "${db[@]}" review --base "$BASE" --markdown > "$RUNNER_TEMP/rowfence-review.md"
+        # each flag on its policy line, in the pull request's files
+        rowfence "${db[@]}" review --base "$BASE" --annotations
+        cat "$RUNNER_TEMP/rowfence-review.md" >> "$GITHUB_STEP_SUMMARY"
+    - name: comment
+      if: inputs.comment == 'true' && github.event.pull_request.number
+      shell: python
+      env:
+        TOKEN: ${{ inputs.github-token }}
+        PR: ${{ github.event.pull_request.number }}
+        REPO: ${{ github.repository }}
+      # the standard library only: a self-hosted runner may not have the GitHub CLI
+      run: |
+        import json, os, urllib.request
+        api = f"{os.environ['GITHUB_API_URL']}/repos/{os.environ['REPO']}/issues"
+        def call(method, url, body=None):
+            req = urllib.request.Request(url, method=method, data=None if body is None else json.dumps(body).encode(),
+                                         headers={"Authorization": f"Bearer {os.environ['TOKEN']}",
+                                                  "Accept": "application/vnd.github+json"})
+            with urllib.request.urlopen(req) as res:
+                return json.load(res)
+        with open(os.path.join(os.environ["RUNNER_TEMP"], "rowfence-review.md"), encoding="utf-8") as fh:
+            body = {"body": fh.read()}
+        # one comment, updated in place: the one that starts with the review's marker
+        found, page = None, 1
+        while found is None:
+            comments = call("GET", f"{api}/{os.environ['PR']}/comments?per_page=100&page={page}")
+            found = next((c["id"] for c in comments if c["body"].startswith("<!-- rowfence review -->")), None)
+            if len(comments) < 100:
+                break
+            page += 1
+        if found is None:
+            call("POST", f"{api}/{os.environ['PR']}/comments", body)
+        else:
+            call("PATCH", f"{api}/comments/{found}", body)

@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>rowfence Studio</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>rowfence <span>Studio</span></h1>
+    <span id="db" class="muted"></span>
+    <span id="mode" class="badge"></span>
+    <form id="as-form" autocomplete="off">
+      <label for="as">View as</label>
+      <input id="as" list="as-list" placeholder="user:42, bot:7 or anyone" spellcheck="false">
+      <datalist id="as-list"></datalist>
+      <button type="submit">Look</button>
+    </form>
+  </header>
+  <nav>
+    <button data-tab="tables" class="on">Tables</button>
+    <button data-tab="graph">Graph</button>
+    <button data-tab="diff">Access diff</button>
+    <button data-tab="shares">Shares and requests</button>
+  </nav>
+  <main>
+    <section id="tables" class="tab on">
+      <aside id="table-list"></aside>
+      <div id="grid-wrap">
+        <p id="grid-head" class="muted">Pick a table.</p>
+        <div id="grid"></div>
+        <p id="pager"></p>
+      </div>
+      <aside id="panel" hidden></aside>
+    </section>
+    <section id="graph" class="tab">
+      <div id="graph-view" class="muted">Loading the graph…</div>
+      <aside id="graph-detail" class="muted">Click a type or a permission to see how it is written.</aside>
+    </section>
+    <section id="diff" class="tab">
+      <div id="diff-view" class="muted">Loading…</div>
+    </section>
+    <section id="shares" class="tab">
+      <form id="shares-form" class="row">
+        <select id="shares-type"></select>
+        <input id="shares-id" placeholder="id" size="8">
+        <button type="submit">Show shares</button>
+      </form>
+      <div id="shares-view"></div>
+      <h2>Pending access requests</h2>
+      <div id="requests-view" class="muted">Loading…</div>
+    </section>
+  </main>
+  <div id="toast" role="status" hidden></div>
+  <script src="app.js"></script>
+</body>
+</html>

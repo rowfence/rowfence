@@ -1,0 +1,60 @@
+[project]
+name = "rowfence"
+dynamic = ["version"]
+description = "Access rules for Postgres: the rowfence command, and the SDK for Python apps (FastAPI, SQLAlchemy, psycopg, asyncpg, Alembic, pytest)"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+dependencies = []
+
+[project.optional-dependencies]
+fastapi = ["fastapi>=0.100", "sqlalchemy[asyncio]>=2.0"]
+sqlalchemy = ["sqlalchemy>=2.0"]
+psycopg = ["psycopg>=3.1"]
+asyncpg = ["asyncpg>=0.28"]
+
+[project.scripts]
+rowfence = "rowfence.command:main"
+
+[project.entry-points.pytest11]
+rowfence = "rowfence.testing"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+# the version is written once, in the compiler (core/authzlib/__init__.py): _version.py reads it
+[tool.hatch.version]
+source = "code"
+path = "rowfence/_version.py"
+
+# hatch_build.py puts the command (core/authzlib and core/cli, standard library only) inside the
+# package, rowfence/_command, so nothing of it is importable at the top level but rowfence
+[tool.hatch.build.targets.wheel]
+packages = ["rowfence"]
+exclude = ["__pycache__", "*.pyc"]
+
+[tool.hatch.build.targets.sdist]
+include = ["rowfence", "README.md", "LICENSE", "hatch_build.py"]
+exclude = ["__pycache__", "*.pyc"]
+
+[tool.hatch.build.hooks.custom]
+
+# strongly typed, as the repository's Python (ty.toml): checked in the FastAPI conformance app's environment,
+# which installs this package with every extra (uv sync --project integrations/fastapi first)
+#   uvx ty@0.0.56 check --project sdk/python
+[tool.ty.environment]
+python-version = "3.11"
+python = "../../integrations/fastapi/.venv"
+
+[tool.ty.rules]
+all = "error"
+missing-override-decorator = "ignore"
+
+# hatchling is the build's, not in that environment
+[[tool.ty.overrides]]
+include = ["hatch_build.py"]
+
+[tool.ty.overrides.rules]
+unresolved-import = "ignore"

@@ -1,0 +1,267 @@
+-- =====================================================================
+-- multi_scenario.sql: the share API and the newer policy features, on tests/multi.authz
+--   psql -d db -f tests/multi_schema.sql; psql -d db -f <compiled multi.authz>; psql -d db -f tests/multi_scenario.sql
+-- =====================================================================
+\set ON_ERROR_STOP on
+\o /dev/null
+SET client_min_messages = notice;
+
+CREATE SCHEMA test;
+GRANT USAGE ON SCHEMA test TO app_user;
+CREATE FUNCTION test.ok(label text, pass boolean) RETURNS void LANGUAGE plpgsql AS $$
+BEGIN
+  IF pass IS NOT TRUE THEN RAISE EXCEPTION 'FAIL  %', label; END IF;
+  RAISE NOTICE 'ok    %', label;
+END $$;
+CREATE FUNCTION test.try(stmt text) RETURNS text LANGUAGE plpgsql AS $$
+BEGIN EXECUTE stmt; RETURN 'ok'; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE; END $$;
+CREATE FUNCTION test.rows(stmt text) RETURNS bigint LANGUAGE plpgsql AS $$
+DECLARE n bigint; BEGIN EXECUTE stmt; GET DIAGNOSTICS n = ROW_COUNT; RETURN n; END $$;
+CREATE FUNCTION test.docs() RETURNS text LANGUAGE sql AS $$
+  SELECT coalesce(string_agg(right(id::text, 2), ', ' ORDER BY id), '-') FROM mt.docs $$;
+CREATE FUNCTION test.as(u int) RETURNS void LANGUAGE sql AS $$
+  SELECT set_config('authz.user_id', CASE WHEN u IS NULL THEN '' ELSE '00000000-0000-4000-8000-' || lpad(u::text, 12, '0') END, false) $$;
+GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA test TO app_user;
+
+-- users 1 alice, 2 bob, 3 carol, 4 dave (guest), 5 erin (Acme admin), 6 frank (inactive), 7 gina (Globex admin)
+INSERT INTO mt.users SELECT ('00000000-0000-4000-8000-' || lpad(i::text, 12, '0'))::uuid, i <> 6 FROM generate_series(1, 7) i;
+INSERT INTO mt.orgs VALUES (1, false), (2, false);
+INSERT INTO mt.org_members VALUES
+  (1, '00000000-0000-4000-8000-000000000001', 'member'), (1, '00000000-0000-4000-8000-000000000002', 'member'),
+  (1, '00000000-0000-4000-8000-000000000003', 'member'), (1, '00000000-0000-4000-8000-000000000005', 'admin'),
+  (2, '00000000-0000-4000-8000-000000000007', 'admin');
+INSERT INTO mt.teams VALUES (1), (2);
+INSERT INTO mt.team_members VALUES (1, '00000000-0000-4000-8000-000000000001'), (1, '00000000-0000-4000-8000-000000000002'),
+  (2, '00000000-0000-4000-8000-000000000003');
+-- folder 1 (alice) > folder 2 > project 1 (Acme, lead bob) > folder 3 > doc 01; doc 02 sits in project 1
+-- folder 4 belongs to frank (inactive); project 2 (Globex) holds doc 03
+INSERT INTO mt.folders VALUES (1, NULL, NULL, '00000000-0000-4000-8000-000000000001', false, false),
+                              (2, 'folder', 1, NULL, false, false),
+                              (4, NULL, NULL, '00000000-0000-4000-8000-000000000006', false, false);
+INSERT INTO mt.projects VALUES (1, 1, 2, '00000000-0000-4000-8000-000000000002'), (2, 2, NULL, NULL);
+INSERT INTO mt.folders VALUES (3, 'project', 1, NULL, false, false);
+UPDATE mt.folders SET org_id = 1 WHERE id IN (1, 2, 3);
+INSERT INTO mt.docs VALUES ('10000000-0000-4000-8000-000000000001', 'folder', 3, NULL),
+                           ('10000000-0000-4000-8000-000000000002', 'project', 1, NULL),
+                           ('10000000-0000-4000-8000-000000000003', 'project', 2, NULL);
+
+SET ROLE app_user;
+-- ---------------------------------------------------------------------
+-- Inheritance across types, UUID keys
+-- ---------------------------------------------------------------------
+SELECT test.as(1);
+SELECT test.ok('alice owns folder 1: edits the whole chain folder > folder > project > folder > doc',
+  authz.can('project', 1, 'edit') AND authz.can('folder', 3, 'edit') AND test.docs() = '01, 02');
+SELECT test.ok('authz.perms lists everything she holds on folder 3', authz.perms('folder', 3) = '{edit,view,share}');
+SELECT test.ok('uuid ids work as text, and malformed ids are simply not allowed',
+  authz.can('doc', '10000000-0000-4000-8000-000000000001', 'edit') AND NOT authz.can('doc', 'not-a-uuid', 'view'));
+SELECT test.as(2);
+SELECT test.ok('bob leads project 1: its folder and both its docs, not folder 1',
+  authz.can('folder', 3, 'edit') AND test.docs() = '01, 02' AND NOT authz.can('folder', 1, 'view'));
+SELECT test.as(5);
+SELECT test.ok('erin (Acme admin) edits project 1 and below through org.admin', test.docs() = '01, 02');
+SELECT test.as(7);
+SELECT test.ok('gina (Globex admin) sees Globex''s doc only', test.docs() = '03');
+RESET ROLE;
+
+UPDATE mt.folders SET locked = true WHERE id = 3;
+SET ROLE app_user;
+SELECT test.as(2);
+SELECT test.ok('folder 3 locked: bob still views it, but edit no longer flows down into it',
+  authz.can('folder', 3, 'view') AND NOT authz.can('folder', 3, 'edit'));
+RESET ROLE;
+UPDATE mt.folders SET locked = false WHERE id = 3;
+
+UPDATE mt.folders SET archived = true WHERE id = 2;
+SET ROLE app_user;
+SELECT test.as(1);
+SELECT test.ok('folder 2 archived: nothing passes through it, so alice loses project 1 and below',
+  NOT authz.can('folder', 2, 'view') AND NOT authz.can('project', 1, 'view') AND test.docs() = '-');
+SELECT test.as(5);
+SELECT test.ok('... while erin keeps it through her org', test.docs() = '01, 02');
+RESET ROLE;
+UPDATE mt.folders SET archived = false WHERE id = 2;
+
+UPDATE mt.orgs SET suspended = true WHERE id = 1;
+SET ROLE app_user;
+SELECT test.as(5);
+SELECT test.ok('Acme suspended: erin''s admin rights there are gone', test.docs() = '-');
+RESET ROLE;
+UPDATE mt.orgs SET suspended = false WHERE id = 1;
+
+SET ROLE app_user;
+SELECT test.as(6);
+SELECT test.ok('frank is inactive: he counts as nobody, even for his own folder',
+  authz.uid() IS NULL AND NOT authz.can('folder', 4, 'view'));
+RESET ROLE;
+UPDATE mt.users SET active = true WHERE id = '00000000-0000-4000-8000-000000000006';
+SET ROLE app_user;
+SELECT test.ok('reactivated: his folder is back', authz.can('folder', 4, 'edit'));
+
+-- ---------------------------------------------------------------------
+-- Sharing: who may share, and what
+-- ---------------------------------------------------------------------
+SELECT test.as(1);
+SELECT test.ok('alice shares folder 1 with carol as viewer',
+  test.try($$SELECT authz.share('folder', '1', 'viewer', 'user', '00000000-0000-4000-8000-000000000003')$$) = 'ok');
+SELECT test.as(3);
+SELECT test.ok('carol now sees folder 1''s documents', test.docs() = '01, 02');
+SELECT test.ok('carol (viewer) cannot share folder 1: viewer is shared by edit',
+  test.try($$SELECT authz.share('folder', '1', 'viewer', 'user', '00000000-0000-4000-8000-000000000004')$$) = '42501');
+RESET ROLE;
+UPDATE mt.users SET active = false WHERE id = '00000000-0000-4000-8000-000000000006';
+SET ROLE app_user;
+SELECT test.as(1);
+SELECT test.ok('shared if: no sharing with inactive users',
+  test.try($$SELECT authz.share('folder', '1', 'viewer', 'user', '00000000-0000-4000-8000-000000000006')$$) = '42501');
+SELECT test.ok('sharing with someone who does not exist is refused',
+  test.try($$SELECT authz.share('folder', '1', 'viewer', 'user', '00000000-0000-4000-8000-000000000099')$$) = '23503');
+SELECT test.ok('shares the policy does not declare are refused (anyone on folders)',
+  test.try($$SELECT authz.share('folder', '1', 'viewer', 'anyone', '*')$$) = 'P0001');
+
+-- every signed-in user; anyone at all
+SELECT test.ok('alice shares folder 2 with every signed-in user',
+  test.try($$SELECT authz.share('folder', '2', 'viewer', 'user', '*')$$) = 'ok');
+SELECT test.as(4);
+SELECT test.ok('dave (signed in) sees folder 2''s documents', test.docs() = '01, 02');
+SELECT test.as(NULL);
+SELECT test.ok('nobody signed in: nothing', test.docs() = '-');
+SELECT test.as(2);
+SELECT test.ok('bob (edit on project 1) makes project 1 public to anyone',
+  test.try($$SELECT authz.share('project', '1', 'viewer', 'anyone', '*')$$) = 'ok');
+SELECT test.as(NULL);
+SELECT test.ok('now even nobody signed in sees project 1''s documents', test.docs() = '01, 02');
+SELECT test.as(2);
+SELECT authz.unshare('project', '1', 'viewer', 'anyone', '*');
+SELECT test.as(1);
+SELECT authz.unshare('folder', '2', 'viewer', 'user', '*');
+
+-- links
+SELECT set_config('test.token', authz.create_link('folder', '2', 'viewer'), false);
+SELECT test.as(4);
+SELECT test.ok('dave without the link: nothing', test.docs() = '-');
+SELECT set_config('authz_ctx.links', current_setting('test.token'), false);
+SELECT test.ok('dave with the link token: folder 2 and below', test.docs() = '01, 02');
+SELECT set_config('authz_ctx.links', 'wrong-token', false);
+SELECT test.ok('a wrong token does nothing', test.docs() = '-');
+RESET authz_ctx.links;
+
+-- shares that start later, and caveats
+SELECT test.as(1);
+SELECT test.ok('alice shares folder 1 with dave from tomorrow',
+  test.try($$SELECT authz.share('folder', '1', 'viewer', 'user', '00000000-0000-4000-8000-000000000004', '', NULL, now() + interval '1 day')$$) = 'ok');
+SELECT test.as(4);
+SELECT test.ok('... not yet', test.docs() = '-');
+SELECT test.as(1);
+SELECT test.ok('alice re-shares it for business hours only (a caveat)',
+  test.try($$SELECT authz.share('folder', '1', 'viewer', 'user', '00000000-0000-4000-8000-000000000004', '', NULL, NULL, 'business_hours')$$) = 'ok');
+SELECT test.as(4);
+SELECT set_config('authz_ctx.mode', 'night', false);
+SELECT test.ok('at night: nothing', test.docs() = '-');
+SELECT set_config('authz_ctx.mode', 'business', false);
+SELECT test.ok('in business hours: folder 1 and below', test.docs() = '01, 02');
+RESET authz_ctx.mode;
+SELECT test.as(1);
+SELECT test.ok('a caveat the policy does not define is refused',
+  test.try($$SELECT authz.share('folder', '1', 'viewer', 'user', '00000000-0000-4000-8000-000000000004', '', NULL, NULL, 'full_moon')$$) = 'P0001');
+SELECT test.ok('a parameterised caveat: only from the office IP',
+  test.try($$SELECT authz.share('folder', '1', 'viewer', 'user', '00000000-0000-4000-8000-000000000004', '', NULL, NULL, 'from_ip', '{"ip": "10.1.2.3"}')$$) = 'ok');
+SELECT test.as(4);
+SELECT set_config('authz_ctx.ip', '10.9.9.9', false);
+SELECT test.ok('from elsewhere: nothing', test.docs() = '-');
+SELECT set_config('authz_ctx.ip', '10.1.2.3', false);
+SELECT test.ok('from the office: folder 1 and below', test.docs() = '01, 02');
+RESET authz_ctx.ip;
+SELECT test.as(1);
+SELECT authz.unshare('folder', '1', 'viewer', 'user', '00000000-0000-4000-8000-000000000004');
+
+-- ---------------------------------------------------------------------
+-- Custom roles
+-- ---------------------------------------------------------------------
+SELECT test.as(1);
+SELECT test.ok('alice is no Acme admin: she cannot define roles for Acme',
+  test.try($$SELECT authz.create_role('org', '1', 'folder', 'reviewer', ARRAY['view'])$$) = '42501');
+SELECT test.as(5);
+SELECT test.ok('erin (Acme admin) defines "reviewer" (view) and "writer" (view, edit) for folders',
+  test.try($$SELECT authz.create_role('org', '1', 'folder', 'reviewer', ARRAY['view'])$$) = 'ok'
+  AND test.try($$SELECT authz.create_role('org', '1', 'folder', 'writer', ARRAY['view', 'edit'])$$) = 'ok');
+SELECT test.ok('a role cannot include what the policy does not let roles grant (share)',
+  test.try($$SELECT authz.create_role('org', '1', 'folder', 'boss', ARRAY['share'])$$) = 'P0001');
+SELECT test.ok('Acme''s roles are listed for Acme members', (SELECT count(*) FROM authz.roles_of('org', '1')) = 2);
+SELECT set_config('test.reviewer', (SELECT id::text FROM authz.roles_of('org', '1') WHERE name = 'reviewer'), false);
+SELECT set_config('test.writer', (SELECT id::text FROM authz.roles_of('org', '1') WHERE name = 'writer'), false);
+SELECT test.as(1);
+SELECT test.ok('alice gives dave the reviewer role on folder 1',
+  test.try(format($$SELECT authz.share('folder', '1', 'role:%s', 'user', '00000000-0000-4000-8000-000000000004')$$,
+                  current_setting('test.reviewer'))) = 'ok');
+SELECT test.as(4);
+SELECT test.ok('dave views folder 1 and below, but cannot edit',
+  test.docs() = '01, 02' AND NOT authz.can('folder', 1, 'edit'));
+SELECT test.as(3);
+SELECT test.ok('carol (a viewer) cannot hand out the writer role: she does not hold edit',
+  test.try(format($$SELECT authz.share('folder', '1', 'role:%s', 'user', '00000000-0000-4000-8000-000000000004')$$,
+                  current_setting('test.writer'))) = '42501');
+SELECT test.as(5);
+SELECT test.ok('erin adds edit to reviewer: dave can now edit',
+  test.try(format($$SELECT authz.set_role_permissions(%s, ARRAY['view', 'edit'])$$, current_setting('test.reviewer'))) = 'ok');
+SELECT test.as(4);
+SELECT test.ok('... and he can', authz.can('folder', 3, 'edit'));
+SELECT test.as(5);
+SELECT test.ok('erin deletes the role: its assignments go with it',
+  test.try(format($$SELECT authz.delete_role(%s)$$, current_setting('test.reviewer'))) = 'ok');
+SELECT test.as(4);
+SELECT test.ok('dave has nothing left', test.docs() = '-');
+-- folders' roles come from their org (roles ... from org): another org's role counts for nothing there
+SELECT test.as(7);
+SELECT test.ok('gina (Globex admin) defines "auditor" (view) for Globex''s folders',
+  test.try($$SELECT authz.create_role('org', '2', 'folder', 'auditor', ARRAY['view'])$$) = 'ok');
+SELECT set_config('test.auditor', (SELECT id::text FROM authz.roles_of('org', '2') WHERE name = 'auditor'), false);
+SELECT test.as(1);
+SELECT test.ok('alice cannot give Globex''s role on Acme''s folder 1',
+  test.try(format($$SELECT authz.share('folder', '1', 'role:%s', 'user', '00000000-0000-4000-8000-000000000004')$$,
+                  current_setting('test.auditor'))) = 'P0001');
+RESET ROLE;
+INSERT INTO authz.shares (object_type, object_id, relation, subject_type, subject_id)
+VALUES ('folder', '1', 'role:' || current_setting('test.auditor'), 'user', '00000000-0000-4000-8000-000000000004');
+SET ROLE app_user;
+SELECT test.as(4);
+SELECT test.ok('... and one written into authz.shares gives dave nothing while folder 1 is Acme''s', test.docs() = '-');
+RESET ROLE;
+UPDATE mt.folders SET org_id = 2 WHERE id = 1;
+SET ROLE app_user;
+SELECT test.ok('... until folder 1 moves to Globex', test.docs() = '01, 02' AND authz.can('folder', 1, 'view'));
+RESET ROLE;
+UPDATE mt.folders SET org_id = 1 WHERE id = 1;
+DELETE FROM authz.shares WHERE relation = 'role:' || current_setting('test.auditor');
+SET ROLE app_user;
+
+-- ---------------------------------------------------------------------
+-- Writes through RLS on documents
+-- ---------------------------------------------------------------------
+SELECT test.as(3);
+SELECT test.ok('carol (viewer) cannot edit doc 01',
+  test.rows($$UPDATE mt.docs SET author_id = author_id WHERE id = '10000000-0000-4000-8000-000000000001'$$) = 0);
+SELECT test.as(2);
+SELECT test.ok('bob (lead of project 1) can',
+  test.rows($$UPDATE mt.docs SET author_id = author_id WHERE id = '10000000-0000-4000-8000-000000000001'$$) = 1);
+
+-- ---------------------------------------------------------------------
+-- Masked columns (rules mt.docs view mt.docs_visible / mask body : edit)
+-- ---------------------------------------------------------------------
+SELECT test.as(3);
+SELECT test.ok('carol (viewer) sees doc 01 in the masked view, but not its text',
+  (SELECT body IS NULL FROM mt.docs_visible WHERE id = '10000000-0000-4000-8000-000000000001'));
+SELECT test.ok('the view has exactly the rows she may select',
+  (SELECT count(*) FROM mt.docs_visible) = (SELECT count(*) FROM mt.docs));
+SELECT test.as(2);
+SELECT test.ok('bob (editor) sees the text',
+  (SELECT body FROM mt.docs_visible WHERE id = '10000000-0000-4000-8000-000000000001') = 'the text');
+SELECT test.ok('the text cannot be read from the table directly', test.try('SELECT body FROM mt.docs') = '42501');
+SELECT test.ok('... nor with SELECT *', test.try('SELECT * FROM mt.docs') = '42501');
+SELECT test.ok('the view cannot be written to', test.try($$UPDATE mt.docs_visible SET author_id = author_id$$) = '42501');
+SELECT test.ok('editors still write the text through the table',
+  test.rows($$UPDATE mt.docs SET body = 'new text' WHERE id = '10000000-0000-4000-8000-000000000001'$$) = 1);
+SELECT test.as(NULL);
+SELECT test.ok('nobody signed in sees no rows in the view', (SELECT count(*) FROM mt.docs_visible) = 0);
+RESET ROLE;
+SELECT test.ok('every inheritance table matches a rebuild', authz.verify());

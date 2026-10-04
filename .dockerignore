@@ -1,0 +1,12 @@
+# Images build from the repository root (core/Dockerfile, the apps' backend/Dockerfile): leave out
+# what each build makes for itself
+.git
+**/node_modules
+**/.venv
+**/dist
+**/__pycache__
+# what the packaging scripts and ci.sh leave in the checkout
+packaging/npm/.cache
+packaging/npm/out
+packaging/out
+.ci

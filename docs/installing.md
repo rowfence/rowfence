@@ -1,0 +1,54 @@
+# Installing
+
+rowfence is a command, `rowfence`, and an SDK for your app's language. Nothing is installed in the database:
+the command writes migrations, and your migration tool runs them as the owner of your tables. Any PostgreSQL
+16, 17 or 18 works, managed or not.
+
+## The command
+
+Once published, one of:
+
+    npm i -D rowfence              # the command with its own Python: a TypeScript app needs none
+    pip install rowfence           # the command and the Python SDK: rowfence[fastapi], [sqlalchemy], ...
+    docker run --rm -u "$(id -u):$(id -g)" -v "$PWD:/work" ghcr.io/rowfence/rowfence migrate
+
+- **npm**: the package brings a Python of its own, built for your machine: Linux (glibc and musl, x64 and
+  arm64), macOS (x64 and arm64) and Windows x64. Run it as `npx rowfence`, or from a script in `package.json`.
+- **pip**: Python 3.11 or newer. The same package is the [Python SDK](../sdk/python/README.md), and its extras
+  bring what each part of it uses: `rowfence[fastapi]`, `rowfence[sqlalchemy]`, `rowfence[psycopg]`,
+  `rowfence[asyncpg]`. The command needs none of them.
+- **Docker**: the image holds the command and git (`rowfence review` asks git for the base branch's files),
+  and works in the folder mounted at `/work`. It runs as root unless told otherwise: `-u` makes the files it
+  writes yours.
+
+`rowfence --version` says which version runs, and on which Python.
+
+## Alphas and release candidates
+
+A version that isn't final is never what a plain install gets. Ask for it:
+
+    npm i -D rowfence@next
+    pip install --pre rowfence
+
+and the image by its version (`ghcr.io/rowfence/rowfence:0.2.0-rc.1`). An alpha is for trying a version
+early: anything in it may still change. A release candidate is meant to become the release as it is.
+[The changelog](../CHANGELOG.md) says what each version changed, and under **Upgrading** what to do when
+moving to it.
+
+## From the repository
+
+    git clone https://github.com/rowfence/rowfence
+    export PATH="$PWD/rowfence/core/cli:$PATH"
+
+The command is Python 3.11 or newer and its standard library: there is nothing else to install.
+
+## Then
+
+`rowfence init` finds the stack (Next.js, Prisma, Drizzle, FastAPI, SQLAlchemy, Alembic), writes
+`rowfence.toml` for its migration tool, adds the SDK's packages and says which line to change.
+
+- [Getting started](getting-started.md): from a schema to a policy, its tests, the edit loop and the first
+  migration.
+- [Your stack](stacks/README.md): the SDK's packages for it ([Python](../sdk/python/README.md),
+  [TypeScript](../sdk/typescript/README.md)), and where each line goes.
+- [Editors](../editor/README.md): highlighting and the language server for VS Code, Zed, Helix and Neovim.

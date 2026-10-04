@@ -1,0 +1,290 @@
+#!/bin/bash
+# migrations.sh: policy changes as migrations: rowfence migrate writes them for each tool, they
+# apply in order on a database, a migration applied out of order is refused, --check tells CI about
+# changes no migration has, and rowfence push brings a development database along the same way.
+#   PGHOST=... PGUSER=... tests/migrations.sh
+set -u
+cd "$(dirname "$0")/.."
+DB=authz_migrations
+fails=0
+ok() { echo "ok    $1"; }
+bad() { echo "FAIL  $1${2:+: $2}"; fails=$((fails + 1)); }
+PSQL() { psql -X -q -At -v ON_ERROR_STOP=1 -d "$DB" "$@"; }
+fresh() { dropdb --if-exists "$1" 2>/dev/null; createdb "$1" || exit 1
+  PGOPTIONS="-c client_min_messages=error" psql -X -q -v ON_ERROR_STOP=1 -d "$1" -f example/app_schema.sql >/dev/null || exit 1; }
+T=$(mktemp -d)
+P="$T/p"
+mkdir -p "$P/db"
+sed '/^test$/,$d' example/docs.authz > "$P/db/policy.authz"     # its test section needs the scenario's shares
+printf 'policy = "db/policy.authz"\ndatabase = "dbname=%s"\n[migrations]\ntool = "sql"\ndir = "db/migrations"\n' "$DB" > "$P/rowfence.toml"
+CLI() { ( cd "$P" && python3 "$OLDPWD/cli/rowfence_cli.py" "$@" ); }
+# every migration in the folder not applied yet, in order, each in its own transaction (as the tools do)
+migrate_db() {
+  local db=$1 dir=$2 done_file="$T/applied_$1"
+  touch "$done_file"
+  for f in $(ls "$dir"/*.sql | sort); do
+    grep -qx "$f" "$done_file" && continue
+    out=$(PGOPTIONS="-c client_min_messages=error" psql -X -q -1 -v ON_ERROR_STOP=1 -d "$db" -f "$f" 2>&1) || { echo "$out"; return 1; }
+    echo "$f" >> "$done_file"
+  done
+}
+
+echo "-- the first migration, and the lock file"
+fresh "$DB"
+out=$(CLI migrate 2>&1); rc=$?
+[ $rc -eq 0 ] && [ -f "$P/db/policy.lock" ] && [ "$(ls "$P/db/migrations" | wc -l)" = 1 ] &&
+  ok "rowfence migrate writes the first migration and db/policy.lock, with no database" || bad "first migrate" "$out"
+first=$(ls "$P"/db/migrations/*.sql)
+grep -q "^-- the whole policy" "$first" && ok "... which says it is the whole policy" || bad "first summary" "$(head -3 "$first")"
+out=$(migrate_db "$DB" "$P/db/migrations") && [ "$(PSQL -c "SELECT authz.verify()")" = t ] &&
+  ok "it applies on a database with nothing of rowfence's" || bad "first applies" "$out"
+[ "$(PSQL -c "SELECT lock IS NOT NULL AND policy LIKE '%type folder = app.folders%' FROM authz.policy_versions ORDER BY id DESC LIMIT 1")" = t ] &&
+  ok "... and records the policy and the lock's hash" || bad "recorded"
+out=$(CLI migrate 2>&1); case "$out" in "nothing to migrate"*) ok "again: nothing to migrate";; *) bad "migrate again" "$out";; esac
+out=$(CLI migrate --check 2>&1); rc=$?; [ $rc -eq 0 ] && ok "--check: exit 0 when the lock is up to date" || bad "--check up to date" "$out"
+# a lock another version wrote: upgrading rowfence is no migration while it makes the same
+cp "$P/db/policy.lock" "$T/lock"
+sed -i '1s/^# rowfence [^:]*:/# rowfence 0.0.1:/' "$P/db/policy.lock"
+out=$(CLI migrate --check 2>&1); rc=$?; [ $rc -eq 0 ] && ok "--check: exit 0 after an upgrade that makes the same" || bad "--check after an upgrade" "$out"
+# the other way round: an older command doesn't write the step back as if it were an upgrade
+sed -i '1s/^# rowfence [^:]*:/# rowfence 99.0.0:/' "$P/db/policy.lock"
+for args in "migrate --check" "migrate"; do
+  out=$(CLI $args 2>&1); rc=$?
+  case "$out" in *"the lock file was last written by rowfence 99.0.0, which is newer than this command"*"[AZ616]"*) [ $rc -ne 0 ] &&
+    [ "$(ls "$P/db/migrations" | wc -l)" = 1 ] && ok "$args: a lock a newer version wrote is refused" || bad "$args on a newer lock: rc $rc";;
+    *) bad "$args on a newer lock" "$out";; esac
+done
+out=$(CLI migrate --check --downgrade 2>&1); rc=$?; [ $rc -eq 0 ] && ok "... unless asked: --downgrade" || bad "--downgrade" "$out"
+cp "$T/lock" "$P/db/policy.lock"
+grep -q '^> type folder: can edit = share or editor or (parent.edit and {inherit})$' "$P/db/policy.lock" &&
+  ok "the lock file starts with the policy's lines" || bad "lock meaning" "$(head -12 "$P/db/policy.lock")"
+
+echo "-- a change"
+sed -i 's/^  can share = owner or folder.share$/  can share = owner or folder.share\n  can comment = folder.view/' "$P/db/policy.authz"
+out=$(CLI migrate --check 2>&1); rc=$?
+case "$out" in *"has changes no migration has"*"+ type file: can comment = folder.view"*) [ $rc -eq 1 ] && ok "--check: exit 1, and what changed" || bad "--check exit" "$rc";;
+  *) bad "--check" "$out";; esac
+sleep 1
+out=$(CLI migrate 2>&1); rc=$?
+second=$(ls "$P"/db/migrations/*.sql | sort | tail -n 1)
+[ $rc -eq 0 ] && [ "$second" != "$first" ] && case "$second" in *_file_comment_folder_view.sql) true;; *) false;; esac &&
+  ok "the next migration is named after what changed" || bad "second migrate" "$out $second"
+[ "$(wc -c < "$second")" -lt 70000 ] && ! grep -q "CREATE TABLE authz_int.\"folder__parent__tree\"" "$second" &&
+  ok "... and holds only what changed ($(( $(wc -c < "$second") / 1024 )) KB; no tree)" || bad "second size" "$(wc -c < "$second")"
+grep -q "^-- + type file: can comment = folder.view$" "$second" && ok "... starting with what changed, as comments" || bad "second summary"
+out=$(migrate_db "$DB" "$P/db/migrations") && [ "$(PSQL -c "SET authz.user_id = 1" -c "SELECT authz.can('file', 11, 'comment')")" = t ] &&
+  ok "it applies: the new permission is there" || bad "second applies" "$out"
+out=$(PGOPTIONS="-c client_min_messages=error" psql -X -q -1 -v ON_ERROR_STOP=1 -d "$DB" -f "$second" 2>&1)
+case "$out" in *"this migration changes the policy the migration before it left"*) ok "the same migration again is refused";; *) bad "guard" "$out";; esac
+fresh "${DB}_2"
+out=$(PGOPTIONS="-c client_min_messages=error" psql -X -q -1 -v ON_ERROR_STOP=1 -d "${DB}_2" -f "$second" 2>&1)
+case "$out" in *"this migration changes the policy the migration before it left"*"none"*) ok "... and so is one without the migrations before it";; *) bad "guard on empty" "$out";; esac
+out=$(migrate_db "${DB}_2" "$P/db/migrations") && [ "$(PSQL -d "${DB}_2" -c "SELECT authz.verify()")" = t ] &&
+  ok "a new database gets both, in order" || bad "both on a new database" "$out"
+
+echo "-- rowfence push, for development databases"
+sed -i 's/^  can comment = folder.view$/  can comment = folder.view\n  can print = view/' "$P/db/policy.authz"
+out=$(CLI push 2>&1); rc=$?
+case "$out" in *"isn't marked as a development database"*"[AZ610]"*"rowfence push --development"*) [ $rc -ne 0 ] &&
+  ok "a database the migrations set up isn't pushed to until someone marks it as a development database" || bad "push rc" "$rc";;
+  *) bad "push to an unmarked database" "$out";; esac
+out=$(CLI push --development 2>&1); case "$out" in *"policy.authz: pushed") ok "push --development marks it, and brings it along with the migration it would write";; *) bad "push" "$out";; esac
+[ "$(PSQL -c "SET authz.user_id = 1" -c "SELECT authz.can('file', 11, 'print')")" = t ] && ok "... the new permission is there" || bad "pushed permission"
+out=$(CLI push 2>&1); case "$out" in *"policy.authz: unchanged") ok "push again: unchanged";; *) bad "push again" "$out";; esac
+sed -i 's/^  can print = view$/  can print = edit/' "$P/db/policy.authz"
+out=$(CLI push 2>&1); case "$out" in *"policy.authz: pushed") ok "a second change is pushed too";; *) bad "second push" "$out";; esac
+PSQL -c "UPDATE authz.policy_versions SET version = '0.0.1' WHERE id = (SELECT max(id) FROM authz.policy_versions)" >/dev/null
+out=$(CLI push 2>&1); case "$out" in *"policy.authz: applied (the whole policy)") ok "a policy another version applied: the whole policy";; *) bad "push after upgrade" "$out";; esac
+sleep 1
+CLI migrate >/dev/null 2>&1
+out=$(migrate_db "${DB}_2" "$P/db/migrations") && [ "$(PSQL -d "${DB}_2" -c "SELECT count(*) FROM authz_int.perms WHERE type = 'file' AND perm = 'print'")" = 1 ] &&
+  ok "the migration for what was pushed applies to a database that took the migrations" || bad "migration after push" "$out $(ls "$P/db/migrations")"
+out=$(PGOPTIONS="-c client_min_messages=error" psql -X -q -1 -v ON_ERROR_STOP=1 -d "$DB" -f "$(ls "$P"/db/migrations/*.sql | sort | tail -n 1)" 2>&1)
+case "$out" in *"this migration changes the policy the migration before it left"*) ok "... but not to the pushed one, which is ahead of it";; *) bad "guard after push" "$out";; esac
+# removing the policy doesn't make a database a development one: what it took is still on record
+fresh "${DB}_4"
+PGOPTIONS="-c client_min_messages=error" psql -X -q -1 -v ON_ERROR_STOP=1 -d "${DB}_4" -f "$first" >/dev/null 2>&1
+out=$(CLI --db "dbname=${DB}_4" remove --yes 2>&1) || bad "remove on the migrated database" "$out"
+out=$(CLI --db "dbname=${DB}_4" push 2>&1); rc=$?
+case "$out" in *"had a policy (removed since) and isn't marked as a development database"*"[AZ610]"*) [ $rc -ne 0 ] &&
+  [ "$(PSQL -d "${DB}_4" -c "SELECT count(*) FROM pg_namespace WHERE nspname = 'authz_int'")" = 0 ] &&
+  ok "after rowfence remove, a database the migrations set up is still one push refuses" || bad "push after remove: rc or schemas" "$rc";;
+  *) bad "push after remove" "$out";; esac
+out=$(CLI --db "dbname=${DB}_4" push --development 2>&1)
+case "$out" in *"policy.authz: applied (the whole policy)") ok "... until someone marks it: push --development";; *) bad "push --development after remove" "$out";; esac
+out=$(CLI --db "dbname=${DB}_4" remove --yes 2>&1 && CLI --db "dbname=${DB}_4" push 2>&1)
+case "$out" in *"policy.authz: applied (the whole policy)") ok "... and a marked one stays marked through remove";; *) bad "push after remove, marked" "$out";; esac
+
+echo "-- an inheritance tree that changes: built beside the one in use, then swapped in"
+sed -i 's/can view  = edit or viewer or (parent.view and {inherit})/can view  = edit or viewer or parent.view/' "$P/db/policy.authz"
+before=$(ls "$P"/db/migrations/*.sql | wc -l)
+sleep 1
+out=$(CLI migrate 2>&1)
+build=$(ls "$P"/db/migrations/*.sql | sort | tail -n 2 | head -n 1); swap=$(ls "$P"/db/migrations/*.sql | sort | tail -n 1)
+case "$out" in *"beside the ones in use"*"two migrations"*) [ "$(ls "$P"/db/migrations/*.sql | wc -l)" = $((before + 2)) ] &&
+  case "$build" in *_authz_build_*) true;; *) false;; esac && ok "migrate writes two: build beside, then swap in" || bad "two files" "$(ls "$P/db/migrations")";;
+  *) bad "two-phase migrate" "$out";; esac
+( PGOPTIONS="-c client_min_messages=error" psql -X -q -v ON_ERROR_STOP=1 -d "${DB}_2" -c "BEGIN" -f "$build" -c "SELECT pg_sleep(4)" -c "COMMIT" 2> "$T/build.log" >/dev/null ) &
+sleep 2
+out=$(psql -X -q -At -d "${DB}_2" -c "SET lock_timeout = '1s'" -c "UPDATE app.folders SET name = name WHERE id = 4" \
+          -c "INSERT INTO app.folder_links VALUES (6, 20)" 2>&1)
+[ -z "$out" ] && ok "while the first one runs, the app still writes to the tables the tree follows" || bad "build blocks writers" "$out"
+wait
+[ ! -s "$T/build.log" ] && ok "... and it finishes" || bad "build" "$(cat "$T/build.log")"
+echo "$build" >> "$T/applied_${DB}_2"
+# a statement at a time (psql -f alone, which also goes on after an error): refused before anything changes, where
+# the swap would stop half way with the old trees dropped
+out=$(PGOPTIONS="-c client_min_messages=error" psql -X -q -d "${DB}_2" -f "$swap" 2>&1)
+case "$out" in *"must run in one transaction"*"[AZ615]"*)
+  [ "$(PSQL -d "${DB}_2" -c "SELECT authz.verify()")" = t ] &&
+  [ "$(PSQL -d "${DB}_2" -c "SELECT count(*) FROM pg_proc WHERE proname = 'folder__linked_into_parent__tree_verify'")" = 1 ] &&
+  [ "$(PSQL -d "${DB}_2" -c "SELECT count(*) FROM authz_int.next_trees")" -ge 1 ] &&
+    ok "a migration run a statement at a time is refused (AZ615), and changes nothing" || bad "half a migration" "$(echo "$out" | head -n 5)";;
+  *) bad "a migration outside a transaction" "$(echo "$out" | head -n 5)";; esac
+out=$(migrate_db "${DB}_2" "$P/db/migrations") && [ "$(PSQL -d "${DB}_2" -c "SELECT authz.verify()")" = t ] &&
+  [ "$(PSQL -d "${DB}_2" -c "SELECT count(*) FROM authz_int.folder__linked_into_parent__tree WHERE descendant = 6 AND ancestor = 20")" = 1 ] &&
+  ok "the second swaps it in, with what the app wrote meanwhile" || bad "swap" "$out"
+out=$(CLI migrate --one-phase --check 2>&1); [ $? -eq 0 ] && ok "and the lock file is where both left it" || bad "lock after two" "$out"
+
+echo "-- rowfence dev writes the migration once you stop editing"
+printf '\nwrite_after = 2\n' >> "$P/rowfence.toml"
+sed -i 's/^  can print = edit$/  can print = edit\n  can copy = view/' "$P/db/policy.authz"
+# exec: the job is timeout itself, so kill %1 stops it. Otherwise it outlives the subshell, and in a container
+# where Postgres is PID 1 the postmaster reaps it: exit code 124, taken for a crashed backend, restarts everything
+( cd "$P" && exec timeout 20 python3 "$OLDPWD/cli/rowfence_cli.py" dev > "$T/dev.log" 2>&1 ) &
+for _ in $(seq 15); do sleep 1; grep -q "watching" "$T/dev.log" 2>/dev/null && break; done
+sed -i 's/^  can copy = view$/  can copy = edit/' "$P/db/policy.authz"
+for _ in $(seq 15); do sleep 1; [ "$(grep -c "stopped editing" "$T/dev.log")" -ge 1 ] && grep -q "authz_file_copy_edit.sql" "$T/dev.log" && break; done
+kill %1 2>/dev/null; wait 2>/dev/null
+case "$(cat "$T/dev.log")" in *"db/policy.authz saved"*"applied in"*"stopped editing"*"wrote db/migrations/"*"_authz_file_copy_edit.sql"*)
+  ok "a save, then quiet: the migration is written, named after what changed";; *) bad "dev writes the migration" "$(cat "$T/dev.log")";; esac
+out=$(CLI migrate --check 2>&1); [ $? -eq 0 ] && ok "... and the lock file is up to date" || bad "lock after dev" "$out"
+
+echo "-- each tool's files"
+W="$T/w"
+mkdir -p "$W"
+cp "$P/db/policy.authz" "$W/policy.authz"
+for tool in sql goose dbmate flyway prisma drizzle alembic; do
+  rm -f "$W/policy.lock"
+  out=$( cd "$W" && python3 "$OLDPWD/cli/rowfence_cli.py" migrate policy.authz --tool $tool --dir "m_$tool" --name first 2>&1) || { bad "$tool" "$out"; continue; }
+  sed -i 's/^  can print = edit$/  can print = share/' "$W/policy.authz"
+  sleep 1
+  out=$( cd "$W" && python3 "$OLDPWD/cli/rowfence_cli.py" migrate policy.authz --tool $tool --dir "m_$tool" 2>&1) || { bad "$tool second" "$out"; continue; }
+  sed -i 's/^  can print = share$/  can print = edit/' "$W/policy.authz"
+  case $tool in
+    sql) [ "$(ls "$W/m_sql" | grep -c '^[0-9]\{14\}_.*\.sql$')" = 2 ] && ok "sql: two timestamped files" || bad "sql files" "$(ls "$W/m_sql")";;
+    goose) head -2 "$W"/m_goose/*first.sql | grep -q "+goose StatementBegin" && tail -1 "$W"/m_goose/*first.sql | grep -q "+goose StatementEnd" &&
+      ok "goose: -- +goose Up, one statement block" || bad "goose" "$(head -3 "$W"/m_goose/*first.sql)";;
+    dbmate) head -1 "$W"/m_dbmate/*first.sql | grep -q "^-- migrate:up$" && grep -q "^-- migrate:down$" "$W"/m_dbmate/*first.sql &&
+      ok "dbmate: -- migrate:up and down" || bad "dbmate";;
+    flyway) ls "$W/m_flyway" | grep -q '^V[0-9]\{14\}__authz_first\.sql$' && ok "flyway: V<version>__authz_first.sql" || bad "flyway" "$(ls "$W/m_flyway")"
+      # the SQL holds ${ (a dollar quote before JSON), which Flyway reads as a placeholder and refuses: off, per script
+      [ "$(cat "$W"/m_flyway/V*__authz_first.sql.conf 2>/dev/null)" = "placeholderReplacement=false" ] && grep -qF '${' "$W"/m_flyway/V*__authz_first.sql &&
+        [ "$(ls "$W/m_flyway" | grep -c '\.sql\.conf$')" = 2 ] && ok "flyway: each script's config file turns placeholders off" || bad "flyway config" "$(ls "$W/m_flyway")";;
+    prisma) [ "$(ls "$W"/m_prisma/*/migration.sql | wc -l)" = 2 ] && ok "prisma: a folder with migration.sql for each" || bad "prisma" "$(ls -R "$W/m_prisma")";;
+    drizzle)
+      python3 - "$W/m_drizzle" <<'PY' && ok "drizzle: numbered files, statement breakpoints, the journal, a snapshot each" || bad "drizzle"
+import json, os, sys
+d = sys.argv[1]
+j = json.load(open(os.path.join(d, "meta", "_journal.json")))
+assert [e["tag"] for e in j["entries"]] == ["0000_authz_first", "0001_" + j["entries"][1]["tag"][5:]], j
+assert all(e["breakpoints"] for e in j["entries"])
+s0 = json.load(open(os.path.join(d, "meta", "0000_snapshot.json")))
+s1 = json.load(open(os.path.join(d, "meta", "0001_snapshot.json")))
+assert s1["prevId"] == s0["id"] and s0["id"] != s1["id"]
+assert "--> statement-breakpoint" in open(os.path.join(d, "0000_authz_first.sql")).read()
+PY
+      # each piece between breakpoints runs on its own, as drizzle-kit migrate sends them
+      fresh "${DB}_3"
+      python3 - "$W/m_drizzle" "${DB}_3" <<'PY' && ok "... and its pieces, run one by one, apply both migrations" || bad "drizzle pieces"
+import json, os, subprocess, sys
+d, db = sys.argv[1:]
+script = ["SET client_min_messages = error;", "BEGIN;"]
+for e in json.load(open(os.path.join(d, "meta", "_journal.json")))["entries"]:
+    for piece in open(os.path.join(d, e["tag"] + ".sql")).read().split("--> statement-breakpoint"):
+        script.append(piece.strip())
+script.append("COMMIT;")
+p = subprocess.run(["psql", "-X", "-q", "-v", "ON_ERROR_STOP=1", "-d", db], input="\n".join(script), text=True, capture_output=True)
+sys.exit(p.returncode and print(p.stderr[-2000:]) or p.returncode)
+PY
+      ;;
+    alembic)
+      python3 - "$W/m_alembic" <<'PY' && ok "alembic: revisions chained by down_revision, each with its SQL beside it" || bad "alembic"
+import ast, os, re, sys
+d = sys.argv[1]
+revs = {}
+for f in sorted(os.listdir(d)):
+    if f.endswith(".py"):
+        text = open(os.path.join(d, f)).read()
+        ast.parse(text)
+        rev = re.search(r'^revision = "(\w+)"', text, re.M).group(1)
+        down = re.search(r"^down_revision(?:: [^=]+)? = (.+)$", text, re.M).group(1)    # annotated or not
+        revs[rev] = down
+        assert os.path.exists(os.path.join(d, f[:-3] + ".sql")), f
+assert len(revs) == 2 and sorted(revs.values()) == sorted(["None", repr(next(r for r, dn in revs.items() if dn == "None"))]), revs
+PY
+      ;;
+  esac
+done
+
+echo "-- tree writes that wait while a migration adds a tree for another type"
+# The migration gives boxes a tree and never touches folders. Two folder moves that together make a loop start
+# while its transaction is open: each waits on the folders' lock row, and after it one of them must still be refused.
+L="${DB}_4"
+dropdb --if-exists "$L" 2>/dev/null; createdb "$L" || exit 1
+PGOPTIONS="-c client_min_messages=error" psql -X -q -v ON_ERROR_STOP=1 -d "$L" >/dev/null <<'SQL' || exit 1
+CREATE SCHEMA p;
+CREATE TABLE p.users (id bigint PRIMARY KEY);
+CREATE TABLE p.folders (id bigint PRIMARY KEY, parent_id bigint REFERENCES p.folders, owner_id bigint);
+CREATE TABLE p.boxes (id bigint PRIMARY KEY, parent_id bigint REFERENCES p.boxes, owner_id bigint);
+INSERT INTO p.users VALUES (1), (2);
+INSERT INTO p.folders VALUES (1, NULL, 1), (2, NULL, 2), (3, 1, NULL), (4, 2, NULL);
+INSERT INTO p.boxes VALUES (1, NULL, 1), (2, 1, NULL);
+GRANT USAGE ON SCHEMA p TO app_user;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA p TO app_user;
+SQL
+cat > "$T/trees_old.authz" <<'POLICY'
+app role app_user
+type user = p.users
+type folder = p.folders
+  parent : folder = parent_id
+  owner  : user = owner_id
+  can view = owner or parent.view
+type box = p.boxes
+  parent : box = parent_id
+  owner  : user = owner_id
+  can view = owner
+  can near = parent.view
+POLICY
+sed 's/^  can view = owner$/  can view = owner or parent.view/' "$T/trees_old.authz" > "$T/trees_new.authz"
+python3 cli/rowfence_cli.py --db "dbname=$L" apply "$T/trees_old.authz" >/dev/null || bad "apply the two-type policy"
+python3 - "$T" <<'PY' || bad "the migration that adds a tree"
+import sys
+sys.path.insert(0, ".")
+from authzlib import database, migrate
+t = sys.argv[1]
+with open(t + "/trees_old.authz", encoding="utf-8") as fh:
+    old = fh.read()
+with open(t + "/trees_new.authz", encoding="utf-8") as fh:
+    new = fh.read()
+[m] = database.migrations(new, {}, migrate.lock_of(database.migratable(old, {})[1]), "box tree", two_phase=False)
+assert "INSERT INTO authz_int.locks" in m.sql and "DELETE FROM authz_int.locks" not in m.sql, "the lock rows are deleted"
+with open(t + "/trees.sql", "w", encoding="utf-8") as fh:
+    fh.write("BEGIN;\nSET client_min_messages = error;\n" + m.sql + "SELECT pg_sleep(4);\nCOMMIT;\n")
+PY
+( psql -X -q -At -v ON_ERROR_STOP=1 -d "$L" -f "$T/trees.sql" > "$T/trees.log" 2>&1 ) &
+sleep 2
+( psql -X -q -At -d "$L" -c "UPDATE p.folders SET parent_id = 4 WHERE id = 1" > "$T/move_a.log" 2>&1 ) &
+( psql -X -q -At -d "$L" -c "UPDATE p.folders SET parent_id = 3 WHERE id = 2" > "$T/move_b.log" 2>&1 ) &
+wait
+moves=$(cat "$T/move_a.log" "$T/move_b.log")
+loop=$(psql -X -q -At -d "$L" -c "WITH RECURSIVE up(id, n) AS (SELECT parent_id, 1 FROM p.folders WHERE id = 1 UNION ALL
+  SELECT f.parent_id, n + 1 FROM p.folders f JOIN up ON f.id = up.id WHERE n < 10) SELECT coalesce(bool_or(id = 1), false) FROM up")
+case "$moves" in *"cannot be moved inside itself"*) [ "$loop" = f ] && [ "$(psql -X -q -At -d "$L" -c "SELECT authz.verify()")" = t ] &&
+  ok "two moves that waited for the migration: the one that would close a loop is still refused" || bad "moves during a migration" "loop $loop";;
+  *) bad "both moves went through during a migration" "loop: $loop; $(cat "$T/trees.log" | tail -n 3)";; esac
+dropdb --if-exists "$L" 2>/dev/null
+
+rm -rf "$T"
+for db in "$DB" "${DB}_2" "${DB}_3" "${DB}_4"; do dropdb --if-exists "$db" 2>/dev/null; done
+[ $fails -eq 0 ] && echo "migrations: all passed" || { echo "migrations: $fails failed"; exit 1; }

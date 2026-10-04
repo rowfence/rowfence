@@ -1,0 +1,10 @@
+{
+  // Studio's page (studio/app.js) is plain JavaScript, typed with JSDoc and checked strictly:
+  //   npx -p typescript@6.0.3 tsc -p core/cli/tsconfig.studio.json
+  "compilerOptions": {
+    "allowJs": true, "checkJs": true, "noEmit": true, "strict": true,
+    "target": "ES2022", "lib": ["ES2022", "DOM", "DOM.Iterable"], "module": "ES2022", "types": [],
+    "noUnusedLocals": true, "noImplicitReturns": true, "noFallthroughCasesInSwitch": true
+  },
+  "files": ["studio/app.js"]
+}

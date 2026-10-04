@@ -1,0 +1,52 @@
+# rowfence review for GitLab merge requests: one note, updated in place, that says what the policy
+# change does (meaning, access, risk, tests, deploy).
+#
+#   include:
+#     - remote: https://raw.githubusercontent.com/rowfence/rowfence/v0.1.0-dev/review-ci/gitlab/rowfence-review.gitlab-ci.yml
+#   variables:
+#     ROWFENCE_REVIEW_TOKEN: ...     # a project access token with the api scope (masked), to write the note
+#     REVIEW_DATABASE_URL: ...       # optional: a database at the target branch's state, with the review data
+#
+# Access and the tests' results need that database; prepare it in a job before this one (a Postgres
+# service, your migration tool). Without it the review leaves Access out.
+#
+# The command comes from PyPI, the release the template's tag names; ROWFENCE_VERSION picks another, and
+# ROWFENCE_PACKAGE anything pip installs instead (a wheel's path or URL).
+rowfence-review:
+  stage: test
+  image: python:3.12-slim
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+  variables:
+    GIT_DEPTH: "0"
+    ROWFENCE_VERSION: "0.1.0-dev"
+    ROWFENCE_PACKAGE: "rowfence==$ROWFENCE_VERSION"
+  before_script:
+    - apt-get update -qq && apt-get install -y -qq git curl >/dev/null
+    - pip install -q "$ROWFENCE_PACKAGE"
+  script:
+    - db=(); [ -n "${REVIEW_DATABASE_URL:-}" ] && db=(--db "$REVIEW_DATABASE_URL")
+    - rowfence "${db[@]}" review --base "$CI_MERGE_REQUEST_DIFF_BASE_SHA" --markdown > review.md
+    - cat review.md
+    - |
+      if [ -n "${ROWFENCE_REVIEW_TOKEN:-}" ]; then
+        api="$CI_API_V4_URL/projects/$CI_PROJECT_ID/merge_requests/$CI_MERGE_REQUEST_IID/notes"
+        # the note that starts with the review's marker, on whichever page of the notes it is
+        id=""; page=1
+        while :; do
+          found=$(curl -sf -H "PRIVATE-TOKEN: $ROWFENCE_REVIEW_TOKEN" "$api?per_page=100&page=$page" |
+                  python3 -c 'import json,sys; ns=json.load(sys.stdin); n=[x["id"] for x in ns if x["body"].startswith("<!-- rowfence review -->")]; print(n[0] if n else "", len(ns))')
+          id=${found% *}; count=${found##* }
+          if [ -n "$id" ] || [ "${count:-0}" -lt 100 ]; then break; fi
+          page=$((page + 1))
+        done
+        body=$(python3 -c 'import json,sys; print(json.dumps({"body": open("review.md").read()}))')
+        if [ -n "$id" ]; then
+          curl -sf -X PUT -H "PRIVATE-TOKEN: $ROWFENCE_REVIEW_TOKEN" -H "Content-Type: application/json" -d "$body" "$api/$id" >/dev/null
+        else
+          curl -sf -X POST -H "PRIVATE-TOKEN: $ROWFENCE_REVIEW_TOKEN" -H "Content-Type: application/json" -d "$body" "$api" >/dev/null
+        fi
+      fi
+  artifacts:
+    paths: [review.md]
+    when: always

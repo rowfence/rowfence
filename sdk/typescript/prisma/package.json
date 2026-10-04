@@ -1,0 +1,15 @@
+{
+  "name": "@rowfence/prisma",
+  "version": "0.1.0-dev",
+  "description": "rowfence with Prisma: a client extension that signs every query in, and turns refusals into errors",
+  "license": "Apache-2.0",
+  "repository": { "type": "git", "url": "git+https://github.com/rowfence/rowfence.git", "directory": "sdk/typescript/prisma" },
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": { ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" } },
+  "files": ["dist"],
+  "sideEffects": false,
+  "dependencies": { "@rowfence/client": "0.1.0-dev" },
+  "peerDependencies": { "@prisma/client": ">=7" }
+}

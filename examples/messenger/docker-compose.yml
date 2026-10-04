@@ -1,0 +1,21 @@
+# The messenger and what it needs: Postgres with the rowfence command (built from this repository, like
+# the rowfence command in the app's image, so both are of the same commit) and the app.
+#   docker compose up -d --build            # everything; the app on http://localhost:8001
+#   docker compose up -d db                 # just the database, for running the backend on the host
+services:
+  db:
+    build: {context: ../.., dockerfile: core/Dockerfile, args: {PG_MAJOR: "16"}}
+    image: rowfence:16
+    environment: {POSTGRES_PASSWORD: postgres, POSTGRES_DB: messenger}
+    ports: ["25433:5432"]
+    volumes: [db:/var/lib/postgresql/data]
+    healthcheck: {test: ["CMD", "pg_isready", "-U", "postgres", "-d", "messenger"], interval: 2s, retries: 30}
+  app:
+    build: {context: ../.., dockerfile: examples/messenger/backend/Dockerfile}
+    depends_on: {db: {condition: service_healthy}}
+    environment:
+      MS_ADMIN_URL: postgresql://postgres:postgres@db:5432/messenger
+      MS_APP_PASSWORD: ms_app
+      MS_DATABASE_URL: postgresql://ms_app:ms_app@db:5432/messenger
+    ports: ["8001:8000"]
+volumes: {db: {}}

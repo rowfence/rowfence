@@ -1,0 +1,41 @@
+{
+  "name": "rowfence",
+  "displayName": "rowfence policy language",
+  "description": "For .authz policy files: highlighting (with SQL inside { }), errors while typing, hover, go to definition, references, outline and completion, from the rowfence language server.",
+  "version": "0.1.0",
+  "publisher": "rowfence",
+  "license": "Apache-2.0",
+  "repository": { "type": "git", "url": "git+https://github.com/rowfence/rowfence.git", "directory": "editor" },
+  "files": ["extension.js", "language-configuration.json", "syntaxes", "README.md", "LICENSE", "node_modules"],
+  "engines": { "vscode": "^1.75.0" },
+  "categories": ["Programming Languages", "Linters"],
+  "main": "./extension.js",
+  "activationEvents": ["onLanguage:authz"],
+  "contributes": {
+    "languages": [{
+      "id": "authz",
+      "aliases": ["authz policy", "authz"],
+      "extensions": [".authz"],
+      "configuration": "./language-configuration.json"
+    }],
+    "grammars": [{
+      "language": "authz",
+      "scopeName": "source.authz",
+      "path": "./syntaxes/authz.tmLanguage.json",
+      "embeddedLanguages": { "meta.embedded.sql.authz": "sql" }
+    }],
+    "configuration": {
+      "title": "rowfence",
+      "properties": {
+        "rowfence.command": {
+          "type": "array", "items": { "type": "string" },
+          "default": ["rowfence", "lsp"],
+          "description": "How to start the language server, e.g. [\"python3\", \"/path/to/rowfence/cli/rowfence_cli.py\", \"lsp\"]."
+        }
+      }
+    }
+  },
+  "scripts": { "package": "vsce package" },
+  "dependencies": { "vscode-languageclient": "^9.0.1" },
+  "devDependencies": { "@types/vscode": "~1.75.0", "@vscode/vsce": "^3.2.1" }
+}

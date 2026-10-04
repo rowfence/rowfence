@@ -1,0 +1,14 @@
+{
+  "name": "rowfence-playground",
+  "private": true,
+  "description": "rowfence in the browser: the compiler in Pyodide, the SQL it writes in PGlite",
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "test": "node test.mjs"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "0.5.8",
+    "pyodide": "314.0.7"
+  }
+}

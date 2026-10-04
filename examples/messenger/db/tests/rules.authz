@@ -1,0 +1,120 @@
+-- The messenger's rules, one test each (the table in README.md). Each test brings its own people and chats,
+-- and rolls them back. Run: rowfence test (from messenger/), or rowfence dev while editing the policy.
+
+test "only members read a chat"
+  given ann = {INSERT INTO ms.users (phone, name) VALUES ('t-ann', 'Ann') RETURNING id}
+  given bo  = {INSERT INTO ms.users (phone, name) VALUES ('t-bo', 'Bo') RETURNING id}
+  given cy  = {INSERT INTO ms.users (phone, name) VALUES ('t-cy', 'Cy') RETURNING id}
+  given g   = {INSERT INTO ms.chats (kind, title, created_by) VALUES ('group', 'Weekend', $ann) RETURNING id}
+  given {INSERT INTO ms.members (chat_id, user_id, role) VALUES ($g, $ann, 'owner'), ($g, $bo, 'member')}
+  user $bo can read chat $g
+  user $cy cannot read chat $g
+  as user $cy sees 0 {SELECT FROM ms.chats WHERE id = $g}
+  as user $cy refused {INSERT INTO ms.messages (chat_id, sender_id, body) VALUES ($g, $cy, 'hi')}
+
+test "new members don't see what was said before they joined"
+  given ann = {INSERT INTO ms.users (phone, name) VALUES ('t-ann', 'Ann') RETURNING id}
+  given bo  = {INSERT INTO ms.users (phone, name) VALUES ('t-bo', 'Bo') RETURNING id}
+  given g   = {INSERT INTO ms.chats (kind, title, created_by) VALUES ('group', 'Weekend', $ann) RETURNING id}
+  given {INSERT INTO ms.members (chat_id, user_id, role, joined_at) VALUES ($g, $ann, 'owner', now() - interval '2 hours')}
+  given old = {INSERT INTO ms.messages (chat_id, sender_id, body, created_at) VALUES ($g, $ann, 'before', now() - interval '1 hour') RETURNING chat_id, seq}
+  given {INSERT INTO ms.members (chat_id, user_id) VALUES ($g, $bo)}
+  user $ann can read message $old
+  user $bo cannot read message $old
+  as user $bo sees 0 {SELECT FROM ms.messages WHERE chat_id = $g}
+  -- by the message's number, whatever the clocks say: a member whose joined_at is ahead still posts and reads
+  given {UPDATE ms.members SET joined_at = now() + interval '1 hour' WHERE chat_id = $g AND user_id = $bo}
+  as user $bo allowed {INSERT INTO ms.messages (chat_id, sender_id, body) VALUES ($g, $bo, 'hello') RETURNING seq}
+  as user $bo sees 1 {SELECT FROM ms.messages WHERE chat_id = $g}
+
+test "owners and admins manage a group, members don't"
+  given ann = {INSERT INTO ms.users (phone, name) VALUES ('t-ann', 'Ann') RETURNING id}
+  given bo  = {INSERT INTO ms.users (phone, name) VALUES ('t-bo', 'Bo') RETURNING id}
+  given cy  = {INSERT INTO ms.users (phone, name) VALUES ('t-cy', 'Cy') RETURNING id}
+  given g   = {INSERT INTO ms.chats (kind, title, created_by) VALUES ('group', 'Weekend', $ann) RETURNING id}
+  given {INSERT INTO ms.members (chat_id, user_id, role) VALUES ($g, $ann, 'owner'), ($g, $bo, 'member')}
+  user $ann can manage chat $g
+  user $bo cannot manage chat $g
+  as user $bo refused {UPDATE ms.chats SET title = 'Mine' WHERE id = $g}
+  as user $bo refused {INSERT INTO ms.members (chat_id, user_id) VALUES ($g, $cy)}
+  as user $ann allowed {UPDATE ms.members SET role = 'admin' WHERE chat_id = $g AND user_id = $bo}
+  user $bo can manage chat $g
+  as user $bo allowed {INSERT INTO ms.members (chat_id, user_id) VALUES ($g, $cy)}
+
+test "announcement groups: only admins post"
+  given ann = {INSERT INTO ms.users (phone, name) VALUES ('t-ann', 'Ann') RETURNING id}
+  given bo  = {INSERT INTO ms.users (phone, name) VALUES ('t-bo', 'Bo') RETURNING id}
+  given g   = {INSERT INTO ms.chats (kind, title, admins_only, created_by) VALUES ('group', 'News', true, $ann) RETURNING id}
+  given {INSERT INTO ms.members (chat_id, user_id, role) VALUES ($g, $ann, 'owner'), ($g, $bo, 'member')}
+  user $ann can post chat $g
+  user $bo cannot post chat $g
+  user $bo can read chat $g
+  as user $bo refused {INSERT INTO ms.messages (chat_id, sender_id, body) VALUES ($g, $bo, 'hi')}
+  as user $ann allowed {INSERT INTO ms.messages (chat_id, sender_id, body) VALUES ($g, $ann, 'hello all')}
+
+test "blocking: neither writes in their direct chat, and who blocked you can't be added"
+  given ann = {INSERT INTO ms.users (phone, name) VALUES ('t-ann', 'Ann') RETURNING id}
+  given bo  = {INSERT INTO ms.users (phone, name) VALUES ('t-bo', 'Bo') RETURNING id}
+  given d   = {INSERT INTO ms.chats (kind, created_by) VALUES ('direct', $ann) RETURNING id}
+  given {INSERT INTO ms.members (chat_id, user_id) VALUES ($d, $ann), ($d, $bo)}
+  given g   = {INSERT INTO ms.chats (kind, title, created_by) VALUES ('group', 'Weekend', $ann) RETURNING id}
+  given {INSERT INTO ms.members (chat_id, user_id, role) VALUES ($g, $ann, 'owner')}
+  user $ann can post chat $d
+  given {INSERT INTO ms.blocks (blocker_id, blocked_id) VALUES ($bo, $ann)}
+  user $ann cannot post chat $d
+  user $bo cannot post chat $d
+  as user $ann refused {INSERT INTO ms.members (chat_id, user_id) VALUES ($g, $bo)}
+
+test "a direct chat stays two people"
+  given ann = {INSERT INTO ms.users (phone, name) VALUES ('t-ann', 'Ann') RETURNING id}
+  given bo  = {INSERT INTO ms.users (phone, name) VALUES ('t-bo', 'Bo') RETURNING id}
+  given cy  = {INSERT INTO ms.users (phone, name) VALUES ('t-cy', 'Cy') RETURNING id}
+  given d   = {INSERT INTO ms.chats (kind, created_by) VALUES ('direct', $ann) RETURNING id}
+  as user $ann allowed {INSERT INTO ms.members (chat_id, user_id) VALUES ($d, $ann)}
+  as user $ann allowed {INSERT INTO ms.members (chat_id, user_id) VALUES ($d, $bo)}
+  as user $ann refused {INSERT INTO ms.members (chat_id, user_id) VALUES ($d, $cy)}
+
+test "nobody demotes the owner, nor makes another"
+  given ann = {INSERT INTO ms.users (phone, name) VALUES ('t-ann', 'Ann') RETURNING id}
+  given bo  = {INSERT INTO ms.users (phone, name) VALUES ('t-bo', 'Bo') RETURNING id}
+  given g   = {INSERT INTO ms.chats (kind, title, created_by) VALUES ('group', 'Weekend', $ann) RETURNING id}
+  given {INSERT INTO ms.members (chat_id, user_id, role) VALUES ($g, $ann, 'owner'), ($g, $bo, 'admin')}
+  as user $bo refused {UPDATE ms.members SET role = 'member' WHERE chat_id = $g AND user_id = $ann}
+  as user $bo refused {DELETE FROM ms.members WHERE chat_id = $g AND user_id = $ann}
+  as user $ann refused {UPDATE ms.members SET role = 'owner' WHERE chat_id = $g AND user_id = $bo}
+  given cy = {INSERT INTO ms.users (phone, name) VALUES ('t-cy2', 'Cy') RETURNING id}
+  given di = {INSERT INTO ms.users (phone, name) VALUES ('t-di2', 'Di') RETURNING id}
+  as user $bo refused {INSERT INTO ms.members (chat_id, user_id, role) VALUES ($g, $cy, 'owner')}
+  as user $bo allowed {INSERT INTO ms.members (chat_id, user_id, role) VALUES ($g, $di, 'admin')}
+
+test "you edit your own messages for 15 minutes; admins delete anyone's, for everyone, for good"
+  given ann = {INSERT INTO ms.users (phone, name) VALUES ('t-ann', 'Ann') RETURNING id}
+  given bo  = {INSERT INTO ms.users (phone, name) VALUES ('t-bo', 'Bo') RETURNING id}
+  given g   = {INSERT INTO ms.chats (kind, title, created_by) VALUES ('group', 'Weekend', $ann) RETURNING id}
+  given {INSERT INTO ms.members (chat_id, user_id, role, joined_at) VALUES ($g, $ann, 'owner', now() - interval '1 day'), ($g, $bo, 'member', now() - interval '1 day')}
+  given now = {INSERT INTO ms.messages (chat_id, sender_id, body) VALUES ($g, $bo, 'fresh') RETURNING chat_id, seq}
+  given old = {INSERT INTO ms.messages (chat_id, sender_id, body, created_at) VALUES ($g, $bo, 'stale', now() - interval '1 hour') RETURNING chat_id, seq}
+  user $bo can edit message $now
+  user $bo cannot edit message $old
+  user $ann cannot edit message $now
+  user $ann can remove message $now
+  as user $ann allowed {UPDATE ms.messages SET deleted = true, body = '' WHERE (chat_id, seq) = (SELECT chat_id, seq FROM ms.messages WHERE body = 'fresh')}
+  as user $ann refused {UPDATE ms.messages SET deleted = false WHERE chat_id = $g AND deleted}
+  as user $ann refused {DELETE FROM ms.messages WHERE chat_id = $g}
+
+test "bots post as themselves, only where an admin added them; only their owner makes keys"
+  given ann = {INSERT INTO ms.users (phone, name) VALUES ('t-ann', 'Ann') RETURNING id}
+  given bo  = {INSERT INTO ms.users (phone, name) VALUES ('t-bo', 'Bo') RETURNING id}
+  given b   = {INSERT INTO ms.bots (name, owner_id) VALUES ('weather', $ann) RETURNING id}
+  given g   = {INSERT INTO ms.chats (kind, title, created_by) VALUES ('group', 'Weekend', $ann) RETURNING id}
+  given h   = {INSERT INTO ms.chats (kind, title, created_by) VALUES ('group', 'Other', $bo) RETURNING id}
+  given {INSERT INTO ms.members (chat_id, user_id, role) VALUES ($g, $ann, 'owner'), ($h, $bo, 'owner')}
+  bot $b cannot post chat $g
+  as user $ann allowed {INSERT INTO ms.chat_bots (chat_id, bot_id, added_by) VALUES ($g, $b, $ann)}
+  bot $b can post chat $g
+  bot $b cannot post chat $h
+  as bot $b allowed {INSERT INTO ms.messages (chat_id, bot_id, body) VALUES ($g, $b, 'sunny')}
+  as bot $b refused {INSERT INTO ms.messages (chat_id, bot_id, body) VALUES ($h, $b, 'sunny')}
+  as user $bo refused {INSERT INTO ms.chat_bots (chat_id, bot_id, added_by) VALUES ($h, $b, $bo)}
+  user $ann can manage_keys bot $b
+  user $bo cannot manage_keys bot $b

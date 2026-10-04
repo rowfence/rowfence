@@ -1,0 +1,285 @@
+# rowfence
+
+Access rules for Postgres: a policy language (`.authz`) that the `rowfence` command compiles into row-level
+security (views, trigger-maintained closure tables, RLS policies and `authz.*` SQL functions) and applies as
+plain SQL, as the tables' owner. No extension, no superuser. PostgreSQL 16, 17 and 18.
+User-facing docs: `README.md`, then `docs/reference/` (read them first). Terms in `CONTEXT-MAP.md` and `core/CONTEXT.md`.
+
+## Layout
+
+- `core/` — rowfence itself: the compiler, the command, their tests (main work happens here)
+  - `authzlib/` — compiler, standard library only; `__version__` in `__init__.py` is the version the command
+    and the packages carry (`packaging/version.py X.Y.Z` sets it everywhere; `unit_test.py` checks they
+    agree). `Compiler` in `__init__.py` is a stack of mixins:
+    - `parse.py` — parser (types, relations, perms, rules, scopes, caveats, invariants, tests, includes;
+      includes come from a `files` map when given, never from disk)
+    - `compiler.py` (Core) — validation, recursion/SCC analysis, per-relation/permission views
+    - `trees.py` — closure tables for inheritance + their triggers
+    - `output.py` — assembles the final SQL (`compile()`), RLS policies, `can/list/perms`, sharing API, masked views
+    - `insight.py` — `who`, `explain`, `list_shares`
+    - `identity.py` — scopes, API keys, JWT login, view_as, sync_members, audit helper
+    - `governance.py` — audit/feed triggers, requests, break_glass, reviews, invariants, diff (`diff_parts`)
+    - `hardening.py` — `authz.lint()`
+    - `devtools.py` — graph (Mermaid), clients (py, ts; with `Refused`, `NotFound`, `refusal`, `expect`, `who_among`;
+      `ts-sdk`: only the names, for apps on the TypeScript SDK)
+    - `testing.py` — policy tests: the unnamed section, named tests (`given`, `as user X allowed|refused|sees`), invariants,
+      compiled into one plpgsql function `pg_temp.authz_policy_tests()` returning a row per check
+    - `refusals.py` — refused writes that say why, `authz.explain_rule`, `authz.who_among`
+    - `draft.py` — a first policy from the catalog (`rowfence init`)
+    - `base.py` — persistent tables (`authz.shares`, `authz.audit`, ...), migrations, `GENERATED_FUNCTIONS`
+    - `sqlutil.py` — quoting helpers (`q`, `qt`, `lit`, ...), `this.`, and `reads_more` (whether a condition
+      reads more than its row: then it runs with the policy's rights)
+    - `conditions.py` — simple conditions (`{not archived}`, `{owner_id = authz.uid()}`) read as facts about
+      the row, for the reference evaluator
+    - `connection.py` — the `Db` authzlib works over, and typed readers for the values its rows hold
+    - `database.py` — what the command does to a database: apply (only if changed), push, reapply, check, diff,
+      test, draft, graph, client, remove, and the migrations; over a `db` with `rows`/`script`/`warn`/`errors`, in
+      the caller's transaction (compiles with `transaction=False`: no BEGIN/COMMIT)
+    - `statements.py` — the compiled SQL read back as statements (quotes, dollar quotes, BEGIN ATOMIC), and the
+      object each one makes
+    - `evaluate.py` — the reference evaluator (sets of ids, a least fixpoint, straight from the policy) and small
+      worlds made up for two policies at once (`compare`: the review's refactor check); difftest uses it
+    - `review.py` — `rowfence review`: meaning, access, risk, tests, deploy; markdown, text, JSON,
+      annotations
+    - `fmt.py` — `rowfence fmt`: one layout, refused if it would change what the policy says
+    - `prove.py` — `rowfence prove`: invariants in many small worlds (the reference evaluator), the smallest
+      counterexample, shrunk link by link
+    - `coverage.py` — the branches of each permission no passing check makes true (from `authz.explain`'s
+      answers, which the test function returns with `coverage=True`)
+    - `errors.py` — each error code's page (title, meaning, the mistake, the fix); `rowfence help AZ201`
+    - `perf.py` — the indexes the policy's lookups need (named, never created: they are the app's schema),
+      `plans` (EXPLAIN ANALYZE as the app role) and `bench`
+    - `grant.py` — `rowfence why` and Studio: the changes to the data (a share, a link row, a column, joining a
+      group, the permission on the object above) that would grant a permission, each tried in a savepoint as the
+      owner and undone, with what else it grants (a preview: the command's, not the runtime's)
+    - `migrate.py` — policy changes as migrations: the compiled policy as objects, the lock file,
+      the migration from a lock to a policy (only what changed), trees built beside then swapped in
+  - `cli/` — the command runs on Python 3.11 or newer, standard library only: `rowfence` (`rowfence_cli.py`: compiles, and runs `authzlib.database` over its own connection; reads
+    included files and `rowfence.toml` from disk; `dev` watches and runs the loop), `lsp.py` (the
+    language server, `rowfence lsp`), `mcp.py` (the MCP server for coding agents, `rowfence mcp`: each tool runs
+    the command once; `tests/mcp_test.py`), `init.py` (`rowfence init`), `migrations.py` (a migration's files for
+    each tool: Alembic, Prisma, Drizzle Kit, SQL, goose, dbmate, Flyway), `stack.py` (the app's stack, for
+    `init`), `studio.py` and `studio/` (Studio: a local web page and its JSON API; read-only transactions unless
+    `--write` or `dev`; localhost and a token; `tests/studio_test.py`) and `pgwire.py` (stdlib Postgres client,
+    SCRAM, notices, URLs, `script()` for many statements)
+  - `authzc.py` — the compiler without a database: SQL for psql (`--check|--tests|--diff|--graph|--client`);
+    used by the tests, the editor task and the benchmark
+  - `example/` — docs app: `app_schema.sql`, `docs.authz`, `docs.test.authz` (the reference's running example,
+    the playground's, and what most suites set up); nothing generated is kept there
+  - `tests/` — all suites; `run_tests.sh` runs them, `ci.sh` runs them on PG 16/17/18 in Docker;
+    `tests/golden/` holds the expected generated SQL; `scenario.sql` is the docs app end to end (psql, with
+    `-v docs_tests=` the compiled policy tests)
+  - `bench/` — `benchmark.sql` (the docs app, bigger; `benchmark_results.txt`) and the scale benchmark (`scale.sh`, pgbench workloads, `results/`, the latest results in its README); the
+    default size (20k folders) is for quick dev runs, `--large` (50k) is the gate's size on the dev laptop, 4 GB
+    shared buffers; `regress.sh` is the CI check (10k folders against `baseline.txt`)
+  - `Dockerfile` — Postgres for development and tests: the stock image, python3, the command
+    (build context: repo root)
+- `editor/` — `test.sh` (in containers: the grammar, the Zed build); the VS Code extension: TextMate grammar (the
+  site highlights ```authz with it too), and `extension.js` starting `rowfence lsp`; `tree-sitter-authz/` (the
+  Tree-sitter grammar and its queries, for Zed, Helix and Neovim; `src/` is generated and committed, editors
+  build from it); `zed/` (the Zed extension: its queries are copies of the grammar's, `Editors` in `unit_test.py`)
+- `review-ci/` — the review for CI: `github/action.yml` (a composite action; it installs the release its tag names
+  from PyPI, or with `version: source` this checkout's command, as `.github/workflows/ci.yml` does) and
+  `gitlab/rowfence-review.gitlab-ci.yml`
+- `examples/filemanager/` — the first adopter (uses only the public surface, `check_public_surface.py`):
+  `db/` (migrations, `policy.authz`, `migrate.py`), `backend/` (FastAPI, uv), `frontend/` (React, Vite),
+  `docker-compose.yml` (rowfence image from this repo, RustFS); `test.sh` runs its tests
+- `examples/messenger/` — the second adopter, a WhatsApp-style app built to show what rowfence takes off an app
+  (same stack and rules as the file manager: public surface only, `check_public_surface.py`); `test.sh` runs its tests
+- `sdk/python/` — the `rowfence` Python package: the Python SDK (`rowfence`: FastAPI, SQLAlchemy, psycopg, asyncpg,
+  Alembic, pytest) and the command, which `hatch_build.py` puts inside it (`rowfence/_command`).
+  It holds no rowfence logic: it signs transactions in and translates the `authz.*` answers
+- `sdk/typescript/` — the TypeScript SDK (`@rowfence/client`, `/pg`, `/postgres`, `/prisma`, `/drizzle`, `/next`,
+  `/react`, `/vitest`), one package per folder, built with `npx tsc -b sdk/typescript`. The repository
+  root's `package.json` is the npm workspace for these packages and `integrations/nextjs` (one React, one pg);
+  `npm ci` at the root. Like the Python SDK it holds no rowfence logic
+- `integrations/<stack>/` — each SDK's conformance suite: a small app and the checks listed in `integrations/README.md`;
+  `integrations/fastapi/test.sh` (uv, Docker), `integrations/nextjs/test.sh` (Next.js, Prisma 7, Vitest, Docker)
+- `packaging/` — how rowfence is installed: `npm/build.mjs` (the `rowfence` npm package and one
+  `@rowfence/cli-<platform>` per platform with a standalone Python), `docker/Dockerfile` (the command's image);
+  `test.sh` installs each on a clean machine; `version.py` sets the version (X.Y.Z, X.Y.Z-alpha.N or X.Y.Z-rc.N).
+  `.github/workflows/release.yml` publishes them on a tag: to private places while the repository is private
+  (GitHub Packages, the GitHub release), to PyPI, npm and ghcr.io once public. The workflows run on the
+  runner the repository variable `RUNNER` names, else `ubuntu-latest` (GitHub's runners since 2026-10-03; `RUNNER`
+  is unset)
+- `playground/` — rowfence in the browser: the compiler in Pyodide (a worker), the SQL in PGlite; `core.mjs` is the
+  engine, `test.mjs` runs it in Node, `browser_test.mjs` the page in headless Chrome, `build.mjs` writes `dist/`
+  (its examples are read from the repository: the getting-started guide's own, the docs app, the cookbook)
+- `README.md` — the landing page: the pitch, installing, the docs, the folders. `core/README.md` is for working
+  on the core folder (what's where, the test suites)
+- `docs/` — `reference/` (the reference by subject: `language.md`, `app-code.md`, `identity.md`,
+  `governance.md`, `tools.md`, `migrations.md`, `review.md`, `guarantees.md`, `limits.md`),
+  `installing.md` (the site's Installing page: it holds the README's install lines, `DocPages` checks),
+  `getting-started.md` (run as written by `tests/docs_test.sh`), `cookbook.md` + `cookbook/` (a policy,
+  schema and tests; `tests/cookbook.sh` checks every line the page shows is in them), `troubleshooting.md`,
+  `operations.md`, `managed-postgres.md` (the setup on a managed service; Neon and Supabase, as tried),
+  `signed-urls.md`, `stacks/` (a page per stack; every line of code in them is in a
+  conformance app, `StackPages` in `tests/unit_test.py`), `errors/` (a page per error code, written from
+  `authzlib/errors.py` by `unit_test.py --update`)
+- `llms.txt` — for agents: what to know, and the links; `docs/llms_full.py` puts those files in one
+  (`llms-full.txt`, built when the docs are published, not committed)
+- `site/` — the docs site (VitePress; own `package.json`, like `playground/`): the Markdown stays where it is,
+  `pages.mjs` says which files are pages and at which address, and turns each link (written relative to its
+  file, for GitHub) into the page's address or the file on GitHub; a link to a missing file or page fails the
+  build. `build.mjs` writes `dist/`: the pages, `/playground/`, each page's Markdown (`/cookbook.md`),
+  `llms.txt` pointing to those, `llms-full.txt`. Its own pages: `index.md` and `problems/` (the SDKs' problem
+  `type` URLs). A new doc page goes in `PAGES` and the sidebar (`.vitepress/config.mts`)
+- `.github/workflows/ci.yml` — on each push: `tests/unit_test.py` and the type checks, every suite on PG 16
+  (`ci.sh`) and what depends on the version on 17 and 18 (`ci.sh --short`), the examples, the conformance suites,
+  the editors, packaging, the site. `nightly.yml` (main) — every suite on 17 and 18, the proofs (`--proofs`) on
+  each version, the soak (new seeds each night, one version in turn), the conformance suites on 17 and 18 and on 16
+  through PgBouncer (`integrations/pooler.sh`), then
+  the benchmark check, last (`gh workflow run nightly.yml -f only=bench` runs it alone; it judges speed against
+  the runners' own baseline, not the gate's limits). On self-hosted runners sharing one machine, jobs with fixed container
+  names or ports hold a `flock` of their own, and `ci.sh` writes its logs where `ROWFENCE_CI_LOGS` says
+- `docs/threat-model.md` — the trust boundary and what `tests/adversarial.sh` checks
+
+## Running
+
+Tests need Postgres, python3 and a role with CREATEDB and CREATEROLE; they create/drop databases named `authz_*`.
+Every suite runs as a non-superuser owner: `run_tests.sh`, started as a superuser, makes `authz_owner` and runs
+as it (`PGSUPERUSER` names the superuser, for the few checks that a superuser's connection is refused). The
+simplest is Docker, from the repo root (Git Bash works on Windows):
+
+    core/ci.sh                   # run_tests.sh --quick on 16, 17 and 18, each in a fresh container
+    core/ci.sh --full 16         # the full run (~15 minutes) on one version
+    core/ci.sh --short 17 18     # what depends on the version (what CI runs on 17 and 18 for each push)
+    python3 core/tests/unit_test.py   # a second, no database; --update rewrites tests/golden/ after an intended change
+
+For one suite, start a container and run it inside:
+
+    docker build -t rowfence:16 --build-arg PG_MAJOR=16 -f core/Dockerfile .
+    MSYS_NO_PATHCONV=1 docker run -d --name pga16 -e POSTGRES_HOST_AUTH_METHOD=trust -v "$(pwd -W):/src" rowfence:16
+    MSYS_NO_PATHCONV=1 docker exec -e PGHOST=/var/run/postgresql -e PGUSER=postgres -w /src/core pga16 bash tests/make_owner.sh
+    MSYS_NO_PATHCONV=1 docker exec -e PGHOST=/var/run/postgresql -e PGUSER=authz_owner -e PGSUPERUSER=postgres -w /src/core pga16 bash tests/cli.sh
+
+- The suites run the mounted repository's code; the image only holds a copy of the command for `docker exec`.
+- Everything is LF (`.gitattributes`); the repo is mounted into Linux. `core.fileMode` is off on Windows, so mark
+  new scripts executable with `git update-index --chmod=+x`.
+- `tests/client_types.py` type-checks the generated TS client (CI's `javascript` job; needs `tsc`, no database);
+  `tests/tools_test.py` runs the same check if `tsc` is there (skipped otherwise).
+- Benchmark: `createdb b && psql -d b -f example/app_schema.sql && python3 authzc.py example/docs.authz > /tmp/docs.sql && psql -d b -v docs_sql=/tmp/docs.sql -f bench/benchmark.sql`
+
+## Conventions
+
+- Generated SQL must be re-appliable: `DROP SCHEMA authz_gen, authz_int CASCADE` then recreate; persistent
+  state lives in schema `authz` (`CREATE TABLE IF NOT EXISTS`, migrations in `base.py`).
+- Applying: the command runs the compiled SQL in one transaction, as the tables' owner; nothing may
+  need a superuser or an extension (later grants on masked columns are reported by `authz.lint()`, not refused). Anything `apply()` creates must also be dropped by `REMOVE_SQL` (`database.py`). `tests/apply.sh`
+  applies as a non-superuser owner.
+- Migrations: `compile()` records `self.parts`, each with a mode that says what a migration does with
+  it (`full`: only the whole script; `always`; `changed`: when its SQL changed, line numbers aside; `created`: also
+  when anything was made; `objects`; `tree`). Put new SQL in the right part. A statement that makes something
+  indirectly (a DO block) says what, `-- @object <kind> <key>`; a statement that makes nothing belongs to the
+  object before it (or the one it names: `INSERT INTO`, `COMMENT ON`). Line numbers in messages at run time go
+  through `line_sql`/`line_key` (the table `authz_gen.policy_lines`), never literally, so lines that move change
+  no function. `tests/migrate_test.py` checks that a migration leaves what applying whole leaves: a new kind of
+  change gets a case there.
+- Runtime capabilities (what apps call) are `authz.*` functions; compiling, applying, previews and tests belong to
+  `authzlib/database.py`, which the command calls.
+- Tree writes take the type-wide lock.
+  `tests/races.sh` and `tests/stress.sh` (`run_tests.sh --proofs`) must stay green for any locking change.
+- Two ways to evaluate a permission, which must agree (the random-change tests check): views (`set_sql`) and
+  row checks (`row_sql`). Select rules and `authz.list` use row checks without `point` (lookups into the views,
+  which Postgres hashes once for many rows; a recursive permission is first checked against its `__direct` view,
+  what the object's own columns give). Write rules and `authz.can` use `point=True`: recursive permissions go
+  through their `authz_gen."<type>__<perm>__has"` function. Never use point checks in select rules or lists: a
+  function call per row makes them slow (`tests/unit_test.py` checks this). `row_sql` orders items cheapest
+  first (`item_cost`); keep OR/AND, not CASE.
+- A deny inside inheritance (`(viewer or parent.view) and not denied`) is split by `split_denies`
+  (compiler.py) into a hidden `view__base` and `view__base and not denied`; `check_denies` refuses a deny that
+  doesn't inherit through the same links. Hidden permissions stay off the public surface: enumerate
+  `public_perms(t)`, not `t.perms`, for anything users or clients see.
+- Keys may have several columns: a composite id is the row's canonical text, so most SQL treats it
+  like a text key. Never write `alias.pk` or `src.obj_col` into SQL: use the helpers in compiler.py (`key`,
+  `ref`, `key_text`, `key_is`, `key_in`, `key_any`, `subject_id`, `subject_is`); lookups into app tables must
+  go column by column (`key_is`), or the table's index isn't used. Ids from callers go through
+  `authz_int.canon()` before they are compared with stored shares.
+- Who is signed in: `authz.user_id` plus `authz.principal_type` (empty: a user). `authz.uid()` is the
+  user only; for "is anyone signed in" use `EXISTS (SELECT 1 FROM authz.principal())`, for who acted (audit,
+  `created_by`) `authz_int.actor()`, and in compiled checks `me(st)` for principal type st. Functions that switch
+  `authz.user_id` (who, explain, invariants, diff) save and restore `authz.principal_type` too.
+- Signed sessions: apps sign in with `authz.act_as()` (or the logins); the four `authz.*` settings are
+  believed only with the HMAC in `authz.session` (`authz_int.session_ok()`, PL/pgSQL for its cached plans), except in
+  the owner's and superusers' sessions, so the suites and psql may still `SET authz.user_id`. Anything that reads
+  the settings goes through `uid()`, `__me`, `actor()` or `scopes_active()`; anything that switches them calls
+  `authz_int.sign()` after each switch and after restoring (or `act_as` when it runs as the caller, like
+  `who_among`). Trust follows `session_user`, never `current_user`: inside a SECURITY DEFINER function the
+  current user is the owner. `tests/sessions.sh` attacks it.
+- Apply keeps inheritance tables whose definition (hashed, line numbers aside) and tables (by oid) are unchanged
+  (`keep_sql` / `swap_in_kept`): anything that changes what a tree holds must be in its generated SQL,
+  or it must not be kept. `tests/keep.sh`.
+- Moves and link changes shift stored closure rows (`_shift` in `trees.py`) when only the changed rows' own links
+  changed and none loops back below them; otherwise everything below is recomputed. `tests/moves.sh` checks both.
+- New `authz.*` functions: add the name to `GENERATED_FUNCTIONS` (base.py) and, if the app role may call them,
+  their signatures to `api_signatures()` (hardening.py). Everything else is admin-only: applying takes back any
+  other privilege on the three schemas and what is in them (`extra_grants_sql`, the owner's default privileges
+  included), and lint reports later ones.
+- SECURITY DEFINER functions: `SET search_path = pg_catalog, pg_temp` with schema-qualified names, or
+  `SET search_path FROM CURRENT` when they evaluate the policy's own SQL snippets (the path the search_path part
+  sets: the schemas that exist, refused if others may create in one, AZ612).
+- Mutating API functions call `authz_int.check_writable()` first (scopes / view-as are read-only).
+- Anything a later function calls must exist before it in `compile()` output order, or be plpgsql (bodies
+  resolve at run time); SQL-language functions referencing later objects sit between
+  `check_function_bodies = off/on`. Things that may add views (`insight`, invariants, masked views) are
+  generated before `self.view_sql` is expanded.
+- Every behaviour change gets a check in the relevant suite; `tests/difftest.py` compares the database
+  against an independent reference evaluator (`authzlib/evaluate.py`, also the review's) — keep it in sync with
+  language changes.
+  A change to generated SQL shows up in `tests/golden/`: update it deliberately and read the diff.
+- Error messages name the policy line and end with a code: `fail(loc, msg, "AZ201")`. A new kind of mistake
+  gets a code and a page in `authzlib/errors.py` (the page's mistake must give its code, its fix must compile;
+  `unit_test.py --update` writes `docs/errors/`), and a case in `tests/policy_errors.py`. What the runtime raises
+  (what apps see) carries its code in the HINT instead, `rowfence help AZ709`, so the message stays as the SDKs
+  read it; `ErrorCodes` in `tests/unit_test.py` finds any RAISE without a code.
+- Types: all Python is strongly typed. `uvx ty@0.0.56 check && uvx ruff@0.15.12 check` from the root (CI's
+  `unit` job): ty checks the types (`ty.toml`, every rule an error), Ruff the lint and that every function is
+  annotated (`ruff.toml`, `ANN`, no exceptions). ty's root settings cover the standard-library code; what needs
+  a package's environment has its own (`uv sync` it first), `--project` sdk/python (the fastapi app's
+  environment), integrations/fastapi, examples/filemanager and examples/messenger (their backends'); CI's `unit`
+  job runs them all. Test code types the JSON it checks as `Answer = Any`, one alias, named; app code types rows
+  as psycopg's `DictRow`. Python 3.11 syntax, standard library only (no `typing.override`, 3.12). A policy
+  expression is a NamedTuple per kind (`parse.Expr`: `Or`, `And`, `Not`, `Cond`, `Ref`, `Arrow`, `ArrowOn`):
+  build them with the class, and in typed code take them apart with `match`/`isinstance`, not `node[0]`.
+- JavaScript is typed too: JSDoc, checked by `tsc` with `checkJs` and `strict`, one `tsconfig.json` per folder with its
+  environment's types (playground, site, editor, editor/tree-sitter-authz, packaging/npm; Studio's page:
+  `core/cli/tsconfig.studio.json`); CI's `javascript` job runs them after `npm ci` in each. The page's API answers
+  are typedefs matching what the Python sends (`studio.py`, `core.mjs`); keep them in step.
+- Words: see `core/CONTEXT.md` (share, not grant; role means a runtime role; app role for the Postgres one).
+- Prose style in docs and messages: plain words, short sentences.
+
+- Refused writes: every `WITH CHECK` is `check OR authz_gen."<table>:<cmd>:refuse"(ROW(t.*)::table)`;
+  the explaining functions are BEGIN ATOMIC in `authz_gen` (the app role can't use `authz_int` by name at run
+  time), run as the app role, and must never leak what `authz.explain` wouldn't. Anything that evaluates a policy's
+  `with_check` text on rows (difftest) must drop the refuse call (`without_refusals`).
+- Named tests never run on `apply` (they write); each runs in a subtransaction that always rolls back. New test
+  syntax gets a case in `tests/policy_errors.py` and the grammars: `editor/syntaxes/` (TextMate) and
+  `editor/tree-sitter-authz/` (Tree-sitter: `grammar.js`, then `npx tree-sitter generate`, a corpus case).
+- The language server (`cli/lsp.py`) only parses and compiles; database work belongs to `rowfence dev`.
+  `tests/lsp_test.py` drives it over the protocol.
+- Adopters' `test.sh` start from an empty database (`docker compose down -v`): migrations must work before the
+  first apply (`authz.uid()` doesn't exist yet: use plpgsql bodies).
+
+## Changes and releases
+
+`CONTRIBUTING.md` and `RELEASING.md` are the rules; in short:
+- Work on a short-lived branch from `main`, named for what it does, and land it through a pull request (CI runs
+  on pull requests and `main`). Never commit to `main` directly.
+- Commits are signed off (`git commit -s`; `.github/workflows/pr.yml` checks), and their subject says what
+  changed, in plain words.
+- A change users will notice gets a line under **Unreleased** in `CHANGELOG.md` (Added, Changed, Fixed,
+  Upgrading); the same check asks when `core/authzlib`, `core/cli`, `sdk`, `review-ci`, `packaging` or
+  `editor` change (label `no changelog` otherwise).
+- Merging: the maintainer's pull requests rebased, outside ones squashed, a merge commit only when a commit
+  must stay reachable.
+- The version: `packaging/version.py` sets it everywhere (X.Y.Z, X.Y.Z-alpha.N, X.Y.Z-rc.N, or X.Y.Z-dev on `main`
+  between releases). Apply, push and migrations record `authzlib.BUILD` (a `-dev` version plus a hash of
+  `authzlib/`; a release's own version otherwise), and apply and push compare it, so two builds of `main`
+  don't trust each other's databases. The lock file's header names `__version__`, and a new version alone
+  is no migration (`always` in the lock hashes the steps every migration runs).
+
+## Known limits / open ideas
+
+See "Limits" in `docs/reference/limits.md`: no sharding, no SCIM endpoint (sync
+function only), HS256-only JWTs.
+Recommend `ALTER ROLE app_user SET jit = off`.

@@ -1,0 +1,97 @@
+-- One test per pattern of docs/cookbook.md. Each brings its own rows and rolls them back.
+
+test "owner only"
+  given ann = {INSERT INTO cb.users VALUES (901, 'Ann') RETURNING id}
+  given bo  = {INSERT INTO cb.users VALUES (902, 'Bo') RETURNING id}
+  given n   = {INSERT INTO cb.notes (owner_id, body) VALUES ($ann, 'mine') RETURNING id}
+  user $ann can edit note $n
+  user $bo cannot view note $n
+  as user $bo sees 0 {SELECT FROM cb.notes WHERE id = $n}
+  as user $bo refused {INSERT INTO cb.notes (owner_id, body) VALUES ($ann, 'as Ann')}
+  as user $ann refused {UPDATE cb.notes SET owner_id = $bo WHERE id = $n}
+
+test "your own row"
+  given ann = {INSERT INTO cb.users VALUES (901, 'Ann') RETURNING id}
+  given bo  = {INSERT INTO cb.users VALUES (902, 'Bo') RETURNING id}
+  user $ann can edit user $ann
+  user $ann cannot edit user $bo
+  as user $ann allowed {UPDATE cb.users SET name = 'Annie' WHERE id = $ann}
+  as user $ann refused {UPDATE cb.users SET name = 'Bob' WHERE id = $bo}
+
+test "teams inside teams, and sharing with a team"
+  given ann = {INSERT INTO cb.users VALUES (901, 'Ann') RETURNING id}
+  given bo  = {INSERT INTO cb.users VALUES (902, 'Bo') RETURNING id}
+  given eng = {INSERT INTO cb.teams (id, name) VALUES (901, 'Engineering') RETURNING id}
+  given web = {INSERT INTO cb.teams (id, parent_id, name) VALUES (902, $eng, 'Web') RETURNING id}
+  given {INSERT INTO cb.team_members VALUES ($web, $bo)}
+  given f   = {INSERT INTO cb.folders (owner_id, name) VALUES ($ann, 'Plans') RETURNING id}
+  user $bo cannot view folder $f
+  as user $ann allowed {SELECT authz.share('folder', $f, 'viewer', 'team', $eng, 'member')}
+  user $bo can view folder $f
+  user $bo cannot edit folder $f
+
+test "folders that inherit, until a folder says stop"
+  given ann = {INSERT INTO cb.users VALUES (901, 'Ann') RETURNING id}
+  given top = {INSERT INTO cb.folders (owner_id, name) VALUES ($ann, 'Top') RETURNING id}
+  given sub = {INSERT INTO cb.folders (parent_id, name) VALUES ($top, 'Sub') RETURNING id}
+  given own = {INSERT INTO cb.folders (parent_id, name, inherit) VALUES ($sub, 'Private', false) RETURNING id}
+  user $ann can share folder $sub
+  user $ann cannot view folder $own
+  as user $ann allowed {INSERT INTO cb.folders (parent_id, owner_id, name) VALUES ($sub, $ann, 'Notes')}
+  as user $ann refused {INSERT INTO cb.folders (parent_id, owner_id, name) VALUES ($own, $ann, 'Notes')}
+
+test "sharing that starts later, and share links"
+  given ann = {INSERT INTO cb.users VALUES (901, 'Ann') RETURNING id}
+  given bo  = {INSERT INTO cb.users VALUES (902, 'Bo') RETURNING id}
+  given f   = {INSERT INTO cb.folders (owner_id, name) VALUES ($ann, 'Plans') RETURNING id}
+  as user $ann allowed {SELECT authz.share('folder', $f, 'viewer', 'user', $bo, '', now() + interval '1 week', now() + interval '1 day')}
+  user $bo cannot view folder $f
+  as user $bo refused {SELECT authz.share('folder', $f, 'viewer', 'user', $bo)}
+
+test "a deny that inherits"
+  given ann = {INSERT INTO cb.users VALUES (901, 'Ann') RETURNING id}
+  given top = {INSERT INTO cb.pages DEFAULT VALUES RETURNING id}
+  given mid = {INSERT INTO cb.pages (parent_id, hidden) VALUES ($top, true) RETURNING id}
+  given low = {INSERT INTO cb.pages (parent_id) VALUES ($mid) RETURNING id}
+  given {INSERT INTO cb.page_readers VALUES ($top, $ann), ($low, $ann)}
+  user $ann can read page $top
+  user $ann cannot read page $mid
+  user $ann cannot read page $low
+  as user $ann sees 1 {SELECT FROM cb.pages WHERE id IN ($top, $mid, $low)}
+
+test "tenants: tickets numbered per organisation"
+  given ann  = {INSERT INTO cb.users VALUES (901, 'Ann') RETURNING id}
+  given bo   = {INSERT INTO cb.users VALUES (902, 'Bo') RETURNING id}
+  given acme = {INSERT INTO cb.orgs VALUES (901, 'Acme') RETURNING id}
+  given {INSERT INTO cb.org_members VALUES ($acme, $ann, 'admin'), ($acme, $bo, 'member')}
+  given t    = {INSERT INTO cb.tickets VALUES ($acme, 1, $bo, 'Printer') RETURNING org_id, id}
+  user $bo can edit ticket $t
+  user $ann can edit ticket $t
+  as user $bo refused {UPDATE cb.tickets SET assignee_id = $ann WHERE (org_id, id) = ($acme, 1)}
+  as user $ann allowed {UPDATE cb.tickets SET assignee_id = $ann WHERE (org_id, id) = ($acme, 1)}
+
+test "announcement channels: members read, admins and bots post"
+  given ann = {INSERT INTO cb.users VALUES (901, 'Ann') RETURNING id}
+  given bo  = {INSERT INTO cb.users VALUES (902, 'Bo') RETURNING id}
+  given c   = {INSERT INTO cb.channels (announce) VALUES (true) RETURNING id}
+  given {INSERT INTO cb.channel_members VALUES ($c, $ann, true), ($c, $bo, false)}
+  given b   = {INSERT INTO cb.services (name, owner_id) VALUES ('weather', $ann) RETURNING id}
+  user $bo can read channel $c
+  user $bo cannot post channel $c
+  service $b cannot post channel $c
+  given {INSERT INTO cb.channel_bots VALUES ($c, $b)}
+  service $b can post channel $c
+  as user $ann allowed {INSERT INTO cb.posts (channel_id, author_id, body) VALUES ($c, $ann, 'hello')}
+  as user $bo refused {INSERT INTO cb.posts (channel_id, author_id, body) VALUES ($c, $bo, 'hi')}
+  as service $b allowed {INSERT INTO cb.posts (channel_id, bot_id, body) VALUES ($c, $b, 'sunny')}
+  user $ann can manage_keys service $b
+  user $bo cannot manage_keys service $b
+
+test "blocking"
+  given ann = {INSERT INTO cb.users VALUES (901, 'Ann') RETURNING id}
+  given bo  = {INSERT INTO cb.users VALUES (902, 'Bo') RETURNING id}
+  as user $ann allowed {INSERT INTO cb.direct_messages (from_id, to_id, body) VALUES ($ann, $bo, 'hi')}
+  given {INSERT INTO cb.blocks VALUES ($bo, $ann)}
+  as user $ann refused {INSERT INTO cb.direct_messages (from_id, to_id, body) VALUES ($ann, $bo, 'hi again')}
+  as user $bo allowed {INSERT INTO cb.direct_messages (from_id, to_id, body) VALUES ($bo, $ann, 'bye')}
+  as user $bo sees 2 {SELECT FROM cb.direct_messages}

@@ -1,0 +1,16 @@
+name: A question
+description: How to write a rule, set rowfence up, or read what it says.
+labels: [question]
+body:
+  - type: textarea
+    id: question
+    attributes:
+      label: The question
+      description: What you want to do, and what you tried. The policy and the message help.
+    validations:
+      required: true
+  - type: input
+    id: versions
+    attributes:
+      label: Versions
+      description: "`rowfence --version` and PostgreSQL's."

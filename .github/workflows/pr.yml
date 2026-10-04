@@ -1,0 +1,42 @@
+# What a pull request needs beyond CI (CONTRIBUTING.md): each commit signed off (the DCO), and a line in
+# CHANGELOG.md when it changes what users run, unless it has the label `no changelog`. On GitHub's runners:
+# a few seconds, and it shouldn't wait behind CI's queue.
+name: pull request
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited, labeled, unlabeled]
+
+permissions: {contents: read}
+
+jobs:
+  pull-request:
+    runs-on: ubuntu-latest
+    env:
+      BASE: ${{ github.event.pull_request.base.sha }}
+      HEAD: ${{ github.event.pull_request.head.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
+        with: {fetch-depth: 0, ref: "${{ github.event.pull_request.head.sha }}"}
+      # a bot's pull request (Dependabot) is GitHub's word, not the commit's: an author's name is whatever
+      # the committer wrote, so no name excuses a commit
+      - name: every commit is signed off (git commit -s)
+        if: github.event.pull_request.user.type != 'Bot'
+        run: |
+          fail=0
+          for c in $(git rev-list --no-merges "$BASE..$HEAD"); do
+            author=$(git log -1 --format='%an <%ae>' "$c")
+            if ! git log -1 --format=%B "$c" | grep -qiF "Signed-off-by: $author"; then
+              echo "::error::$(git log -1 --format='%h %s' "$c"): no 'Signed-off-by: $author' line (git commit -s; git rebase --signoff $BASE for the commits so far)"
+              fail=1
+            fi
+          done
+          exit $fail
+      - name: a changelog line for what users run
+        if: github.event.pull_request.user.type != 'Bot' && !contains(github.event.pull_request.labels.*.name, 'no changelog')
+        run: |
+          changed=$(git diff --name-only "$BASE...$HEAD")
+          if echo "$changed" | grep -qE '^(core/authzlib|core/cli|sdk|review-ci|packaging|editor)/' \
+             && ! echo "$changed" | grep -qx CHANGELOG.md; then
+            echo "::error::this changes what users run: add a line under Unreleased in CHANGELOG.md, or the label 'no changelog' if they won't notice"
+            exit 1
+          fi

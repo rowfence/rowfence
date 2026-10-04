@@ -1,0 +1,7 @@
+# Everything is LF: scripts, SQL and Makefiles run inside Linux containers, even when checked out on Windows
+* text=auto eol=lf
+
+# written by core/tests/unit_test.py --update: reviews show them collapsed
+docs/errors/*.md linguist-generated
+# generated from grammar.js (npx tree-sitter generate); editors build from it
+editor/tree-sitter-authz/src/** linguist-generated

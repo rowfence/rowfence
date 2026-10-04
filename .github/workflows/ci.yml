@@ -1,0 +1,187 @@
+# Every test on every supported PostgreSQL version, the same way core/ci.sh runs them locally.
+# Each job runs on GitHub's ubuntu-latest, or on the runner labelled by the repository variable RUNNER when it
+# is set (the laptop's self-hosted runners were, until 2026-10-03). Never set it on a public repository: its
+# pull requests would run on that machine.
+# Self-hosted runners would share one machine: a job that starts fixed-name containers or ports (the examples,
+# the conformance suites, the packaging tests) holds a lock of its own (flock), so the same job from two runs
+# waits rather than colliding; on GitHub's runners each job has a machine of its own and the lock is free. The proofs, 17's and 18's other suites and the benchmark run nightly (nightly.yml).
+name: ci
+on:
+  push:
+    branches: [main]      # a pull request's branch runs once, as the pull request
+  pull_request:
+  workflow_dispatch:
+# a new push to a pull request cancels its run still going (main's runs all finish)
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+# what a job needs beyond reading the repository, it says itself
+permissions: {contents: read}
+jobs:
+  unit:
+    runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
+        with: {fetch-depth: 0}     # the Zed extension's grammar commit is checked against this one
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97   # v7.0.0
+        with:
+          python-version: "3.13"
+      - run: python3 core/tests/unit_test.py
+      # the Python is strongly typed and linted (ty.toml, ruff.toml)
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7   # v10.2.0
+        with: {version: "0.12.21"}
+      - run: uvx ty@0.0.56 check && uvx ruff@0.15.12 check
+      # the Python SDK, in its conformance app's environment (the SDK with every extra), that app, and the examples
+      - run: uv sync --project integrations/fastapi --frozen && uvx ty@0.0.56 check --project sdk/python && uvx ty@0.0.56 check --project integrations/fastapi
+      - run: |
+          for app in filemanager messenger; do
+            uv sync --project examples/$app/backend --frozen && uvx ty@0.0.56 check --project examples/$app || exit 1
+          done
+  postgres:
+    needs: unit
+    runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
+    env:
+      # the label on this job's containers: its run, attempt, job and version
+      ROWFENCE_CI_JOB: "${{ github.run_id }}-${{ github.run_attempt }}-${{ github.job }}-${{ matrix.pg }}"
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {pg: "16", mode: ""}           # every suite (run_tests.sh --quick)
+          - {pg: "17", mode: "--short"}    # what depends on the version; the rest runs nightly
+          - {pg: "18", mode: "--short"}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
+      - run: bash core/ci.sh ${{ matrix.mode }} ${{ matrix.pg }}
+        env: {ROWFENCE_CI_LOGS: "${{ runner.temp }}"}
+      # a cancelled job may stop before ci.sh removes its container: this job's own (the label names the job)
+      - if: always()
+        run: docker ps -aq --filter "label=rowfence.ci=$ROWFENCE_CI_JOB" | xargs -r docker rm -f -v
+      - if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a   # v7.0.1
+        with:
+          name: logs-pg${{ matrix.pg }}
+          path: ${{ runner.temp }}/rowfence-ci-${{ matrix.pg }}.log
+  # rowfence review on pull requests: one comment, updated in place, on what the file manager's
+  # policy change does, and a warning on each line it flags (review-ci/github/action.yml), with this commit's command
+  review:
+    if: github.event_name == 'pull_request'
+    needs: unit
+    runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
+    permissions: {contents: read, pull-requests: write}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
+        with: {fetch-depth: 0}
+      - uses: ./review-ci/github
+        with: {version: source, working-directory: examples/filemanager}
+  # The Python SDK's conformance suite: FastAPI, SQLAlchemy async and asyncpg, Alembic (integrations/fastapi)
+  conformance-python:
+    needs: unit
+    runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7   # v10.2.0
+        with: {version: "0.12.21"}
+      - run: flock /tmp/rowfence-ci-conformance-python.lock bash integrations/fastapi/test.sh
+  # The TypeScript SDK's conformance suite: Next.js, Prisma 7 (Prisma Migrate), pg, postgres.js, Drizzle, the
+  # React kit, Vitest (integrations/nextjs)
+  conformance-typescript:
+    needs: unit
+    runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020   # v7.0.0
+        with:
+          node-version: "24"
+      - run: npm ci --no-audit --no-fund
+      - run: flock /tmp/rowfence-ci-conformance-typescript.lock bash integrations/nextjs/test.sh
+      # @rowfence/vitest's matchers type-check with each Vitest it supports (4, 5)
+      - run: npx tsc -b sdk/typescript && bash sdk/typescript/vitest/types-test/types.sh
+  # The playground: the compiler in Pyodide and its SQL in PGlite, headless (every example's tests pass), then the
+  # page in Chrome (loaded from the CDN, a mistake and its page, asking as someone, links; loading, cached, under
+  # 10 s: the design's 5 s is measured on the dev laptop, where it takes 3.5 s; GitHub's runners took up to 5.9 s)
+  playground:
+    needs: unit
+    runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020   # v7.0.0
+        with:
+          node-version: "24"
+      - run: cd playground && npm ci --no-audit --no-fund && node test.mjs
+      - run: cd playground && node build.mjs && node browser_test.mjs
+        env: {PLAYGROUND_LIMIT_MS: "10000"}
+  # The docs site: the repository's Markdown built with VitePress (a link to a page or a file that isn't there fails
+  # the build), with the playground, llms.txt and llms-full.txt beside it (site/build.mjs)
+  site:
+    needs: unit
+    runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020   # v7.0.0
+        with:
+          node-version: "24"
+      - run: cd site && npm ci --no-audit --no-fund && node build.mjs
+  # The JavaScript is typed (JSDoc) and checked strictly by TypeScript, each part with its own dependencies' types
+  javascript:
+    needs: unit
+    runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020   # v7.0.0
+        with:
+          node-version: "24"
+      # the root: TypeScript and @types/node; the folders: what their scripts use (types only: no install scripts)
+      - run: |
+          npm ci --no-audit --no-fund --ignore-scripts
+          for d in playground site editor editor/tree-sitter-authz; do
+            (cd "$d" && npm ci --no-audit --no-fund --ignore-scripts) || exit 1
+          done
+      - run: |
+          for p in core/cli/tsconfig.studio.json packaging/npm playground site editor editor/tree-sitter-authz; do
+            npx tsc -p "$p" || exit 1
+          done
+      # the client `rowfence client ts` writes, under tsc --strict: correct calls pass, wrong names don't
+      - run: python3 core/tests/client_types.py
+  # The editors: the Tree-sitter grammar (generated, its corpus, every policy in the repository parses) and the
+  # Zed extension's build (editor/test.sh)
+  editor:
+    needs: unit
+    runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
+      - run: bash editor/test.sh
+  # The ways rowfence is installed, each on a clean machine: npm (no Python there), PyPI, the command's image
+  packaging:
+    needs: unit
+    runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
+      - run: flock /tmp/rowfence-ci-packaging.lock bash packaging/test.sh
+  # The file manager against the rowfence image built from the same commit: its public-surface
+  # check, the generated client matching its policy, the API tests with RustFS, and the web app's build.
+  filemanager:
+    needs: unit
+    runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7   # v10.2.0
+        with: {version: "0.12.21"}
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020   # v7.0.0
+        with:
+          node-version: "24"
+      - run: cd examples/filemanager/frontend && npm ci && npm run build
+      - run: flock /tmp/rowfence-ci-filemanager.lock bash examples/filemanager/test.sh
+
+  messenger:
+    needs: unit
+    runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7   # v10.2.0
+        with: {version: "0.12.21"}
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020   # v7.0.0
+        with:
+          node-version: "24"
+      - run: cd examples/messenger/frontend && npm ci && npm run build
+      - run: flock /tmp/rowfence-ci-messenger.lock bash examples/messenger/test.sh

@@ -1,0 +1,17 @@
+{
+  "name": "rowfence-site",
+  "private": true,
+  "description": "The docs site: the repository's Markdown, built with VitePress, with the playground and llms.txt beside it",
+  "type": "module",
+  "scripts": {
+    "dev": "vitepress dev",
+    "build": "node build.mjs"
+  },
+  "devDependencies": {
+    "shiki": "2.5.0",
+    "vitepress": "1.6.4"
+  },
+  "overrides": {
+    "vite": "^6.4.3"
+  }
+}

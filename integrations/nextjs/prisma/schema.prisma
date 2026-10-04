@@ -1,0 +1,82 @@
+// The conformance app's tables: projects with members, notes in them, a service that reads projects, and an
+// inbox people can write to but only the recipient reads. The same app as integrations/fastapi.
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+  schemas  = ["app"]
+}
+
+model User {
+  id   Int    @id
+  name String
+
+  @@map("users")
+  @@schema("app")
+}
+
+model Service {
+  id   Int    @id
+  name String
+
+  @@map("services")
+  @@schema("app")
+}
+
+model Project {
+  id       Int     @id
+  owner_id Int
+  name     String
+  public   Boolean @default(false)
+
+  @@index([owner_id])
+  @@map("projects")
+  @@schema("app")
+}
+
+model Member {
+  project_id Int
+  user_id    Int
+
+  @@id([project_id, user_id])
+  @@index([user_id])
+  @@map("members")
+  @@schema("app")
+}
+
+model ProjectService {
+  project_id Int
+  service_id Int
+
+  @@id([project_id, service_id])
+  @@index([service_id])
+  @@map("project_services")
+  @@schema("app")
+}
+
+model Note {
+  id         Int    @id @default(autoincrement())
+  project_id Int
+  author_id  Int
+  body       String
+
+  @@index([project_id])
+  @@index([author_id])
+  @@map("notes")
+  @@schema("app")
+}
+
+model Message {
+  id           Int    @id @default(autoincrement())
+  sender_id    Int
+  recipient_id Int
+  body         String
+
+  @@index([sender_id])
+  @@index([recipient_id])
+  @@map("inbox")
+  @@schema("app")
+}

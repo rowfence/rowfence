@@ -1,0 +1,10 @@
+{
+  // The extension is plain JavaScript, typed with JSDoc and checked strictly (npm ci here first):
+  //   npx tsc -p editor
+  "compilerOptions": {
+    "allowJs": true, "checkJs": true, "noEmit": true, "strict": true,
+    "target": "ES2022", "lib": ["ES2022"], "module": "NodeNext", "moduleResolution": "NodeNext", "types": ["vscode"],
+    "skipLibCheck": true, "noUnusedLocals": true, "noImplicitReturns": true, "noFallthroughCasesInSwitch": true
+  },
+  "files": ["extension.js"]
+}

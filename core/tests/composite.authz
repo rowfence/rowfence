@@ -1,0 +1,59 @@
+-- composite.authz: tables keyed by several columns, and services that sign in as themselves;
+-- checked by difftest.py
+app role app_user
+
+type user = cx.users
+  manager : user = manager_id                               -- people report to people
+  can oversee = manager or manager.oversee                  -- and whoever they report to, up the chain
+
+type bot = cx.bots principal where {this.active}               -- a service: signs in with its own keys
+  owner : user = owner_id
+  can manage_keys = owner
+
+type org = cx.orgs
+  admin : user = cx.org_admins(org_id -> user_id)
+
+type team = cx.teams (org_id bigint, slug text) where {not disbanded}   -- text in a key: quoting in ids; a disbanded team gives nothing, nor through the team it is in
+  lead   : user        = lead_id
+  member : user        = cx.team_members([org_id, team_slug] -> user_id)
+  member : team#member = cx.teams([org_id, parent_slug] -> [org_id, slug])   -- sub-teams' members count too
+  member : team#member  shared
+  member : bot         = cx.team_bots([org_id, team_slug] -> bot_id)      -- bots in teams
+  can share = lead
+
+type project = cx.projects (org_id, id)
+  org    : org    = org_id
+  lead   : user   = lead_id
+  folder : folder = [org_id, folder_id]                     -- a project may sit in a folder
+  can edit = lead or org.admin
+  can view = edit or folder.view
+
+type folder = cx.folders (org_id, id)
+  org    : org             = org_id
+  parent : folder, project = (parent_type, [org_id, parent_id])
+  parent : folder          = cx.folder_links([org_id, child_id] -> [org_id, parent_id])
+  owner  : user            = owner_id
+  viewer : user, team#member, bot, bot:*  shared
+  editor : team#member     = cx.folder_teams(object: [org_id, folder_id], subject: [org_id, team_slug])
+  can share = owner or org.admin
+  can edit  = share or editor or parent.edit
+  can view  = edit or viewer or parent.view                 -- through projects too: folder and project views recurse together
+
+type file = cx.files (org_id, id)
+  folder   : folder = [org_id, folder_id]
+  owner    : user   = owner_id
+  uploader : bot    = uploaded_by                           -- the bot that put it there
+  can edit = owner or uploader or folder.edit
+  can view = edit or folder.view or owner.oversee           -- following a relation to users
+
+rules cx.files
+  select                 : view
+  insert                 : folder.edit and {owner_id = authz.uid()}
+  update                 : edit
+  update folder_id after : folder.edit
+  delete                 : edit
+
+rules cx.folders
+  select                              : view
+  update                              : edit
+  update parent_type, parent_id after : parent.edit or {parent_id is null}

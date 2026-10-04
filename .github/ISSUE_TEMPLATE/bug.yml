@@ -1,0 +1,36 @@
+name: A bug
+description: Something rowfence does that it shouldn't, or doesn't do that the docs say it does.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A row seen or written that the policy doesn't allow is a security problem: report it privately
+        ([SECURITY.md](https://github.com/rowfence/rowfence/blob/main/SECURITY.md)), not here.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what should have
+      description: The command or call, what it did (the whole message, with its AZ code if it has one), and what you expected.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: The smallest policy, schema and steps that show it
+      description: The `.authz` file, the tables it reads, and what you ran, as which role and signed in as whom.
+      render: text
+    validations:
+      required: true
+  - type: input
+    id: versions
+    attributes:
+      label: Versions
+      description: "`rowfence --version`, PostgreSQL's (`SELECT version()`), and the SDK's if one is involved."
+    validations:
+      required: true
+  - type: input
+    id: how
+    attributes:
+      label: How rowfence is installed and run
+      description: npm, pip, the image or this repository; the operating system; a managed Postgres or a pooler, if any.

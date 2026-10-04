@@ -1,0 +1,234 @@
+"""Small helpers for writing SQL."""
+from __future__ import annotations
+
+import hashlib
+import re
+
+from .parse import Loc, fail
+
+
+def ident(name: str) -> str:
+    """Generated names longer than Postgres allows (63 bytes) are shortened
+    with a hash, the same way every time they appear."""
+    if len(name.encode()) > 63:
+        digest = hashlib.sha1(name.encode()).hexdigest()[:8]
+        name = name.encode()[:54].decode(errors="ignore") + "_" + digest
+    return name
+
+
+def q(name: str) -> str:
+    """Quote an identifier."""
+    name = ident(name)
+    return '"' + name.replace('"', '""') + '"'
+
+
+def qt(table: str) -> str:
+    """Quote a schema.table name from the policy."""
+    return ".".join(q(part) for part in table.split("."))
+
+
+def lit(s: object) -> str:
+    return "'" + str(s).replace("'", "''") + "'"
+
+
+def union(parts: list[str]) -> str:
+    return parts[0] if len(parts) == 1 else "\n  UNION ALL\n  ".join(f"({p})" for p in parts)
+
+
+def or_join(parts: list[str]) -> str:
+    return parts[0] if len(parts) == 1 else "(" + "\n    OR ".join(parts) + ")"
+
+
+def strip_literals(sql: str) -> str:
+    """SQL with string literals and quoted names blanked out, for keyword checks."""
+    sql = re.sub(r"'(?:[^']|'')*'", "''", sql)
+    return re.sub(r'"(?:[^"]|"")*"', '""', sql)
+
+
+def reads_tables(sql: str) -> bool:
+    return bool(re.search(r"\b(select|table)\b", strip_literals(sql), re.IGNORECASE))
+
+
+# built-in functions that read nothing but their arguments (and the clock or the session): a condition calling only
+# these reads only its row, whoever runs it
+PURE_FUNCTIONS = frozenset({
+    "abs", "age", "array_length", "array_position", "array_positions", "array_to_string", "btrim", "cardinality",
+    "ceil", "ceiling", "char_length", "character_length", "clock_timestamp", "concat", "concat_ws", "current_setting",
+    "date_part", "date_trunc", "floor", "format", "gen_random_uuid", "initcap", "isfinite", "json_array_length",
+    "json_typeof", "jsonb_array_length", "jsonb_extract_path", "jsonb_extract_path_text", "jsonb_typeof", "left",
+    "length", "lower", "lpad", "ltrim", "make_date", "make_interval", "make_timestamp", "md5", "mod", "now",
+    "num_nonnulls", "num_nulls", "octet_length", "pg_input_is_valid", "power", "random", "regexp_like",
+    "regexp_match", "regexp_matches", "regexp_replace", "repeat", "replace", "reverse", "right", "round", "rpad",
+    "rtrim", "sign", "split_part", "sqrt", "starts_with", "statement_timestamp", "string_to_array", "strpos",
+    "substr", "timeofday", "to_char", "to_date", "to_number", "to_timestamp", "transaction_timestamp", "trunc",
+    "upper", "authz.uid", "authz.ctx", "authz.principal", "authz.link_hashes"})
+# words followed by ( that are SQL's own, not functions
+CALL_WORDS = frozenset({
+    "all", "and", "any", "array", "between", "case", "cast", "coalesce", "else", "exists", "extract", "filter",
+    "greatest", "in", "is", "least", "not", "nullif", "or", "over", "overlay", "position", "row", "some",
+    "substring", "then", "trim", "values", "when", "within"})
+CALL = re.compile(r"(?<![\w.$\"])([A-Za-z_][A-Za-z0-9_]*(?:\s*\.\s*[A-Za-z_][A-Za-z0-9_]*)?)\s*\(")
+# the operators Postgres has for its own types (comparison, arithmetic, text, patterns, arrays, JSON, ranges, network
+# addresses): any other is one an app made, and its function may read anything
+BUILTIN_OPERATORS = frozenset({
+    "=", "<>", "!=", "<", ">", "<=", ">=", "+", "-", "*", "/", "%", "^", "||", "|/", "||/", "@", "&", "|", "#", "~",
+    "<<", ">>", "~~", "~~*", "!~~", "!~~*", "~*", "!~", "!~*", "^@", "@>", "<@", "&&", "?", "?|", "?&", "->", "->>",
+    "#>", "#>>", "#-", "@?", "@@", "-|-", "&<", "&>", "<<=", ">>=", "<->"})
+OPERATOR = re.compile(r"[+\-*/<>=~!@#%^&|`?]+")
+
+
+def operators(code: str) -> list[str]:
+    """The operators in SQL code, cut as Postgres cuts them: a name of several characters doesn't end in + or -
+    unless it holds one of ~ ! @ # % ^ & | ` ? (so `a=-1` is `=` then `-`)."""
+    out: list[str] = []
+    for m in OPERATOR.finditer(code):
+        op = m.group(0)
+        if len(op) > 1 and not any(c in op for c in "~!@#%^&|`?"):
+            tail = len(op) - len(op.rstrip("+-"))
+            if tail:
+                out += [op[:-tail]] if op[:-tail] else []
+                out += list(op[-tail:])
+                continue
+        out.append(op)
+    return out
+
+
+def reads_more(sql: str) -> bool:
+    """Whether a condition reads more than its row's own columns: a subquery, or a function other than a
+    built-in that reads nothing, called by name or as an operator. Then who runs it decides what it sees, so the
+    policy runs it as its owner."""
+    if reads_tables(sql):
+        return True
+    # a quoted name stands as one no built-in has (app."f"(x) and "app".f(x) are calls of a function of the
+    # app's), a comment as a space (f /* c */ (x) is a call), a string literal as an empty one
+    shown = "".join(text if code else "_quoted_" if text.startswith('"') else " " if text.startswith("/*") else "''"
+                    for code, text in sql_code(sql))
+    for m in CALL.finditer(shown):
+        name = re.sub(r"\s+", "", m.group(1)).lower()
+        if name not in PURE_FUNCTIONS and name not in CALL_WORDS:
+            return True
+    return any(op not in BUILTIN_OPERATORS for op in operators(shown))
+
+
+# A view emptied in place: the same columns (names, types, collations), reading nothing. What the app built on
+# the view stays while what the view read is dropped and made again; CREATE OR REPLACE VIEW then defines it again.
+# VIEW is the view's oid, in the SQL around it.
+STUB_COLUMNS = """(SELECT string_agg(format('NULL::%s%s AS %I', pg_catalog.format_type(a.atttypid, a.atttypmod),
+        CASE WHEN a.attcollation <> 0 AND a.attcollation <> t.typcollation
+             THEN format(' COLLATE %I.%I', cn.nspname, co.collname) ELSE '' END, a.attname), ', ' ORDER BY a.attnum)
+      FROM pg_catalog.pg_attribute a JOIN pg_catalog.pg_type t ON t.oid = a.atttypid
+      LEFT JOIN pg_catalog.pg_collation co ON co.oid = a.attcollation
+      LEFT JOIN pg_catalog.pg_namespace cn ON cn.oid = co.collnamespace
+      WHERE a.attrelid = VIEW AND a.attnum > 0 AND NOT a.attisdropped)"""
+
+
+def with_uid(sql: str) -> str:
+    """authz.uid() inside conditions runs once per query, not once per row."""
+    return re.sub(r"\bauthz\s*\.\s*uid\s*\(\s*\)", "(SELECT authz.uid())", sql)
+
+
+def sql_code(sql: str) -> list[tuple[bool, str]]:
+    """sql in pieces, (is it code, text): string literals ('...', E'...'), quoted names ("..."), $$...$$ and
+    /* comments */ are not code."""
+    out: list[tuple[bool, str]] = []
+    i, start, n = 0, 0, len(sql)
+    while i < n:
+        c = sql[i]
+        end = -1
+        if c == "'":
+            escapes = i > 0 and sql[i - 1] in "eE" and (i < 2 or not (sql[i - 2].isalnum() or sql[i - 2] == "_"))
+            j = i + 1
+            while j < n:
+                if escapes and sql[j] == "\\":
+                    j += 2
+                    continue
+                if sql[j] == "'":
+                    if j + 1 < n and sql[j + 1] == "'":
+                        j += 2
+                        continue
+                    break
+                j += 1
+            end = j + 1
+        elif c == '"':
+            j = sql.find('"', i + 1)
+            while j != -1 and sql[j + 1:j + 2] == '"':
+                j = sql.find('"', j + 2)
+            end = n if j == -1 else j + 1
+        elif sql.startswith("$$", i):
+            j = sql.find("$$", i + 2)
+            end = n if j == -1 else j + 2
+        elif sql.startswith("/*", i):
+            j = sql.find("*/", i + 2)
+            end = n if j == -1 else j + 2
+        if end == -1:
+            i += 1
+            continue
+        if start < i:
+            out.append((True, sql[start:i]))
+        out.append((False, sql[i:end]))
+        i = start = end
+    if start < n:
+        out.append((True, sql[start:]))
+    return out
+
+
+# `this.` in a condition: the row the condition is about (not a part of a longer name, nor after a dot)
+THIS = re.compile(r"(?<![\w.$\"])this\s*\.\s*(?=[A-Za-z_\"])", re.IGNORECASE)
+
+
+def this_spans(sql: str) -> list[tuple[int, int]]:
+    """Where a condition writes `this.` (in its code, not in quoted text or comments)."""
+    if "this" not in sql.lower():
+        return []
+    code: list[bool] = []
+    for is_code, text in sql_code(sql):
+        code += [is_code] * len(text)
+    return [(m.start(), m.end()) for m in THIS.finditer(sql) if code[m.start()]]
+
+
+def names_this(sql: str) -> bool:
+    """Whether a condition names its row as `this.`."""
+    return bool(this_spans(sql))
+
+
+def this_alone(sql: str) -> bool:
+    """Whether a condition writes the word `this` other than as `this.` (a table called this, say)."""
+    if "this" not in sql.lower():
+        return False
+    return any(code and re.search(r"(?<![\w.$\"])this\b(?!\s*\.)", text, re.IGNORECASE)
+               for code, text in sql_code(sql))
+
+
+def on_row(sql: str, alias: str) -> str:
+    """A condition with `this.` written as the alias its row has where the condition is placed: `this.id` is
+    `r.id` in a view, `"files".id` in a row-level security policy, `NEW`'s columns in a trigger."""
+    out, last = [], 0
+    for start, end in this_spans(sql):
+        out += [sql[last:start], alias + "."]
+        last = end
+    return "".join(out) + sql[last:]
+
+
+def row_cond(sql: str, alias: str) -> str:
+    """A condition placed where its row is aliased `alias`: `this.` as that alias, authz.uid() once per query."""
+    return with_uid(on_row(sql, alias))
+
+
+# Conditions whose result is stored (inheritance) must give the same answer for
+# everyone at any time.
+UNSTABLE = re.compile(r"\b(now|current_timestamp|current_date|current_time|localtime|localtimestamp|"
+                      r"clock_timestamp|statement_timestamp|transaction_timestamp|timeofday|random|"
+                      r"current_setting|current_user|session_user|current_role|user|"
+                      r"authz\s*\.\s*(uid|ctx|me))\b", re.IGNORECASE)
+
+
+def check_stable_condition(cond: str, loc: Loc, what: str = "limit inheritance") -> None:
+    lit_m = re.search(r"'\s*(now|today|tomorrow|yesterday)\s*'", cond, re.IGNORECASE)
+    if lit_m:
+        fail(loc, f"{{{cond}}} can't {what}: '{lit_m.group(1)}' means the current time, but inherited "
+                  f"rights are stored, so the condition must give the same answer for every user at any time", "AZ305")
+    m = UNSTABLE.search(strip_literals(cond))
+    if m:
+        fail(loc, f"{{{cond}}} can't {what}: it depends on {m.group(0)}, but inherited "
+                  f"rights are stored, so the condition must give the same answer for every user "
+                  f"at any time", "AZ305")

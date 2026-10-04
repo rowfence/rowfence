@@ -1,0 +1,13 @@
+# strongly typed, as the repository's Python (ty.toml at its root), in the backend's environment:
+#   uv sync --project examples/messenger/backend && uvx ty@0.0.56 check --project examples/messenger
+[src]
+include = ["backend/app", "backend/tests", "db", "check_public_surface.py"]
+
+[environment]
+python-version = "3.12"
+python = "backend/.venv"
+extra-paths = ["backend"]
+
+[rules]
+all = "error"
+missing-override-decorator = "ignore"

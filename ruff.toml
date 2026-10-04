@@ -1,0 +1,26 @@
+# Ruff lints every Python file here (CI's `unit` job: uvx ruff@0.15.12 check), and with ty (ty.toml) keeps
+# the Python strongly typed: ANN asks for every argument's and result's type. It doesn't format: the code
+# keeps its layout, and no line length is enforced.
+target-version = "py311"
+
+[lint]
+select = [
+    "E", "W", "F",      # pycodestyle, pyflakes
+    "B",                # bugbear: likely bugs
+    "UP",               # the syntax of Python 3.11
+    "I",                # sorted imports
+    "RUF", "SIM", "C4", "PIE",
+    "ANN",              # annotations everywhere
+]
+ignore = [
+    "E501",             # no line length
+    "E731",             # a lambda may be named
+    "RUF005",           # a + [b] reads as well as [*a, b]
+    "SIM105",           # try/except/pass reads as well as contextlib.suppress
+]
+
+[lint.flake8-bugbear]
+# FastAPI's dependencies are declared as default values
+extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "fastapi.Header", "fastapi.Cookie", "fastapi.File",
+                          "fastapi.Form", "fastapi.Body", "fastapi.Path"]
+

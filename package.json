@@ -1,0 +1,27 @@
+{
+  "name": "rowfence-workspace",
+  "private": true,
+  "description": "The TypeScript SDK's packages (sdk/typescript) and their conformance app (integrations/nextjs), in one npm workspace so they share one React and one pg",
+  "workspaces": [
+    "sdk/typescript/client",
+    "sdk/typescript/pg",
+    "sdk/typescript/postgres",
+    "sdk/typescript/prisma",
+    "sdk/typescript/drizzle",
+    "sdk/typescript/next",
+    "sdk/typescript/react",
+    "sdk/typescript/vitest",
+    "integrations/nextjs"
+  ],
+  "scripts": {
+    "build": "tsc -b sdk/typescript",
+    "check": "tsc -b sdk/typescript --noEmit false"
+  },
+  "devDependencies": {
+    "typescript": "~6.0.3"
+  },
+  "overrides": {
+    "mysql2": "^3.23.1",
+    "deepmerge-ts": "^8.0.2"
+  }
+}
