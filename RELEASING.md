@@ -9,7 +9,8 @@ rowfence follows [semantic versioning](https://semver.org/). One version covers 
 the `rowfence` command, the Python package, the TypeScript packages (`@rowfence/*` and the command's
 platform packages), the image, and the review for CI. `packaging/version.py` sets it in every file, and a
 unit test fails if two files disagree. The editor extensions (VS Code, Zed) have their own versions, raised
-when they change: the Marketplace takes no alphas or release candidates.
+when they change: the Marketplace takes no alphas or release candidates. A release publishes the VS Code extension
+on the Marketplace and Open VSX when its version isn't there yet.
 
 | version | what it is | published |
 |---|---|---|
