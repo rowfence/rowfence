@@ -10,7 +10,7 @@ repository = "https://github.com/rowfence/rowfence"
 # change to the grammar, commit it, then set rev to that commit (unit_test.py checks they match).
 [grammars.authz]
 repository = "https://github.com/rowfence/rowfence"
-rev = "5bb616904613edd6c3834b53a5a78976042c4b5c"
+rev = "caff74d7c26c4227a07e7d71820317fa29c9e95f"
 path = "editor/tree-sitter-authz"
 
 [language_servers.rowfence]
