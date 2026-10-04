@@ -14,7 +14,7 @@ b1=""; b2=""   # (extra statements per session; the narrow-locks branch uses the
 fails=0; n=0; retryable=0; waited=0
 dropdb --if-exists "$DB" 2>/dev/null; createdb "$DB" || exit 1
 PGOPTIONS="-c client_min_messages=error" psql -X -q -v ON_ERROR_STOP=1 -d "$DB" -f example/app_schema.sql >/dev/null || exit 1
-python3 authzc.py example/docs.authz > "/tmp/${DB}_docs.sql" || exit 1
+python3 compile_policy.py example/docs.authz > "/tmp/${DB}_docs.sql" || exit 1
 PGOPTIONS="-c client_min_messages=error" psql -X -q -v ON_ERROR_STOP=1 -d "$DB" -f "/tmp/${DB}_docs.sql" >/dev/null || exit 1
 T=$(mktemp -d)
 

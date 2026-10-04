@@ -47,14 +47,14 @@ CREATE TEMP TABLE authz_old_tables ON COMMIT DROP AS
   SELECT DISTINCT p.polrelid::regclass AS tbl
   FROM pg_policy p
   LEFT JOIN pg_description d ON d.objoid = p.oid AND d.classoid = 'pg_policy'::regclass
-  WHERE d.description = 'authzc' OR p.polname IN ('authz_select', 'authz_insert', 'authz_update', 'authz_delete');
+  WHERE d.description = 'rowfence' OR p.polname IN ('authz_select', 'authz_insert', 'authz_update', 'authz_delete');
 DO $d$
 DECLARE old record;
 BEGIN
   FOR old IN SELECT pol.polname, pol.polrelid::regclass AS tbl
              FROM pg_policy pol
              LEFT JOIN pg_description d ON d.objoid = pol.oid AND d.classoid = 'pg_policy'::regclass
-             WHERE d.description = 'authzc' OR pol.polname IN ('authz_select', 'authz_insert', 'authz_update', 'authz_delete') LOOP
+             WHERE d.description = 'rowfence' OR pol.polname IN ('authz_select', 'authz_insert', 'authz_update', 'authz_delete') LOOP
     EXECUTE format('DROP POLICY %I ON %s', old.polname, old.tbl);
   END LOOP;
 END $d$;
@@ -64,7 +64,7 @@ DO $mv$
 DECLARE v record; cols text;
 BEGIN
   FOR v IN SELECT c.oid, c.oid::regclass AS name FROM pg_class c JOIN pg_description d ON d.objoid = c.oid
-           AND d.classoid = 'pg_class'::regclass WHERE c.relkind = 'v' AND d.description = 'authzc masked view' LOOP
+           AND d.classoid = 'pg_class'::regclass WHERE c.relkind = 'v' AND d.description = 'rowfence masked view' LOOP
     BEGIN
       EXECUTE format('DROP VIEW %s', v.name);
     EXCEPTION WHEN dependent_objects_still_exist THEN
@@ -1662,7 +1662,7 @@ CREATE POLICY "authz_select" ON "lp"."orgs" FOR SELECT TO app_user
   USING (((SELECT authz_int.scope_cmd('lp.orgs', 'select')) AND (coalesce("orgs"."owner_id" = (SELECT authz.uid()), false)
     OR EXISTS (SELECT 1 FROM authz_gen."setting__edit" v WHERE v.id = "orgs"."settings_id"))));
 
-COMMENT ON POLICY "authz_select" ON "lp"."orgs" IS 'authzc';
+COMMENT ON POLICY "authz_select" ON "lp"."orgs" IS 'rowfence';
 
 -- lp.orgs update (line 30): edit
 CREATE POLICY "authz_update" ON "lp"."orgs" FOR UPDATE TO app_user
@@ -1672,7 +1672,7 @@ CREATE POLICY "authz_update" ON "lp"."orgs" FOR UPDATE TO app_user
     OR EXISTS (SELECT 1 FROM authz_gen."setting__edit" v WHERE v.id = "orgs"."settings_id")))
     OR authz_gen."lp.orgs:update:refuse"(ROW("orgs".*)::"lp"."orgs"));
 
-COMMENT ON POLICY "authz_update" ON "lp"."orgs" IS 'authzc';
+COMMENT ON POLICY "authz_update" ON "lp"."orgs" IS 'rowfence';
 
 ALTER TABLE "lp"."settings" ENABLE ROW LEVEL SECURITY;
 -- its partitions and the tables that inherit from it: row-level security on, with no policies of their own,
@@ -1755,7 +1755,7 @@ CREATE POLICY "authz_select" ON "lp"."settings" FOR SELECT TO app_user
   USING (((SELECT authz_int.scope_cmd('lp.settings', 'select')) AND (EXISTS (SELECT 1 FROM authz_gen."setting__admin" v WHERE v.id = "settings"."id")
     OR EXISTS (SELECT 1 FROM authz_gen."email__edit" v WHERE v.id = "settings"."email_id"))));
 
-COMMENT ON POLICY "authz_select" ON "lp"."settings" IS 'authzc';
+COMMENT ON POLICY "authz_select" ON "lp"."settings" IS 'rowfence';
 
 -- lp.settings update (line 34): edit
 CREATE POLICY "authz_update" ON "lp"."settings" FOR UPDATE TO app_user
@@ -1765,7 +1765,7 @@ CREATE POLICY "authz_update" ON "lp"."settings" FOR UPDATE TO app_user
     OR EXISTS (SELECT 1 FROM authz_gen."email__edit" v WHERE v.id = "settings"."email_id")))
     OR authz_gen."lp.settings:update:refuse"(ROW("settings".*)::"lp"."settings"));
 
-COMMENT ON POLICY "authz_update" ON "lp"."settings" IS 'authzc';
+COMMENT ON POLICY "authz_update" ON "lp"."settings" IS 'rowfence';
 
 ALTER TABLE "lp"."emails" ENABLE ROW LEVEL SECURITY;
 -- its partitions and the tables that inherit from it: row-level security on, with no policies of their own,
@@ -1807,7 +1807,7 @@ CREATE POLICY "authz_select" ON "lp"."emails" FOR SELECT TO app_user
   USING (((SELECT authz_int.scope_cmd('lp.emails', 'select')) AND (coalesce((verified), false)
     AND EXISTS (SELECT 1 FROM authz_gen."domain__edit" v WHERE v.id = "emails"."domain_id"))));
 
-COMMENT ON POLICY "authz_select" ON "lp"."emails" IS 'authzc';
+COMMENT ON POLICY "authz_select" ON "lp"."emails" IS 'rowfence';
 
 ALTER TABLE "lp"."domains" ENABLE ROW LEVEL SECURITY;
 -- its partitions and the tables that inherit from it: row-level security on, with no policies of their own,
@@ -1887,7 +1887,7 @@ END $f$;
 CREATE POLICY "authz_select" ON "lp"."domains" FOR SELECT TO app_user
   USING (((SELECT authz_int.scope_cmd('lp.domains', 'select')) AND EXISTS (SELECT 1 FROM authz_gen."org__edit" v WHERE v.id = "domains"."org_id")));
 
-COMMENT ON POLICY "authz_select" ON "lp"."domains" IS 'authzc';
+COMMENT ON POLICY "authz_select" ON "lp"."domains" IS 'rowfence';
 
 -- lp.domains update (line 41): edit
 CREATE POLICY "authz_update" ON "lp"."domains" FOR UPDATE TO app_user
@@ -1895,7 +1895,7 @@ CREATE POLICY "authz_update" ON "lp"."domains" FOR UPDATE TO app_user
   WITH CHECK (((SELECT authz_int.scope_cmd('lp.domains', 'update')) AND EXISTS (SELECT 1 FROM authz_gen."org__edit" v WHERE v.id = "domains"."org_id"))
     OR authz_gen."lp.domains:update:refuse"(ROW("domains".*)::"lp"."domains"));
 
-COMMENT ON POLICY "authz_update" ON "lp"."domains" IS 'authzc';
+COMMENT ON POLICY "authz_update" ON "lp"."domains" IS 'rowfence';
 
 CREATE FUNCTION authz_gen."lp.domains:column_1:items"(p_row "lp"."domains") RETURNS boolean[]
 LANGUAGE sql STABLE
@@ -3557,7 +3557,7 @@ WHERE w.who IS NOT NULL AND n.nspname !~ '^pg_(toast_)?temp_' LOOP
            FROM pg_policy p
            LEFT JOIN pg_description d ON d.objoid = p.oid AND d.classoid = 'pg_policy'::regclass
            WHERE p.polrelid = ANY (SELECT to_regclass(x) FROM unnest(ARRAY['"lp"."domains"', '"lp"."emails"', '"lp"."orgs"', '"lp"."settings"']::text[]) x)
-             AND d.description IS DISTINCT FROM 'authzc'
+             AND d.description IS DISTINCT FROM 'rowfence'
              AND p.polname NOT IN ('authz_select', 'authz_insert', 'authz_update', 'authz_delete')
              AND EXISTS (SELECT 1 FROM unnest(p.polroles) o
                          WHERE CASE WHEN o = 0 THEN true ELSE pg_has_role(v_role, o, 'MEMBER') END)
@@ -3698,7 +3698,7 @@ WHERE w.who IS NOT NULL AND n.nspname !~ '^pg_(toast_)?temp_' LOOP
              AND d.refobjid = ANY (SELECT to_regclass(x) FROM unnest(ARRAY['"lp"."domains"', '"lp"."emails"', '"lp"."orgs"', '"lp"."settings"', '"lp"."users"']::text[]) x)
              AND v.oid <> d.refobjid AND v.relkind IN ('v', 'm')
              AND v.relnamespace NOT IN (to_regnamespace('authz_gen'), to_regnamespace('authz_int'))
-             AND coalesce(ds.description, '') <> 'authzc masked view'
+             AND coalesce(ds.description, '') <> 'rowfence masked view'
              AND NOT coalesce(v.reloptions @> ARRAY['security_invoker=true'], false)
              AND NOT coalesce(v.reloptions @> ARRAY['security_invoker=on'], false)
              AND has_table_privilege(v_role, v.oid, 'SELECT') LOOP
@@ -3834,7 +3834,7 @@ BEGIN
            FROM pg_depend d WHERE d.refclassid = 'pg_class'::regclass AND d.refobjid = c.oid AND d.deptype = 'n'
              AND NOT (d.classid = 'pg_rewrite'::regclass AND d.objid IN (SELECT oid FROM pg_rewrite WHERE ev_class = c.oid))) || ')', '; ')
   INTO v_old FROM pg_class c JOIN pg_description d ON d.objoid = c.oid AND d.classoid = 'pg_class'::regclass
-  WHERE c.relkind = 'v' AND d.description = 'authzc masked view' AND c.oid <> ALL (ARRAY[]::oid[]);
+  WHERE c.relkind = 'v' AND d.description = 'rowfence masked view' AND c.oid <> ALL (ARRAY[]::oid[]);
   IF v_old IS NOT NULL THEN
     RAISE EXCEPTION 'this policy no longer makes a masked view that something in the database is built on: % [AZ617]', v_old
       USING HINT = 'Drop or change what is built on it, then apply again.';

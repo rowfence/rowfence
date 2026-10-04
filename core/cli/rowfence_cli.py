@@ -389,7 +389,7 @@ def sign_in(q: Query, who: str) -> None:
 
 def app_role(q: Query) -> str:
     rows = q("SELECT DISTINCT r.rolname FROM pg_catalog.pg_policy p JOIN pg_catalog.pg_description d ON d.objoid = p.oid "
-             "AND d.classoid = 'pg_catalog.pg_policy'::regclass AND d.description = 'authzc' "
+             "AND d.classoid = 'pg_catalog.pg_policy'::regclass AND d.description = 'rowfence' "
              "CROSS JOIN unnest(p.polroles) ro JOIN pg_catalog.pg_roles r ON r.oid = ro")
     if not rows:
         fail("no policy with rules is applied, so there is no app role to run as", 1)

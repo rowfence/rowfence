@@ -28,12 +28,12 @@
 | `rowfence mcp` | the MCP server, for coding agents (see below) |
 | `rowfence graph [p.authz]`, `rowfence client py\|ts [p.authz]` | diagram and typed helpers |
 | `rowfence reapply [--force]`, `rowfence remove --yes` | the policy in force again, after an upgrade (`--force`: and every inheritance table computed again); to take the policy out |
-| `core/authzc.py p.authz` | without a database: the SQL to apply with psql (one transaction) |
-| `core/authzc.py p.authz --check` | only report mistakes, as `file: line N: message` |
-| `core/authzc.py p.authz --tests [tests.authz ...]` | the tests and invariants as SQL (run after applying) |
-| `core/authzc.py p.authz --diff [--users 1,2]` | who gains and loses what (see [Governance](governance.md)) |
-| `core/authzc.py p.authz --graph` | a Mermaid diagram of types, relations and permissions |
-| `core/authzc.py p.authz --client ts\|py` | typed client helpers |
+| `core/compile_policy.py p.authz` | without a database: the SQL to apply with psql (one transaction) |
+| `core/compile_policy.py p.authz --check` | only report mistakes, as `file: line N: message` |
+| `core/compile_policy.py p.authz --tests [tests.authz ...]` | the tests and invariants as SQL (run after applying) |
+| `core/compile_policy.py p.authz --diff [--users 1,2]` | who gains and loses what (see [Governance](governance.md)) |
+| `core/compile_policy.py p.authz --graph` | a Mermaid diagram of types, relations and permissions |
+| `core/compile_policy.py p.authz --client ts\|py` | typed client helpers |
 | [`editor/`](../../editor/README.md) | the VS Code and Zed extensions: highlighting (SQL inside `{ }` too) and the language server; a Tree-sitter grammar for Helix and Neovim; other editors start `rowfence lsp` themselves |
 
 Commands without a policy file read `rowfence.toml`, found in the current folder or a folder above it:

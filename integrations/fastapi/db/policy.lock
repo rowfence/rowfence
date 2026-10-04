@@ -49,7 +49,7 @@ function authz.delete_role(p_role bigint) | 1366502e0c29 shape=7c823e86
 function authz.explain(p_type text, p_id bigint, p_perm text, p_user text) | e9fc8335de7a shape=0a2287cd
 function authz.explain(p_type text, p_id text, p_perm text, p_user text) | 8a795f3a6e6d shape=7d6de14b
 function authz.explain_rule(p_table text, p_command text, p_id text, p_row jsonb) | 7bacef287db3 shape=1223ad2f
-function authz.lint() | 0f5ee60faa12 shape=54cb1505
+function authz.lint() | f8b744c61bcd shape=54cb1505
 function authz.list(p_type text, p_perm text, p_after text, p_limit int) | 4c1c8807ba69 shape=e713a7cc
 function authz.list_api_keys(p_principal_type text, p_principal_id text) | 9a3b10b6e81a shape=04dcffde
 function authz.list_shares(p_type text, p_id bigint) | ac72a4d55b8e shape=63c58ea1
@@ -179,13 +179,13 @@ function authz_int.sign() | 26fda3872285 shape=de0f1c18
 function authz_int.subject_key(p_type text, p_id text, p_relation text) | fda03b078e77 shape=13054e65
 function authz_int.visible(p_type text, p_id text) | 90ee906af242 shape=e14964bd
 function authz_int.writable() | dce4bbfe1638 shape=2260a03a
-policy "authz_delete" ON "app"."notes" | d29450042d86
-policy "authz_insert" ON "app"."inbox" | 04342305e0e1
-policy "authz_insert" ON "app"."notes" | 4e0ac74e2a45
-policy "authz_select" ON "app"."inbox" | 1022c6409951
-policy "authz_select" ON "app"."notes" | 998f2a2089d7
-policy "authz_select" ON "app"."projects" | 39391f82b601
-policy "authz_update" ON "app"."notes" | fd65291462c5
+policy "authz_delete" ON "app"."notes" | d4a41d6f7f41
+policy "authz_insert" ON "app"."inbox" | e64029f29c7b
+policy "authz_insert" ON "app"."notes" | ec625f845497
+policy "authz_select" ON "app"."inbox" | 6c604bf78005
+policy "authz_select" ON "app"."notes" | b2e11590ed7a
+policy "authz_select" ON "app"."projects" | b193779ba056
+policy "authz_update" ON "app"."notes" | 0ff7a2856cd5
 rls "app"."inbox" | e8128a72e9a7
 rls "app"."notes" | 895f402ca9d0
 rls "app"."projects" | 432b11d414de

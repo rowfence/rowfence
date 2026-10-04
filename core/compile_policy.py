@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""authzc: compile a .authz policy file into PostgreSQL.
+"""compile_policy: compile a .authz policy file into PostgreSQL.
 
-    python3 authzc.py docs.authz > docs.sql              # views, triggers, RLS, API
-    python3 authzc.py docs.authz --tests [tests/*.authz] > docs_tests.sql   # the policy's tests, and more
-    python3 authzc.py docs.authz --check                 # only report mistakes
-    python3 authzc.py docs.authz --diff [--users 1,2] | psql   # who gains/loses access
+    python3 compile_policy.py docs.authz > docs.sql              # views, triggers, RLS, API
+    python3 compile_policy.py docs.authz --tests [tests/*.authz] > docs_tests.sql   # the policy's tests, and more
+    python3 compile_policy.py docs.authz --check                 # only report mistakes
+    python3 compile_policy.py docs.authz --diff [--users 1,2] | psql   # who gains/loses access
                                                          # if applied (rolled back)
-    python3 authzc.py docs.authz --graph > docs.mmd      # Mermaid diagram of the policy
-    python3 authzc.py docs.authz --client ts > authz.ts  # typed helpers (ts or py)
+    python3 compile_policy.py docs.authz --graph > docs.mmd      # Mermaid diagram of the policy
+    python3 compile_policy.py docs.authz --client ts > authz.ts  # typed helpers (ts or py)
 
 Apply the output with psql as a superuser (or the owner of the tables). It runs
 in one transaction, so a policy change applies fully or not at all, and

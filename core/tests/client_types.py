@@ -15,7 +15,7 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT)
-import authzc  # noqa: E402
+import compile_policy  # noqa: E402
 
 USE = """import { authz, asUser, Queryable } from "./authz";
 declare const db: Queryable;
@@ -63,7 +63,7 @@ def type_check(ts: str, use: str = USE) -> tuple[bool, str] | None:
 
 def main() -> None:
     policy = os.path.join(ROOT, "example", "docs.authz")
-    ts = authzc.load(policy).client("ts", "docs.authz")
+    ts = compile_policy.load(policy).client("ts", "docs.authz")
     fails = 0
     for label, use, want in (
             ("tsc --strict accepts correct calls and refuses wrong names", USE, True),

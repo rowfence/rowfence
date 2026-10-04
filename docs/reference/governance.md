@@ -24,7 +24,7 @@
 - **Access reviews**: a snapshot of an object's shares; each is kept or revoked by
   someone who could unshare it; closing applies the decisions.
 - **Invariants** run with the policy's tests and on demand.
-- **Previewing a change**: `python3 core/authzc.py new.authz --diff [--users 1,2] | psql -d mydb`
+- **Previewing a change**: `python3 core/compile_policy.py new.authz --diff [--users 1,2] | psql -d mydb`
   applies the new policy inside a transaction, lists every (user, object) pair that
   gains or loses each permission, readable row and masked column, then rolls back. It asks as
   every user, as every service or other principal (named `service:7`, also in `--users`) and as nobody.

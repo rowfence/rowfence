@@ -47,14 +47,14 @@ CREATE TEMP TABLE authz_old_tables ON COMMIT DROP AS
   SELECT DISTINCT p.polrelid::regclass AS tbl
   FROM pg_policy p
   LEFT JOIN pg_description d ON d.objoid = p.oid AND d.classoid = 'pg_policy'::regclass
-  WHERE d.description = 'authzc' OR p.polname IN ('authz_select', 'authz_insert', 'authz_update', 'authz_delete');
+  WHERE d.description = 'rowfence' OR p.polname IN ('authz_select', 'authz_insert', 'authz_update', 'authz_delete');
 DO $d$
 DECLARE old record;
 BEGIN
   FOR old IN SELECT pol.polname, pol.polrelid::regclass AS tbl
              FROM pg_policy pol
              LEFT JOIN pg_description d ON d.objoid = pol.oid AND d.classoid = 'pg_policy'::regclass
-             WHERE d.description = 'authzc' OR pol.polname IN ('authz_select', 'authz_insert', 'authz_update', 'authz_delete') LOOP
+             WHERE d.description = 'rowfence' OR pol.polname IN ('authz_select', 'authz_insert', 'authz_update', 'authz_delete') LOOP
     EXECUTE format('DROP POLICY %I ON %s', old.polname, old.tbl);
   END LOOP;
 END $d$;
@@ -64,7 +64,7 @@ DO $mv$
 DECLARE v record; cols text;
 BEGIN
   FOR v IN SELECT c.oid, c.oid::regclass AS name FROM pg_class c JOIN pg_description d ON d.objoid = c.oid
-           AND d.classoid = 'pg_class'::regclass WHERE c.relkind = 'v' AND d.description = 'authzc masked view' LOOP
+           AND d.classoid = 'pg_class'::regclass WHERE c.relkind = 'v' AND d.description = 'rowfence masked view' LOOP
     BEGIN
       EXECUTE format('DROP VIEW %s', v.name);
     EXCEPTION WHEN dependent_objects_still_exist THEN
@@ -2603,7 +2603,7 @@ CREATE POLICY "authz_select" ON "app"."folders" FOR SELECT TO app_user
     OR EXISTS (SELECT 1 FROM authz_gen."folder__view" v WHERE v.id = "folders"."parent_id")))
     OR EXISTS (SELECT 1 FROM authz_gen."folder__linked_into__view" v WHERE v.id = "folders"."id"))));
 
-COMMENT ON POLICY "authz_select" ON "app"."folders" IS 'authzc';
+COMMENT ON POLICY "authz_select" ON "app"."folders" IS 'rowfence';
 
 -- app.folders insert (line 72): parent.edit and owner
 CREATE POLICY "authz_insert" ON "app"."folders" FOR INSERT TO app_user
@@ -2611,7 +2611,7 @@ CREATE POLICY "authz_insert" ON "app"."folders" FOR INSERT TO app_user
     AND authz_gen."folder__edit__has"("folders"."parent_id")))
     OR authz_gen."app.folders:insert:refuse"(ROW("folders".*)::"app"."folders"));
 
-COMMENT ON POLICY "authz_insert" ON "app"."folders" IS 'authzc';
+COMMENT ON POLICY "authz_insert" ON "app"."folders" IS 'rowfence';
 
 -- app.folders update (line 73): edit
 CREATE POLICY "authz_update" ON "app"."folders" FOR UPDATE TO app_user
@@ -2627,7 +2627,7 @@ CREATE POLICY "authz_update" ON "app"."folders" FOR UPDATE TO app_user
     AND authz_gen."folder__edit__has"("folders"."parent_id"))))
     OR authz_gen."app.folders:update:refuse"(ROW("folders".*)::"app"."folders"));
 
-COMMENT ON POLICY "authz_update" ON "app"."folders" IS 'authzc';
+COMMENT ON POLICY "authz_update" ON "app"."folders" IS 'rowfence';
 
 -- app.folders delete (line 76): share
 CREATE POLICY "authz_delete" ON "app"."folders" FOR DELETE TO app_user
@@ -2636,7 +2636,7 @@ CREATE POLICY "authz_delete" ON "app"."folders" FOR DELETE TO app_user
     OR (coalesce((inherit), false)
     AND authz_gen."folder__share__has"("folders"."parent_id")))));
 
-COMMENT ON POLICY "authz_delete" ON "app"."folders" IS 'authzc';
+COMMENT ON POLICY "authz_delete" ON "app"."folders" IS 'rowfence';
 
 ALTER TABLE "app"."files" ENABLE ROW LEVEL SECURITY;
 -- its partitions and the tables that inherit from it: row-level security on, with no policies of their own,
@@ -2794,7 +2794,7 @@ CREATE POLICY "authz_select" ON "app"."files" FOR SELECT TO app_user
     AND (EXISTS (SELECT 1 FROM authz_gen."folder__share__direct" v WHERE v.id = "files"."folder_id")
     OR EXISTS (SELECT 1 FROM authz_gen."folder__view" v WHERE v.id = "files"."folder_id"))))));
 
-COMMENT ON POLICY "authz_select" ON "app"."files" IS 'authzc';
+COMMENT ON POLICY "authz_select" ON "app"."files" IS 'rowfence';
 
 -- app.files insert (line 80): folder.edit and owner
 CREATE POLICY "authz_insert" ON "app"."files" FOR INSERT TO app_user
@@ -2802,7 +2802,7 @@ CREATE POLICY "authz_insert" ON "app"."files" FOR INSERT TO app_user
     AND authz_gen."folder__edit__has"("files"."folder_id")))
     OR authz_gen."app.files:insert:refuse"(ROW("files".*)::"app"."files"));
 
-COMMENT ON POLICY "authz_insert" ON "app"."files" IS 'authzc';
+COMMENT ON POLICY "authz_insert" ON "app"."files" IS 'rowfence';
 
 -- app.files update (line 81): edit
 CREATE POLICY "authz_update" ON "app"."files" FOR UPDATE TO app_user
@@ -2812,14 +2812,14 @@ CREATE POLICY "authz_update" ON "app"."files" FOR UPDATE TO app_user
     OR authz_gen."folder__edit__has"("files"."folder_id")))
     OR authz_gen."app.files:update:refuse"(ROW("files".*)::"app"."files"));
 
-COMMENT ON POLICY "authz_update" ON "app"."files" IS 'authzc';
+COMMENT ON POLICY "authz_update" ON "app"."files" IS 'rowfence';
 
 -- app.files delete (line 84): edit
 CREATE POLICY "authz_delete" ON "app"."files" FOR DELETE TO app_user
   USING (((SELECT authz_int.scope_cmd('app.files', 'delete')) AND (coalesce("files"."owner_id" = (SELECT authz.uid()), false)
     OR authz_gen."folder__edit__has"("files"."folder_id"))));
 
-COMMENT ON POLICY "authz_delete" ON "app"."files" IS 'authzc';
+COMMENT ON POLICY "authz_delete" ON "app"."files" IS 'rowfence';
 
 CREATE FUNCTION authz_gen."app.folders:column_1:items"(p_row "app"."folders") RETURNS boolean[]
 LANGUAGE sql STABLE
@@ -5118,7 +5118,7 @@ WHERE w.who IS NOT NULL AND n.nspname !~ '^pg_(toast_)?temp_' LOOP
            FROM pg_policy p
            LEFT JOIN pg_description d ON d.objoid = p.oid AND d.classoid = 'pg_policy'::regclass
            WHERE p.polrelid = ANY (SELECT to_regclass(x) FROM unnest(ARRAY['"app"."files"', '"app"."folders"']::text[]) x)
-             AND d.description IS DISTINCT FROM 'authzc'
+             AND d.description IS DISTINCT FROM 'rowfence'
              AND p.polname NOT IN ('authz_select', 'authz_insert', 'authz_update', 'authz_delete')
              AND EXISTS (SELECT 1 FROM unnest(p.polroles) o
                          WHERE CASE WHEN o = 0 THEN true ELSE pg_has_role(v_role, o, 'MEMBER') END)
@@ -5259,7 +5259,7 @@ WHERE w.who IS NOT NULL AND n.nspname !~ '^pg_(toast_)?temp_' LOOP
              AND d.refobjid = ANY (SELECT to_regclass(x) FROM unnest(ARRAY['"app"."files"', '"app"."folders"', '"app"."orgs"', '"app"."teams"', '"app"."users"', '"app"."folder_links"', '"app"."folder_team_access"', '"app"."org_members"', '"app"."team_members"', '"app"."teams"']::text[]) x)
              AND v.oid <> d.refobjid AND v.relkind IN ('v', 'm')
              AND v.relnamespace NOT IN (to_regnamespace('authz_gen'), to_regnamespace('authz_int'))
-             AND coalesce(ds.description, '') <> 'authzc masked view'
+             AND coalesce(ds.description, '') <> 'rowfence masked view'
              AND NOT coalesce(v.reloptions @> ARRAY['security_invoker=true'], false)
              AND NOT coalesce(v.reloptions @> ARRAY['security_invoker=on'], false)
              AND has_table_privilege(v_role, v.oid, 'SELECT') LOOP
@@ -5404,7 +5404,7 @@ BEGIN
            FROM pg_depend d WHERE d.refclassid = 'pg_class'::regclass AND d.refobjid = c.oid AND d.deptype = 'n'
              AND NOT (d.classid = 'pg_rewrite'::regclass AND d.objid IN (SELECT oid FROM pg_rewrite WHERE ev_class = c.oid))) || ')', '; ')
   INTO v_old FROM pg_class c JOIN pg_description d ON d.objoid = c.oid AND d.classoid = 'pg_class'::regclass
-  WHERE c.relkind = 'v' AND d.description = 'authzc masked view' AND c.oid <> ALL (ARRAY[]::oid[]);
+  WHERE c.relkind = 'v' AND d.description = 'rowfence masked view' AND c.oid <> ALL (ARRAY[]::oid[]);
   IF v_old IS NOT NULL THEN
     RAISE EXCEPTION 'this policy no longer makes a masked view that something in the database is built on: % [AZ617]', v_old
       USING HINT = 'Drop or change what is built on it, then apply again.';

@@ -17,9 +17,9 @@ fresh() {
        -c "INSERT INTO mt.projects (id, org_id, lead_id) VALUES (1, 1, '00000000-0000-4000-8000-000000000001')" \
        -c "INSERT INTO mt.docs VALUES ('10000000-0000-4000-8000-000000000001', 'project', 1, NULL, 'secret text')" >/dev/null
 }
-python3 authzc.py tests/multi.authz > /tmp/authz_masks.sql || exit 1
+python3 compile_policy.py tests/multi.authz > /tmp/authz_masks.sql || exit 1
 sed '/mask body/d; s/ view mt.docs_visible//' tests/multi.authz > /tmp/authz_nomask.authz
-python3 authzc.py /tmp/authz_nomask.authz > /tmp/authz_nomask.sql || exit 1
+python3 compile_policy.py /tmp/authz_nomask.authz > /tmp/authz_nomask.sql || exit 1
 
 echo "-- applying"
 fresh
@@ -60,11 +60,11 @@ out=$(PSQL -c "SELECT count(*) FROM authz.lint()" 2>&1); case "$out" in [0-9]*) 
 PSQL -c "ALTER TABLE mt.docs RENAME COLUMN body2 TO body" >/dev/null
 
 echo "-- previewing mask changes"
-out=$(python3 authzc.py /tmp/authz_nomask.authz --diff | PGOPTIONS="-c client_min_messages=error" psql -X -q -d "$DB" 2>&1)
+out=$(python3 compile_policy.py /tmp/authz_nomask.authz --diff | PGOPTIONS="-c client_min_messages=error" psql -X -q -d "$DB" 2>&1)
 case "$out" in *"gains  | 00000000-0000-4000-8000-000000000001 | mt.docs | column body readable"*) bad "the lead could already read the body" "$out";;
   *) ok "the project lead (who could read the text) gains nothing";; esac
 PSQL -c "INSERT INTO authz.shares (object_type, object_id, relation, subject_type, subject_id) VALUES ('project', '1', 'viewer', 'user', '00000000-0000-4000-8000-000000000002')" >/dev/null
-out=$(python3 authzc.py /tmp/authz_nomask.authz --diff | PGOPTIONS="-c client_min_messages=error" psql -X -q -d "$DB" 2>&1)
+out=$(python3 compile_policy.py /tmp/authz_nomask.authz --diff | PGOPTIONS="-c client_min_messages=error" psql -X -q -d "$DB" 2>&1)
 case "$out" in *"gains  | 00000000-0000-4000-8000-000000000002 | mt.docs | column body readable"*) ok "removing the mask: a viewer gains the text";;
   *) bad "diff without the mask" "$out";; esac
 
@@ -86,7 +86,7 @@ out=$(why 2 "SELECT r_old.body IS NULL FROM (SELECT (jsonb_populate_record(NULL:
 out=$(apply /tmp/authz_nomask.sql); [ -z "$out" ] && ok "the version without masks applies" || bad "apply without masks" "$out"
 [ "$(PSQL -c "SELECT has_table_privilege('app_user', 'mt.docs', 'SELECT')")|$(PSQL -c "SELECT to_regclass('mt.docs_visible') IS NULL")" = "t|t" ] &&
   ok "... gives back table-wide SELECT and drops the view" || bad "unmasking"
-out=$(python3 authzc.py tests/multi.authz --diff | PGOPTIONS="-c client_min_messages=error" psql -X -q -d "$DB" 2>&1)
+out=$(python3 compile_policy.py tests/multi.authz --diff | PGOPTIONS="-c client_min_messages=error" psql -X -q -d "$DB" 2>&1)
 case "$out" in *"loses  | 00000000-0000-4000-8000-000000000002 | mt.docs | column body readable"*) ok "adding the mask back: the viewer would lose the text";;
   *) bad "diff adding the mask" "$out";; esac
 case "$out" in *"00000000-0000-4000-8000-000000000001 | mt.docs | column body"*) bad "the lead should keep the text" "$out";;

@@ -9,7 +9,7 @@ DB=${1:-authz_concurrency}
 dropdb --if-exists "$DB" 2>/dev/null; createdb "$DB" || exit 1
 fails=0
 out=$(mktemp)
-python3 authzc.py example/docs.authz > "/tmp/${DB}_docs.sql" || exit 1
+python3 compile_policy.py example/docs.authz > "/tmp/${DB}_docs.sql" || exit 1
 
 reset() {
   psql -X -q -v ON_ERROR_STOP=1 -d "$DB" -f example/app_schema.sql >/dev/null 2>&1 &&

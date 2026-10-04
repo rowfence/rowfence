@@ -420,7 +420,7 @@ def run(spec: Spec, db: DB, steps: int, workdir: str, seconds: float = 900) -> l
         fh.write(policy_text(spec))
     with open(schema_path, "w", encoding="utf-8") as fh:
         fh.write(schema_text(spec))
-    compiled = subprocess.run([sys.executable, "authzc.py", policy_path], capture_output=True, text=True)
+    compiled = subprocess.run([sys.executable, "compile_policy.py", policy_path], capture_output=True, text=True)
     if compiled.returncode != 0:
         raise Refused(compiled.stderr.strip().splitlines()[-1] if compiled.stderr.strip() else "refused")
     if "view definitions to plan" in compiled.stdout:

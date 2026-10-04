@@ -21,7 +21,7 @@ expect_code() {  # $1 label, $2 expected SQLSTATE, rest: -c statements
   if [ "$got" = "$want" ]; then echo "ok    $label"; else echo "FAIL  $label: expected $want, got $got"; fails=$((fails + 1)); fi
 }
 
-python3 authzc.py example/docs.authz > /tmp/authz_identity.sql || exit 1
+python3 compile_policy.py example/docs.authz > /tmp/authz_identity.sql || exit 1
 PGOPTIONS="-c client_min_messages=error" psql -X -q -v ON_ERROR_STOP=1 -d "$DB" -f example/app_schema.sql >/dev/null &&
 PGOPTIONS="-c client_min_messages=error" psql -X -q -v ON_ERROR_STOP=1 -d "$DB" -f /tmp/authz_identity.sql >/dev/null || exit 1
 PSQL -c "SET ROLE app_user; SET authz.user_id = 5; SELECT authz.share('folder', 1, 'viewer', 'org', 1, 'member')" >/dev/null

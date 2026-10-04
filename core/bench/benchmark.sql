@@ -1,6 +1,6 @@
 -- =====================================================================
 -- benchmark.sql — the compiled policy on a bigger copy of the example app
---   python3 authzc.py example/docs.authz > /tmp/docs.sql
+--   python3 compile_policy.py example/docs.authz > /tmp/docs.sql
 --   psql -v ON_ERROR_STOP=1 -d scratch -f example/app_schema.sql
 --   psql -v ON_ERROR_STOP=1 -v docs_sql=/tmp/docs.sql -d scratch -f bench/benchmark.sql
 -- Loads 2,000 users, 200 nested teams, 10,000 folders (500 also linked

@@ -93,7 +93,7 @@ function authz.explain(p_type text, p_id bigint, p_perm text, p_user text) | e9f
 function authz.explain(p_type text, p_id text, p_perm text, p_user text) | 7cc41cba806e shape=7d6de14b
 function authz.explain(p_type text, p_id uuid, p_perm text, p_user text) | d0e05eb87342 shape=94941757
 function authz.explain_rule(p_table text, p_command text, p_id text, p_row jsonb) | 68eb0c128059 shape=1223ad2f
-function authz.lint() | ecafb1c4ffcf shape=54cb1505
+function authz.lint() | 2affb71c7656 shape=54cb1505
 function authz.list(p_type text, p_perm text, p_after text, p_limit int) | 1517d85172a6 shape=e713a7cc
 function authz.list_api_keys(p_principal_type text, p_principal_id text) | 9a3b10b6e81a shape=04dcffde
 function authz.list_shares(p_type text, p_id bigint) | ac72a4d55b8e shape=63c58ea1
@@ -362,26 +362,26 @@ function authz_int.sign() | 26fda3872285 shape=de0f1c18
 function authz_int.subject_key(p_type text, p_id text, p_relation text) | fda03b078e77 shape=13054e65
 function authz_int.visible(p_type text, p_id text) | a2f58ee951ba shape=e14964bd
 function authz_int.writable() | dce4bbfe1638 shape=2260a03a
-policy "authz_delete" ON "fm"."file_versions" | 4e6722f131e7
-policy "authz_delete" ON "fm"."files" | 74d64b3dac49
-policy "authz_delete" ON "fm"."folders" | 35f9caa9d2db
-policy "authz_delete" ON "fm"."group_members" | 6c3aaec58330
-policy "authz_delete" ON "fm"."groups" | f6c911ab92fd
-policy "authz_insert" ON "fm"."file_versions" | d32f1d67b924
-policy "authz_insert" ON "fm"."files" | aac1fa2190d3
-policy "authz_insert" ON "fm"."folders" | cf966c74d34f
-policy "authz_insert" ON "fm"."group_members" | 811c50b88aac
-policy "authz_insert" ON "fm"."groups" | 980f68703c4a
-policy "authz_select" ON "fm"."file_versions" | 3d4e384be18c
-policy "authz_select" ON "fm"."files" | 5abf9d6164e3
-policy "authz_select" ON "fm"."folders" | 9444316f3bfd
-policy "authz_select" ON "fm"."group_members" | ca9ad02fbdda
-policy "authz_select" ON "fm"."groups" | ac5ca9e07d71
-policy "authz_update" ON "fm"."file_versions" | b862295b551b
-policy "authz_update" ON "fm"."files" | f029db99598c
-policy "authz_update" ON "fm"."folders" | 1cfffefe8bb0
-policy "authz_update" ON "fm"."group_members" | dbcb67d90ac2
-policy "authz_update" ON "fm"."groups" | fdc886159d51
+policy "authz_delete" ON "fm"."file_versions" | a97005dfc2c2
+policy "authz_delete" ON "fm"."files" | 6e68cf9e131a
+policy "authz_delete" ON "fm"."folders" | 3ccced319954
+policy "authz_delete" ON "fm"."group_members" | 79884efc1b83
+policy "authz_delete" ON "fm"."groups" | dd6c94ecc1ee
+policy "authz_insert" ON "fm"."file_versions" | e4887f85fc8d
+policy "authz_insert" ON "fm"."files" | 8cd577a026f0
+policy "authz_insert" ON "fm"."folders" | a5b5d8236e39
+policy "authz_insert" ON "fm"."group_members" | 0bda42b0a301
+policy "authz_insert" ON "fm"."groups" | 2efb2894d131
+policy "authz_select" ON "fm"."file_versions" | fc4d599691c3
+policy "authz_select" ON "fm"."files" | 87500cf2575f
+policy "authz_select" ON "fm"."folders" | c1a159f68aa5
+policy "authz_select" ON "fm"."group_members" | 15702766e5a0
+policy "authz_select" ON "fm"."groups" | 639a18fe0b97
+policy "authz_update" ON "fm"."file_versions" | 39170e9fc1f9
+policy "authz_update" ON "fm"."files" | d4e6910c0dad
+policy "authz_update" ON "fm"."folders" | be27b824b37f
+policy "authz_update" ON "fm"."group_members" | a27c4b03261a
+policy "authz_update" ON "fm"."groups" | 5fa36176af06
 rls "fm"."file_versions" | fff5af26c945
 rls "fm"."files" | 1223f29d9096
 rls "fm"."folders" | 59812d027bdf

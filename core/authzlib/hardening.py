@@ -247,7 +247,7 @@ BEGIN
            FROM pg_policy p
            LEFT JOIN pg_description d ON d.objoid = p.oid AND d.classoid = 'pg_policy'::regclass
            WHERE p.polrelid = ANY (SELECT to_regclass(x) FROM unnest({arr([qt(t) for t in governed])}) x)
-             AND d.description IS DISTINCT FROM 'authzc'
+             AND d.description IS DISTINCT FROM 'rowfence'
              AND p.polname NOT IN ('authz_select', 'authz_insert', 'authz_update', 'authz_delete')
              AND EXISTS (SELECT 1 FROM unnest(p.polroles) o
                          WHERE CASE WHEN o = 0 THEN true ELSE pg_has_role(v_role, o, 'MEMBER') END)
@@ -388,7 +388,7 @@ BEGIN
              AND d.refobjid = ANY (SELECT to_regclass(x) FROM unnest({arr([qt(t) for t in typed_tables + sorted(link_tables)])}) x)
              AND v.oid <> d.refobjid AND v.relkind IN ('v', 'm')
              AND v.relnamespace NOT IN (to_regnamespace('authz_gen'), to_regnamespace('authz_int'))
-             AND coalesce(ds.description, '') <> 'authzc masked view'
+             AND coalesce(ds.description, '') <> 'rowfence masked view'
              AND NOT coalesce(v.reloptions @> ARRAY['security_invoker=true'], false)
              AND NOT coalesce(v.reloptions @> ARRAY['security_invoker=on'], false)
              AND has_table_privilege(v_role, v.oid, 'SELECT') LOOP

@@ -19,7 +19,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT)
 sys.path.insert(0, os.path.join(ROOT, "cli"))
-import authzc  # noqa: E402
+import compile_policy  # noqa: E402
 import client_types  # noqa: E402
 import pgwire  # noqa: E402
 
@@ -59,7 +59,7 @@ def main() -> None:
     subprocess.run(["dropdb", "--if-exists", db], capture_output=True)
     subprocess.run(["createdb", db], check=True)
     policy = os.path.join(ROOT, "example", "docs.authz")
-    compiler = authzc.load(policy)
+    compiler = compile_policy.load(policy)
     sql = compiler.compile(policy)
     for f in (os.path.join(ROOT, "example", "app_schema.sql"),):
         subprocess.run(["psql", "-X", "-q", "-v", "ON_ERROR_STOP=1", "-d", db, "-f", f], check=True, capture_output=True)
@@ -69,7 +69,7 @@ def main() -> None:
 
     print("-- the diagram (--graph)")
     for name in ("example/docs.authz", "tests/multi.authz", "tests/alt.authz", "tests/composite.authz"):
-        c = authzc.load(os.path.join(ROOT, name))
+        c = compile_policy.load(os.path.join(ROOT, name))
         c.compile(name)
         g = c.graph()
         declared = set(re.findall(r"^\s+([A-Za-z0-9_]+)(?:\[|\(|\(\()", g, re.M))

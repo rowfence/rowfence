@@ -16,7 +16,7 @@ CLI() { python3 cli/rowfence_cli.py --db "dbname=$DB" "$@"; }
 run() { out=$(CLI "$@" 2>&1); rc=$?; }
 T=$(mktemp -d)
 # the end-to-end scenario, with the tests at the bottom of the policy file
-python3 authzc.py example/docs.authz --tests > "$T/docs_tests.sql" || exit 1
+python3 compile_policy.py example/docs.authz --tests > "$T/docs_tests.sql" || exit 1
 scenario() { psql -X -q -v ON_ERROR_STOP=1 -v docs_tests="$T/docs_tests.sql" -d "$DB" -f tests/scenario.sql; }
 
 # (user, readable files, files it may view): what access looks like, to compare databases

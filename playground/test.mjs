@@ -111,11 +111,11 @@ check("another example after it, and nothing of the one before", second.ok && le
 // the glue calls the compiler its own way: what it writes is what the command writes
 console.log("-- the same SQL as the command");
 const python = process.env.PYTHON || (process.platform === "win32" ? "python" : "python3");
-const authzc = fileURLToPath(new URL("../core/authzc.py", import.meta.url));
+const compilePolicy = fileURLToPath(new URL("../core/compile_policy.py", import.meta.url));
 const dir = mkdtempSync(join(tmpdir(), "rowfence-playground-"));
 for (const ex of examples) {
   writeFileSync(join(dir, "policy.authz"), ex.policy);
-  const command = execFileSync(python, [authzc, "policy.authz"], { cwd: dir, encoding: "utf8", maxBuffer: 1 << 28 }).replaceAll("\r\n", "\n");   // Windows: Python prints CRLF
+  const command = execFileSync(python, [compilePolicy, "policy.authz"], { cwd: dir, encoding: "utf8", maxBuffer: 1 << 28 }).replaceAll("\r\n", "\n");   // Windows: Python prints CRLF
   const here = must(c.compile(ex.policy, ""));
   check(`${ex.name}: ${here.sql.length} characters, the command's`, here.sql === command, [here.sql.length, command.length]);
 }

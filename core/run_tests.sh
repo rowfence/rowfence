@@ -66,8 +66,8 @@ record $? "fuzz parser"
 fi
 
 step "compile the example policy"
-python3 authzc.py example/docs.authz > /tmp/authz_docs.sql &&
-python3 authzc.py example/docs.authz --tests > /tmp/authz_docs_tests.sql
+python3 compile_policy.py example/docs.authz > /tmp/authz_docs.sql &&
+python3 compile_policy.py example/docs.authz --tests > /tmp/authz_docs_tests.sql
 record $? "compile"
 
 step "end-to-end scenario through RLS (tests/scenario.sql + the tests in docs.authz)"
@@ -89,7 +89,7 @@ dropdb "$DB"
 
 step "the share API and newer features (tests/multi_scenario.sql on tests/multi.authz)"
 dropdb --if-exists "$DB" >/dev/null 2>&1; createdb "$DB"
-python3 authzc.py tests/multi.authz > /tmp/authz_multi.sql &&
+python3 compile_policy.py tests/multi.authz > /tmp/authz_multi.sql &&
 apply tests/multi_schema.sql && apply /tmp/authz_multi.sql &&
 psql -X -q -v ON_ERROR_STOP=1 -d "$DB" -f tests/multi_scenario.sql > /tmp/authz_multi_scenario.log 2>&1
 rc=$?; echo "$(grep -c 'ok  ' /tmp/authz_multi_scenario.log) checks passed"; grep "FAIL\|ERROR" /tmp/authz_multi_scenario.log

@@ -72,7 +72,7 @@ invariants
   never doc: edit and not owner
   never doc: not view             -- everyone, signed in or not, lacks view on something: broken on purpose
 POLICY
-python3 authzc.py /tmp/authz_principals.authz > /tmp/authz_principals.sql || exit 1
+python3 compile_policy.py /tmp/authz_principals.authz > /tmp/authz_principals.sql || exit 1
 PGOPTIONS="-c client_min_messages=error" psql -X -q -v ON_ERROR_STOP=1 -d "$DB" -f /tmp/authz_principals.sql >/dev/null || exit 1
 PSQL -c "SET authz.user_id = '2'" -c "SELECT authz.share('doc', 2, 'reader', 'team', 1, 'member')" \
      -c "SELECT authz.share('doc', 3, 'reader', 'service', '*')" -c "SELECT authz.share('doc', 4, 'reader', 'user', '*')" >/dev/null
@@ -112,7 +112,7 @@ got=$(psql -X -q -At -d "$DB" -c "SET ROLE app_user" -c "SET authz.user_id = '3'
 case "$got" in *"you cannot grant doc.helper on doc 1: you do not hold assist"*) echo "ok    a viewer may share helper, but not grant assist, which they don't hold";;
   *) echo "FAIL  sharing what the sharer doesn't hold: $got"; fails=$((fails + 1));; esac
 check "the owner holds it, and may" "1" "$AS_USER SELECT authz.share('doc', 1, 'helper', 'user', 2); SELECT count(*) FROM authz.list_shares('doc', 1) WHERE relation = 'helper';"
-got=$(psql -X -q -At -d "$DB" -f <(python3 authzc.py /tmp/authz_principals.authz --tests) 2>&1)
+got=$(psql -X -q -At -d "$DB" -f <(python3 compile_policy.py /tmp/authz_principals.authz --tests) 2>&1)
 case "$got" in *"FAIL  invariant never doc: edit and not owner"*": service 7 can reach {1}"*) echo "ok    ... and the policy tests say which service";;
   *) echo "FAIL  the policy tests on a service breaking an invariant: $got"; fails=$((fails + 1));; esac
 
@@ -170,7 +170,7 @@ expect_code "a token naming a type that doesn't sign in" 28000 -c "BEGIN" -c "SE
 
 echo "-- the policy"
 bad() {  # $1 label, $2 expected piece of the error, $3 policy
-  got=$(printf '%s\n' "$3" | python3 authzc.py --check /dev/stdin 2>&1)
+  got=$(printf '%s\n' "$3" | python3 compile_policy.py --check /dev/stdin 2>&1)
   case "$got" in *"$2"*) echo "ok    $1";; *) echo "FAIL  $1: $got"; fails=$((fails + 1));; esac
 }
 bad "type:* needs a principal type" "doc:* means any signed-in doc, but doc doesn't sign in" \
@@ -179,10 +179,10 @@ bad "a principal's key is one column" "the service type signs in, so it needs a 
   "$(sed 's/type service = ps.services principal/type service = ps.services (owner_id, id) principal/' /tmp/authz_principals.authz)"
 # a change that reaches only a service is in the preview, named as the audit trail names it
 sed 's/^  can assist = owner or helper$/  can assist = owner or helper or bot/' /tmp/authz_principals.authz > /tmp/authz_principals_bot.authz
-out=$(python3 authzc.py /tmp/authz_principals_bot.authz --diff | PGOPTIONS="-c client_min_messages=error" psql -X -q -At -d "$DB" 2>&1)
+out=$(python3 compile_policy.py /tmp/authz_principals_bot.authz --diff | PGOPTIONS="-c client_min_messages=error" psql -X -q -At -d "$DB" 2>&1)
 case "$out" in *"gains|service:7|doc|permission assist|1"*) echo "ok    the preview lists what a service gains";;
   *) echo "FAIL  the preview of a change for a service: $out"; fails=$((fails + 1));; esac
-out=$(python3 authzc.py /tmp/authz_principals_bot.authz --diff --users 1,2 | PGOPTIONS="-c client_min_messages=error" psql -X -q -At -d "$DB" 2>&1)
+out=$(python3 compile_policy.py /tmp/authz_principals_bot.authz --diff --users 1,2 | PGOPTIONS="-c client_min_messages=error" psql -X -q -At -d "$DB" 2>&1)
 case "$out" in *service:*) echo "FAIL  --users 1,2 shows a service: $out"; fails=$((fails + 1));; *) echo "ok    ... and --users leaves it out when it names users only";; esac
 check "lint notes a principal type nobody can make keys for" "0" \
   "RESET ROLE; SELECT count(*) FROM authz.lint() WHERE object = 'service' AND problem LIKE '%manage_keys%';"
