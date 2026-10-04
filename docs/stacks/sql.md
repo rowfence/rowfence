@@ -78,4 +78,5 @@ To filter a query to the objects the user holds a permission on, join `authz.lis
 Policy changes ship as migrations for your tool: `tool = "goose"`, `"dbmate"`, `"flyway"` or `"sql"`
 (numbered or timestamped files) in `rowfence.toml`. `rowfence migrate` writes the next one, and your tool
 applies it with the others; `rowfence migrate --check` in CI fails if a policy change has none. The command
-installs with `pip install rowfence`, `npm install rowfence`, or as a Docker image.
+installs with `pip install --pre rowfence`, `npm install rowfence@next` (while only an alpha is published), or
+as a Docker image: [Installing](../installing.md).

@@ -195,6 +195,17 @@ def config_lines(s: Stack) -> list[str]:
     return out
 
 
+def pip_requirement(name: str, version: str) -> str:
+    """The requirement init tells a Python app to add: the bare name for a release; for an alpha, a candidate or a
+    build of main, at least this version in PyPI's spelling (0.1.0-alpha.1 is 0.1.0a1), which also lets pip and uv
+    take a pre-release, as `^0.1.0-alpha.1` does for npm."""
+    m = re.fullmatch(r"(\d+\.\d+\.\d+)(?:-alpha\.(\d+)|-rc\.(\d+)|(-dev))?", version)
+    if not m or not (m.group(2) or m.group(3) or m.group(4)):
+        return name
+    pypi = m.group(1) + (f"a{m.group(2)}" if m.group(2) else f"rc{m.group(3)}" if m.group(3) else ".dev0")
+    return f"{name}>={pypi}"
+
+
 def add_npm(root: str, names: list[str], version: str) -> list[str]:
     """Adds the packages to package.json's dependencies (and the command to devDependencies), keeping its layout;
     returns what it added."""

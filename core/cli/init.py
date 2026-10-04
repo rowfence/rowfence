@@ -64,13 +64,14 @@ database = "{database}"     # a DSN or URL, or env:NAME for an environment varia
         marked = migrations.mark_generated(os.getcwd(), migrations.generated_patterns(found.tool, found.migrations_dir, lock))
         if marked:
             print("wrote   .gitattributes (reviews show the generated files collapsed)")
+    from authzlib import __version__
     if found.npm:
-        from authzlib import __version__
         added = stack.add_npm(os.getcwd(), found.npm, __version__)
         if added:
             print(f"added   {', '.join(added)} to package.json (then: npm install)")
     if found.pip:
-        print(f"add     {found.pip} to your Python dependencies (pip install '{found.pip}', or uv add '{found.pip}')")
+        req = stack.pip_requirement(found.pip, __version__)
+        print(f"add     {req} to your Python dependencies (pip install '{req}', or uv add '{req}')")
     setup = ""
     if found.setup:
         where = f"in {found.setup_file}" if found.setup_file else "where the app makes its database client"

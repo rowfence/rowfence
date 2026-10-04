@@ -15,7 +15,7 @@ postgres.js: [Node apps](node.md).
 
 ```sh
 npm install @rowfence/client @rowfence/prisma @rowfence/next @rowfence/react
-npm install --save-dev rowfence @rowfence/vitest
+npm install --save-dev rowfence@next @rowfence/vitest    # @next while only an alpha is published
 npx rowfence init        # a first policy from your tables, a test file, rowfence.toml
 ```
 

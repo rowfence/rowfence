@@ -20,6 +20,13 @@ Each release upgrades from the one before it. How releases are numbered and made
   on the PATH it points to the Installing page (the install lines it showed get the placeholder while only an
   alpha is published).
 
+### Fixed
+
+- While only an alpha is published, a plain `pip install rowfence` finds nothing and `npm i rowfence` gets the
+  0.0.0 placeholder: `rowfence init` now tells a Python app to add `rowfence[...]>=0.1.0a1` (at least its own
+  version, which lets pip and uv take a pre-release), and the stack pages, the Python SDK's README and
+  `llms.txt` ask for the alpha (`--pre`, `rowfence@next`, `uv add --prerelease=allow`).
+
 ## 0.1.0 (alpha)
 
 The first release, as an alpha: for trying rowfence early. Anything in it may still change before 0.1.0
