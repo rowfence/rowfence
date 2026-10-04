@@ -3,8 +3,8 @@
 app role cb_app
 
 type user = cb.users
-  self        : user = id                                     -- your own row
-  has_blocked : user = cb.blocks(blocker_id -> blocked_id)     -- the people this person blocked
+  self        : user = id                                   -- your own row
+  has_blocked : user = cb.blocks(blocker_id -> blocked_id)  -- the people this person blocked
   can edit = self
 
 -- owner only
@@ -16,14 +16,14 @@ type note = cb.notes
 -- teams inside teams
 type team = cb.teams
   member : user        = cb.team_members(team_id -> user_id)
-  member : team#member = cb.teams(parent_id -> id)             -- members of sub-teams count too
+  member : team#member = cb.teams(parent_id -> id)  -- members of sub-teams count too
 
 -- folders that inherit, and sharing
 type folder = cb.folders
   parent : folder = parent_id
   owner  : user   = owner_id
-  viewer : user, team#member, link  shared by share
-  editor : user, team#member        shared by share
+  viewer : user, team#member, link shared by share
+  editor : user, team#member shared by share
 
   can share = owner or (parent.share and {inherit})
   can edit  = share or editor or (parent.edit and {inherit})
@@ -74,34 +74,34 @@ type direct_message = cb.direct_messages
   recipient : user = to_id
 
 rules cb.notes
-  select : view
-  insert : owner
-  update : edit
+  select          : view
+  insert          : owner
+  update          : edit
   update owner_id : nobody
-  delete : edit
+  delete          : edit
 
 rules cb.folders
-  select : view
-  insert : parent.edit and owner
-  update : edit
-  update parent_id after : parent.edit
+  select                   : view
+  insert                   : parent.edit and owner
+  update                   : edit
+  update parent_id after   : parent.edit
   update owner_id, inherit : share
-  delete : share
+  delete                   : share
 
 rules cb.users
-  select : signed_in
-  update : edit
+  select    : signed_in
+  update    : edit
   update id : nobody
 
 rules cb.pages
   select : read
 
 rules cb.tickets
-  select : view
-  insert : org.member
-  update : edit
-  update assignee_id : org.admin                          -- only admins reassign
-  update org_id, id : nobody
+  select             : view
+  insert             : org.member
+  update             : edit
+  update assignee_id : org.admin  -- only admins reassign
+  update org_id, id  : nobody
 
 rules cb.posts
   select : channel.read
@@ -109,4 +109,4 @@ rules cb.posts
 
 rules cb.direct_messages
   select : sender or recipient
-  insert : sender and not recipient.has_blocked          -- nobody writes to someone who blocked them
+  insert : sender and not recipient.has_blocked  -- nobody writes to someone who blocked them

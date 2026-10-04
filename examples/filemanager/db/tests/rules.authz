@@ -2,12 +2,12 @@
 -- Run: rowfence test (from filemanager/), or rowfence dev while editing the policy.
 
 test "a folder's owner has everything inside it, and turning inheritance off stops it"
-  given ann  = {INSERT INTO fm.users (email, name) VALUES ('t-ann@x', 'Ann') RETURNING id}
-  given bo   = {INSERT INTO fm.users (email, name) VALUES ('t-bo@x', 'Bo') RETURNING id}
-  given top  = {INSERT INTO fm.folders (owner_id, name) VALUES ($ann, 'Top') RETURNING id}
-  given sub  = {INSERT INTO fm.folders (parent_id, owner_id, name) VALUES ($top, $bo, 'Sub') RETURNING id}
-  given own  = {INSERT INTO fm.folders (parent_id, owner_id, name, inherit) VALUES ($top, $bo, 'Own', false) RETURNING id}
-  given f    = {INSERT INTO fm.files (folder_id, owner_id, name) VALUES ($sub, $bo, 'plan.txt') RETURNING id}
+  given ann = {INSERT INTO fm.users (email, name) VALUES ('t-ann@x', 'Ann') RETURNING id}
+  given bo = {INSERT INTO fm.users (email, name) VALUES ('t-bo@x', 'Bo') RETURNING id}
+  given top = {INSERT INTO fm.folders (owner_id, name) VALUES ($ann, 'Top') RETURNING id}
+  given sub = {INSERT INTO fm.folders (parent_id, owner_id, name) VALUES ($top, $bo, 'Sub') RETURNING id}
+  given own = {INSERT INTO fm.folders (parent_id, owner_id, name, inherit) VALUES ($top, $bo, 'Own', false) RETURNING id}
+  given f = {INSERT INTO fm.files (folder_id, owner_id, name) VALUES ($sub, $bo, 'plan.txt') RETURNING id}
   user $ann can share file $f
   user $ann can edit folder $sub
   user $ann cannot view folder $own
@@ -17,11 +17,11 @@ test "a folder's owner has everything inside it, and turning inheritance off sto
   as user $ann allowed {INSERT INTO fm.folders (parent_id, owner_id, name) VALUES ($sub, $ann, 'Notes')}
 
 test "sharing with a group reaches its sub-groups' members"
-  given ann  = {INSERT INTO fm.users (email, name) VALUES ('t-ann@x', 'Ann') RETURNING id}
-  given bo   = {INSERT INTO fm.users (email, name) VALUES ('t-bo@x', 'Bo') RETURNING id}
-  given cy   = {INSERT INTO fm.users (email, name) VALUES ('t-cy@x', 'Cy') RETURNING id}
-  given eng  = {INSERT INTO fm.groups (name, owner_id) VALUES ('Engineering', $ann) RETURNING id}
-  given web  = {INSERT INTO fm.groups (name, parent_id, owner_id) VALUES ('Web', $eng, $ann) RETURNING id}
+  given ann = {INSERT INTO fm.users (email, name) VALUES ('t-ann@x', 'Ann') RETURNING id}
+  given bo = {INSERT INTO fm.users (email, name) VALUES ('t-bo@x', 'Bo') RETURNING id}
+  given cy = {INSERT INTO fm.users (email, name) VALUES ('t-cy@x', 'Cy') RETURNING id}
+  given eng = {INSERT INTO fm.groups (name, owner_id) VALUES ('Engineering', $ann) RETURNING id}
+  given web = {INSERT INTO fm.groups (name, parent_id, owner_id) VALUES ('Web', $eng, $ann) RETURNING id}
   given {INSERT INTO fm.group_members (group_id, user_id) VALUES ($web, $bo)}
   given docs = {INSERT INTO fm.folders (owner_id, name) VALUES ($ann, 'Docs') RETURNING id}
   user $bo cannot view folder $docs
@@ -32,11 +32,11 @@ test "sharing with a group reaches its sub-groups' members"
   as user $bo refused {SELECT authz.share('folder', $docs, 'viewer', 'user', $cy)}
 
 test "groups: their owner, admins and those above manage them; anyone may leave"
-  given ann  = {INSERT INTO fm.users (email, name) VALUES ('t-ann@x', 'Ann') RETURNING id}
-  given bo   = {INSERT INTO fm.users (email, name) VALUES ('t-bo@x', 'Bo') RETURNING id}
-  given cy   = {INSERT INTO fm.users (email, name) VALUES ('t-cy@x', 'Cy') RETURNING id}
-  given eng  = {INSERT INTO fm.groups (name, owner_id) VALUES ('Engineering', $ann) RETURNING id}
-  given web  = {INSERT INTO fm.groups (name, parent_id, owner_id) VALUES ('Web', $eng, $bo) RETURNING id}
+  given ann = {INSERT INTO fm.users (email, name) VALUES ('t-ann@x', 'Ann') RETURNING id}
+  given bo = {INSERT INTO fm.users (email, name) VALUES ('t-bo@x', 'Bo') RETURNING id}
+  given cy = {INSERT INTO fm.users (email, name) VALUES ('t-cy@x', 'Cy') RETURNING id}
+  given eng = {INSERT INTO fm.groups (name, owner_id) VALUES ('Engineering', $ann) RETURNING id}
+  given web = {INSERT INTO fm.groups (name, parent_id, owner_id) VALUES ('Web', $eng, $bo) RETURNING id}
   given {INSERT INTO fm.group_members (group_id, user_id, is_admin) VALUES ($web, $cy, false)}
   user $ann can manage group $web
   user $bo can manage group $web
@@ -45,18 +45,18 @@ test "groups: their owner, admins and those above manage them; anyone may leave"
   as user $cy allowed {DELETE FROM fm.group_members WHERE group_id = $web AND user_id = $cy}
 
 test "a file shows one of its own versions, never another file's"
-  given ann  = {INSERT INTO fm.users (email, name) VALUES ('t-ann@x', 'Ann') RETURNING id}
+  given ann = {INSERT INTO fm.users (email, name) VALUES ('t-ann@x', 'Ann') RETURNING id}
   given docs = {INSERT INTO fm.folders (owner_id, name) VALUES ($ann, 'Docs') RETURNING id}
-  given a    = {INSERT INTO fm.files (folder_id, owner_id, name) VALUES ($docs, $ann, 'a.txt') RETURNING id}
-  given b    = {INSERT INTO fm.files (folder_id, owner_id, name) VALUES ($docs, $ann, 'b.txt') RETURNING id}
+  given a = {INSERT INTO fm.files (folder_id, owner_id, name) VALUES ($docs, $ann, 'a.txt') RETURNING id}
+  given b = {INSERT INTO fm.files (folder_id, owner_id, name) VALUES ($docs, $ann, 'b.txt') RETURNING id}
   given mine = {INSERT INTO fm.file_versions (file_id, created_by, ready) VALUES ($a, $ann, true) RETURNING object_key}
   given other = {INSERT INTO fm.file_versions (file_id, created_by, ready) VALUES ($b, $ann, true) RETURNING object_key}
   as user $ann allowed {UPDATE fm.files SET object_key = $mine WHERE id = $a}
   as user $ann refused {UPDATE fm.files SET object_key = $other WHERE id = $a}
 
 test "support staff may break the glass, nobody else"
-  given ann  = {INSERT INTO fm.users (email, name) VALUES ('t-ann@x', 'Ann') RETURNING id}
-  given sue  = {INSERT INTO fm.users (email, name, is_support) VALUES ('t-sue@x', 'Sue', true) RETURNING id}
+  given ann = {INSERT INTO fm.users (email, name) VALUES ('t-ann@x', 'Ann') RETURNING id}
+  given sue = {INSERT INTO fm.users (email, name, is_support) VALUES ('t-sue@x', 'Sue', true) RETURNING id}
   given docs = {INSERT INTO fm.folders (owner_id, name) VALUES ($ann, 'Docs') RETURNING id}
   user $sue can break_glass folder $docs
   user $sue cannot view folder $docs
