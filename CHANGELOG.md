@@ -7,6 +7,11 @@ Each release upgrades from the one before it. How releases are numbered and made
 
 ## Unreleased
 
+### Added
+
+- The docs site, at https://rowfence.dev: the guides, the reference, the error codes and the playground,
+  as of the latest release.
+
 ### Changed
 
 - The Zed extension carries the licence in its own folder, as Zed's registry asks, and when `rowfence` isn't
