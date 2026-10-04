@@ -3,7 +3,7 @@
 // headless share dialog, access requests, and the change feed that keeps them current.
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test } from "vitest";
-import { AuthzProvider, Can, ShareDialog, useAccessRequest, usePerms } from "@rowfence/react";
+import { AuthzProvider, Can, ShareDialog, useAccessRequest, usePerms } from "@rowstile/react";
 import { SERVER, as, seed } from "./data";
 
 beforeEach(seed);

@@ -1,5 +1,5 @@
 /**
- * rowfence with Drizzle ORM (node-postgres or postgres.js underneath).
+ * rowstile with Drizzle ORM (node-postgres or postgres.js underneath).
  *
  *     const authz = withAuthz(drizzle(pool), { user: async () => (await auth())?.user.id });
  *     const mine = await authz.transaction((tx) =>
@@ -14,7 +14,7 @@ import { sql, type SQL, type Column } from "drizzle-orm";
 import {
   actAs, calls, signingIn, translate,
   type Id, type ObjectType, type Permission, type Queryable, type UserResolver, type Who,
-} from "@rowfence/client";
+} from "@rowstile/client";
 
 export interface Options {
   /** Who the request is, when nothing set it with actingAs. */

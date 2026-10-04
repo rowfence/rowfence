@@ -1,6 +1,6 @@
 # Contributing
 
-Thank you for helping. rowfence decides who may read and change which rows, so a change is held to one bar:
+Thank you for helping. rowstile decides who may read and change which rows, so a change is held to one bar:
 it must say what it does, and a test must show it. This page says how a change gets in. How to run the
 suites is in [core/README.md](core/README.md). A security problem goes to [SECURITY.md](SECURITY.md), not an
 issue. Everyone taking part follows the [code of conduct](CODE_OF_CONDUCT.md).
@@ -64,7 +64,7 @@ The project's conventions (how the SQL is generated, locking, sessions, what mus
   version on 17 and 18, the SDKs' conformance suites, the example apps, the editors, the packaging, the
   playground and the site. The rest runs each night on `main`: every suite on 17 and 18, the proofs, the
   soak and the benchmark check. A pull request that changes a policy gets a
-  comment from `rowfence review` saying what the change does to access.
+  comment from `rowstile review` saying what the change does to access.
 - **Review**: a maintainer reviews each outside pull request, and may push small fixes to your branch.
   Expect questions about the tests more than about the code.
 - **Merging**: a maintainer merges. An outside pull request is squashed into one commit, and the maintainer

@@ -1,10 +1,10 @@
 // "use cache" where the user doesn't come from the request (check 15): a client whose `user` function knows
-// who it is without reading anything Next would refuse inside a cache. Only @rowfence/next stands in the way
+// who it is without reading anything Next would refuse inside a cache. Only @rowstile/next stands in the way
 // here: before a transaction signs in as someone it calls connection(), which throws inside a cache. Without
 // it this page would cache user 1's notes and serve them to whoever asks.
 import { PrismaPg } from "@prisma/adapter-pg";
-import { authz, signedIn } from "@rowfence/prisma";
-import "@rowfence/next";
+import { authz, signedIn } from "@rowstile/prisma";
+import "@rowstile/next";
 import { pool, requestUser } from "@/db";
 import { PrismaClient } from "@/generated/prisma/client.ts";
 

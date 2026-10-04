@@ -2,7 +2,7 @@
 
 What people run into, by what they see. Most of these were first hit while building the file manager and the
 messenger. A mistake in a policy ends with its code (`[AZ203]`): its page in `docs/errors/`, or
-`rowfence help AZ203`, says what it means and shows it fixed.
+`rowstile help AZ203`, says what it means and shows it fixed.
 
 ## A `{condition}` with a subquery matches rows it shouldn't (or none)
 
@@ -79,11 +79,11 @@ Connect as that role, or `GRANT app_user TO app_backend`. Services signing in wi
 
 ## "new row violates row-level security policy for table T"
 
-That is Postgres's own message, not rowfence's (whose refusals say which rule, and why). It comes from:
+That is Postgres's own message, not rowstile's (whose refusals say which rule, and why). It comes from:
 
 - `INSERT ... RETURNING` or `UPDATE ... RETURNING` of a row the user may not *read* afterwards: returning it
   needs the `select` rule too.
-- A policy on the table that rowfence didn't make. `authz.lint()` lists them: a restrictive one as a note, a
+- A policy on the table that rowstile didn't make. `authz.lint()` lists them: a restrictive one as a note, a
   permissive one as an error, since Postgres joins it to the rules with OR and it lets through what they don't.
 
 ## Your app's role sees everything
@@ -104,26 +104,26 @@ Applying locks the governed tables, and waits 10 s at most (unless you set `lock
 every query behind it. Apply when it is quieter. A policy whose inheritance didn't change applies in a fraction
 of a second: its tables are kept.
 
-## "rowfence: this migration changes the policy the migration before it left (...), but the database has ..."
+## "rowstile: this migration changes the policy the migration before it left (...), but the database has ..."
 
-A rowfence migration starts where the one before it left the database, and says so when it doesn't:
+A rowstile migration starts where the one before it left the database, and says so when it doesn't:
 it was applied twice or out of order, the ones before it weren't applied, or the database was changed
-since with `rowfence push` or `rowfence apply` (development databases). Apply the migrations in order;
-for a development database, make it again from the migrations, or `rowfence push` the policy and keep
+since with `rowstile push` or `rowstile apply` (development databases). Apply the migrations in order;
+for a development database, make it again from the migrations, or `rowstile push` the policy and keep
 using `push` there.
 
-## `rowfence push` or `dev`: isn't marked as a development database (AZ610)
+## `rowstile push` or `dev`: isn't marked as a development database (AZ610)
 
 Push changes a policy straight away, so it only changes a database marked as a development database. The
 first push to a database that never had a policy marks it; one your migrations set up has a policy and no
-mark, and `rowfence remove` doesn't change that: after it, push is still refused. If it is a development
-database, mark it once: `rowfence push --development`. If it is production, it takes migrations
-(`rowfence migrate`).
+mark, and `rowstile remove` doesn't change that: after it, push is still refused. If it is a development
+database, mark it once: `rowstile push --development`. If it is production, it takes migrations
+(`rowstile migrate`).
 
 ## "cannot drop column ... because other objects depend on it" in a schema migration
 
-A view rowfence made reads that column, because the policy uses it. Do it in two steps: change the
-policy so it doesn't use the column and write its migration (`rowfence migrate`), then drop the column
+A view rowstile made reads that column, because the policy uses it. Do it in two steps: change the
+policy so it doesn't use the column and write its migration (`rowstile migrate`), then drop the column
 in a later migration.
 
 ## A named test fails with "given x = {...} returned 0 rows"
@@ -132,17 +132,17 @@ A `given` that names a value must return exactly one row: end the statement with
 columns, for a key of several). Tests run on top of the data already in the database, then roll back: use
 values nothing else uses, or let the database make the ids (`RETURNING id`).
 
-## A new build of rowfence, and the database still has the old functions
+## A new build of rowstile, and the database still has the old functions
 
-`rowfence reapply` after installing a new version. A build from this repository's `main` (a version ending in
-`-dev`) records a hash of its compiler, so `rowfence apply` applies again after the compiler changed; if it
-still says `unchanged`, use `rowfence apply --force`.
+`rowstile reapply` after installing a new version. A build from this repository's `main` (a version ending in
+`-dev`) records a hash of its compiler, so `rowstile apply` applies again after the compiler changed; if it
+still says `unchanged`, use `rowstile apply --force`.
 
 ## `authz.verify()` says false
 
 Rows were written while the triggers were off (a restore with `--disable-triggers`, a bulk load under
 `session_replication_role = replica`, `ALTER TABLE ... DISABLE TRIGGER`), so the inheritance tables don't match
-the app's tables any more. `rowfence reapply --force` computes them again (it locks tree writes while it
+the app's tables any more. `rowstile reapply --force` computes them again (it locks tree writes while it
 runs). A plain `apply` or `reapply` keeps the tables whose definition didn't change, so it doesn't.
 
 ## `authz.lint()` says a SECURITY DEFINER function uses a governed table

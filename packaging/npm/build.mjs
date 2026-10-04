@@ -1,8 +1,8 @@
-// Builds the npm packages of the rowfence command: `rowfence` (the launcher and the command, which is Python,
-// standard library only) and one `@rowfence/cli-<platform>` per platform with a standalone Python in it
+// Builds the npm packages of the rowstile command: `rowstile` (the launcher and the command, which is Python,
+// standard library only) and one `@rowstile/cli-<platform>` per platform with a standalone Python in it
 // (python-build-standalone), trimmed of what the command never uses.
 //
-//   node packaging/npm/build.mjs                         # rowfence, and the package for this platform
+//   node packaging/npm/build.mjs                         # rowstile, and the package for this platform
 //   node packaging/npm/build.mjs --platform linux-x64    # ... for these platforms (repeat it), or --all
 //
 // Writes packaging/npm/out/<package>/; downloads are kept in packaging/npm/.cache/.
@@ -92,16 +92,16 @@ function copyCommand(dest) {
 
 /** @param {string[]} platforms */
 function launcher(platforms) {
-  const dir = join(OUT, "rowfence");
+  const dir = join(OUT, "rowstile");
   rmSync(dir, { recursive: true, force: true });
-  cpSync(join(HERE, "rowfence"), dir, { recursive: true });
+  cpSync(join(HERE, "rowstile"), dir, { recursive: true });
   cpSync(join(ROOT, "LICENSE"), join(dir, "LICENSE"));
   copyCommand(join(dir, "command"));
   const pkg = JSON.parse(readFileSync(join(dir, "package.json"), "utf8"));
   pkg.version = version;
-  pkg.optionalDependencies = Object.fromEntries(Object.keys(TARGETS).map((k) => [`@rowfence/cli-${k}`, version]));
+  pkg.optionalDependencies = Object.fromEntries(Object.keys(TARGETS).map((k) => [`@rowstile/cli-${k}`, version]));
   write(join(dir, "package.json"), pkg);
-  console.log(`built rowfence ${version}${platforms.length ? "" : " (no platform packages)"}`);
+  console.log(`built rowstile ${version}${platforms.length ? "" : " (no platform packages)"}`);
 }
 
 /** @param {string} file @returns {string} */
@@ -191,27 +191,27 @@ function platform(key) {
     chmodSync(join(dir, exe), 0o755);
   }
   write(join(dir, "package.json"), {
-    name: `@rowfence/cli-${key}`,
+    name: `@rowstile/cli-${key}`,
     version,
-    description: `The Python the rowfence command runs on, for ${key} (python-build-standalone ${PYTHON}, trimmed)`,
+    description: `The Python the rowstile command runs on, for ${key} (python-build-standalone ${PYTHON}, trimmed)`,
     license: "Apache-2.0 AND PSF-2.0",
-    repository: { type: "git", url: "git+https://github.com/rowfence/rowfence.git", directory: "packaging/npm" },
+    repository: { type: "git", url: "git+https://github.com/rowstile/rowstile.git", directory: "packaging/npm" },
     os: [target.os],
     cpu: [target.cpu],
     ...(target.libc ? { libc: [target.libc] } : {}),      // npm installs the one for the machine's C library
     files: ["python", "README.md"],
     preferUnplugged: true,
-    rowfencePython: exe,
+    rowstilePython: exe,
   });
   cpSync(join(ROOT, "LICENSE"), join(dir, "LICENSE"));    // the package's; Python's own is python/**/LICENSE.txt
   // ... and those of the libraries built into this Python, where python-build-standalone's full archives put them
   cpSync(join(HERE, "python-licenses"), join(dir, "python", "licenses"), { recursive: true });
-  write(join(dir, "README.md"), `# @rowfence/cli-${key}\n\nThe Python that the \`rowfence\` command runs on, for ${key}: ` +
+  write(join(dir, "README.md"), `# @rowstile/cli-${key}\n\nThe Python that the \`rowstile\` command runs on, for ${key}: ` +
     `CPython ${PYTHON} from python-build-standalone (${RELEASE}), without the parts the command never uses. ` +
-    "Installed by `rowfence` as an optional dependency; not for use on its own.\n\n" +
+    "Installed by `rowstile` as an optional dependency; not for use on its own.\n\n" +
     "Python's licence is `python/lib/python3.13/LICENSE.txt` (`python/LICENSE.txt` on Windows); the licences of the " +
     "libraries built into it (OpenSSL, SQLite, zlib, bzip2, xz, libffi and others) are in `python/licenses/`.\n");
-  console.log(`built @rowfence/cli-${key} (${(size(dir) / 1e6).toFixed(1)} MB unpacked)`);
+  console.log(`built @rowstile/cli-${key} (${(size(dir) / 1e6).toFixed(1)} MB unpacked)`);
 }
 
 const platforms = args();

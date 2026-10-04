@@ -1,5 +1,5 @@
 /**
- * Tree-sitter grammar for rowfence policies (.authz), for editors that highlight with Tree-sitter (Zed,
+ * Tree-sitter grammar for rowstile policies (.authz), for editors that highlight with Tree-sitter (Zed,
  * Helix, Neovim). It follows core/authzlib/parse.py, which stays the definition of the language: a policy
  * this grammar reads differently is a bug here. Each block (type, rules, invariants, test) holds lines of its
  * own kinds, so blocks nest without reading indentation; newlines are whitespace, as a line starting with

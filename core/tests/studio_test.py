@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""studio_test: rowfence why (the smallest changes that would grant a permission) and Studio's API, on the
+"""studio_test: rowstile why (the smallest changes that would grant a permission) and Studio's API, on the
 docs example: read-only by default (nothing it does stays, and it refuses to change shares), able to write
 with --write (shares and decisions made as the person it views as, so the database decides), and only for the
 page that has the token, on localhost.
@@ -20,7 +20,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT)
 sys.path.insert(0, os.path.join(ROOT, "cli"))
-import rowfence_cli  # noqa: E402
+import rowstile_cli  # noqa: E402
 import studio  # noqa: E402
 
 fails = 0
@@ -46,7 +46,7 @@ def psql(db: str, sql: str) -> str:
 
 
 def cli(db: str, *args: str) -> tuple[int, str]:
-    r = subprocess.run([sys.executable, os.path.join(ROOT, "cli", "rowfence_cli.py"), "--db", f"dbname={db}", *args],
+    r = subprocess.run([sys.executable, os.path.join(ROOT, "cli", "rowstile_cli.py"), "--db", f"dbname={db}", *args],
                        capture_output=True, text=True)
     return r.returncode, r.stdout + r.stderr
 
@@ -90,7 +90,7 @@ def main() -> None:
     psql(db, "SELECT authz.act_as('user', '5'); SELECT authz.share('folder', '1', 'viewer', 'org', '1', 'member')")
     shares = lambda: psql(db, "SELECT count(*) FROM authz.shares")
 
-    print("-- rowfence why")
+    print("-- rowstile why")
     rc, out = cli(db, "why", "--as", "user:3", "folder", "3", "edit")
     lines = out.splitlines()
     ways = [x.strip() for x in lines[lines.index("would be granted by:") + 1:]] if "would be granted by:" in lines else []
@@ -122,12 +122,12 @@ def main() -> None:
 
     print("-- Studio, read-only")
     dsn = f"dbname={db}"
-    ro = studio.Studio(dsn, None, policy, writable=False, port=0, read_policy=rowfence_cli.read_policy)
+    ro = studio.Studio(dsn, None, policy, writable=False, port=0, read_policy=rowstile_cli.read_policy)
     ro.start(background=True)
     c = Client(ro)
     try:
         status, page = c.call("/")
-        check("the page, without the token (it carries no data)", status == 200 and "rowfence Studio" in page, status)
+        check("the page, without the token (it carries no data)", status == 200 and "rowstile Studio" in page, status)
         check("the API needs the token", Client(ro, token="wrong").call("/api/overview")[0] == 401)
         check("... and a request for localhost (not a DNS name pointed here)", c.call("/api/overview", host="evil.example:4983")[0] == 403)
         check("no file outside the page's folder", c.call("/..%2fstudio.py")[0] == 404 and c.call("/.hidden")[0] == 404)
@@ -192,7 +192,7 @@ def main() -> None:
         with open(changed, "w", encoding="utf-8") as fh:
             fh.write(text.replace("  can edit  = share or editor or (parent.edit and {inherit})",
                                   "  can edit  = share or editor or viewer or (parent.edit and {inherit})"))
-        s = studio.Studio(dsn, None, changed, writable=False, port=0, read_policy=rowfence_cli.read_policy)
+        s = studio.Studio(dsn, None, changed, writable=False, port=0, read_policy=rowstile_cli.read_policy)
         s.start(background=True)
         try:
             status, d = Client(s).call("/api/diff")
@@ -200,7 +200,7 @@ def main() -> None:
                   status == 409 and "locks the app's tables" in d["detail"], d)
         finally:
             s.stop()
-        s = studio.Studio(dsn, None, changed, writable=True, port=0, read_policy=rowfence_cli.read_policy)
+        s = studio.Studio(dsn, None, changed, writable=True, port=0, read_policy=rowstile_cli.read_policy)
         s.start(background=True)
         try:
             before = psql(db, "SELECT count(*) FROM authz.policy_versions")
@@ -211,8 +211,8 @@ def main() -> None:
         finally:
             s.stop()
 
-    print("-- Studio, able to write (rowfence dev, or --write)")
-    rw = studio.Studio(dsn, None, policy, writable=True, port=0, read_policy=rowfence_cli.read_policy)
+    print("-- Studio, able to write (rowstile dev, or --write)")
+    rw = studio.Studio(dsn, None, policy, writable=True, port=0, read_policy=rowstile_cli.read_policy)
     rw.start(background=True)
     c = Client(rw)
     try:
@@ -257,7 +257,7 @@ def main() -> None:
         raise SystemExit(out)
     psql(masks, f"SELECT authz.act_as('user', '{lead}'); SELECT authz.share('project', '1', 'viewer', 'user', '{bob}')")
     ms = studio.Studio(f"dbname={masks}", None, os.path.join(HERE, "multi.authz"), writable=False, port=0,
-                       read_policy=rowfence_cli.read_policy)
+                       read_policy=rowstile_cli.read_policy)
     ms.start(background=True)
     c = Client(ms)
     try:

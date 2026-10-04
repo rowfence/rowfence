@@ -1,7 +1,7 @@
 #!/bin/bash
-# review.sh: rowfence review in a git repository, with a database at the base branch's state, as CI
+# review.sh: rowstile review in a git repository, with a database at the base branch's state, as CI
 # runs it: what the pull request changes in meaning, access, risk, tests and deploy; the comment, the JSON and
-# the annotations; the database left as it was. And rowfence fmt.
+# the annotations; the database left as it was. And rowstile fmt.
 #   PGHOST=... PGUSER=... tests/review.sh
 set -u
 cd "$(dirname "$0")/.."
@@ -16,8 +16,8 @@ P="$T/p"
 mkdir -p "$P/db/tests"
 sed '/^test$/,$d' example/docs.authz > "$P/db/policy.authz"
 cp example/docs.test.authz "$P/db/tests/docs.authz"
-printf 'policy = "db/policy.authz"\ntests = ["db/tests/*.authz"]\n[migrations]\ntool = "sql"\ndir = "db/migrations"\n' > "$P/rowfence.toml"
-CLI() { ( cd "$P" && python3 "$OLDPWD/cli/rowfence_cli.py" "$@" ); }
+printf 'policy = "db/policy.authz"\ntests = ["db/tests/*.authz"]\n[migrations]\ntool = "sql"\ndir = "db/migrations"\n' > "$P/rowstile.toml"
+CLI() { ( cd "$P" && python3 "$OLDPWD/cli/rowstile_cli.py" "$@" ); }
 G() { git -C "$P" "$@"; }
 # the project in a folder of the repository, as the file manager is in this one
 git -C "$T" init -q -b main && G config user.email t@example.com && G config user.name t
@@ -38,7 +38,7 @@ sed -i 's/user $bo cannot view file $f/user $bo can view file $f/' "$P/db/tests/
 sleep 1
 CLI migrate >/dev/null
 out=$(CLI --db "dbname=$DB" review --base main 2>&1); rc=$?
-[ $rc -eq 0 ] && ok "rowfence review runs, and exits 0 whatever it found (it reports, the tests gate)" || bad "review" "$out"
+[ $rc -eq 0 ] && ok "rowstile review runs, and exits 0 whatever it found (it reports, the tests gate)" || bad "review" "$out"
 case "$out" in *"Meaning  1 permission changed, 3 permissions and rules change through it"*) ok "Meaning: what changed, and what changes through it";; *) bad "meaning" "$out";; esac
 case "$out" in *"Access   "*"users gain \`view\` on"*"Nobody loses access."*) ok "Access: who gains what, on the review data";; *) bad "access" "$out";; esac
 case "$out" in *"folder.view\` allows more than before"*) ok "Risk: the permission widened, with an example";; *) bad "risk" "$out";; esac
@@ -49,7 +49,7 @@ case "$out" in *"Deploy   2 migrations."*"Builds folder__linked_into_parent__tre
 [ "$(PSQL -c "SELECT count(*) || '/' || max(lock) FROM authz.policy_versions")" = "$before" ] &&
   ok "the review database is left as it was" || bad "review left changes"
 md=$(CLI --db "dbname=$DB" review --base main --markdown)
-case "$md" in "<!-- rowfence review -->"*"<details><summary>Meaning</summary>"*"| \`folder.view\` (changed) |"*"<details><summary>Access</summary>"*"<details><summary>Deploy</summary>"*)
+case "$md" in "<!-- rowstile review -->"*"<details><summary>Meaning</summary>"*"| \`folder.view\` (changed) |"*"<details><summary>Access</summary>"*"<details><summary>Deploy</summary>"*)
   ok "--markdown: the comment, with its marker and details";; *) bad "markdown" "$md";; esac
 CLI review --base main --json | python3 -c "import json,sys; d=json.load(sys.stdin); assert d['meaning']['changed'][0]['what'] == 'folder.view'" &&
   ok "--json" || bad "json"
@@ -75,7 +75,7 @@ sed -i 's/can edit  = share or editor or (parent.edit and {inherit})/can edit  =
 out=$(CLI review --base main 2>&1)
 case "$out" in "Meaning  unchanged: every permission and rule grants the same in"*) ok "a refactor: meaning unchanged, checked in small worlds";; *) bad "refactor" "$out";; esac
 
-echo "-- rowfence fmt"
+echo "-- rowstile fmt"
 G checkout -q -- db
 out=$(CLI fmt --check 2>&1); rc=$?
 case "$out" in *"db/policy.authz: not formatted"*) [ $rc -eq 1 ] && ok "fmt --check: exit 1, and which file" || bad "fmt --check exit" "$rc";; *) bad "fmt --check" "$out";; esac
@@ -92,7 +92,7 @@ out=$(CLI fmt 2>&1)
 lines=$(wc -l < "$P/db/policy.authz"); crlf=$(grep -c $'\r$' "$P/db/policy.authz")
 case "$out" in *"formatted db/policy.authz"*) [ "$lines" = "$crlf" ] && ok "... and fmt writes it back with CRLF" || bad "fmt on CRLF: endings" "$crlf of $lines";; *) bad "fmt on CRLF" "$out";; esac
 
-echo "-- a base in the language before this one (a pull request that upgrades rowfence rewrites the policy)"
+echo "-- a base in the language before this one (a pull request that upgrades rowstile rewrites the policy)"
 G checkout -q -- db && G clean -q -fd db
 { G checkout -q -b before && sed -i 's/^app role app_user/role app_user/' "$P/db/policy.authz" && G commit -q -am before &&
   G checkout -q main; } || bad "setting up the branch before"

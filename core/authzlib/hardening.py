@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from .compiler import MANY_EXPANSIONS, Core
 from .parse import Loc, cols
-from .sqlutil import lit, q, qt
+from .sqlutil import POLICY_MARKS, VIEW_MARKS, lit, q, qt
 
 DEF = "SECURITY DEFINER SET search_path = pg_catalog, pg_temp"
 
@@ -201,7 +201,7 @@ BEGIN
     severity := 'error'; object := {lit(role)};
     problem := format('is a member of %s, which bypasses row-level security', r.parent); RETURN NEXT;
   END LOOP;
-  -- rowfence's own objects: nobody but the owner uses them, except for what the policy grants
+  -- rowstile's own objects: nobody but the owner uses them, except for what the policy grants
   FOR r IN {self.extra_grants_sql()} LOOP
     severity := 'error'; object := r.object;
     problem := format('%s holds %s on it, which the policy doesn''t give (a default privilege of the owner, or a grant made since the last apply): the next apply takes it back, or %s', r.who, r.privilege, r.stmt);
@@ -210,7 +210,7 @@ BEGIN
   -- schemas on the search path of the functions that run as the owner, which others may create in
   FOR r IN {path_writers_sql("authz_int.policy_path()", "(SELECT nspowner FROM pg_namespace WHERE nspname = 'authz_int')")} LOOP
     severity := 'error'; object := r.schema;
-    problem := format('is on the search path of rowfence''s functions that run as the owner, and %s may create in it: a function there can take the place of a built-in one and run as the owner. REVOKE CREATE ON SCHEMA %I FROM %s, or apply with a search path without it', r.who, r.schema, r.who);
+    problem := format('is on the search path of rowstile''s functions that run as the owner, and %s may create in it: a function there can take the place of a built-in one and run as the owner. REVOKE CREATE ON SCHEMA %I FROM %s, or apply with a search path without it', r.who, r.schema, r.who);
     RETURN NEXT;
   END LOOP;
   -- governed tables
@@ -239,7 +239,7 @@ BEGIN
       RETURN NEXT;
     END IF;
   END LOOP;
-  -- policies on governed tables that rowfence didn't make (left from before, or made by a migration) and that
+  -- policies on governed tables that rowstile didn't make (left from before, or made by a migration) and that
   -- apply to the app role: Postgres joins permissive policies with OR, so one widens what the rules allow
   FOR r IN SELECT p.polname, p.polrelid::regclass AS tbl, p.polpermissive,
                   CASE p.polcmd WHEN 'r' THEN 'select' WHEN 'a' THEN 'insert' WHEN 'w' THEN 'update'
@@ -247,7 +247,7 @@ BEGIN
            FROM pg_policy p
            LEFT JOIN pg_description d ON d.objoid = p.oid AND d.classoid = 'pg_policy'::regclass
            WHERE p.polrelid = ANY (SELECT to_regclass(x) FROM unnest({arr([qt(t) for t in governed])}) x)
-             AND d.description IS DISTINCT FROM 'rowfence'
+             AND coalesce(d.description, '') NOT IN {POLICY_MARKS}
              AND p.polname NOT IN ('authz_select', 'authz_insert', 'authz_update', 'authz_delete')
              AND EXISTS (SELECT 1 FROM unnest(p.polroles) o
                          WHERE CASE WHEN o = 0 THEN true ELSE pg_has_role(v_role, o, 'MEMBER') END)
@@ -255,10 +255,10 @@ BEGIN
     object := r.tbl::text;
     IF r.polpermissive THEN
       severity := 'error';
-      problem := format('the policy %I (%s) on it is not rowfence''s: Postgres joins a table''s policies with OR, so it lets %s through whatever the rules say. DROP POLICY %I ON %s, and say what it allowed in the policy file', r.polname, r.cmd, {lit(role)}, r.polname, r.tbl);
+      problem := format('the policy %I (%s) on it is not rowstile''s: Postgres joins a table''s policies with OR, so it lets %s through whatever the rules say. DROP POLICY %I ON %s, and say what it allowed in the policy file', r.polname, r.cmd, {lit(role)}, r.polname, r.tbl);
     ELSE
       severity := 'info';
-      problem := format('the restrictive policy %I (%s) on it is not rowfence''s: %s gets less than the rules give, and a write it refuses fails with Postgres''s own message, not a reason', r.polname, r.cmd, {lit(role)});
+      problem := format('the restrictive policy %I (%s) on it is not rowstile''s: %s gets less than the rules give, and a write it refuses fails with Postgres''s own message, not a reason', r.polname, r.cmd, {lit(role)});
     END IF;
     RETURN NEXT;
   END LOOP;
@@ -388,7 +388,7 @@ BEGIN
              AND d.refobjid = ANY (SELECT to_regclass(x) FROM unnest({arr([qt(t) for t in typed_tables + sorted(link_tables)])}) x)
              AND v.oid <> d.refobjid AND v.relkind IN ('v', 'm')
              AND v.relnamespace NOT IN (to_regnamespace('authz_gen'), to_regnamespace('authz_int'))
-             AND coalesce(ds.description, '') <> 'rowfence masked view'
+             AND coalesce(ds.description, '') NOT IN {VIEW_MARKS}
              AND NOT coalesce(v.reloptions @> ARRAY['security_invoker=true'], false)
              AND NOT coalesce(v.reloptions @> ARRAY['security_invoker=on'], false)
              AND has_table_privilege(v_role, v.oid, 'SELECT') LOOP

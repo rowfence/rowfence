@@ -3,7 +3,7 @@
 Indexes. The policy looks rows up by columns of the app's tables: a relation read from a column finds the
 objects a subject is linked to by that column (`owner_id`, `parent_id`); one read from a link table looks it
 up by the subject (lists, select rules) and by the object (checks, explanations). Without an index each is a
-full scan. rowfence doesn't create them: they are the app's schema, and an index its ORM doesn't know about
+full scan. rowstile doesn't create them: they are the app's schema, and an index its ORM doesn't know about
 would show as drift in Prisma's, Drizzle Kit's and Alembic's own diffs. It names each missing one, why it is
 needed (the policy line), and the line to add for the app's migration tool.
 
@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING, TypeAlias, TypedDict
 
 from .connection import Db, Value, text
 from .parse import Loc, Type, cols
-from .sqlutil import lit, q, qt
+from .sqlutil import POLICY_MARKS, lit, q, qt
 
 if TYPE_CHECKING:
     from . import Compiler
@@ -147,7 +147,7 @@ def describe_missing(missing: list[Lookup], tool: str | None) -> str:
 # --- plans ---------------------------------------------------------------------------------------------
 def app_role(db: Db) -> str | None:
     rows = db.rows("SELECT DISTINCT r.rolname AS r FROM pg_catalog.pg_policy p JOIN pg_catalog.pg_description d "
-                   "ON d.objoid = p.oid AND d.classoid = 'pg_catalog.pg_policy'::regclass AND d.description = 'rowfence' "
+                   f"ON d.objoid = p.oid AND d.classoid = 'pg_catalog.pg_policy'::regclass AND d.description IN {POLICY_MARKS} "
                    "CROSS JOIN unnest(p.polroles) ro JOIN pg_catalog.pg_roles r ON r.oid = ro")
     return text(rows[0], "r") if rows else None
 

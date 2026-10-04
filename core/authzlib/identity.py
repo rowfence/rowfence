@@ -54,7 +54,7 @@ BEGIN
   SELECT * INTO k FROM authz_int.session_key;
   RETURN {SESSION_SIG};
 END $f$;
--- signs the settings as they are now: for rowfence's own functions, after they switch who is signed in
+-- signs the settings as they are now: for rowstile's own functions, after they switch who is signed in
 CREATE FUNCTION authz_int.sign() RETURNS void
 LANGUAGE plpgsql VOLATILE {DEF} AS $f$
 BEGIN
@@ -81,14 +81,14 @@ BEGIN
   IF v_sig <> '' THEN
     RAISE EXCEPTION 'who is signed in was changed after signing in' USING ERRCODE = 'invalid_authorization_specification',
       HINT = 'say who is signed in with authz.act_as(), never by setting authz.user_id or the other authz settings '
-             '(rowfence help AZ702)';
+             '(rowstile help AZ702)';
   ELSIF coalesce(current_setting('authz.user_id', true), '') <> '' THEN
     RAISE EXCEPTION 'authz.user_id was set directly, so it is not believed' USING ERRCODE = 'invalid_authorization_specification',
-      HINT = 'sign in with SELECT authz.act_as(''user'', ''42''), authz.login_key() or authz.login_jwt() (rowfence help AZ702)';
+      HINT = 'sign in with SELECT authz.act_as(''user'', ''42''), authz.login_key() or authz.login_jwt() (rowstile help AZ702)';
   END IF;
   RAISE EXCEPTION 'nobody signed in in this transaction' USING ERRCODE = 'invalid_authorization_specification',
     HINT = 'start each transaction with SELECT authz.act_as(''user'', ''42''), or authz.act_as(NULL, NULL) for nobody '
-           '(or authz.login_key() / authz.login_jwt()) (rowfence help AZ701)';
+           '(or authz.login_key() / authz.login_jwt()) (rowstile help AZ701)';
 END $f$;"""
 
     def scope_rows(self) -> list[tuple[str, str, str | None, str]]:
@@ -141,7 +141,7 @@ LANGUAGE plpgsql STABLE {DEF} AS $f$
 BEGIN
   IF NOT authz_int.writable() THEN
     RAISE EXCEPTION 'this session is read-only (viewing as someone else, or a read-only token)'
-      USING ERRCODE = 'insufficient_privilege', HINT = 'rowfence help AZ704';
+      USING ERRCODE = 'insufficient_privilege', HINT = 'rowstile help AZ704';
   END IF;
 END $f$;
 -- the role that called (inside SECURITY DEFINER functions current_user is the owner)
@@ -204,7 +204,7 @@ BEGIN
   PERFORM authz_int.check_writable();
   IF p_principal_id IS NULL THEN
     IF v_type <> 'user' OR authz.uid() IS NULL THEN
-      RAISE EXCEPTION 'sign in to create an API key' USING ERRCODE = 'insufficient_privilege', HINT = 'rowfence help AZ701';
+      RAISE EXCEPTION 'sign in to create an API key' USING ERRCODE = 'insufficient_privilege', HINT = 'rowstile help AZ701';
     END IF;
     v_id := authz.uid()::text;
   ELSE
@@ -213,9 +213,9 @@ BEGIN
   END IF;
   SELECT string_agg(x, ', ') INTO v_bad FROM unnest(v_scopes) x
   WHERE NOT EXISTS (SELECT 1 FROM authz_int.scope_items WHERE scope = x);
-  IF v_bad IS NOT NULL THEN RAISE EXCEPTION 'no scope % in the policy', v_bad USING HINT = 'rowfence help AZ707'; END IF;
+  IF v_bad IS NOT NULL THEN RAISE EXCEPTION 'no scope % in the policy', v_bad USING HINT = 'rowstile help AZ707'; END IF;
   IF v_cur IS NOT NULL AND (cardinality(v_scopes) = 0 OR NOT v_scopes <@ v_cur) THEN
-    RAISE EXCEPTION 'a key cannot have more scopes than the session creating it' USING ERRCODE = 'insufficient_privilege', HINT = 'rowfence help AZ704';
+    RAISE EXCEPTION 'a key cannot have more scopes than the session creating it' USING ERRCODE = 'insufficient_privilege', HINT = 'rowstile help AZ704';
   END IF;
   INSERT INTO authz.api_keys (user_id, principal_type, name, prefix, hash, scopes, expires_at)
   VALUES (v_id, v_type, p_name, left(v_token, 10), encode(sha256(convert_to(v_token, 'UTF8')), 'hex'),
@@ -230,14 +230,14 @@ CREATE FUNCTION authz_int.check_manage_keys(p_type text, p_id text) RETURNS void
 LANGUAGE plpgsql STABLE {DEF} AS $f$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM authz_int.types WHERE name = p_type AND principal) THEN
-    RAISE EXCEPTION 'no type % that signs in (type ... principal) in the policy', p_type USING HINT = 'rowfence help AZ707';
+    RAISE EXCEPTION 'no type % that signs in (type ... principal) in the policy', p_type USING HINT = 'rowstile help AZ707';
   END IF;
   IF NOT EXISTS (SELECT 1 FROM authz_int.perms WHERE type = p_type AND perm = 'manage_keys') THEN
     RAISE EXCEPTION 'the policy gives % no manage_keys permission, so nobody manages its keys', p_type
-      USING ERRCODE = 'insufficient_privilege', HINT = 'rowfence help AZ707';
+      USING ERRCODE = 'insufficient_privilege', HINT = 'rowstile help AZ707';
   END IF;
   IF NOT EXISTS (SELECT 1 FROM authz.principal()) OR NOT coalesce(authz.can(p_type, p_id, 'manage_keys'), false) THEN
-    RAISE EXCEPTION 'you cannot manage the keys of % %', p_type, p_id USING ERRCODE = 'insufficient_privilege', HINT = 'rowfence help AZ705';
+    RAISE EXCEPTION 'you cannot manage the keys of % %', p_type, p_id USING ERRCODE = 'insufficient_privilege', HINT = 'rowstile help AZ705';
   END IF;
 END $f$;
 
@@ -272,7 +272,7 @@ BEGIN
        OR (EXISTS (SELECT 1 FROM authz_int.perms WHERE type = k.principal_type AND perm = 'manage_keys')
            AND EXISTS (SELECT 1 FROM authz.principal())
            AND coalesce(authz.can(k.principal_type, k.user_id, 'manage_keys'), false))) THEN
-    RAISE EXCEPTION 'no API key % of yours', p_id USING ERRCODE = 'insufficient_privilege', HINT = 'rowfence help AZ708';
+    RAISE EXCEPTION 'no API key % of yours', p_id USING ERRCODE = 'insufficient_privilege', HINT = 'rowstile help AZ708';
   END IF;
   UPDATE authz.api_keys SET revoked_at = now() WHERE id = p_id;
   PERFORM authz_int.audit('revoke_api_key', k.principal_type, k.user_id, NULL, NULL, NULL, NULL,
@@ -288,7 +288,7 @@ BEGIN
   IF p_id IS NOT NULL AND coalesce(p_type, 'user') <> 'user'
      AND NOT EXISTS (SELECT 1 FROM authz_int.types WHERE name = p_type AND principal) THEN
     RAISE EXCEPTION '% is not a type that signs in', p_type USING ERRCODE = 'invalid_parameter_value',
-      HINT = 'principal types are marked "principal" in the policy: type service = app.services principal (rowfence help AZ707)';
+      HINT = 'principal types are marked "principal" in the policy: type service = app.services principal (rowstile help AZ707)';
   END IF;
   -- stored as every other id is ('05' is 5), so the audit and created_by name the user as shares do
   PERFORM set_config('authz.user_id', coalesce(authz_int.canon(coalesce(p_type, 'user'), p_id), ''), true);
@@ -306,7 +306,7 @@ DECLARE k authz.api_keys;
 BEGIN
   SELECT * INTO k FROM authz.api_keys WHERE hash = encode(sha256(convert_to(coalesce(p_token, ''), 'UTF8')), 'hex');
   IF k.id IS NULL OR k.revoked_at IS NOT NULL OR (k.expires_at IS NOT NULL AND k.expires_at <= now()) THEN
-    RAISE EXCEPTION 'invalid API key' USING ERRCODE = 'invalid_authorization_specification', HINT = 'rowfence help AZ703';
+    RAISE EXCEPTION 'invalid API key' USING ERRCODE = 'invalid_authorization_specification', HINT = 'rowstile help AZ703';
   END IF;
   PERFORM set_config('authz.user_id', k.user_id, true);
   PERFORM set_config('authz.principal_type', CASE WHEN k.principal_type = 'user' THEN '' ELSE k.principal_type END, true);
@@ -316,7 +316,7 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM authz.principal()) THEN
     PERFORM set_config('authz.user_id', '', true);
     PERFORM set_config('authz.principal_type', '', true);
-    RAISE EXCEPTION 'invalid API key' USING ERRCODE = 'invalid_authorization_specification', HINT = 'rowfence help AZ703';
+    RAISE EXCEPTION 'invalid API key' USING ERRCODE = 'invalid_authorization_specification', HINT = 'rowstile help AZ703';
   END IF;
   -- when it was last used, to the minute: never waiting on another request with the key (the row they
   -- lock), and not at all in a read-only transaction (a replica, a GET)
@@ -358,7 +358,7 @@ DECLARE parts text[] := string_to_array(coalesce(p_token, ''), '.'); v_head json
         v_user text; v_type text; v_scopes text[]; v_now numeric := extract(epoch FROM now()); v_want text;
 BEGIN
   SELECT value INTO v_secret FROM authz.settings WHERE key = 'jwt_secret';
-  IF v_secret IS NULL THEN RAISE EXCEPTION 'JWT login is not configured (authz.settings jwt_secret)' USING HINT = 'rowfence help AZ703'; END IF;
+  IF v_secret IS NULL THEN RAISE EXCEPTION 'JWT login is not configured (authz.settings jwt_secret)' USING HINT = 'rowstile help AZ703'; END IF;
   BEGIN
     IF cardinality(parts) <> 3 THEN RAISE EXCEPTION 'bad'; END IF;
     v_head := convert_from(authz_int.b64url(parts[1]), 'UTF8')::jsonb;
@@ -369,27 +369,27 @@ BEGIN
       RAISE EXCEPTION 'bad';
     END IF;
   EXCEPTION WHEN OTHERS THEN
-    RAISE EXCEPTION 'invalid token' USING ERRCODE = 'invalid_authorization_specification', HINT = 'rowfence help AZ703';
+    RAISE EXCEPTION 'invalid token' USING ERRCODE = 'invalid_authorization_specification', HINT = 'rowstile help AZ703';
   END;
   -- an expiry is required; both are numbers of seconds
   IF jsonb_typeof(v_claims->'exp') IS DISTINCT FROM 'number' OR (v_claims->>'exp')::numeric <= v_now
      OR (v_claims ? 'nbf' AND (jsonb_typeof(v_claims->'nbf') <> 'number' OR (v_claims->>'nbf')::numeric > v_now)) THEN
-    RAISE EXCEPTION 'token expired or not yet valid' USING ERRCODE = 'invalid_authorization_specification', HINT = 'rowfence help AZ703';
+    RAISE EXCEPTION 'token expired or not yet valid' USING ERRCODE = 'invalid_authorization_specification', HINT = 'rowstile help AZ703';
   END IF;
   SELECT value INTO v_want FROM authz.settings WHERE key = 'jwt_issuer';
   IF v_want IS NOT NULL AND v_claims->>'iss' IS DISTINCT FROM v_want THEN
-    RAISE EXCEPTION 'token from another issuer' USING ERRCODE = 'invalid_authorization_specification', HINT = 'rowfence help AZ703';
+    RAISE EXCEPTION 'token from another issuer' USING ERRCODE = 'invalid_authorization_specification', HINT = 'rowstile help AZ703';
   END IF;
   SELECT value INTO v_want FROM authz.settings WHERE key = 'jwt_audience';
   -- (coalesce: without the claim both sides are NULL, and a token that names no audience is not for this one)
   IF v_want IS NOT NULL AND NOT coalesce(v_claims->>'aud' = v_want
        OR (jsonb_typeof(v_claims->'aud') = 'array' AND v_claims->'aud' ? v_want), false) THEN
-    RAISE EXCEPTION 'token for another audience' USING ERRCODE = 'invalid_authorization_specification', HINT = 'rowfence help AZ703';
+    RAISE EXCEPTION 'token for another audience' USING ERRCODE = 'invalid_authorization_specification', HINT = 'rowstile help AZ703';
   END IF;
   v_user := v_claims->>coalesce((SELECT value FROM authz.settings WHERE key = 'jwt_user_claim'), 'sub');
   v_type := v_claims->>(SELECT value FROM authz.settings WHERE key = 'jwt_type_claim');
   IF coalesce(v_type, 'user') <> 'user' AND NOT EXISTS (SELECT 1 FROM authz_int.types WHERE name = v_type AND principal) THEN
-    RAISE EXCEPTION 'the token names a type that does not sign in' USING ERRCODE = 'invalid_authorization_specification', HINT = 'rowfence help AZ703';
+    RAISE EXCEPTION 'the token names a type that does not sign in' USING ERRCODE = 'invalid_authorization_specification', HINT = 'rowstile help AZ703';
   END IF;
   PERFORM set_config('authz.user_id', coalesce(authz_int.canon(coalesce(v_type, 'user'), v_user), ''), true);
   PERFORM set_config('authz.principal_type', CASE WHEN coalesce(v_type, 'user') = 'user' THEN '' ELSE v_type END, true);
@@ -406,7 +406,7 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM authz.principal()) THEN
     PERFORM set_config('authz.user_id', '', true);
     PERFORM set_config('authz.principal_type', '', true);
-    RAISE EXCEPTION 'the token names no active user' USING ERRCODE = 'invalid_authorization_specification', HINT = 'rowfence help AZ703';
+    RAISE EXCEPTION 'the token names no active user' USING ERRCODE = 'invalid_authorization_specification', HINT = 'rowstile help AZ703';
   END IF;
   RETURN authz_int.actor();
 END $f$;
@@ -419,14 +419,14 @@ DECLARE v_me text := nullif(current_setting('authz.user_id', true), '');
         v_pt text := coalesce(current_setting('authz.principal_type', true), ''); v_actor text := authz_int.actor();
 BEGIN
   IF coalesce(current_setting('authz.acting_user', true), '') <> '' THEN
-    RAISE EXCEPTION 'already viewing as someone' USING ERRCODE = 'insufficient_privilege', HINT = 'rowfence help AZ704';
+    RAISE EXCEPTION 'already viewing as someone' USING ERRCODE = 'insufficient_privilege', HINT = 'rowstile help AZ704';
   END IF;
   IF coalesce(btrim(p_reason), '') = '' THEN
-    RAISE EXCEPTION 'say why (the reason is kept in the audit trail)' USING HINT = 'rowfence help AZ710';
+    RAISE EXCEPTION 'say why (the reason is kept in the audit trail)' USING HINT = 'rowstile help AZ710';
   END IF;
   IF NOT (authz_int.caller_is_admin()
           {'OR (EXISTS (SELECT 1 FROM authz.principal()) AND authz.can(' + lit('user') + ', p_user, ' + lit('impersonate') + '))' if imp else ''}) THEN
-    RAISE EXCEPTION 'you cannot view as user %', p_user USING ERRCODE = 'insufficient_privilege', HINT = 'rowfence help AZ705';
+    RAISE EXCEPTION 'you cannot view as user %', p_user USING ERRCODE = 'insufficient_privilege', HINT = 'rowstile help AZ705';
   END IF;
   PERFORM set_config('authz.user_id', coalesce(authz_int.canon('user', p_user), ''), true);
   PERFORM set_config('authz.principal_type', '', true);
@@ -435,7 +435,7 @@ BEGIN
     PERFORM set_config('authz.user_id', coalesce(v_me, ''), true);
     PERFORM set_config('authz.principal_type', v_pt, true);
     PERFORM authz_int.sign();
-    RAISE EXCEPTION 'there is no active user %', p_user USING HINT = 'rowfence help AZ708';
+    RAISE EXCEPTION 'there is no active user %', p_user USING HINT = 'rowstile help AZ708';
   END IF;
   PERFORM set_config('authz.acting_user', coalesce(v_actor, authz_int.caller_role()), true);
   PERFORM set_config('authz.scopes', 'read', true);
@@ -453,7 +453,7 @@ BEGIN
   CASE p_type || '.' || p_relation
 {sync}
     ELSE RAISE EXCEPTION '%.% has no single table of members to sync (it needs one source: table(group -> user), without where)',
-      p_type, p_relation USING HINT = 'rowfence help AZ707';
+      p_type, p_relation USING HINT = 'rowstile help AZ707';
   END CASE;
   PERFORM authz_int.audit('sync_members', p_type, p_id, p_relation, 'user', NULL, NULL,
                           jsonb_build_object('added', added, 'removed', removed, 'members', p_members));

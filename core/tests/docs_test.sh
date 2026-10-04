@@ -2,7 +2,7 @@
 # docs_test.sh: docs/getting-started.md runs as written and does what the guide says.
 #   PGHOST=... PGUSER=postgres tests/docs_test.sh
 # Walks the guide's blocks in order, in a fresh database and an empty folder: ```sql blocks run in psql,
-# ```authz <file> blocks are written to that file, ```sh blocks run (with rowfence on the PATH, and
+# ```authz <file> blocks are written to that file, ```sh blocks run (with rowstile on the PATH, and
 # DATABASE_URL naming the database). Then checks what the guide's comments promise.
 set -u
 cd "$(dirname "$0")/.."
@@ -21,8 +21,8 @@ drop_roles
 DIR=$(mktemp -d)
 # the folder step 1 puts on the PATH (an indented line, from the repository's root): the command is there
 CLI=$(sed -n 's/^ *export PATH="\$PWD\/\([^:"]*\):\$PATH".*/\1/p' "$GUIDE" | head -n 1)
-[ -n "$CLI" ] && [ -x "../$CLI/rowfence" ] && echo "ok    the guide's PATH line names the command's folder ($CLI)" ||
-  { echo "FAIL  the guide's PATH line: '$CLI' doesn't hold the rowfence command"; fails=$((fails + 1)); CLI=core/cli; }
+[ -n "$CLI" ] && [ -x "../$CLI/rowstile" ] && echo "ok    the guide's PATH line names the command's folder ($CLI)" ||
+  { echo "FAIL  the guide's PATH line: '$CLI' doesn't hold the rowstile command"; fails=$((fails + 1)); CLI=core/cli; }
 out=$(DATABASE_URL="dbname=$DB" PATH="$PWD/../$CLI:$PATH" python3 - "$GUIDE" "$DIR" "$DB" <<'PY'
 import os, re, subprocess, sys
 guide, folder, db = sys.argv[1:]
@@ -51,14 +51,14 @@ PY
 rc=$?
 check "every block of the guide runs" "$rc" "0"
 [ $rc -ne 0 ] && echo "$out" | tail -n 25
-case "$out" in *"ok   compiles"*"applied in"*"check(s) pass"*) echo "ok    rowfence dev applies the policy and its tests pass";;
-  *) echo "FAIL  rowfence dev: $(echo "$out" | grep -A 12 'sh$' | head -30)"; fails=$((fails + 1));; esac
+case "$out" in *"ok   compiles"*"applied in"*"check(s) pass"*) echo "ok    rowstile dev applies the policy and its tests pass";;
+  *) echo "FAIL  rowstile dev: $(echo "$out" | grep -A 12 'sh$' | head -30)"; fails=$((fails + 1));; esac
 case "$out" in *"no   insert : project.edit and author"*) echo "ok    explain-rule says which rule and what is missing";;
   *) echo "FAIL  explain-rule"; fails=$((fails + 1));; esac
 [ -f "$DIR/db/policy.lock" ] && ls "$DIR"/migrations/*_authz_policy.sql >/dev/null 2>&1 && grep -q "linguist-generated" "$DIR/.gitattributes" &&
-  ( cd "$DIR" && PATH="$OLDPWD/cli:$PATH" rowfence migrate --check >/dev/null ) &&
-  echo "ok    rowfence migrate writes the first migration, the lock file and .gitattributes" ||
-  { echo "FAIL  rowfence migrate: $(ls -R "$DIR" | head -20)"; fails=$((fails + 1)); }
+  ( cd "$DIR" && PATH="$OLDPWD/cli:$PATH" rowstile migrate --check >/dev/null ) &&
+  echo "ok    rowstile migrate writes the first migration, the lock file and .gitattributes" ||
+  { echo "FAIL  rowstile migrate: $(ls -R "$DIR" | head -20)"; fails=$((fails + 1)); }
 # what the guide's comments say the last blocks return
 notes_cy=$(psql -X -At -d "$DB" -c "SET ROLE app_backend" -c "SET authz.user_id = '3'" -c "SELECT count(*) FROM app.notes" | tail -n 1)
 check "cy sees no notes" "$notes_cy" "0"

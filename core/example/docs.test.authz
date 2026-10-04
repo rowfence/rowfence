@@ -1,5 +1,5 @@
 -- Named tests for docs.authz: each brings its own data and rolls it back.
--- Run them: rowfence test example/docs.test.authz, or compile_policy.py example/docs.authz --tests example/docs.test.authz
+-- Run them: rowstile test example/docs.test.authz, or compile_policy.py example/docs.authz --tests example/docs.test.authz
 
 test "a folder's owner edits what is inside, and others see nothing"
   given ann = {INSERT INTO app.users (id, name) VALUES (9001, 'Ann') RETURNING id}

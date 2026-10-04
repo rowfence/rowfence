@@ -1,7 +1,7 @@
-"""rowfence with FastAPI: one line.
+"""rowstile with FastAPI: one line.
 
     app = FastAPI()
-    authz = Rowfence(app, engine, user=current_user)   # current_user(request): its user's id; before adding routes
+    authz = Rowstile(app, engine, user=current_user)   # current_user(request): its user's id; before adding routes
 
 Each request acts for user(request) (a user id, ("service", 3), a Principal, or None for nobody; it may be
 async), so every transaction it begins on `engine` signs in as them. A refused write answers 403 with the
@@ -9,9 +9,9 @@ reason (an RFC 9457 problem body), a row the user can't see 404. At start-up the
 connection that skips row-level security (authz.connection_check()), with or without a lifespan of its own.
 
 user(request) runs in a middleware this adds: read the session or the token from the request itself. What a
-middleware of the app's puts on request.state is there only if it was added after Rowfence(...) (Starlette
+middleware of the app's puts on request.state is there only if it was added after Rowstile(...) (Starlette
 runs the one added last first). It may raise an HTTPException (a 401 for a bad token), which is answered as
-it is. WebSockets are not signed in: use rowfence.acting_as() in the endpoint.
+it is. WebSockets are not signed in: use rowstile.acting_as() in the endpoint.
 """
 from __future__ import annotations
 
@@ -50,7 +50,7 @@ if TYPE_CHECKING:
 UserOf: TypeAlias = "Callable[[Request], Who | Awaitable[Who]]"
 
 
-class Rowfence:
+class Rowstile:
     def __init__(self, app: FastAPI, engine: Engine | AsyncEngine | None = None, user: UserOf | None = None,
                  check_connection: bool = True) -> None:
         self.app, self.engine, self.user = app, engine, user
@@ -130,7 +130,7 @@ async def _db_error(request: Request, exc: Exception) -> Response:
         return _json(r.problem())
     if not_signed_in(exc):                      # the app's bug, not the user's doing: a 500 that says what
         raise NotSignedIn("a query ran in a transaction nobody signed in to: every transaction must begin with "
-                          "authz.act_as() (rowfence.sqlalchemy.install(engine) does it; is this engine in "
+                          "authz.act_as() (rowstile.sqlalchemy.install(engine) does it; is this engine in "
                           "AUTOCOMMIT, or the query on another connection?)") from exc
     raise exc
 

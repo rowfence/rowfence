@@ -1,5 +1,5 @@
 /**
- * rowfence with node-postgres (pg).
+ * rowstile with node-postgres (pg).
  *
  *     const db = authz(new Pool({ connectionString }), { user: async () => (await auth())?.user.id });
  *     await db.transaction(async (client) => client.query("UPDATE app.notes SET body = $1 WHERE id = $2", [b, id]));
@@ -12,7 +12,7 @@
 import type { Pool, PoolClient, QueryResult, QueryResultRow } from "pg";
 import {
   actAs, calls, signingIn, translate, type Queryable, type UserResolver, type Who,
-} from "@rowfence/client";
+} from "@rowstile/client";
 
 export interface Options {
   /** Who the request is, when nothing set it with actingAs. */
@@ -67,7 +67,7 @@ export { calls };
 
 /** A function for the React kit's live updates: calls onChange whenever access may have changed (the policy's
  *  change feed, NOTIFY authz_changes). It is off until an administrator turns it on, as the owner, in a
- *  migration: INSERT INTO authz.settings VALUES ('notify_changes', 'on'), the one table of rowfence's that is
+ *  migration: INSERT INTO authz.settings VALUES ('notify_changes', 'on'), the one table of rowstile's that is
  *  written by hand (the reference's "Using it from app code"); the app role can't.
  *  One connection listens for every subscriber. Each time it begins to listen, the first time too, it tells
  *  every subscriber once: what changed while the connection was being opened was notified to nobody. If it

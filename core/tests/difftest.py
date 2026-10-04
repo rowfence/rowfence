@@ -122,7 +122,7 @@ def caveat_case(caveats: dict[str, Caveat], alias: str = "g") -> str:
 
 def idsql(t: Type, a: str | None = None, columns: Cols | None = None) -> str:
     """The text id of t's row a, or of the t that columns point at: the key column, or for a
-    composite key the text Postgres prints for the row (what rowfence's ids are)."""
+    composite key the text Postgres prints for the row (what rowstile's ids are)."""
     p = f"{a}." if a else ""
     cols = [columns] if isinstance(columns, str) else list(columns or [c for c, _ in t.key])
     if len(t.key) == 1:

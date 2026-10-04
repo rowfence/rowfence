@@ -1,9 +1,9 @@
-"""rowfence with psycopg 3, without SQLAlchemy.
+"""rowstile with psycopg 3, without SQLAlchemy.
 
-    with rowfence.psycopg.transaction(conn, 42):              # BEGIN; SELECT authz.act_as('user', '42')
+    with rowstile.psycopg.transaction(conn, 42):              # BEGIN; SELECT authz.act_as('user', '42')
         conn.execute("UPDATE app.notes SET body = %s WHERE id = %s", (body, note_id))
 
-    async with rowfence.psycopg.atransaction(aconn):          # as rowfence.current(), or nobody
+    async with rowstile.psycopg.atransaction(aconn):          # as rowstile.current(), or nobody
         ...
 
 A pooled connection never carries one request's user into another's: the sign-in ends with the transaction.
@@ -38,7 +38,7 @@ _Args = tuple[str | None, str | None]
 
 _ACT_AS = "SELECT authz.act_as(%s, %s)"
 _EXPLAIN = explain_rule_sql("%(t)s", "%(c)s", "%(k)s")
-_SIGNED = "_rowfence_signed_in"         # on the connection: who each open block of ours signed in, outermost first
+_SIGNED = "_rowstile_signed_in"         # on the connection: who each open block of ours signed in, outermost first
 
 
 def _open(conn: psycopg.Connection[Any] | psycopg.AsyncConnection[Any]) -> bool:

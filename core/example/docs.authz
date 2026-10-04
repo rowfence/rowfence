@@ -18,7 +18,7 @@
 --             update cols : ...        changing these columns needs this, on the row before
 --             update cols after : ...  ...and this, on the row after (e.g. where it moves to)
 -- invariants  what must never happen: checked by the tests and by authz.check_invariants()
--- test      checks of the data already there, which rowfence test and rowfence dev run (never apply)
+-- test      checks of the data already there, which rowstile test and rowstile dev run (never apply)
 
 app role app_user
 

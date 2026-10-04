@@ -1,6 +1,6 @@
-"""The app's stack, as `rowfence init` finds it: the web framework, the ORM and the migration tool, from the files
+"""The app's stack, as `rowstile init` finds it: the web framework, the ORM and the migration tool, from the files
 in the project folder (package.json, pyproject.toml, requirements*.txt, prisma/, drizzle.config.*, alembic.ini).
-What init does with it: rowfence.toml's [migrations] and [clients], the SDK packages to add, and the one line of
+What init does with it: rowstile.toml's [migrations] and [clients], the SDK packages to add, and the one line of
 setup to change. Reads files only; changes nothing."""
 from __future__ import annotations
 
@@ -18,8 +18,8 @@ class Stack:
     tool: str = ""                                     # the migration tool: prisma, drizzle, alembic, sql, or "" (unknown)
     migrations_dir: str = ""
     clients: dict[str, str] = field(default_factory=dict)  # {"ts": "src/authz.gen.ts"} or {"py": "app/authz_types.py"}
-    npm: list[str] = field(default_factory=list)       # @rowfence/* packages to add
-    pip: str = ""                                      # the pip requirement to add: rowfence[fastapi]
+    npm: list[str] = field(default_factory=list)       # @rowstile/* packages to add
+    pip: str = ""                                      # the pip requirement to add: rowstile[fastapi]
     setup: list[str] = field(default_factory=list)     # the change to make, in lines to print
     setup_file: str = ""                               # where to make it, if found
 
@@ -93,7 +93,7 @@ def detect(root: str = ".") -> Stack:
     py = _python_names(root)
     ts_dir = "src" if os.path.isdir(os.path.join(root, "src")) else "."
 
-    # the migration tool first: it decides where rowfence migrate writes
+    # the migration tool first: it decides where rowstile migrate writes
     # where Prisma's schema is: its config file or package.json say, else the two places Prisma looks
     cfg = _read(root, "prisma.config.ts") or ""
     named = re.search(r"\bschema\s*:\s*[\"']([^\"']+)[\"']", cfg)
@@ -131,66 +131,66 @@ def detect(root: str = ".") -> Stack:
     if js:
         if "next" in js:
             s.found.insert(0, "Next.js")
-            s.npm.append("@rowfence/next")
+            s.npm.append("@rowstile/next")
         if s.tool == "prisma":
-            s.npm.insert(0, "@rowfence/prisma")
+            s.npm.insert(0, "@rowstile/prisma")
             s.setup_file = _find(root, (".ts", ".tsx", ".js", ".mjs"), r"new PrismaClient\(")
             s.setup = [
                 'import { PrismaPg } from "@prisma/adapter-pg";',
-                'import { authz, signedIn } from "@rowfence/prisma";',
+                'import { authz, signedIn } from "@rowstile/prisma";',
                 "const adapter = signedIn(new PrismaPg({ connectionString: process.env.DATABASE_URL }),",
                 f"                         {{ user: {user_ts} }});",
                 "export const db = new PrismaClient({ adapter }).$extends(authz());",
             ]
         elif s.tool == "drizzle":
-            s.npm.insert(0, "@rowfence/drizzle")
+            s.npm.insert(0, "@rowstile/drizzle")
             s.setup_file = _find(root, (".ts", ".js", ".mjs"), r"drizzle\(")
-            s.setup = ['import { withAuthz } from "@rowfence/drizzle";',
+            s.setup = ['import { withAuthz } from "@rowstile/drizzle";',
                        f"export const authz = withAuthz(db, {{ user: {user_ts} }});   // authz.transaction(tx => ...)"]
         elif "postgres" in js:
-            s.npm.insert(0, "@rowfence/postgres")
-            s.setup = ['import { authz } from "@rowfence/postgres";', f"export const db = authz(sql, {{ user: {user_ts} }});"]
+            s.npm.insert(0, "@rowstile/postgres")
+            s.setup = ['import { authz } from "@rowstile/postgres";', f"export const db = authz(sql, {{ user: {user_ts} }});"]
         elif "pg" in js:
-            s.npm.insert(0, "@rowfence/pg")
-            s.setup = ['import { authz } from "@rowfence/pg";', f"export const db = authz(pool, {{ user: {user_ts} }});"]
+            s.npm.insert(0, "@rowstile/pg")
+            s.setup = ['import { authz } from "@rowstile/pg";', f"export const db = authz(pool, {{ user: {user_ts} }});"]
         if "react" in js:
-            s.npm.append("@rowfence/react")
+            s.npm.append("@rowstile/react")
         if "vitest" in js:
-            s.npm.append("@rowfence/vitest")
+            s.npm.append("@rowstile/vitest")
         if s.npm:
             s.clients["ts"] = f"{ts_dir}/authz.gen.ts".lstrip("./")
             if "next" in js and s.setup:
-                s.setup.insert(0, 'import "@rowfence/next";               // signed-in reads stay out of caches')
+                s.setup.insert(0, 'import "@rowstile/next";               // signed-in reads stay out of caches')
     if py and not s.npm:
         extras = [x for x in ("fastapi", "sqlalchemy", "psycopg", "asyncpg") if x in py or (x == "sqlalchemy" and "sqlmodel" in py)]
         if "fastapi" in py:
             s.found.insert(0, "FastAPI")
         if "sqlalchemy" in py or "sqlmodel" in py:
             s.found.insert(1 if "fastapi" in py else 0, "SQLModel" if "sqlmodel" in py else "SQLAlchemy")
-        s.pip = "rowfence" + (f"[{','.join(extras)}]" if extras else "")
+        s.pip = "rowstile" + (f"[{','.join(extras)}]" if extras else "")
         pkg_dir = next((d for d in ("app", "src", "backend/app") if os.path.isdir(os.path.join(root, d))), ".")
         s.clients["py"] = f"{pkg_dir}/authz_types.py".lstrip("./")
         if "fastapi" in py:
             s.setup_file = _find(root, (".py",), r"=\s*FastAPI\(")
-            s.setup = ["from rowfence.fastapi import Rowfence",
-                       "Rowfence(app, engine, user=current_user)   # before adding routes; current_user(request): the",
+            s.setup = ["from rowstile.fastapi import Rowstile",
+                       "Rowstile(app, engine, user=current_user)   # before adding routes; current_user(request): the",
                        "                                            # user's id from its session or token, None for nobody"]
         elif "sqlalchemy" in py or "sqlmodel" in py:
-            s.setup = ["import rowfence.sqlalchemy", "rowfence.sqlalchemy.install(engine)   # with rowfence.acting_as(user_id): ..."]
+            s.setup = ["import rowstile.sqlalchemy", "rowstile.sqlalchemy.install(engine)   # with rowstile.acting_as(user_id): ..."]
         if s.tool == "alembic":
             s.setup += ["# alembic env.py: context.configure(..., include_name=include_name, include_object=include_object)",
-                        "from rowfence.alembic import include_name, include_object"]
+                        "from rowstile.alembic import include_name, include_object"]
     return s
 
 
 def config_lines(s: Stack) -> list[str]:
-    """rowfence.toml's [clients] and [migrations] for the stack."""
+    """rowstile.toml's [clients] and [migrations] for the stack."""
     out: list[str] = []
     if s.clients:
-        out += ["[clients]                    # written on each change by rowfence dev"] + \
+        out += ["[clients]                    # written on each change by rowstile dev"] + \
                [f'{lang} = "{path}"' for lang, path in s.clients.items()]
     if s.tool:
-        out += ["[migrations]                 # rowfence migrate writes the policy's changes for this tool",
+        out += ["[migrations]                 # rowstile migrate writes the policy's changes for this tool",
                 f'tool = "{s.tool}"', f'dir  = "{s.migrations_dir}"']
     return out
 
@@ -216,7 +216,7 @@ def add_npm(root: str, names: list[str], version: str) -> list[str]:
     data = _object(json.loads(text))
     indent = re.search(r'\n([ \t]+)"', text)
     added: list[str] = []
-    for section, pkgs in (("dependencies", names), ("devDependencies", ["rowfence"])):
+    for section, pkgs in (("dependencies", names), ("devDependencies", ["rowstile"])):
         have = dependencies(data)
         for n in pkgs:
             if n not in have:

@@ -1,11 +1,11 @@
 # Messenger
 
-A WhatsApp-style messaging app, built to show what rowfence takes off an application's hands. It has
+A WhatsApp-style messaging app, built to show what rowstile takes off an application's hands. It has
 direct chats and groups, owners and admins, announcement groups, invite links, blocking, message editing
 and deleting for everyone, read receipts, bots that post with their own API keys, and live updates.
 
 Every rule about who may do what lives in one file, [`db/policy.authz`](db/policy.authz) (about 100 lines).
-rowfence turns it into row-level security on the app's tables. The backend
+rowstile turns it into row-level security on the app's tables. The backend
 ([`backend/app/main.py`](backend/app/main.py)) has **no permission checks at all**: it signs each
 transaction in as the person asking, runs plain SQL, and turns the database's refusals into HTTP errors.
 
@@ -14,15 +14,15 @@ transaction in as the person asking, runs plain SQL, and turns the database's re
 ![An announcement group: the member can't post, and "why?" shows the database's explanation](docs/why.png)
 
 ```
-docker compose up -d --build          # the app on http://localhost:8001 (Postgres and rowfence, built from this repository)
+docker compose up -d --build          # the app on http://localhost:8001 (Postgres and rowstile, built from this repository)
 ./test.sh                             # the API tests: the database in Docker, the tests on the host
 ```
 
 For development: `docker compose up -d db`, then `uv run python ../db/migrate.py` and
 `uv run uvicorn app.main:app --port 8001` in `backend/`, and `npm run dev` in `frontend/`. While changing
-the policy, `rowfence dev` (with `MS_ADMIN_URL` set; `rowfence.toml` says the rest) applies it on every save,
+the policy, `rowstile dev` (with `MS_ADMIN_URL` set; `rowstile.toml` says the rest) applies it on every save,
 runs its tests and rewrites the client. The migrations set that database up, so mark it as a development
-database once first: `rowfence push --development`.
+database once first: `rowstile push --development`.
 
 ## The rules, and where they are
 
@@ -44,7 +44,7 @@ database once first: `rowfence push --development`.
 | Messages are numbered per chat | `type message = ms.messages (chat_id, seq)`: a composite key; the API asks `authz.can('message', '(7,42)', 'edit')` |
 
 Each row of this table is a test in [`db/tests/rules.authz`](db/tests/rules.authz): it makes the people and
-chats it needs, checks who may do what (as the app, through row-level security), and rolls back. `rowfence
+chats it needs, checks who may do what (as the app, through row-level security), and rolls back. `rowstile
 test` runs them: 45 checks, in about a second.
 
 ## What the backend doesn't have to do
@@ -79,7 +79,7 @@ test` runs them: 45 checks, in about a second.
   (`authz.who_among`), and only then passes the number on. The browser refetches through the API, which row-level
   security filters. A WebSocket never carries a message.
 
-## What rowfence caught while building it
+## What rowstile caught while building it
 
 - **`authz.lint()` flagged the blocking view.** The view `ms.direct_blocks` was readable by the app role,
   and views run with their owner's rights, so they bypass row-level security. The migration now revokes it:
@@ -94,8 +94,8 @@ test` runs them: 45 checks, in about a second.
 ## Layout
 
 - `db/migrations/` the tables (plain data integrity), `db/policy.authz` the rules, `db/migrate.py` applies
-  both and writes the generated client (`backend/app/authz_client.py`, from `rowfence client py`)
+  both and writes the generated client (`backend/app/authz_client.py`, from `rowstile client py`)
 - `backend/` FastAPI: `main.py` the API, `db.py` transactions signed in as a person or a bot, `auth.py`
   passwords and sessions, `events.py` live updates, `tests/test_api.py`
 - `frontend/` React: the chat list, conversations, group info, settings (profile, bots, blocked people)
-- `check_public_surface.py`: the app uses only rowfence's public functions, never its internals
+- `check_public_surface.py`: the app uses only rowstile's public functions, never its internals

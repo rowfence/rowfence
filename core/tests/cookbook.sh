@@ -9,7 +9,7 @@ BOOK=../docs/cookbook
 fails=0
 ok() { echo "ok    $1"; }
 bad() { echo "FAIL  $1${2:+: $2}"; fails=$((fails + 1)); }
-CLI() { python3 cli/rowfence_cli.py --db "dbname=$DB" "$@"; }
+CLI() { python3 cli/rowstile_cli.py --db "dbname=$DB" "$@"; }
 
 dropdb --if-exists "$DB" 2>/dev/null; createdb "$DB" || exit 1
 PGOPTIONS="-c client_min_messages=warning" psql -X -q -v ON_ERROR_STOP=1 -d "$DB" -f "$BOOK/schema.sql" >/dev/null || exit 1

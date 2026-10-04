@@ -1,5 +1,5 @@
 -- The file manager's rules, tested with their own data (rolled back after each test).
--- Run: rowfence test (from filemanager/), or rowfence dev while editing the policy.
+-- Run: rowstile test (from filemanager/), or rowstile dev while editing the policy.
 
 test "a folder's owner has everything inside it, and turning inheritance off stops it"
   given ann = {INSERT INTO fm.users (email, name) VALUES ('t-ann@x', 'Ann') RETURNING id}

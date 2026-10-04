@@ -1,6 +1,6 @@
 "use server";
 // A server action: a refusal comes back as { ok: false, problem } (Next.js hides a thrown error's message)
-import { action } from "@rowfence/next";
+import { action } from "@rowstile/next";
 import { db } from "@/db";
 
 export const renameNote = action(async (id: number, body: string) => {

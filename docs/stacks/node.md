@@ -18,17 +18,17 @@ uses a session-level `SET`, so pools and poolers in transaction mode are safe. T
 needs its own connection to Postgres: [Behind a pooler](../operations.md#behind-a-pooler).
 
 ```sh
-npm install @rowfence/client @rowfence/pg          # or @rowfence/postgres, @rowfence/drizzle
-npm install --save-dev rowfence@next                # the command (@next while only an alpha is published)
+npm install @rowstile/client @rowstile/pg          # or @rowstile/postgres, @rowstile/drizzle
+npm install --save-dev rowstile@next                # the command (@next while only an alpha is published)
 ```
 
 ## pg
 
 ```ts
-import { authz as rowfence } from "@rowfence/pg";
+import { authz as rowstile } from "@rowstile/pg";
 
     const p = new pg.Pool({ connectionString: APP });
-    const a = rowfence(p);
+    const a = rowstile(p);
       expect(await a.transaction(async (c) => (await c.query("SELECT id FROM app.notes ORDER BY id")).rows.map((r) => r.id), "2")).toEqual([2, 3]);
 ```
 
@@ -58,7 +58,7 @@ superuser, BYPASSRLS, the tables' owner).
 ## postgres.js
 
 ```ts
-import { authz as postgresAuthz } from "@rowfence/postgres";
+import { authz as postgresAuthz } from "@rowstile/postgres";
 
     const sql = postgres(APP, { max: 2 });
     const a = postgresAuthz(sql);
@@ -72,7 +72,7 @@ import { authz as postgresAuthz } from "@rowfence/postgres";
 objects the user holds a permission on.
 
 ```ts
-import { expect as drizzleExpect, inIds, withAuthz } from "@rowfence/drizzle";
+import { expect as drizzleExpect, inIds, withAuthz } from "@rowstile/drizzle";
 
     const d = drizzle(p);
     const a = withAuthz(d);
@@ -91,7 +91,7 @@ A query outside a signed-in transaction fails with strict sign-in's error; `tran
 
 ## Answering HTTP
 
-In your framework's error handler, `problemOf(e)` (in `@rowfence/client`) gives the status and the problem body
+In your framework's error handler, `problemOf(e)` (in `@rowstile/client`) gives the status and the problem body
 for any driver's error that is a refusal (403, with the rule and the reason) or a hidden row (404), and `null`
 for anything else. `problemResponse(e)` is the same as a Fetch `Response`, for Hono and other frameworks built
 on it.
@@ -99,5 +99,5 @@ on it.
 ## Migrations
 
 Policy changes ship as migrations for your tool: `tool = "drizzle"` (Drizzle Kit's journal), `"sql"`,
-`"goose"`, `"dbmate"` or `"flyway"` in `rowfence.toml`. `npx rowfence migrate` writes the next one;
-`npx rowfence migrate --check` in CI fails if a policy change has none.
+`"goose"`, `"dbmate"` or `"flyway"` in `rowstile.toml`. `npx rowstile migrate` writes the next one;
+`npx rowstile migrate --check` in CI fails if a policy change has none.

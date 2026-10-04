@@ -1,4 +1,4 @@
-"""A first policy from a database's tables and foreign keys (authz.draft, `rowfence init`).
+"""A first policy from a database's tables and foreign keys (authz.draft, `rowstile init`).
 
 It compiles, and it is a draft: every place a person has to decide is marked `-- decide:`. Tables become
 types; foreign keys become relations (to users: owner, author, ...; to other rows: what the row sits in,
@@ -169,7 +169,7 @@ def draft(tables: list[Table], users: str | None = None, role: str = "app_user",
                     if len(fk["cols"]) == 1 and re.search(r"(user|owner|author|creator|created_by|sender)", fk["cols"][0]):
                         refs[fk["ref"]] = refs.get(fk["ref"], 0) + 1
             if not refs:
-                raise DraftError("which table holds your users? name it: rowfence init --users schema.table")
+                raise DraftError("which table holds your users? name it: rowstile init --users schema.table")
             users = max(refs, key=lambda n: refs[n])
     if len(keyed[users]["pk"]) != 1:
         raise DraftError(f"{users}: the user table needs a key of one column")
@@ -183,7 +183,7 @@ def draft(tables: list[Table], users: str | None = None, role: str = "app_user",
     for n, t in sorted(keyed.items()):
         cols = dict(t["columns"])
         if any(key_type(cols[c]) is None for c in t["pk"]):
-            skipped.append(f"-- {n}: its key's type isn't one rowfence can use ({', '.join(KEY_TYPES)})")
+            skipped.append(f"-- {n}: its key's type isn't one rowstile can use ({', '.join(KEY_TYPES)})")
             continue
         if n == users:
             type_names[n] = "user"
@@ -197,7 +197,7 @@ def draft(tables: list[Table], users: str | None = None, role: str = "app_user",
         type_names[n] = name
     for n, t in sorted(by_name.items()):
         if not t["pk"]:
-            skipped.append(f"-- {n}: no primary key (rowfence needs one to name its rows)")
+            skipped.append(f"-- {n}: no primary key (rowstile needs one to name its rows)")
 
     def key_spec(t: Table) -> str:
         cols = dict(t["columns"])
@@ -267,9 +267,9 @@ def draft(tables: list[Table], users: str | None = None, role: str = "app_user",
                                  f"  --   admin : user = {n}({cols_text(o['cols'])} -> {u['cols'][0]}) where {{{role_col} = 'admin'}}")
 
     # --- permissions and rules ------------------------------------------------------------------
-    out = [f"-- A first policy drafted by rowfence from the tables in {', '.join(schemas)}.",
+    out = [f"-- A first policy drafted by rowstile from the tables in {', '.join(schemas)}.",
            "-- It compiles, and it is a draft: read every '-- decide:' and change what isn't so.",
-           "-- Then: rowfence dev (applies it on each save, runs the tests, writes the clients).",
+           "-- Then: rowstile dev (applies it on each save, runs the tests, writes the clients).",
            "",
            f"app role {role}                          -- decide: the Postgres role your app connects as",
            ""]

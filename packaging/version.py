@@ -25,16 +25,16 @@ ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)),
 VERSION = re.compile(r"^\d+\.\d+\.\d+(-(alpha|rc)\.\d+|-dev)?$")
 
 # (files, pattern): each pattern's one group is the version. Each must match in each file, but for the
-# packages' dependencies on each other (@rowfence/client has none)
+# packages' dependencies on each other (@rowstile/client has none)
 PLACES = [
     (["core/authzlib/__init__.py"], r'^__version__ = "([^"]+)"'),
     (["sdk/typescript/*/package.json"], r'^  "version": "([^"]+)"'),
-    (["sdk/typescript/*/package.json", "package-lock.json"], r'"@rowfence/[a-z-]+": "(\d[^"]*)"'),  # optional
-    (["package-lock.json"], r'"name": "@rowfence/[a-z-]+",\n\s+"version": "([^"]+)"'),
+    (["sdk/typescript/*/package.json", "package-lock.json"], r'"@rowstile/[a-z-]+": "(\d[^"]*)"'),  # optional
+    (["package-lock.json"], r'"name": "@rowstile/[a-z-]+",\n\s+"version": "([^"]+)"'),
     (["review-ci/github/action.yml"], r'^    default: "(\d[^"]*)"'),
     (["review-ci/github/action.yml", "docs/reference/review.md"], r"review-ci/github@v(\S+)"),
-    (["review-ci/gitlab/rowfence-review.gitlab-ci.yml"], r'ROWFENCE_VERSION: "([^"]+)"'),
-    (["review-ci/gitlab/rowfence-review.gitlab-ci.yml"], r"/rowfence/rowfence/v([^/]+)/"),
+    (["review-ci/gitlab/rowstile-review.gitlab-ci.yml"], r'ROWSTILE_VERSION: "([^"]+)"'),
+    (["review-ci/gitlab/rowstile-review.gitlab-ci.yml"], r"/rowstile/rowstile/v([^/]+)/"),
 ]
 
 
@@ -59,7 +59,7 @@ def found() -> dict[str, list[str]]:
     out: dict[str, list[str]] = {}
     for path, rx in places():
         hits = rx.findall(read(path))
-        if not hits and not rx.pattern.startswith('"@rowfence/'):
+        if not hits and not rx.pattern.startswith('"@rowstile/'):
             raise SystemExit(f"version.py: {path} has no match for {rx.pattern}")
         for v in hits:
             out.setdefault(v, []).append(path)
@@ -81,7 +81,7 @@ def set_version(new: str) -> None:
 def dist_tag(version: str, tags: list[str]) -> str:
     """The tag a release is published under (npm's dist-tag; the image is `latest` when this is): `next` for an
     alpha or a candidate, `latest` for the highest release, and `release-X.Y` for a patch to an older line once a higher
-    release is out (a patch from `release/0.1` after 0.2.0 must not become what `npm i rowfence` installs).
+    release is out (a patch from `release/0.1` after 0.2.0 must not become what `npm i rowstile` installs).
     `tags` are the repository's (`v0.2.0`, `v0.2.0-rc.1`, ...)."""
     if "-" in version:
         return "next"

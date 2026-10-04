@@ -1,9 +1,9 @@
-# rowfence for TypeScript
+# rowstile for TypeScript
 
-The SDK for TypeScript apps on a rowfence policy: every transaction signs in as whoever the request
+The SDK for TypeScript apps on a rowstile policy: every transaction signs in as whoever the request
 or the job acts for, refused writes become a 403 with the database's reason, rows the user can't see a 404,
 signed-in reads stay out of Next.js's caches, and the app refuses to start on a connection that skips
-row-level security. It holds no rowfence logic: it calls the `authz.*` functions the policy made, and
+row-level security. It holds no rowstile logic: it calls the `authz.*` functions the policy made, and
 translates their answers.
 
 Next.js with Prisma:
@@ -11,9 +11,9 @@ Next.js with Prisma:
 ```ts
 // src/db.ts
 import { PrismaPg } from "@prisma/adapter-pg";
-import { authz, signedIn } from "@rowfence/prisma";
-import "@rowfence/next";                         // signed-in reads never land in a cache
-import "./authz.gen";                            // the policy's names (rowfence client)
+import { authz, signedIn } from "@rowstile/prisma";
+import "@rowstile/next";                         // signed-in reads never land in a cache
+import "./authz.gen";                            // the policy's names (rowstile client)
 
 const adapter = signedIn(new PrismaPg({ connectionString: process.env.DATABASE_URL }),
                          { user: async () => (await auth())?.user.id });
@@ -30,14 +30,14 @@ export const PATCH = route(async (req: Request, { params }: { params: Promise<{ 
 
 | package | what |
 |---|---|
-| `@rowfence/client` | `actingAs(who, fn)`, `job(who, fn)`, `current()`, `Refused`, `NotFound`, `NotSignedIn`, `translate(e)` and `problemResponse(e)` for any driver's error, `errorCode(e)` (rowfence's code: `AZ709`), `calls(queryable)` (the runtime's functions), the `Register` the generated names fill in |
-| `@rowfence/prisma` | `signedIn(adapter, { user })`: every transaction Prisma begins signs in; `authz()`: P2025 as `NotFound` or `Refused` with the reason, refused creates naming the rule, `db.$authz` (`can`, `ids`, `permsOf`, `share`, `check`, ...) |
-| `@rowfence/pg` | `authz(pool, { user })`: `transaction(fn)`, `query()`, the runtime's functions; `changes(pool)` for live updates |
-| `@rowfence/postgres` | `authz(sql, { user })`: `begin(fn)`, the runtime's functions |
-| `@rowfence/drizzle` | `withAuthz(db, { user })`: `transaction(fn)`; `inIds(column, type, perm)` and `ids()` for `where`; `expect(tx, result, ...)` for updates and deletes that changed nothing |
-| `@rowfence/next` | `route(handler)` (403 and 404 problem bodies), `action(fn)` (`{ ok, value }` or `{ ok: false, problem }`), `authzRoutes()` (what the React kit calls), `checkAtStart()` for `instrumentation.ts`; importing it keeps signed-in reads out of caches |
-| `@rowfence/react` | `<AuthzProvider>`, `usePerms(type, ids)` (one call for a list), `<Can>`, `useShares` and a headless `<ShareDialog>`, `useAccessRequest`; kept current over server-sent events |
-| `@rowfence/vitest` | `expect.extend(matchers)`: `toBeRefused(command, reason)`, `toBeNotFound()`; `asUser(who, fn)`; `databasePerWorker(url)`. Vitest 4 or 5 |
+| `@rowstile/client` | `actingAs(who, fn)`, `job(who, fn)`, `current()`, `Refused`, `NotFound`, `NotSignedIn`, `translate(e)` and `problemResponse(e)` for any driver's error, `errorCode(e)` (rowstile's code: `AZ709`), `calls(queryable)` (the runtime's functions), the `Register` the generated names fill in |
+| `@rowstile/prisma` | `signedIn(adapter, { user })`: every transaction Prisma begins signs in; `authz()`: P2025 as `NotFound` or `Refused` with the reason, refused creates naming the rule, `db.$authz` (`can`, `ids`, `permsOf`, `share`, `check`, ...) |
+| `@rowstile/pg` | `authz(pool, { user })`: `transaction(fn)`, `query()`, the runtime's functions; `changes(pool)` for live updates |
+| `@rowstile/postgres` | `authz(sql, { user })`: `begin(fn)`, the runtime's functions |
+| `@rowstile/drizzle` | `withAuthz(db, { user })`: `transaction(fn)`; `inIds(column, type, perm)` and `ids()` for `where`; `expect(tx, result, ...)` for updates and deletes that changed nothing |
+| `@rowstile/next` | `route(handler)` (403 and 404 problem bodies), `action(fn)` (`{ ok, value }` or `{ ok: false, problem }`), `authzRoutes()` (what the React kit calls), `checkAtStart()` for `instrumentation.ts`; importing it keeps signed-in reads out of caches |
+| `@rowstile/react` | `<AuthzProvider>`, `usePerms(type, ids)` (one call for a list), `<Can>`, `useShares` and a headless `<ShareDialog>`, `useAccessRequest`; kept current over server-sent events |
+| `@rowstile/vitest` | `expect.extend(matchers)`: `toBeRefused(command, reason)`, `toBeNotFound()`; `asUser(who, fn)`; `databasePerWorker(url)`. Vitest 4 or 5 |
 
 Who a transaction acts for: `42` or `"42"` (a user), `["service", 3]` (another principal type of the policy),
 or `null` (nobody: only what `anyone` may see). A plain id is always a user's, whatever it holds: `"service:3"`
@@ -50,7 +50,7 @@ to Postgres ([Behind a pooler](../../docs/operations.md#behind-a-pooler)).
 
 Traps it handles:
 
-- **Next.js caching.** Before a transaction signs in as someone, `@rowfence/next` calls Next's `connection()`:
+- **Next.js caching.** Before a transaction signs in as someone, `@rowstile/next` calls Next's `connection()`:
   the render is dynamic, and a signed-in read inside `"use cache"` or `unstable_cache` fails instead of being
   cached for the next user. Reads as nobody may be cached.
 - **Prisma answers some calls together.** It dispatches the `findUnique` calls of one tick, and array
@@ -62,7 +62,7 @@ Traps it handles:
   message comes back as `Refused` naming the select rule.
 - **Prisma's promises are lazy**: `actingAs` and `job` await what they return inside their scope.
 - **A connection that drops.** node-postgres stops the process when a client that is checked out loses its
-  connection and nobody listens: `@rowfence/pg` listens while it holds one, so the transaction fails instead.
+  connection and nobody listens: `@rowstile/pg` listens while it holds one, so the transaction fails instead.
   `changes(pool)` listens again after its connection drops, and tells its subscribers once.
 - **An update that changed nothing** is `NotFound` when the user can't see the row, `Refused` when the database
   says no, and `NotFound` again when the rule allows it and the statement matched nothing for another reason
@@ -70,10 +70,10 @@ Traps it handles:
 - **The answers in the browser are one user's.** Give `<AuthzProvider user={id}>` if the user can change
   without a page load: the hooks forget what they had and ask again.
 
-The types and permissions of the policy are generated names: with a `@rowfence/*` dependency in
-`package.json`, `rowfence client` writes only the names (`[clients] ts = "src/authz.gen.ts"`), registered with
+The types and permissions of the policy are generated names: with a `@rowstile/*` dependency in
+`package.json`, `rowstile client` writes only the names (`[clients] ts = "src/authz.gen.ts"`), registered with
 the SDK, so `db.$authz.can("note", 1, "edt")` doesn't type-check. Policy changes ship as migrations for your
-tool (`rowfence migrate`, with `tool = "prisma"` or `"drizzle"` in `rowfence.toml`).
+tool (`rowstile migrate`, with `tool = "prisma"` or `"drizzle"` in `rowstile.toml`).
 
 The packages are an npm workspace at the repository root (`npm ci`, then `npx tsc -b sdk/typescript`).
 `integrations/nextjs/` is the conformance suite: a small Next.js app on Prisma 7 and Prisma Migrate, and the

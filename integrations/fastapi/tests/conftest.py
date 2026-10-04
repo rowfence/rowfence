@@ -4,7 +4,7 @@ from collections.abc import Iterator
 import psycopg
 import pytest
 
-OWNER = os.environ.get("ROWFENCE_OWNER_URL", "")
+OWNER = os.environ.get("ROWSTILE_OWNER_URL", "")
 
 
 def libpq(url: str) -> str:
@@ -22,7 +22,7 @@ def data() -> Iterator[None]:
     """The same few rows for every test: ann (1) owns project 1 (cy is a member, service 1 reads it) and the
     public project 3; bo (2) owns project 2."""
     if not OWNER:
-        pytest.skip("ROWFENCE_OWNER_URL is not set (test.sh sets it)")
+        pytest.skip("ROWSTILE_OWNER_URL is not set (test.sh sets it)")
     with psycopg.connect(libpq(OWNER), autocommit=True) as conn:
         conn.execute("TRUNCATE app.inbox, app.notes, app.members, app.project_services, app.projects, app.services, "
                      "app.users CASCADE")

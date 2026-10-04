@@ -1,4 +1,4 @@
-"""rowfence fmt: one way to write a policy, so a text diff holds only real changes.
+"""rowstile fmt: one way to write a policy, so a text diff holds only real changes.
 
 - top-level lines (app role, type, rules, scope, caveat, include, invariants, test) start the line; the lines
   of a block are indented by two spaces; a continuation (or, and, where, if, grant) lines up under the
@@ -302,7 +302,7 @@ def tests_of(text: str, files: dict[str, str]) -> list[object]:
 
 
 def format(text: str, files: dict[str, str] | None = None) -> str:
-    """The policy as rowfence fmt writes it; FormatError if that would change what it says."""
+    """The policy as rowstile fmt writes it; FormatError if that would change what it says."""
     from .migrate import meaning_lines
     out = format_policy(text)
     try:
@@ -311,5 +311,5 @@ def format(text: str, files: dict[str, str] | None = None) -> str:
     except Exception as e:
         raise FormatError(f"can't format a policy that doesn't parse: {e}") from None
     if not same:
-        raise FormatError("formatting would change what the policy says (a bug in rowfence fmt: please report it)")
+        raise FormatError("formatting would change what the policy says (a bug in rowstile fmt: please report it)")
     return out

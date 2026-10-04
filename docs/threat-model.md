@@ -1,16 +1,16 @@
 # Threat model
 
-What rowfence protects, from whom, where it relies on the deployment, and what it does not cover.
+What rowstile protects, from whom, where it relies on the deployment, and what it does not cover.
 Checked by `core/tests/adversarial.sh` (the app role attacking the policy), `tests/identity.sh`
 (identity and scopes), `tests/difftest.py` (the database agrees with an independent evaluator) and
-`tests/fuzz_parser.py` (broken policies are refused cleanly). rowfence has not been audited by anyone
+`tests/fuzz_parser.py` (broken policies are refused cleanly). rowstile has not been audited by anyone
 outside the project.
 
 ## What is protected
 
 - **Rows of governed tables**: a table with `rules` in the policy. Who may read, add, change and
   delete each row, down to columns (column rules, masks).
-- **Shares, roles, requests, reviews, API keys**: the `authz` tables. Only rowfence's own functions
+- **Shares, roles, requests, reviews, API keys**: the `authz` tables. Only rowstile's own functions
   change them, after checking the caller may.
 - **The audit trail and the change feed**: append-only for everyone but `authz.trim_audit()` and
   `authz.trim_changes()`, which administrators run.
@@ -21,10 +21,10 @@ outside the project.
 
 | | trusted to | not trusted to |
 |---|---|---|
-| **Policy authors** (whoever applies it with `rowfence apply`: the tables' owner, or a superuser) | say what the rules are; their `{...}` conditions run as the policy's owner | nothing: a policy can do anything its owner can |
+| **Policy authors** (whoever applies it with `rowstile apply`: the tables' owner, or a superuser) | say what the rules are; their `{...}` conditions run as the policy's owner | nothing: a policy can do anything its owner can |
 | **Database owner, migration role** | own the tables and apply policies | |
 | **The app's backend** (the app role, or a member of it: the roles that may call `authz.act_as()`) | say who is signed in, per transaction | |
-| **The app role** (`app role` in the policy; the backend connects as it) | nothing beyond the rules | read or change rows the rules don't allow, touch rowfence's internals, turn row-level security off, share more than it holds, approve its own requests |
+| **The app role** (`app role` in the policy; the backend connects as it) | nothing beyond the rules | read or change rows the rules don't allow, touch rowstile's internals, turn row-level security off, share more than it holds, approve its own requests |
 | **Anyone signed in with an API key or JWT** | act as that user, within the key's scopes | widen the scopes, act as someone else |
 
 The trust boundary is between the app role and everything above it. A bug in the app (say, SQL
@@ -36,8 +36,8 @@ do depends on identity:
   believed. So the app role can't change who is signed in by setting it, widen a key's scopes, leave
   view-as, or reuse a sign-in from another transaction or connection (`tests/sessions.sh`).
 - **The app role may call `authz.act_as()`**, so code running as the app role can claim to be anyone
-  (rowfence had an optional native library that narrowed `act_as` to chosen roles; it was removed once
-  rowfence ran on any Postgres and the benchmark showed that signing costs nothing measurable). Roles other than the app role
+  (rowstile had an optional native library that narrowed `act_as` to chosen roles; it was removed once
+  rowstile ran on any Postgres and the benchmark showed that signing costs nothing measurable). Roles other than the app role
   and its members can't sign anyone in.
 - **If the backend role itself is compromised**, the attacker can claim any user either way: the
   backend is trusted to say who is signed in. Keep that role's credentials inside the
@@ -51,8 +51,8 @@ do depends on identity:
 | see hidden rows through a function in `WHERE` that prints its argument | Postgres runs row-level security before functions that aren't `LEAKPROOF` (only superusers can mark them) | adversarial.sh |
 | `SET row_security = off`, disable row-level security, drop or add a policy, drop a trigger, replace a generated function | not the owner; `row_security = off` makes the query fail instead | adversarial.sh |
 | read or write `authz_int`, `authz.shares`, `authz.audit`, `authz.changes`, the lock rows; call internal functions | no privileges on them; the app role reads only `authz_gen` views (its own ids) and calls the `authz.*` API | adversarial.sh |
-| use rowfence's tables or administrators' functions through the owner's default privileges, or a grant made since | applying takes back every privilege on rowfence's schemas the policy doesn't give; `authz.lint()` reports later ones | adversarial.sh |
-| run code as the owner: a function in a schema on the search path of rowfence's functions that run as the owner, taking a built-in's place | applying refuses a schema on that path that roles other than the owner may create in (AZ612); `authz.lint()` reports one opened later | adversarial.sh |
+| use rowstile's tables or administrators' functions through the owner's default privileges, or a grant made since | applying takes back every privilege on rowstile's schemas the policy doesn't give; `authz.lint()` reports later ones | adversarial.sh |
+| run code as the owner: a function in a schema on the search path of rowstile's functions that run as the owner, taking a built-in's place | applying refuses a schema on that path that roles other than the owner may create in (AZ612); `authz.lint()` reports one opened later | adversarial.sh |
 | update, delete or upsert onto a hidden row | row-level security (`UPDATE 0`, `DELETE 0`, an error for the upsert) | adversarial.sh |
 | take ownership, move a row where the user may not write, stop inheritance above a folder | column rules (`update owner_id : share`, `update parent_id after : parent.edit`) | adversarial.sh, scenario.sql |
 | share what the user can't share, a relation that isn't shared, or to widen their own access | `authz.share()` checks the relation is shared and the sharer holds what the policy asks | adversarial.sh, multi_scenario.sql |
@@ -62,12 +62,12 @@ do depends on identity:
 | a stale closure table granting access after a move | the type-wide tree lock; serialization errors in stricter isolation levels | races.sh, stress.sh, concurrency.sh |
 | a policy with a mistake that silently grants too much | compile-time and apply-time checks with line numbers; conditions that decide inheritance must not depend on time or user | policy_errors.py, fuzz_parser.py |
 
-The review in CI (`rowfence review`, the GitHub action) runs on a pull request's files, which whoever
+The review in CI (`rowstile review`, the GitHub action) runs on a pull request's files, which whoever
 opened it wrote. An include stays in the policy's folder: no `..` out of it, no absolute path, no link
-leading out (AZ108), and the policy, the tests and the lock file `rowfence.toml` names stay in the folder
-`rowfence.toml` is in, the same way; so a pull request can't make the review read one of the runner's files, or
+leading out (AZ108), and the policy, the tests and the lock file `rowstile.toml` names stay in the folder
+`rowstile.toml` is in, the same way; so a pull request can't make the review read one of the runner's files, or
 its environment, and print it in the job's log (`unit_test.py`, policy_errors.py, cli.sh). The review believes the pull
-request's `rowfence.toml`, as CI believes its workflow files: run it on `pull_request`, where a fork's pull
+request's `rowstile.toml`, as CI believes its workflow files: run it on `pull_request`, where a fork's pull
 request gets no secrets, not on `pull_request_target`.
 
 ## Known limits (accepted)
@@ -96,4 +96,4 @@ request gets no secrets, not on `pull_request_target`.
   user may edit, not edit it.
 - **Request context** (`authz.ctx(...)`, `authz_ctx.*` settings) is whatever the app sets: a policy that
   trusts it trusts the backend.
-- **No outside audit.** rowfence has had self-review only.
+- **No outside audit.** rowstile has had self-review only.

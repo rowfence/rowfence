@@ -6,9 +6,9 @@
 Environment: MS_ADMIN_URL (the owner of the app's tables, or a superuser), MS_APP_PASSWORD (the
 app role's password; the role is created if missing). The migrations run in one transaction.
 
-The policy ships as migrations too: after a change to db/policy.authz, `rowfence migrate`
-writes the next one into db/migrations (and db/policy.lock). The app uses only rowfence's public
-surface: the rowfence command writes its migrations and its client, and the app calls
+The policy ships as migrations too: after a change to db/policy.authz, `rowstile migrate`
+writes the next one into db/migrations (and db/policy.lock). The app uses only rowstile's public
+surface: the rowstile command writes its migrations and its client, and the app calls
 authz.* functions.
 """
 import os
@@ -21,13 +21,13 @@ from psycopg import sql
 
 HERE = Path(__file__).resolve().parent
 CLIENT = HERE.parent / "backend" / "app" / "authz_client.py"
-# the rowfence command, from this repository (at /core in the app's image): the nearest folder above with core/cli
-ROWFENCE = next(p for p in HERE.parents if (p / "core" / "cli").is_dir()) / "core" / "cli" / "rowfence_cli.py"
+# the rowstile command, from this repository (at /core in the app's image): the nearest folder above with core/cli
+ROWSTILE = next(p for p in HERE.parents if (p / "core" / "cli").is_dir()) / "core" / "cli" / "rowstile_cli.py"
 
 
-def rowfence(*args: str) -> str:
-    """Runs the rowfence command; its output, or exits with its status."""
-    p = subprocess.run([sys.executable, str(ROWFENCE), *args], capture_output=True, text=True)
+def rowstile(*args: str) -> str:
+    """Runs the rowstile command; its output, or exits with its status."""
+    p = subprocess.run([sys.executable, str(ROWSTILE), *args], capture_output=True, text=True)
     sys.stderr.write(p.stderr)
     if p.returncode:
         sys.exit(p.returncode)
@@ -55,7 +55,7 @@ def main() -> None:
             cur.execute(path.read_bytes())               # a file's SQL, not a literal of this code
             cur.execute("INSERT INTO public.ms_migrations (name) VALUES (%s)", (path.name,))
     if "--client" in sys.argv:
-        CLIENT.write_text(rowfence("client", "py", str(HERE / "policy.authz")), encoding="utf-8", newline="\n")
+        CLIENT.write_text(rowstile("client", "py", str(HERE / "policy.authz")), encoding="utf-8", newline="\n")
         print(f"wrote {CLIENT.relative_to(HERE.parent)}")
 
 

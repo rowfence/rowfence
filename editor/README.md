@@ -1,7 +1,7 @@
-# rowfence in your editor
+# rowstile in your editor
 
-For `.authz` files: highlighting (SQL inside `{ }` is highlighted as SQL), and from the rowfence language
-server (`rowfence lsp`, in `cli/lsp.py`):
+For `.authz` files: highlighting (SQL inside `{ }` is highlighted as SQL), and from the rowstile language
+server (`rowstile lsp`, in `cli/lsp.py`):
 
 - **errors while typing**, on the line they name, from the same compiler the database runs;
 - **hover**: a permission's definition and what it inherits through, a relation's sources, a type's table and key;
@@ -9,17 +9,17 @@ server (`rowfence lsp`, in `cli/lsp.py`):
   the folder's `edit`);
 - **outline** of types, relations, permissions and rules;
 - **completion**: after `rel.` the target type's permissions, inside a type its relations and permissions, and
-  with a `database` in `rowfence.toml`, table and column names;
-- **test files** (only `test "..."` blocks) are checked against the policy `rowfence.toml` names.
+  with a `database` in `rowstile.toml`, table and column names;
+- **test files** (only `test "..."` blocks) are checked against the policy `rowstile.toml` names.
 
 ## VS Code
 
-    cd editor && npm install && npx vsce package      # makes rowfence-0.1.0.vsix
-    code --install-extension rowfence-0.1.0.vsix
+    cd editor && npm install && npx vsce package      # makes rowstile-0.1.0.vsix
+    code --install-extension rowstile-0.1.0.vsix
 
-The extension runs `rowfence lsp` (put `cli/` on your PATH), or whatever `rowfence.command` says, e.g.
-`["python3", "/path/to/rowfence/cli/rowfence_cli.py", "lsp"]`. It starts in the workspace folder, where it looks
-for `rowfence.toml`.
+The extension runs `rowstile lsp` (put `cli/` on your PATH), or whatever `rowstile.command` says, e.g.
+`["python3", "/path/to/rowstile/cli/rowstile_cli.py", "lsp"]`. It starts in the workspace folder, where it looks
+for `rowstile.toml`.
 
 ## Zed
 
@@ -27,11 +27,11 @@ for `rowfence.toml`.
 the language server. From this repository: in Zed, run **zed: install dev extension** and pick `editor/zed`
 (Zed builds it, with Rust installed through rustup).
 
-It runs `rowfence lsp` with the `rowfence` on the project's PATH (installed with npm, pip or uv), or the one
+It runs `rowstile lsp` with the `rowstile` on the project's PATH (installed with npm, pip or uv), or the one
 Zed's settings name:
 
 ```json
-{ "lsp": { "rowfence": { "binary": { "path": "/path/to/rowfence", "arguments": ["lsp"] } } } }
+{ "lsp": { "rowstile": { "binary": { "path": "/path/to/rowstile", "arguments": ["lsp"] } } } }
 ```
 
 ## Other editors
@@ -41,31 +41,31 @@ with its queries in `queries/`: highlights (SQL injected inside `{ }`), outline 
 highlight with it: build the grammar from `editor/tree-sitter-authz` in this repository, and copy `queries/`
 into the editor's queries folder for `authz`.
 
-Any editor with a language client can start `rowfence lsp` for `.authz` files. Neovim:
+Any editor with a language client can start `rowstile lsp` for `.authz` files. Neovim:
 
 ```lua
 vim.filetype.add({ extension = { authz = "authz" } })
 vim.api.nvim_create_autocmd("FileType", { pattern = "authz", callback = function()
-  vim.lsp.start({ name = "rowfence", cmd = { "rowfence", "lsp" }, root_dir = vim.fs.root(0, { "rowfence.toml", ".git" }) })
+  vim.lsp.start({ name = "rowstile", cmd = { "rowstile", "lsp" }, root_dir = vim.fs.root(0, { "rowstile.toml", ".git" }) })
 end })
 ```
 
 Helix (`languages.toml`, in its config folder: `~/.config/helix/` on Linux and macOS):
 
 ```toml
-[language-server.rowfence]
-command = "rowfence"
+[language-server.rowstile]
+command = "rowstile"
 args = ["lsp"]
 
 [[language]]
 name = "authz"
 scope = "source.authz"
 file-types = ["authz"]
-language-servers = ["rowfence"]
+language-servers = ["rowstile"]
 
 [[grammar]]
 name = "authz"
-source = { path = "/path/to/rowfence/editor/tree-sitter-authz" }
+source = { path = "/path/to/rowstile/editor/tree-sitter-authz" }
 ```
 
 Then `hx --grammar build` builds the grammar, and the queries go in Helix's runtime folder:

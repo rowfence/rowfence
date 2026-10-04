@@ -1,7 +1,7 @@
 [project]
 name = "filemanager"
 version = "0.1.0"
-description = "A file manager on rowfence: FastAPI, Postgres with rowfence, RustFS for file contents"
+description = "A file manager on rowstile: FastAPI, Postgres with rowstile, RustFS for file contents"
 requires-python = ">=3.12"
 dependencies = [
   "fastapi>=0.115",

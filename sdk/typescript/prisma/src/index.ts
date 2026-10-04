@@ -1,5 +1,5 @@
 /**
- * rowfence with Prisma (7 and later: driver adapters).
+ * rowstile with Prisma (7 and later: driver adapters).
  *
  *     const adapter = signedIn(new PrismaPg({ connectionString }), { user: async () => (await auth())?.user.id });
  *     export const db = new PrismaClient({ adapter }).$extends(authz());
@@ -20,7 +20,7 @@ import { Prisma } from "@prisma/client/extension";
 import {
   actAs, calls, idText, signingIn, translate, verdict,
   type AuthzCalls, type Id, type ObjectType, type Permission, type Queryable, type UserResolver,
-} from "@rowfence/client";
+} from "@rowstile/client";
 
 export interface Options {
   /** Who the request is, when nothing set it with actingAs. */
@@ -61,7 +61,7 @@ async function end(tx: Transaction, how: "COMMIT" | "ROLLBACK"): Promise<void> {
 
 // Set while a call comes through a client extended with authz(): the adapter refuses any other call (signedIn).
 // One store for the process, even if a bundler loads this module more than once.
-const KEY = Symbol.for("rowfence.prisma.extended");
+const KEY = Symbol.for("rowstile.prisma.extended");
 const through: AsyncLocalStorage<true> = ((globalThis as Record<symbol, unknown>)[KEY] as AsyncLocalStorage<true> | undefined) ??
   ((globalThis as Record<symbol, unknown>)[KEY] = new AsyncLocalStorage<true>()) as AsyncLocalStorage<true>;
 // (awaited inside: Prisma's promises only start when they are awaited)
@@ -70,7 +70,7 @@ function mustBeExtended(): void {
   if (through.getStore()) return;
   // without authz(), Prisma may answer two users' findUnique calls with one query, signed in as one of them,
   // and starts an array transaction from whichever caller came first
-  throw new Error("@rowfence/prisma: this client isn't extended with authz(). Use the client $extends returns, and " +
+  throw new Error("@rowstile/prisma: this client isn't extended with authz(). Use the client $extends returns, and " +
     "only that one: export const db = new PrismaClient({ adapter }).$extends(authz())");
 }
 
@@ -198,14 +198,14 @@ export function authz(options: ExtensionOptions = {}) {
       },
     };
     const hooks = client.$extends({
-      name: "rowfence",
+      name: "rowstile",
       query: {
         async $allOperations({ model, operation, args, query, ...rest }) {
           const internal = (rest as { __internalParams?: { transaction?: { kind?: string } } }).__internalParams;
           if (internal?.transaction?.kind === "batch") {
             // Prisma starts an array's transaction later, from whichever request came first in that tick: it
             // might sign in as someone else
-            throw new Error("@rowfence/prisma: $transaction([...]) can't be signed in as the right user; use " +
+            throw new Error("@rowstile/prisma: $transaction([...]) can't be signed in as the right user; use " +
               "$transaction(async (tx) => { ... }) instead");
           }
           try {
@@ -251,7 +251,7 @@ export function authz(options: ExtensionOptions = {}) {
         return extended(() => parent.$transaction(app, ...rest));
       },
     };
-    return hooks.$extends({ name: "rowfence-transactions", client: transactions as {} });
+    return hooks.$extends({ name: "rowstile-transactions", client: transactions as {} });
   });
 }
 

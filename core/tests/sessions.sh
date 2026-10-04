@@ -24,7 +24,7 @@ ACT() { echo "DO \$\$ BEGIN PERFORM authz.act_as($1); END \$\$"; }
 
 dropdb --if-exists "$DB" 2>/dev/null; createdb "$DB" || exit 1
 PGOPTIONS="-c client_min_messages=error" psql -X -q -v ON_ERROR_STOP=1 -d "$DB" -f example/app_schema.sql >/dev/null || exit 1
-python3 cli/rowfence_cli.py --db "dbname=$DB" apply example/docs.authz >/dev/null 2>&1 || { bad "apply"; exit 1; }
+python3 cli/rowstile_cli.py --db "dbname=$DB" apply example/docs.authz >/dev/null 2>&1 || { bad "apply"; exit 1; }
 for r in $APP $OTHER; do psql -X -q -d postgres -c "DROP ROLE IF EXISTS $r" >/dev/null 2>&1; done
 psql -X -q -d postgres -c "CREATE ROLE $APP LOGIN IN ROLE app_user" -c "ALTER ROLE $APP SET jit = off" \
      -c "CREATE ROLE $OTHER LOGIN" >/dev/null
@@ -98,7 +98,7 @@ expect "clearing its scopes is an error, not a way to write" "28000" -c "SELECT 
 expect "who_among isn't a way out of a key's scopes" "42501" -c "SELECT authz.login_key('$key') IS NOT NULL" \
   -c "SELECT count(*) FROM authz.who_among('file', '11', 'view', ARRAY['1', '2'])"
 
-echo "-- rowfence's own functions switch users and sign again"
+echo "-- rowstile's own functions switch users and sign again"
 alice=$(as -c "$(ACT "'user', '1'")" -c "SELECT count(*) FROM app.files")
 expect "who checks each person, and alice is still signed in afterwards" "$alice" -c "$(ACT "'user', '1'")" \
   -c "SELECT count(*) > 0 FROM authz.who('file', '11', 'view')" -c "SELECT count(*) FROM app.files"

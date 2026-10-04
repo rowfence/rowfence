@@ -2,7 +2,7 @@
 """migrate_test: a migration leaves the database as applying the new policy from scratch would.
 
 For each change to a policy: one database gets the old policy, then the migration the lock file of the
-old policy gives; another gets the old policy, then the new one, each applied whole. Everything rowfence made in them must be the
+old policy gives; another gets the old policy, then the new one, each applied whole. Everything rowstile made in them must be the
 same: functions (with their privileges), views, triggers, row-level security policies, the catalog
 tables and the inheritance tables' rows. Then the migration back, which must give the old policy again.
 
@@ -89,7 +89,7 @@ BEGIN
 END $o$;"""
 
 
-# what the app built on what rowfence made, for the cases that say so
+# what the app built on what rowstile made, for the cases that say so
 APP_VIEW = ("CREATE VIEW mt.my_docs AS SELECT id FROM mt.docs_visible;\n"
             "CREATE FUNCTION mt.count_docs() RETURNS bigint LANGUAGE sql BEGIN ATOMIC SELECT count(*) FROM mt.docs_visible; END;")
 
@@ -116,7 +116,7 @@ def apply_whole(db: str, policy: str) -> None:
     with tempfile.NamedTemporaryFile("w", suffix=".authz", delete=False, encoding="utf-8") as fh:
         fh.write(policy)
     try:
-        sh(sys.executable, os.path.join(ROOT, "cli", "rowfence_cli.py"), "--db", f"dbname={db}", "apply", fh.name, "--force")
+        sh(sys.executable, os.path.join(ROOT, "cli", "rowstile_cli.py"), "--db", f"dbname={db}", "apply", fh.name, "--force")
     finally:
         os.unlink(fh.name)
 
@@ -134,7 +134,7 @@ UNION ALL
 SELECT 'view ' || c.oid::regclass::text || E'\n' || pg_get_viewdef(c.oid) || E'\nacl ' || coalesce(c.relacl::text, '')
        || E'\ncomment ' || coalesce(obj_description(c.oid, 'pg_class'), '')
 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-WHERE c.relkind = 'v' AND (n.nspname IN ('authz_int', 'authz_gen') OR obj_description(c.oid, 'pg_class') = 'rowfence masked view')
+WHERE c.relkind = 'v' AND (n.nspname IN ('authz_int', 'authz_gen') OR obj_description(c.oid, 'pg_class') = 'rowstile masked view')
 UNION ALL
 SELECT 'trigger ' || t.tgname || ' ON ' || t.tgrelid::regclass::text || E'\n' || pg_get_triggerdef(t.oid)
        || ' ' || t.tgenabled::text

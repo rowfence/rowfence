@@ -1,6 +1,6 @@
-# rowfence: access rules in a policy file, enforced by Postgres
+# rowstile: access rules in a policy file, enforced by Postgres
 
-Write who-can-do-what in one small file, next to the data it depends on. The `rowfence`
+Write who-can-do-what in one small file, next to the data it depends on. The `rowstile`
 command compiles it into plain SQL: views, trigger-maintained tables for inheritance, row-level
 security policies, and functions for app code: checks, sharing, "who has access", "why", access
 requests, reviews, audit. Each change to the policy ships as a migration for the tool your app
@@ -38,24 +38,27 @@ COMMIT;
 
 ## Status
 
-rowfence is a 0.x preview. Until 1.0, a minor release may change the language, the `authz.*` functions, the
+rowstile is a 0.x preview. Until 1.0, a minor release may change the language, the `authz.*` functions, the
 SDKs and the file formats; each release still upgrades a database from the one before it, and the changelog
 says what to do. [What a 0.x release promises](docs/reference/limits.md#what-a-0x-release-promises).
 
+rowstile was called rowfence until 0.1.0-alpha.1; another product had the name first. The
+[changelog](CHANGELOG.md) says what to change.
+
 ## Installing
 
-Only an alpha is published so far, 0.1.0-alpha.1: ask for it.
+Only an alpha is published so far, 0.1.0-alpha.2: ask for it.
 
-    npm i -D rowfence@next         # the command with its own Python: a TypeScript app needs none
-    pip install --pre rowfence     # the command and the Python SDK: rowfence[fastapi], [sqlalchemy], ...
-    docker run --rm -u "$(id -u):$(id -g)" -v "$PWD:/work" ghcr.io/rowfence/rowfence:0.1.0-alpha.1 migrate
+    npm i -D rowstile@next         # the command with its own Python: a TypeScript app needs none
+    pip install --pre rowstile     # the command and the Python SDK: rowstile[fastapi], [sqlalchemy], ...
+    docker run --rm -u "$(id -u):$(id -g)" -v "$PWD:/work" ghcr.io/rowstile/rowstile:0.1.0-alpha.2 migrate
 
 `npm` brings the Python for Linux (glibc and musl, x64 and arm64), macOS (x64 and arm64) and Windows x64. The
 image runs as root unless told otherwise: `-u` makes the files it writes yours. [Installing](docs/installing.md)
 has the rest: alphas and release candidates, the extras, the repository.
 
-From this repository, put `core/cli` on `PATH`. `rowfence init` then finds the stack (Next.js, Prisma,
-Drizzle, FastAPI, SQLAlchemy, Alembic), writes `rowfence.toml` for its migration tool, adds the SDK's
+From this repository, put `core/cli` on `PATH`. `rowstile init` then finds the stack (Next.js, Prisma,
+Drizzle, FastAPI, SQLAlchemy, Alembic), writes `rowstile.toml` for its migration tool, adds the SDK's
 packages and says which line to change.
 
 ## Docs
@@ -65,7 +68,7 @@ packages and says which line to change.
 - [Your stack](docs/stacks/README.md): FastAPI, Next.js, other Node and Python apps, and the SQL any other
   language sends.
 - [Cookbook](docs/cookbook.md), [troubleshooting](docs/troubleshooting.md), [running
-  rowfence](docs/operations.md), [managed Postgres](docs/managed-postgres.md) (Neon, Supabase), [files in
+  rowstile](docs/operations.md), [managed Postgres](docs/managed-postgres.md) (Neon, Supabase), [files in
   S3-compatible storage](docs/signed-urls.md), [error codes](docs/errors/README.md).
 - Reference: [the policy language](docs/reference/language.md), [app code](docs/reference/app-code.md),
   [identity](docs/reference/identity.md), [governance](docs/reference/governance.md),
@@ -78,15 +81,15 @@ packages and says which line to change.
 
 | folder | what |
 |---|---|
-| [`core/`](core/README.md) | the compiler and the `rowfence` command, their tests and the benchmarks |
+| [`core/`](core/README.md) | the compiler and the `rowstile` command, their tests and the benchmarks |
 | `sdk/` | the SDKs: [Python](sdk/python/README.md) (FastAPI, SQLAlchemy, psycopg, asyncpg) and [TypeScript](sdk/typescript/README.md) (Next.js, Prisma, Drizzle, pg, postgres.js, React) |
 | [`integrations/`](integrations/README.md) | each SDK's conformance suite: a small app and the checks it must pass |
-| [`examples/`](examples/README.md) | complete apps built on rowfence: a file manager and a messenger |
-| [`editor/`](editor/README.md) | the VS Code and Zed extensions, a Tree-sitter grammar (Helix, Neovim); other editors start `rowfence lsp` |
+| [`examples/`](examples/README.md) | complete apps built on rowstile: a file manager and a messenger |
+| [`editor/`](editor/README.md) | the VS Code and Zed extensions, a Tree-sitter grammar (Helix, Neovim); other editors start `rowstile lsp` |
 | `review-ci/` | the policy review for pull requests: a GitHub action and a GitLab CI template |
 | `docs/` | the guides and the reference, as Markdown; `site/` builds them into the docs site |
-| [`playground/`](playground/README.md) | rowfence in the browser (Pyodide and PGlite) |
-| `packaging/` | how rowfence is installed: npm, PyPI and a Docker image |
+| [`playground/`](playground/README.md) | rowstile in the browser (Pyodide and PGlite) |
+| `packaging/` | how rowstile is installed: npm, PyPI and a Docker image |
 
 ## Contributing
 
@@ -97,7 +100,7 @@ changed in each release: [CHANGELOG.md](CHANGELOG.md). How releases are numbered
 
 ## Security
 
-rowfence has not been audited by anyone outside the project. [The threat model](docs/threat-model.md) says
+rowstile has not been audited by anyone outside the project. [The threat model](docs/threat-model.md) says
 what it protects and from whom. Report a vulnerability privately: [SECURITY.md](SECURITY.md).
 
 ## License

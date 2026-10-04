@@ -1,11 +1,11 @@
-"""pytest fixtures for apps that use rowfence (loaded by the pytest11 entry point, or with
-`pytest_plugins = ["rowfence.testing"]`).
+"""pytest fixtures for apps that use rowstile (loaded by the pytest11 entry point, or with
+`pytest_plugins = ["rowstile.testing"]`).
 
     def test_bob_cannot_rename(client, as_user, assert_refused):
         with as_user(2):
             assert_refused(lambda: rename(note_id, "x"), command="update")
 
-Environment: ROWFENCE_OWNER_URL (the tables' owner: migrations, test data) and ROWFENCE_APP_URL (the app's
+Environment: ROWSTILE_OWNER_URL (the tables' owner: migrations, test data) and ROWSTILE_APP_URL (the app's
 role: what the app sees), both SQLAlchemy or libpq URLs, give the authz_owner_url and authz_app_url fixtures.
 The fixtures' types, for annotating a test's arguments: AsUser, AssertRefused, AssertNotFound.
 
@@ -110,15 +110,15 @@ def assert_not_found() -> AssertNotFound:
 
 @pytest.fixture
 def authz_owner_url() -> str:
-    url = os.environ.get("ROWFENCE_OWNER_URL")
+    url = os.environ.get("ROWSTILE_OWNER_URL")
     if not url:
-        pytest.skip("ROWFENCE_OWNER_URL is not set")
+        pytest.skip("ROWSTILE_OWNER_URL is not set")
     return url
 
 
 @pytest.fixture
 def authz_app_url() -> str:
-    url = os.environ.get("ROWFENCE_APP_URL")
+    url = os.environ.get("ROWSTILE_APP_URL")
     if not url:
-        pytest.skip("ROWFENCE_APP_URL is not set")
+        pytest.skip("ROWSTILE_APP_URL is not set")
     return url

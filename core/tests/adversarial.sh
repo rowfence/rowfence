@@ -70,7 +70,7 @@ expect "sharing as a user chosen by a setting" "28000" -c "SET LOCAL authz.user_
   -c "SELECT authz.share('folder', 5, 'viewer', 'user', 3)"
 expect "asking can() as a user chosen by a setting" "28000" -c "SET LOCAL authz.user_id = 5" -c "SELECT authz.can('folder', 5, 'view')"
 
-echo "-- rowfence's own tables and functions"
+echo "-- rowstile's own tables and functions"
 expect "internal views" "42501" -c "SELECT count(*) FROM authz_int.\"folder__view\""
 expect "the closure tables" "42501" -c "SELECT count(*) FROM authz_int.\"folder__parent__tree\""
 expect "the shares table" "42501" -c "SELECT count(*) FROM authz.shares"
@@ -84,7 +84,7 @@ expect "announcing fake changes" "42501" -c "SELECT authz_int.changed('folder', 
 expect "the public views return only carol's own ids" "0" \
   -c "SELECT count(*) FROM authz_gen.\"folder__view\" WHERE id IN (5, 6)"
 
-echo "-- the catalog: every function, table and schema rowfence made, against the rules (tests/catalog.sql)"
+echo "-- the catalog: every function, table and schema rowstile made, against the rules (tests/catalog.sql)"
 # $1 database, $2 compiled policy, $3 app role: prints what breaks a rule
 catalog() {
   local api; api=$(awk '/^GRANT EXECUTE ON FUNCTION$/{f=1; next} f && /^  TO /{f=0} f' "$2" | sed 's/^ *//; s/,$//' | paste -sd'|')
@@ -123,7 +123,7 @@ CP -c "ALTER DEFAULT PRIVILEGES REVOKE ALL ON TABLES FROM app_user" -c "ALTER DE
    -c "ALTER DEFAULT PRIVILEGES REVOKE ALL ON FUNCTIONS FROM app_user" -c "ALTER DEFAULT PRIVILEGES REVOKE ALL ON SCHEMAS FROM app_user" >/dev/null
 CP -c "GRANT SELECT ON authz.shares TO app_user" -c "GRANT EXECUTE ON FUNCTION authz.trim_audit(interval) TO app_user" >/dev/null
 [ "$(lint_c authz.shares)" = 1 ] && [ "$(lint_c 'authz.trim_audit(interval)')" = 1 ] &&
-  echo "ok    lint reports a grant on rowfence's objects made after apply" || { echo "FAIL  lint misses later grants"; fails=$((fails + 1)); }
+  echo "ok    lint reports a grant on rowstile's objects made after apply" || { echo "FAIL  lint misses later grants"; fails=$((fails + 1)); }
 out=$(apply_c); got=$(catalog "$C" /tmp/authz_adversarial.sql app_user)
 [ -z "$got" ] && echo "ok    ... and the next apply takes it back" || { echo "FAIL  a later grant survives apply: $got $out"; fails=$((fails + 1)); }
 # a schema on the search path the app role may create in: a function there could take the place of a built-in

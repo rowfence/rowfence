@@ -850,7 +850,7 @@ wheels = [
 ]
 
 [[package]]
-name = "rowfence"
+name = "rowstile"
 source = { editable = "../../sdk/python" }
 
 [package.optional-dependencies]
@@ -879,7 +879,7 @@ requires-dist = [
 provides-extras = ["asyncpg", "fastapi", "psycopg", "sqlalchemy"]
 
 [[package]]
-name = "rowfence-conformance-fastapi"
+name = "rowstile-conformance-fastapi"
 version = "0.0.0"
 source = { virtual = "." }
 dependencies = [
@@ -890,7 +890,7 @@ dependencies = [
     { name = "mypy" },
     { name = "psycopg", extra = ["binary"] },
     { name = "pytest" },
-    { name = "rowfence", extra = ["asyncpg", "fastapi", "psycopg", "sqlalchemy"] },
+    { name = "rowstile", extra = ["asyncpg", "fastapi", "psycopg", "sqlalchemy"] },
     { name = "sqlalchemy", extra = ["asyncio"] },
 ]
 
@@ -903,7 +903,7 @@ requires-dist = [
     { name = "mypy", specifier = ">=1.10" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.1" },
     { name = "pytest", specifier = ">=8" },
-    { name = "rowfence", extras = ["fastapi", "sqlalchemy", "psycopg", "asyncpg"], editable = "../../sdk/python" },
+    { name = "rowstile", extras = ["fastapi", "sqlalchemy", "psycopg", "asyncpg"], editable = "../../sdk/python" },
     { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0" },
 ]
 

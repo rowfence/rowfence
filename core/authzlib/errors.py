@@ -1,6 +1,6 @@
-"""Every mistake rowfence reports has a stable code, like AZ201, at the end of its message: 'line 4: folder.owner:
+"""Every mistake rowstile reports has a stable code, like AZ201, at the end of its message: 'line 4: folder.owner:
 unknown type 'person' [AZ201]'. This file is each code's page: what it means, a policy that makes the mistake and
-the same policy fixed. `rowfence help AZ201` prints it; docs/errors/ is written from it (tests/unit_test.py
+the same policy fixed. `rowstile help AZ201` prints it; docs/errors/ is written from it (tests/unit_test.py
 --update), and the unit tests compile every example: the mistake must give its code, the fix must compile.
 """
 from __future__ import annotations
@@ -408,7 +408,7 @@ CODES = {
         when="apply"),
     "AZ604": Code(
         "An inheritance condition reading a view",
-        "rowfence watches the tables an inheritance condition reads, so it can keep the tree up to date. A view "
+        "rowstile watches the tables an inheritance condition reads, so it can keep the tree up to date. A view "
         "can't be watched: read its tables directly.",
         "type folder = app.folders\n  owner  : user = owner_id\n  parent : folder = parent_id\n"
         "  can view = owner or (parent.view and {not exists (select 1 from app.locked_v l where l.folder_id = id)})\n",
@@ -431,8 +431,8 @@ CODES = {
         "A migration applied out of order",
         "Each policy migration starts from the policy the one before it left, recorded in "
         "`authz.policy_versions`. This database is somewhere else: a migration was skipped, or the database was "
-        "changed with `rowfence push` or `apply` since. Apply the migrations in order; a database changed by "
-        "`push` takes the migrations from the start, or `rowfence apply` of the policy the previous migration "
+        "changed with `rowstile push` or `apply` since. Apply the migrations in order; a database changed by "
+        "`push` takes the migrations from the start, or `rowstile apply` of the policy the previous migration "
         "left.",
         "", "", when="deploy"),
     "AZ608": Code(
@@ -443,16 +443,16 @@ CODES = {
     "AZ609": Code(
         "No policy is applied",
         "The command asks the policy in force (tests, why, lint, snapshots, ...), and this database has none, or "
-        "it was removed. Apply it first: `rowfence push` on a development database, the migrations elsewhere.",
+        "it was removed. Apply it first: `rowstile push` on a development database, the migrations elsewhere.",
         "", "", when="command"),
     "AZ610": Code(
         "Not a development database",
-        "`rowfence push` (and `rowfence dev`, and the MCP server's `push`) changes a policy straight away, so it "
+        "`rowstile push` (and `rowstile dev`, and the MCP server's `push`) changes a policy straight away, so it "
         "only changes a development database: one marked as one. The first push to a database that never had a "
-        "policy marks it. This one has a policy and no mark (or had one: `rowfence remove` leaves it as it was, "
+        "policy marks it. This one has a policy and no mark (or had one: `rowstile remove` leaves it as it was, "
         "marked or not): if it is production, it takes migrations "
-        "(`rowfence migrate`, then your migration tool); if it is a development database (say, one your "
-        "migrations set up), mark it once with `rowfence push --development`.",
+        "(`rowstile migrate`, then your migration tool); if it is a development database (say, one your "
+        "migrations set up), mark it once with `rowstile push --development`.",
         "", "", when="command"),
     "AZ611": Code(
         "Masked columns still readable",
@@ -483,7 +483,7 @@ CODES = {
         "Something uses a function this policy no longer makes",
         "A view or a function of yours may call the `authz.*` functions (`authz.can`, `authz.list`, ...): applying "
         "replaces them in place, and what uses them goes on working. This one is no longer made with those "
-        "arguments (another version of rowfence, usually), so it can't be replaced, and Postgres won't drop a "
+        "arguments (another version of rowstile, usually), so it can't be replaced, and Postgres won't drop a "
         "function something depends on. The message names the function and what uses it: drop that view or "
         "function, apply, and create it again with the function as it is now. (When only the function's result "
         "changed, Postgres says so itself, `cannot change return type of existing function`: the same fix.)",
@@ -499,11 +499,11 @@ CODES = {
         "", "", when="deploy"),
     "AZ616": Code(
         "An older command, a newer database",
-        "The database (or the lock file) was last written by a newer version of rowfence than this command. Going "
+        "The database (or the lock file) was last written by a newer version of rowstile than this command. Going "
         "on would put this older version's functions back, with everything fixed since undone, and a migration "
         "written now would be that step back, though it would read like an upgrade. An old global install, a CI "
         "image pinned to an older version or one machine that wasn't upgraded are the usual causes: upgrade the "
-        "command there. To go back to the older version on purpose, add `--downgrade` (`rowfence apply`, `push` "
+        "command there. To go back to the older version on purpose, add `--downgrade` (`rowstile apply`, `push` "
         "and `migrate` take it). Development builds of the same version can't be told apart, and are never refused.",
         "", "", when="command"),
     "AZ617": Code(
@@ -517,7 +517,7 @@ CODES = {
         "", "", when="apply"),
     "AZ618": Code(
         "The owner may not switch to the app role",
-        "`rowfence test` (its `as user ...` checks), `sql --as`, `explain-rule`, `plans`, `bench` and Studio look "
+        "`rowstile test` (its `as user ...` checks), `sql --as`, `explain-rule`, `plans`, `bench` and Studio look "
         "at the data as the app does: they switch to the app role with `SET ROLE`, in a transaction that is rolled "
         "back. The role the command connects as has to hold the app role for that. A superuser always does. Since "
         "PostgreSQL 16 a role that makes another (`CREATE ROLE app_user`) only administers it, so an owner that "
@@ -637,15 +637,15 @@ def message(code: str) -> str | None:
 
 
 def page(code: str) -> str:
-    """The code's page, in markdown (docs/errors/AZ201.md, and `rowfence help AZ201`)."""
+    """The code's page, in markdown (docs/errors/AZ201.md, and `rowstile help AZ201`)."""
     c = CODES[code]
     out = [f"# {code}: {c.title}", "", c.text, ""]
-    found = {"compile": "when the policy is compiled: `rowfence check`, the editor, `rowfence dev`",
-             "tests": "when the tests are compiled: `rowfence test`, the editor, `rowfence dev`",
-             "apply": "when the policy is applied (`rowfence push`, `apply`, a migration), against the database",
+    found = {"compile": "when the policy is compiled: `rowstile check`, the editor, `rowstile dev`",
+             "tests": "when the tests are compiled: `rowstile test`, the editor, `rowstile dev`",
+             "apply": "when the policy is applied (`rowstile push`, `apply`, a migration), against the database",
              "deploy": "when a policy migration runs",
              "command": "by the command, against a database",
-             "runtime": "to the app, by the `authz.*` functions and the policy's rules: the code is in the error's HINT (`rowfence help AZ709`), and the SDKs' errors carry it as `code`"}[c.when]
+             "runtime": "to the app, by the `authz.*` functions and the policy's rules: the code is in the error's HINT (`rowstile help AZ709`), and the SDKs' errors carry it as `code`"}[c.when]
     out += [f"Reported {found}.", ""]
     if c.wrong:
         out += ["## The mistake", "", "```authz", example(c.wrong).rstrip("\n"), "```", ""]
@@ -661,8 +661,8 @@ def page(code: str) -> str:
 
 def index() -> str:
     out = ["# Error codes", "",
-           "Every mistake rowfence reports ends with its code: `line 4: folder.owner: unknown type 'person' "
-           "[AZ201]`. `rowfence help AZ201` prints its page in the terminal.", ""]
+           "Every mistake rowstile reports ends with its code: `line 4: folder.owner: unknown type 'person' "
+           "[AZ201]`. `rowstile help AZ201` prints its page in the terminal.", ""]
     for prefix, name in GROUPS:
         out += [f"## {name}", ""]
         out += [f"- [{code}]({code}.md): {c.title}" for code, c in CODES.items() if code.startswith(prefix)]

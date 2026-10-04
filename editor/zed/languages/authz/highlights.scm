@@ -1,4 +1,4 @@
-; rowfence policies: capture names that Zed, Helix and Neovim all know
+; rowstile policies: capture names that Zed, Helix and Neovim all know
 
 (comment) @comment
 (string) @string

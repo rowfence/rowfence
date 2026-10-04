@@ -55,7 +55,7 @@ fi
 
 if [ "$MODE" != proofs ] && [ "$MODE" != soak ]; then
 if every_version; then
-step "fast checks without a database: golden SQL, included files, the command's SQL, rowfence command"
+step "fast checks without a database: golden SQL, included files, the command's SQL, rowstile command"
 python3 tests/unit_test.py 2>&1 | tail -n 3
 record "${PIPESTATUS[0]}" "unit"
 
@@ -126,16 +126,16 @@ if every_version; then
   record "${PIPESTATUS[0]}" "language server"
 fi
 
-step "applying with the rowfence command: no extension, no superuser, includes, diff, backup and restore, remove"
+step "applying with the rowstile command: no extension, no superuser, includes, diff, backup and restore, remove"
 tests/apply.sh
 record $? "apply"
-step "the rowfence command"
+step "the rowstile command"
 tests/cli.sh
 record $? "cli"
 step "policy changes as migrations: each tool's files, in order, out of order, push, trees built beside"
 tests/migrations.sh
 record $? "migrations"
-step "rowfence review and fmt: a pull request in a git repository, with a review database"
+step "rowstile review and fmt: a pull request in a git repository, with a review database"
 tests/review.sh
 record $? "review"
 if every_version; then

@@ -6,7 +6,7 @@
 - Uploads that never finished (a row made, the bytes never arrived or never confirmed): their objects
   and rows are removed. They span every user, so this runs as the owner, not as the app role.
 - What is left in the uploads' place in storage after a day, and sessions that ended.
-- rowfence's retention: the change feed, with authz.trim_changes(). The audit trail is kept; trim it with
+- rowstile's retention: the change feed, with authz.trim_changes(). The audit trail is kept; trim it with
   authz.trim_audit(...) once you have decided how long to keep it.
 """
 import argparse

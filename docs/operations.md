@@ -1,6 +1,6 @@
-# Running rowfence
+# Running rowstile
 
-Upgrading, backups, retention and what to watch. Applying is the `rowfence` command, run as the owner of
+Upgrading, backups, retention and what to watch. Applying is the `rowstile` command, run as the owner of
 the tables; everything else here is plain SQL.
 
 ## Configuration
@@ -18,7 +18,7 @@ the tables; everything else here is plain SQL.
 
 ## Behind a pooler
 
-rowfence signs in each transaction, so a pooler in transaction mode works: PgBouncer and Supavisor (Supabase's)
+rowstile signs in each transaction, so a pooler in transaction mode works: PgBouncer and Supavisor (Supabase's)
 pass both SDKs' conformance suites and the example apps. Session mode works as plain connections do.
 Statement mode can't: signing in and the queries after it are one transaction, and it refuses transactions.
 
@@ -40,7 +40,7 @@ Statement mode can't: signing in and the queries after it are one transaction, a
 - **Nothing may outlive a transaction.** The next transaction on that server connection may be another
   client's. A session-level `SET`, a temporary table, a statement prepared by name, or a `WITH HOLD` cursor in
   your own code reaches it: a cursor declared while signed in as one user is read by the next client, signed
-  in or not. This holds for any pool. rowfence's own sign-in lasts one transaction.
+  in or not. This holds for any pool. rowstile's own sign-in lasts one transaction.
 - **Migrations and the command** run through a pooler too, each in one transaction. The pooler logs in as
   the role it is given: the owner for migrations, the app role for the app (`authz.connection_check()` judges
   the role the app's connection logs in as).
@@ -50,20 +50,20 @@ Statement mode can't: signing in and the queries after it are one transaction, a
 
 ## On managed Postgres
 
-The role a managed service gives you owns your tables but isn't a superuser, which is all rowfence needs. Make
+The role a managed service gives you owns your tables but isn't a superuser, which is all rowstile needs. Make
 the app role with SQL and give it to the owner once (`GRANT app_user TO CURRENT_USER`). [Managed
 Postgres](managed-postgres.md) has the setup, and what we found on Neon and Supabase: their connection strings,
 poolers, passwords, test databases and, on Supabase, the owner's search path.
 
 ## Deploying a policy change
 
-A policy change is a migration: `rowfence migrate` writes it for the tool in `rowfence.toml`
+A policy change is a migration: `rowstile migrate` writes it for the tool in `rowstile.toml`
 (`[migrations]`), from the lock file (`db/policy.lock`, committed next to the policy), and the deploy runs
 it with the app's other migrations, as the owner of the tables. There is no separate step. In CI,
-`rowfence migrate --check` fails a change to the policy that has no migration.
+`rowstile migrate --check` fails a change to the policy that has no migration.
 
 - A migration holds only what changed. Most take milliseconds and lock the app's tables only where a
-  rule or a trigger on them changes (the migration's first comments say what changed; `rowfence review`
+  rule or a trigger on them changes (the migration's first comments say what changed; `rowstile review`
   will say which tables it locks). Each waits at most 10 seconds for a table (`lock_timeout`, unless the
   migration tool set one), then fails, rather than queueing every query behind it; run it again when the
   database is quieter.
@@ -75,19 +75,19 @@ it with the app's other migrations, as the owner of the tables. There is no sepa
   catches up with whatever the app changed in between. Other inheritance changes rebuild the table in one
   migration, with the app's tables locked while it runs.
 - A migration checks that the database is where the one before it left it, so migrations applied out of
-  order, or on a database changed by hand since (`rowfence push` or `apply`), stop with a message.
-- Preview first with `rowfence diff`: who gains and loses what.
+  order, or on a database changed by hand since (`rowstile push` or `apply`), stop with a message.
+- Preview first with `rowstile diff`: who gains and loses what.
 
-`rowfence apply db/policy.authz` still applies the whole policy in one transaction (keeping inheritance
-tables that didn't change); use it for databases that don't take migrations. `rowfence push`
+`rowstile apply db/policy.authz` still applies the whole policy in one transaction (keeping inheritance
+tables that didn't change); use it for databases that don't take migrations. `rowstile push`
 is for development databases.
 
-## Upgrading rowfence
+## Upgrading rowstile
 
-1. Install the new version of the `rowfence` command.
-2. `rowfence migrate` writes what the new version makes differently, as the next migration; deploy it. If
-   it makes the same, there is nothing to write, and `rowfence migrate --check` passes as before.
-   (Databases that don't take migrations: `rowfence reapply`.)
+1. Install the new version of the `rowstile` command.
+2. `rowstile migrate` writes what the new version makes differently, as the next migration; deploy it. If
+   it makes the same, there is nothing to write, and `rowstile migrate --check` passes as before.
+   (Databases that don't take migrations: `rowstile reapply`.)
 
 The tests (`core/tests/apply.sh`) apply a policy another version applied, and check nothing else changed.
 
@@ -101,12 +101,12 @@ The tests (`core/tests/apply.sh`) apply a policy another version applied, and ch
 SELECT authz.verify();     -- the inheritance tables match a rebuild
 ```
 
-and, if a newer rowfence is in use now, its next migration (`rowfence migrate`).
+and, if a newer rowstile is in use now, its next migration (`rowstile migrate`).
 
 If `authz.verify()` says false, rows were written with the triggers off (a restore with `--disable-triggers`, a
 bulk load under `session_replication_role = replica`, `ALTER TABLE ... DISABLE TRIGGER`): the inheritance
-tables no longer match the app's tables, and people keep or miss access they shouldn't. `rowfence reapply
---force` (or `rowfence apply db/policy.authz --force`) computes every inheritance table again, under its
+tables no longer match the app's tables, and people keep or miss access they shouldn't. `rowstile reapply
+--force` (or `rowstile apply db/policy.authz --force`) computes every inheritance table again, under its
 lock; a plain `apply` keeps the tables it finds unchanged, stale or not.
 
 ## Retention
@@ -126,7 +126,7 @@ must read everything again, then follow from where the feed was when it started 
 
 | | how |
 |---|---|
-| the inheritance tables are exact | `SELECT authz.verify()` (reads everything, a batch of rows at a time: about two and a half minutes for a million folders; run it off-peak); false: `rowfence reapply --force` |
+| the inheritance tables are exact | `SELECT authz.verify()` (reads everything, a batch of rows at a time: about two and a half minutes for a million folders; run it off-peak); false: `rowstile reapply --force` |
 | the policy's invariants hold | `SELECT * FROM authz.check_invariants()` |
 | a tree write waits | `pg_locks` on `authz_int.locks`; a big move holds it for half a second to a second per 20k folders below (`core/bench/`) |
 | slow checks | `pg_stat_statements` on your app's queries; `EXPLAIN` shows the policy's subplans |

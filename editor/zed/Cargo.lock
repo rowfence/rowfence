@@ -417,7 +417,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "rowfence-zed"
+name = "rowstile-zed"
 version = "0.1.0"
 dependencies = [
  "zed_extension_api",

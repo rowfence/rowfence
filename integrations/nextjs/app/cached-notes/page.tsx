@@ -1,7 +1,7 @@
-// A page that tries to cache what one user may see (check 15): @rowfence/next refuses to sign in inside the
+// A page that tries to cache what one user may see (check 15): @rowstile/next refuses to sign in inside the
 // cache, so the page fails instead of serving one user's notes to the next.
 import { unstable_cache } from "next/cache";
-import { actingAs } from "@rowfence/client";
+import { actingAs } from "@rowstile/client";
 import { db, requestUser } from "@/db";
 
 const cachedNotes = unstable_cache(async () => db.note.findMany({ select: { id: true }, orderBy: { id: "asc" } }), ["notes"]);

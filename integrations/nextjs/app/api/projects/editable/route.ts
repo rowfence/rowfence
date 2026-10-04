@@ -1,5 +1,5 @@
 // A query by permission: the projects the user may edit (a set check, not a check per row)
-import { route } from "@rowfence/next";
+import { route } from "@rowstile/next";
 import { db } from "@/db";
 
 export const GET = route(async () => {

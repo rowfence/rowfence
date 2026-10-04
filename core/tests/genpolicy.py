@@ -16,7 +16,7 @@ warns about its select rule: a check of it takes minutes to hours), and a seed t
 counted and their seeds printed. For each of the others, after every one of a few random changes to the data:
   - difftest's checks (tests/difftest.py: list, can, explain, who, the rows each rule allows, verify)
   - authz.check_invariants() against the reference evaluator
-and at the end, `rowfence prove`: an invariant it says holds must not be broken by the data seen.
+and at the end, `rowstile prove`: an invariant it says holds must not be broken by the data seen.
 A failing policy is shrunk (an invariant, a rule, a type, a part of a permission taken away while it still fails)
 and printed with its seed, so `--only SEED` runs it again.
 """

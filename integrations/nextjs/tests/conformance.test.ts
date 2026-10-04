@@ -13,17 +13,17 @@ import { drizzle as drizzlePostgres } from "drizzle-orm/postgres-js";
 import { eq, sql as sqlTag } from "drizzle-orm";
 import { integer, numeric, pgSchema, serial, text, varchar } from "drizzle-orm/pg-core";
 import { afterAll, beforeEach, describe, expect, test } from "vitest";
-import { actingAs, beforeSignIn, ConnectionProblem, current, errorCode, NotSignedIn, sqlstate, translate } from "@rowfence/client";
-import { describe as describePrincipal, parsePrincipal, principal } from "@rowfence/client";
-import { authzRoutes } from "@rowfence/next";
-import { authz as rowfence } from "@rowfence/pg";
-import { calls, changes } from "@rowfence/pg";
-import { authz as postgresAuthz } from "@rowfence/postgres";
-import { expect as drizzleExpect, inIds, withAuthz } from "@rowfence/drizzle";
-import { ids as drizzleIds } from "@rowfence/drizzle";
-import { databasePerWorker } from "@rowfence/vitest";
+import { actingAs, beforeSignIn, ConnectionProblem, current, errorCode, NotSignedIn, sqlstate, translate } from "@rowstile/client";
+import { describe as describePrincipal, parsePrincipal, principal } from "@rowstile/client";
+import { authzRoutes } from "@rowstile/next";
+import { authz as rowstile } from "@rowstile/pg";
+import { calls, changes } from "@rowstile/pg";
+import { authz as postgresAuthz } from "@rowstile/postgres";
+import { expect as drizzleExpect, inIds, withAuthz } from "@rowstile/drizzle";
+import { ids as drizzleIds } from "@rowstile/drizzle";
+import { databasePerWorker } from "@rowstile/vitest";
 import { PrismaPg } from "@prisma/adapter-pg";
-import { authz, signedIn } from "@rowfence/prisma";
+import { authz, signedIn } from "@rowstile/prisma";
 import { PrismaClient } from "@/generated/prisma/client.ts";
 import { db, pool } from "@/db";
 import { digest } from "@/jobs";
@@ -32,7 +32,7 @@ import { APP, EXPECTED, FEED, OWNER, SERVER, SERVER_ONE, as, seed } from "./data
 
 const HERE = dirname(dirname(fileURLToPath(import.meta.url)));
 const ROOT = join(HERE, "..", "..");
-const CLI = join(ROOT, "core", "cli", "rowfence_cli.py");
+const CLI = join(ROOT, "core", "cli", "rowstile_cli.py");
 const PYTHON = process.env.PYTHON ?? (process.platform === "win32" ? "python" : "python3");
 // the tools' own scripts, run with this Node
 const TOOL: Record<string, string> = {
@@ -69,11 +69,16 @@ test("3: not signed in is an error that says how", async () => {
     expect(e.code).toBe("28000");
     expect(e.hint).toContain("act_as");
     expect(translate(e)).toBeInstanceOf(NotSignedIn);
-    expect(errorCode(e)).toBe("AZ701");                 // rowfence help AZ701
+    expect(errorCode(e)).toBe("AZ701");                 // rowstile help AZ701
     expect((translate(e) as NotSignedIn).code).toBe("AZ701");
   } finally {
     await c.end();
   }
+});
+
+// a database rowfence applied (rowstile's name before) says `rowfence help` in its hints: the code still reads
+test("the code in a hint rowfence wrote", () => {
+  expect(errorCode({ code: "28000", message: "sign in first", hint: "sign in with authz.act_as(); rowfence help AZ701" })).toBe("AZ701");
 });
 
 // 4: one pooled connection, Ann then Bob: Bob never sees Ann's rows
@@ -154,7 +159,7 @@ test("7: hidden is 404, not allowed is 403", async () => {
   expect(refused.status).toBe(403);
   const why = await refused.json();
   expect(why.command).toBe("update");
-  expect(why.code).toBe("AZ709");                       // rowfence help AZ709
+  expect(why.code).toBe("AZ709");                       // rowstile help AZ709
   expect(why.why.some((line: string) => line.includes("edit"))).toBe(true);
   expect(mine.status).toBe(200);
   expect(gone.status).toBe(404);
@@ -193,7 +198,7 @@ test("9: the generated names type-check", () => {
     compilerOptions: { incremental: false, plugins: [] }, exclude: [],
     include: [file, "../../src/authz.gen.ts"],
   });
-  const use = (perm: string) => `import { db } from "../../src/db.ts";\nimport type { Permission } from "@rowfence/client";\n` +
+  const use = (perm: string) => `import { db } from "../../src/db.ts";\nimport type { Permission } from "@rowstile/client";\n` +
     `export const ok = db.$authz.can("note", 1, "${perm}");\nexport const p: Permission<"project"> = "view";\n`;
   const check = (name: string, perm: string) => {
     writeFileSync(join(dir, `${name}.ts`), use(perm));
@@ -227,8 +232,8 @@ test("10: an id with a colon is a user's, not a service", async () => {
 
 // 12: the framework's test database has the policy: a database per worker, copied from the migrated one
 test("12: a test database per worker has the policy", async () => {
-  const tests = process.env.ROWFENCE_TESTS_DSN;
-  expect(tests, "ROWFENCE_TESTS_DSN (test.sh sets it)").toBeTruthy();
+  const tests = process.env.ROWSTILE_TESTS_DSN;
+  expect(tests, "ROWSTILE_TESTS_DSN (test.sh sets it)").toBeTruthy();
   const appTests = new URL(APP);
   appTests.pathname = new URL(tests!).pathname;
   const worker = await databasePerWorker(tests!, { appUrl: appTests.toString() });
@@ -238,7 +243,7 @@ test("12: a test database per worker has the policy", async () => {
   await owner.query("INSERT INTO app.users VALUES (1, 'ann'), (2, 'bo'); INSERT INTO app.projects VALUES (1, 1, 'Plans', false)");
   await owner.end();
   const p = new pg.Pool({ connectionString: worker.appUrl });
-  const a = rowfence(p);
+  const a = rowstile(p);
   try {
     await a.check();
     expect(await a.transaction(async (c) => (await c.query("SELECT id FROM app.projects")).rows.map((r) => r.id), "1")).toEqual([1]);
@@ -252,7 +257,7 @@ test("12: a test database per worker has the policy", async () => {
 test("13: refuses a connection that skips RLS", async () => {
   const ownerPool = new pg.Pool({ connectionString: OWNER });
   try {
-    const e = await rowfence(ownerPool).check().catch((err) => err);
+    const e = await rowstile(ownerPool).check().catch((err) => err);
     expect(e).toBeInstanceOf(ConnectionProblem);
     expect(e.message).toMatch(/owner|superuser/);
   } finally {
@@ -280,7 +285,7 @@ test("15: signed-in pages are never cached for another user", async () => {
   const other = await fetch(`${SERVER}/cached-notes`, as("2"));
   expect(ids(await other.text())).not.toEqual(EXPECTED["1"]);
   // the same with the "use cache" directive: the page whose user comes from the request, and the one whose
-  // user is known without it (only @rowfence/next's connection() stops that one)
+  // user is known without it (only @rowstile/next's connection() stops that one)
   for (const page of ["use-cache-notes", "use-cache-known-user"]) {
     for (const user of ["1", "2", "1"]) {
       const r = await fetch(`${SERVER}/${page}`, as(user));
@@ -303,7 +308,7 @@ test("server actions answer with the problem", async () => {
 describe("without Prisma", () => {
   test("pg: transactions signed in, refusals as errors", async () => {
     const p = new pg.Pool({ connectionString: APP });
-    const a = rowfence(p);
+    const a = rowstile(p);
     try {
       expect(await a.transaction(async (c) => (await c.query("SELECT id FROM app.notes ORDER BY id")).rows.map((r) => r.id), "2")).toEqual([2, 3]);
       await expect(actingAs("3", () => a.transaction(async (c) => {
@@ -355,7 +360,7 @@ describe("without Prisma", () => {
   test("the runtime's functions over pg, postgres.js and Drizzle", async () => {
     const p = new pg.Pool({ connectionString: APP });
     const sql = postgres(APP, { max: 2 });
-    const drivers = { pg: rowfence(p), "postgres.js": postgresAuthz(sql), "Drizzle on pg": withAuthz(drizzle(p)),
+    const drivers = { pg: rowstile(p), "postgres.js": postgresAuthz(sql), "Drizzle on pg": withAuthz(drizzle(p)),
                       "Drizzle on postgres.js": withAuthz(drizzlePostgres(sql)) };
     try {
       for (const [name, a] of Object.entries(drivers)) {
@@ -377,7 +382,7 @@ describe("without Prisma", () => {
   // its schema is found on the search_path; a 42501 that isn't a policy's stays the driver's error
   test("refused means the database said no", async () => {
     const p = new pg.Pool({ connectionString: APP, options: "-c search_path=app" });
-    const a = rowfence(p);
+    const a = rowstile(p);
     try {
       await expect(actingAs("3", () => a.transaction(async (c) =>             // cy may edit note 4
         calls(c).expect(await c.query("UPDATE app.notes SET body = 'x' WHERE id = 4 AND body = 'something else'"), "app.notes", "update", 4))))
@@ -399,17 +404,17 @@ describe("without Prisma", () => {
     }
   });
 
-  // a transaction told who it acts for runs the hooks before signing in too (@rowfence/next's cache guard is one)
+  // a transaction told who it acts for runs the hooks before signing in too (@rowstile/next's cache guard is one)
   test("the sign-in hooks run for a transaction given who", async () => {
     const seen: (string | null)[] = [];
     beforeSignIn((who) => { seen.push(who.id); });
     const p = new pg.Pool({ connectionString: APP });
     const sql = postgres(APP, { max: 1 });
     try {
-      await rowfence(p).transaction((c) => c.query("SELECT 1"), "2");
+      await rowstile(p).transaction((c) => c.query("SELECT 1"), "2");
       await postgresAuthz(sql).begin((tx) => tx`SELECT 1`, "3");
       await withAuthz(drizzle(p)).transaction((tx) => tx.execute(sqlTag`SELECT 1`), ["service", 1]);
-      await rowfence(p).transaction((c) => c.query("SELECT 1"), null);
+      await rowstile(p).transaction((c) => c.query("SELECT 1"), null);
       expect(seen).toEqual(["2", "3", "1", null]);
     } finally {
       await p.end();
@@ -422,7 +427,7 @@ describe("without Prisma", () => {
     const p = new pg.Pool({ connectionString: APP, max: 1 });
     const owner = new pg.Client({ connectionString: OWNER });
     await owner.connect();
-    const a = rowfence(p);
+    const a = rowstile(p);
     try {
       await expect(actingAs("1", () => a.transaction(async (c) => {
         const pid = (await c.query("SELECT pg_backend_pid() AS pid")).rows[0].pid;
@@ -443,7 +448,7 @@ describe("without Prisma", () => {
     feedPool.on("error", () => undefined);
     const owner = new pg.Client({ connectionString: OWNER });
     await owner.connect();
-    const a = rowfence(pool);
+    const a = rowstile(pool);
     let seen = 0;
     const stop = changes(feedPool)(() => { seen++; });
     const until = async (ok: () => boolean) => { for (let i = 0; i < 100 && !ok(); i++) await new Promise((r) => setTimeout(r, 100)); };
@@ -508,7 +513,7 @@ test("authzRoutes: no more event streams than maxStreams", async () => {
 test("14: a policy change ships as the next migration", () => {
   const work = join(HERE, ".work", "check14");
   rmSync(work, { recursive: true, force: true });
-  for (const part of ["db", "prisma", "rowfence.toml", "prisma.config.ts"]) cpSync(join(HERE, part), join(work, part), { recursive: true });
+  for (const part of ["db", "prisma", "rowstile.toml", "prisma.config.ts"]) cpSync(join(HERE, part), join(work, part), { recursive: true });
   const policy = join(work, "db", "policy.authz");
   writeFileSync(policy, readFileSync(policy, "utf8").replace("  can read = recipient\n", "  can read = recipient\n  can reply = recipient\n"));
   const env = { ...process.env };
@@ -518,7 +523,7 @@ test("14: a policy change ships as the next migration", () => {
   execFileSync(PYTHON, [CLI, "client"], { cwd: work, stdio: "pipe", env });
   const names = readFileSync(join(work, "src", "authz.gen.ts"), "utf8");
   expect(names).toContain('"reply"');
-  writeFileSync(join(work, "use.ts"), 'import "./src/authz.gen.ts";\nimport type { Permission } from "@rowfence/client";\n' +
+  writeFileSync(join(work, "use.ts"), 'import "./src/authz.gen.ts";\nimport type { Permission } from "@rowstile/client";\n' +
     'export const p: Permission<"message"> = "reply";\n');
   writeFileSync(join(work, "tsconfig.json"), JSON.stringify({ extends: "../../tsconfig.json", compilerOptions: { incremental: false, plugins: [] }, exclude: [], include: ["use.ts", "src/authz.gen.ts"] }));
   const tsc = run("tsc", ["-p", "tsconfig.json", "--noEmit"], work);

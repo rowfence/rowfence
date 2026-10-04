@@ -51,7 +51,7 @@ UID = "(SELECT authz.uid())"
 UIDT = "(SELECT authz.uid()::text)"
 LINKS = "(SELECT authz.link_hashes())::text[]"
 # what a function over every type does with a type the policy doesn't have (Core.dispatch_type)
-NO_SUCH_TYPE = "RAISE EXCEPTION 'no type % in the policy', p_type USING HINT = 'rowfence help AZ707';"
+NO_SUCH_TYPE = "RAISE EXCEPTION 'no type % in the policy', p_type USING HINT = 'rowstile help AZ707';"
 
 # a type's relation or permission: (type name, its name)
 Name: TypeAlias = "tuple[str, str]"
@@ -415,7 +415,7 @@ class Core:
         """`view = view__base and not denied` means what `(... or parent.view) and not denied` says only if
         denied holds on everything below a denied object: denied inherits through every link view__base
         does (without a condition, or with the same one). Otherwise the deny would cut inheritance at the
-        denied object only, which needs each user's paths, and rowfence stores objects' ancestors."""
+        denied object only, which needs each user's paths, and rowstile stores objects' ancestors."""
         for (tn, pn), negs in self.denies.items():
             t = self.T(tn)
             base_name = t.perms[pn].base

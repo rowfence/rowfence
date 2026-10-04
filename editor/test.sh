@@ -34,7 +34,7 @@ docker run --rm "${as_me[@]}" -e CARGO_HOME=/tmp/cargo -v "$REPO:/repo" -w /repo
   cp -r /usr/local/cargo /tmp/cargo 2>/dev/null
   rustup target add wasm32-wasip2 >/dev/null 2>&1 &&
     cargo build -q --release --target wasm32-wasip2 --target-dir /tmp/target 2>&1 &&
-    ls /tmp/target/wasm32-wasip2/release/rowfence_zed.wasm >/dev/null' \
+    ls /tmp/target/wasm32-wasip2/release/rowstile_zed.wasm >/dev/null' \
   && ok "it builds for wasm32-wasip2" || bad "the Zed extension doesn't build"
 
 exit $rc

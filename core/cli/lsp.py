@@ -1,10 +1,10 @@
-"""The rowfence language server: `rowfence lsp`, the Language Server Protocol over stdin and stdout.
+"""The rowstile language server: `rowstile lsp`, the Language Server Protocol over stdin and stdout.
 
 For .authz files: errors while typing (from the compiler), hover, go to definition, find references, an outline,
 and completion. It needs nothing but Python's standard library and the compiler next to it. With a database in
-rowfence.toml it also completes table and column names (read once from the catalog).
+rowstile.toml it also completes table and column names (read once from the catalog).
 
-A file of named tests (no types, only `test "..."` blocks) is checked against the policy rowfence.toml names.
+A file of named tests (no types, only `test "..."` blocks) is checked against the policy rowstile.toml names.
 """
 from __future__ import annotations
 
@@ -33,7 +33,7 @@ from authzlib.parse import (  # noqa: E402
 )
 
 if TYPE_CHECKING:
-    from rowfence_cli import Config
+    from rowstile_cli import Config
 
 Message = dict[str, Json]
 
@@ -164,7 +164,7 @@ class Server:
         return collect_includes(text, read)
 
     def included_by(self, path: str) -> str | None:
-        """The policy rowfence.toml names, when it includes this file: the file is a part of it, not a policy."""
+        """The policy rowstile.toml names, when it includes this file: the file is a part of it, not a policy."""
         try:
             policy = self.cfg.policy
             if not policy or same_file(policy) == same_file(path):
@@ -199,7 +199,7 @@ class Server:
             if main is None and self.is_test_file(text):
                 policy = self.cfg.policy
                 if not policy:
-                    raise PolicyError("line 1: to check tests, name the policy in rowfence.toml: policy = \"...\"")
+                    raise PolicyError("line 1: to check tests, name the policy in rowstile.toml: policy = \"...\"")
                 ptext = self.text_of(policy)
                 c = Compiler(parse_policy(ptext, None, files=self.includes(policy, ptext)))
                 c.add_test_files({THIS: text})
@@ -220,13 +220,13 @@ class Server:
             lines = (self.docs.get(target) or "").split("\n")
             width = len(lines[line - 1]) if 0 < line <= len(lines) else 200
             indent = len(lines[line - 1]) - len(lines[line - 1].lstrip()) if 0 < line <= len(lines) else 0
-            diag: Diagnostic = {"range": rng(line - 1, indent, line - 1, width), "severity": 1, "source": "rowfence",
+            diag: Diagnostic = {"range": rng(line - 1, indent, line - 1, width), "severity": 1, "source": "rowstile",
                                 "message": msg}
             if e.code:
-                diag["code"] = e.code      # rowfence help AZ201
+                diag["code"] = e.code      # rowstile help AZ201
             diags[target].append(diag)
         except Exception as e:           # a compiler bug must not take the editor down
-            diags[uri].append({"range": rng(0, 0, 0, 1), "severity": 2, "source": "rowfence",
+            diags[uri].append({"range": rng(0, 0, 0, 1), "severity": 2, "source": "rowstile",
                                "message": f"the checker failed: {type(e).__name__}: {e}"})
         # a file this check marked last time and doesn't now is cleared: its mistake was fixed
         for target in self.sent.get(uri, set()) - set(diags):
@@ -493,7 +493,7 @@ class Server:
         return dedupe(items)
 
     def tables(self) -> dict[str, list[str]]:
-        """{schema.table: [columns]} from the database in rowfence.toml; empty without one."""
+        """{schema.table: [columns]} from the database in rowstile.toml; empty without one."""
         if self.catalog is None:
             catalog: dict[str, list[str]] = {}
             self.catalog = catalog
@@ -525,7 +525,7 @@ class Server:
             result = {"capabilities": {
                 "textDocumentSync": 1, "hoverProvider": True, "definitionProvider": True, "referencesProvider": True,
                 "documentSymbolProvider": True, "completionProvider": {"triggerCharacters": [".", " "]}},
-                "serverInfo": {"name": "rowfence"}}
+                "serverInfo": {"name": "rowstile"}}
         elif method == "shutdown":
             result = None
         elif method == "exit":

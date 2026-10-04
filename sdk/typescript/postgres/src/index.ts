@@ -1,5 +1,5 @@
 /**
- * rowfence with postgres.js.
+ * rowstile with postgres.js.
  *
  *     const db = authz(postgres(url), { user: async () => (await auth())?.user.id });
  *     const notes = await db.begin((sql) => sql`SELECT * FROM app.notes`);
@@ -9,7 +9,7 @@
  * With PgBouncer in transaction mode, create the client with { prepare: false }, as postgres.js says.
  */
 import type { Sql, TransactionSql } from "postgres";
-import { actAs, calls, signingIn, translate, type Queryable, type UserResolver, type Who } from "@rowfence/client";
+import { actAs, calls, signingIn, translate, type Queryable, type UserResolver, type Who } from "@rowstile/client";
 
 export interface Options {
   /** Who the request is, when nothing set it with actingAs. */

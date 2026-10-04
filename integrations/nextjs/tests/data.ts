@@ -2,16 +2,16 @@
 // project 3; bo (2) owns project 2. The servers test.sh started, and what they answer.
 import pg from "pg";
 
-export const OWNER = process.env.ROWFENCE_OWNER_DSN ?? "";
-export const APP = process.env.ROWFENCE_APP_URL ?? "";
+export const OWNER = process.env.ROWSTILE_OWNER_DSN ?? "";
+export const APP = process.env.ROWSTILE_APP_URL ?? "";
 // the change feed's own connection: straight to Postgres when the app's goes through a pooler (POOLER=pgbouncer)
-export const FEED = process.env.ROWFENCE_FEED_URL ?? APP;
+export const FEED = process.env.ROWSTILE_FEED_URL ?? APP;
 export const SERVER = process.env.CONFORMANCE_SERVER ?? "";          // a pool of 5 connections
 export const SERVER_ONE = process.env.CONFORMANCE_SERVER_ONE ?? "";  // a pool of one
 export const EXPECTED: Record<string, number[]> = { "1": [1, 3, 4], "2": [2, 3], "3": [1, 3, 4], "": [3] };
 
 export async function seed(): Promise<void> {
-  if (!OWNER) throw new Error("ROWFENCE_OWNER_DSN is not set (test.sh sets it)");
+  if (!OWNER) throw new Error("ROWSTILE_OWNER_DSN is not set (test.sh sets it)");
   const c = new pg.Client({ connectionString: OWNER });
   await c.connect();
   try {

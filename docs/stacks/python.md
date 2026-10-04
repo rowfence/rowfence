@@ -10,14 +10,14 @@ reads and refuses what it may not write, and the SDK raises `Refused` (403) or `
 These come from the conformance suite (`integrations/fastapi/tests/test_conformance.py`).
 
 ```sh
-pip install --pre "rowfence[sqlalchemy,psycopg]"   # or [asyncpg]; the command comes with it (--pre: an alpha)
+pip install --pre "rowstile[sqlalchemy,psycopg]"   # or [asyncpg]; the command comes with it (--pre: an alpha)
 ```
 
 ## Who a transaction acts for
 
 `acting_as(who)` signs in every transaction begun inside it: `42` or `"42"` (a user), `("service", 3)` (another
 principal type of the policy), or `None` (nobody: only what `anyone` may see). In a web app, enter it around
-each request. A background job is `@rowfence.job(who)`. Every transaction signs in, even as nobody, and
+each request. A background job is `@rowstile.job(who)`. Every transaction signs in, even as nobody, and
 nothing uses a session-level `SET`, so pools and poolers in transaction mode are safe (behind one that keeps no
 prepared statements, turn the driver's off: [Behind a pooler](../operations.md#behind-a-pooler)). A transaction
 already begun keeps who it
@@ -28,9 +28,9 @@ acts for: `acting_as` decides for the ones begun inside it.
 `install(engine)` signs in every transaction the engine begins. SQLModel is built on the same engine.
 
 ```python
-    from rowfence import sqlalchemy as authz_sa
+    from rowstile import sqlalchemy as authz_sa
     engine = authz_sa.install(create_engine(APP.replace("+asyncpg", "+psycopg")))
-        with rowfence.acting_as(2), Session(engine) as s:
+        with rowstile.acting_as(2), Session(engine) as s:
             assert sorted(s.scalars(select(Note.id)).all()) == [2, 3]
             assert authz_sa.can_sync(s, "note", 2, "edit") and not authz_sa.can_sync(s, "note", 3, "edit")
 ```
@@ -50,7 +50,7 @@ asks the database why, and gives `Refused` with the rule and the reason, or `Not
 ## psycopg
 
 ```python
-    import rowfence.psycopg as pgp
+    import rowstile.psycopg as pgp
         with pgp.transaction(conn, 2):
             assert [r[0] for r in conn.execute("SELECT id FROM app.notes ORDER BY id")] == [2, 3]
 ```
@@ -68,22 +68,22 @@ An UPDATE or DELETE the rules refuse changes 0 rows, without an error; `expect` 
             pgp.expect(conn, cur.rowcount, "app.notes", "update", 1)
 ```
 
-A refused INSERT is an error already: `rowfence.refusal(exc)` reads it as `Refused`.
+A refused INSERT is an error already: `rowstile.refusal(exc)` reads it as `Refused`.
 
 ## asyncpg
 
 ```python
-    import rowfence.asyncpg as pga
-        with rowfence.acting_as(("service", "1")):
+    import rowstile.asyncpg as pga
+        with rowstile.acting_as(("service", "1")):
             async with pga.transaction(conn):
                 assert [r["id"] for r in await conn.fetch("SELECT id FROM app.projects ORDER BY id")] == [1, 3]
         async with pga.transaction(conn, 2):
-            with pytest.raises(rowfence.NotFound):
+            with pytest.raises(rowstile.NotFound):
                 await pga.expect(conn, await conn.execute("DELETE FROM app.notes WHERE id = 1"), "app.notes", "delete", 1)
 ```
 
 ## Migrations
 
 Policy changes ship as migrations for your tool: `tool = "alembic"` (see [FastAPI](fastapi.md)), `"sql"`,
-`"goose"`, `"dbmate"` or `"flyway"` in `rowfence.toml`. `rowfence migrate` writes the next one;
-`rowfence migrate --check` in CI fails if a policy change has none.
+`"goose"`, `"dbmate"` or `"flyway"` in `rowstile.toml`. `rowstile migrate` writes the next one;
+`rowstile migrate --check` in CI fails if a policy change has none.

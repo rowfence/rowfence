@@ -1,16 +1,16 @@
-"""rowfence for Python apps.
+"""rowstile for Python apps.
 
 Every transaction signs in as whoever the request (or the job) acts for, with `authz.act_as()`; the database's
 refusals become `Refused` (a 403 with the reason), rows the user can't see become `NotFound` (a 404). The
-package holds no rowfence logic: it calls the `authz.*` functions the policy made, and translates their answers.
+package holds no rowstile logic: it calls the `authz.*` functions the policy made, and translates their answers.
 
-    import rowfence
-    with rowfence.acting_as(42):                  # or ("service", 3), or None for nobody
+    import rowstile
+    with rowstile.acting_as(42):                  # or ("service", 3), or None for nobody
         ...                                       # every transaction in here signs in as user 42
 
-The integrations: `rowfence.fastapi` (one line: Rowfence(app, engine, user=...)), `rowfence.sqlalchemy` (sync
-and async engines, SQLModel too), `rowfence.psycopg`, `rowfence.asyncpg`, `rowfence.alembic` (autogenerate
-leaves rowfence's objects alone) and `rowfence.testing` (pytest fixtures).
+The integrations: `rowstile.fastapi` (one line: Rowstile(app, engine, user=...)), `rowstile.sqlalchemy` (sync
+and async engines, SQLModel too), `rowstile.psycopg`, `rowstile.asyncpg`, `rowstile.alembic` (autogenerate
+leaves rowstile's objects alone) and `rowstile.testing` (pytest fixtures).
 """
 from __future__ import annotations
 
@@ -71,12 +71,12 @@ class Principal:
 
 
 NOBODY = Principal("user", None)
-_current: contextvars.ContextVar[Principal | None] = contextvars.ContextVar("rowfence_principal", default=None)
+_current: contextvars.ContextVar[Principal | None] = contextvars.ContextVar("rowstile_principal", default=None)
 # the rows the ORM updated or deleted lately (sqlalchemy.why_stale): a list each request or acting_as block
 # makes, which the ORM's hooks add to (they may run in another greenlet, which sees the same list)
 # (the engine, the table, update or delete, the row's key)
 _Write: TypeAlias = "tuple[Engine, str, str, tuple[object, ...]]"
-_writes: contextvars.ContextVar[list[_Write] | None] = contextvars.ContextVar("rowfence_writes", default=None)
+_writes: contextvars.ContextVar[list[_Write] | None] = contextvars.ContextVar("rowstile_writes", default=None)
 
 
 class _Unset(enum.Enum):
@@ -104,7 +104,7 @@ def acting_as(who: Who) -> Iterator[Principal | None]:
 
 def job(who: Who) -> Callable[[Callable[P, R]], Callable[P, R]]:
     """A decorator for background jobs (Celery, RQ, FastAPI's BackgroundTasks): the job acts for `who`, e.g.
-    @rowfence.job(("service", 3)). Async functions work too."""
+    @rowstile.job(("service", 3)). Async functions work too."""
     import functools
     import inspect
 
@@ -149,7 +149,7 @@ def act_as_sql(who: Who | _Unset = _UNSET) -> str:
 # --- errors -------------------------------------------------------------------------------------------
 class Refused(Exception):
     """The database refused a write, and said why: the rule (table and command), and the explanation."""
-    code = "AZ709"                      # rowfence help AZ709
+    code = "AZ709"                      # rowstile help AZ709
 
     def __init__(self, message: str, table: str | None = None, command: str | None = None,
                  why: Sequence[str] = ()) -> None:
@@ -158,7 +158,7 @@ class Refused(Exception):
 
     def problem(self) -> Problem:
         """An RFC 9457 problem body for a 403."""
-        return {"type": "https://rowfence.dev/problems/refused", "title": "Forbidden", "status": 403,
+        return {"type": "https://rowstile.dev/problems/refused", "title": "Forbidden", "status": 403,
                 "detail": self.message, "table": self.table, "command": self.command, "why": self.why,
                 "code": self.code}
 
@@ -171,13 +171,13 @@ class NotFound(Exception):
         self.table, self.id = table, None if id_ is None else str(id_)
 
     def problem(self) -> Problem:
-        return {"type": "https://rowfence.dev/problems/not-found", "title": "Not Found", "status": 404,
+        return {"type": "https://rowstile.dev/problems/not-found", "title": "Not Found", "status": 404,
                 "detail": str(self)}
 
 
 class NotSignedIn(Exception):
     """A query that needs to know who is asking ran in a transaction nobody signed in to (strict sign-in)."""
-    code = "AZ701"                      # rowfence help AZ701
+    code = "AZ701"                      # rowstile help AZ701
 
 
 class ConnectionProblem(RuntimeError):
@@ -185,7 +185,7 @@ class ConnectionProblem(RuntimeError):
 
     def __init__(self, problems: Iterable[str]) -> None:
         self.problems = list(problems)
-        super().__init__("the app's database connection can't be used with rowfence: " + "; ".join(self.problems))
+        super().__init__("the app's database connection can't be used with rowstile: " + "; ".join(self.problems))
 
 
 def _db_error(exc: BaseException) -> list[BaseException]:
@@ -218,12 +218,12 @@ def _field(errs: list[BaseException], *names: str) -> str | None:
 
 
 def error_code(exc: BaseException) -> str | None:
-    """rowfence's code for a database error (AZ709; `rowfence help AZ709` says what it means): from its HINT,
-    where the runtime puts it, or its message. None for an error rowfence didn't raise."""
+    """rowstile's code for a database error (AZ709; `rowstile help AZ709` says what it means): from its HINT,
+    where the runtime puts it, or its message. None for an error rowstile didn't raise."""
     import re
     errs = _db_error(exc)
     for text in (_field(errs, "message_hint", "hint"), _field(errs, "message_primary", "message") or str(errs[-1])):
-        m = re.search(r"rowfence help (AZ\d{3})|\[(AZ\d{3})\]", text or "")
+        m = re.search(r"(?:rowstile|rowfence) help (AZ\d{3})|\[(AZ\d{3})\]", text or "")
         if m:
             return m.group(1) or m.group(2)
     return None
@@ -235,7 +235,7 @@ def sqlstate(exc: BaseException) -> str | None:
 
 
 def refusal(exc: BaseException) -> Refused | None:
-    """A Refused for an error that is the database refusing a write (SQLSTATE 42501, raised by rowfence's
+    """A Refused for an error that is the database refusing a write (SQLSTATE 42501, raised by rowstile's
     policies with the rule and why), else None. psycopg, psycopg2 and asyncpg, bare or in SQLAlchemy's.
     Another 42501 (a table the app role was never granted) is the app's mistake, not a refusal: None."""
     err = _db_error(exc)
@@ -248,7 +248,7 @@ def refusal(exc: BaseException) -> Refused | None:
     schema, table = _field(err, "schema_name"), _field(err, "table_name")
     constraint = _field(err, "constraint_name") or ""
     if message.startswith("new row violates row-level security policy"):
-        # Postgres's own words, not rowfence's: the row was allowed in, but may not be read back
+        # Postgres's own words, not rowstile's: the row was allowed in, but may not be read back
         # (INSERT ... RETURNING, or an ORM that reads the new row), which the select rule decides
         import re
         m = re.search(r'for table "([^"]+)"', message)

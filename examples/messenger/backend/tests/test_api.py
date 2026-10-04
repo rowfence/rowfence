@@ -1,4 +1,4 @@
-"""The API against real Postgres with rowfence and db/policy.authz applied: run test.sh.
+"""The API against real Postgres with rowstile and db/policy.authz applied: run test.sh.
 
 Every check goes through HTTP as a signed-in person (or a bot with its key), so what it proves is what
 row-level security decides: the backend has no permission checks of its own.

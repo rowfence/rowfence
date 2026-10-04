@@ -6,12 +6,12 @@ body:
     attributes:
       value: |
         These are design decisions, so they start here, before a pull request
-        ([CONTRIBUTING.md](https://github.com/rowfence/rowfence/blob/main/CONTRIBUTING.md), "Before you start").
+        ([CONTRIBUTING.md](https://github.com/rowstile/rowstile/blob/main/CONTRIBUTING.md), "Before you start").
   - type: textarea
     id: problem
     attributes:
       label: The problem
-      description: What you are trying to do, and where rowfence gets in the way. A policy or a query helps.
+      description: What you are trying to do, and where rowstile gets in the way. A policy or a query helps.
     validations:
       required: true
   - type: textarea

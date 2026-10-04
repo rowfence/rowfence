@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""mcp_test: the MCP server (`rowfence mcp`) over its protocol, as a coding agent's client would use it: the
-handshake and the tools, then each tool in a project folder (rowfence.toml, a policy, tests) on a scratch
+"""mcp_test: the MCP server (`rowstile mcp`) over its protocol, as a coding agent's client would use it: the
+handshake and the tools, then each tool in a project folder (rowstile.toml, a policy, tests) on a scratch
 database: check, prove, push, test, why, lint.
 
     PGHOST=... PGUSER=... python3 tests/mcp_test.py [--db authz_mcp]     (--no-db: only what needs none)
@@ -31,7 +31,7 @@ def check(label: str, ok: object, detail: object = "") -> None:
 
 class Client:
     def __init__(self, cwd: str, *args: str) -> None:
-        self.p = subprocess.Popen([sys.executable, os.path.join(ROOT, "cli", "rowfence_cli.py"), *args, "mcp"], cwd=cwd,
+        self.p = subprocess.Popen([sys.executable, os.path.join(ROOT, "cli", "rowstile_cli.py"), *args, "mcp"], cwd=cwd,
                                   stdin=subprocess.PIPE, stdout=subprocess.PIPE)
         assert self.p.stdin is not None and self.p.stdout is not None
         self.stdin, self.stdout = self.p.stdin, self.p.stdout
@@ -66,7 +66,7 @@ def protocol(folder: str) -> None:
     r = c.request("initialize", {"protocolVersion": "2025-06-18", "capabilities": {},
                                  "clientInfo": {"name": "test", "version": "1"}})["result"]
     check("initialize: the version asked for, tools, and what the server is", r["protocolVersion"] == "2025-06-18"
-          and "tools" in r["capabilities"] and r["serverInfo"]["name"] == "rowfence" and "push" in r["instructions"], r)
+          and "tools" in r["capabilities"] and r["serverInfo"]["name"] == "rowstile" and "push" in r["instructions"], r)
     r = c.request("initialize", {"protocolVersion": "1999-01-01", "capabilities": {}})["result"]
     check("... a version it doesn't know: its newest", r["protocolVersion"] == "2025-11-25", r)
     c.send({"jsonrpc": "2.0", "method": "notifications/initialized"})
@@ -97,7 +97,7 @@ def without_db(folder: str) -> None:
     print("-- check and prove (no database)")
     c = Client(folder)
     r = c.tool("check")
-    check("check: the policy rowfence.toml names compiles", not r["isError"] and r["structuredContent"]["ok"]
+    check("check: the policy rowstile.toml names compiles", not r["isError"] and r["structuredContent"]["ok"]
           and r["content"][0]["text"].strip().endswith(": ok"), r)
     policy = os.path.join(folder, "db", "policy.authz")
     with open(policy, encoding="utf-8") as fh:
@@ -174,7 +174,7 @@ def with_db(folder: str, db: str) -> None:
     subprocess.run(["createdb", other], check=True)
     subprocess.run(["psql", "-X", "-q", "-v", "ON_ERROR_STOP=1", "-d", other, "-f", os.path.join(ROOT, "example", "app_schema.sql")],
                    check=True, capture_output=True, env=dict(os.environ, PGOPTIONS="-c client_min_messages=error"))
-    subprocess.run([sys.executable, os.path.join(ROOT, "cli", "rowfence_cli.py"), "--db", f"dbname={other}", "apply"],
+    subprocess.run([sys.executable, os.path.join(ROOT, "cli", "rowstile_cli.py"), "--db", f"dbname={other}", "apply"],
                    cwd=folder, check=True, capture_output=True)
     c2 = Client(folder, "--db", f"dbname={other}")
     with open(os.path.join(folder, "db", "policy.authz"), "a", encoding="utf-8", newline="\n") as fh:
@@ -204,7 +204,7 @@ def with_db(folder: str, db: str) -> None:
 
 
 def project() -> str:
-    """A project folder: rowfence.toml, the docs example's policy and its named tests."""
+    """A project folder: rowstile.toml, the docs example's policy and its named tests."""
     folder = tempfile.mkdtemp(prefix="pga_mcp_")
     os.makedirs(os.path.join(folder, "db", "tests"))
     with open(os.path.join(ROOT, "example", "docs.authz"), encoding="utf-8") as fh:
@@ -212,7 +212,7 @@ def project() -> str:
     with open(os.path.join(folder, "db", "policy.authz"), "w", encoding="utf-8", newline="\n") as fh:
         fh.write(policy)
     shutil.copy(os.path.join(ROOT, "example", "docs.test.authz"), os.path.join(folder, "db", "tests", "docs.authz"))
-    with open(os.path.join(folder, "rowfence.toml"), "w", encoding="utf-8", newline="\n") as fh:
+    with open(os.path.join(folder, "rowstile.toml"), "w", encoding="utf-8", newline="\n") as fh:
         fh.write('policy = "db/policy.authz"\ntests = ["db/tests/docs.authz"]\n')
     return folder
 

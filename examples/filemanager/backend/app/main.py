@@ -3,7 +3,7 @@
 Every route that touches folders, files or shares runs in a transaction signed in as the user
 (db.as_user), so what it may see and change is decided by row-level security and the authz.*
 functions of the policy in db/policy.authz; the backend adds no permission checks of its own, with one
-exception: the list of an object's share links is a table of the app's (rowfence keeps only a link's hash),
+exception: the list of an object's share links is a table of the app's (rowstile keeps only a link's hash),
 so listing and revoking links ask authz.can(..., "share") first (may_share).
 Something a user may not see answers 404, as if it didn't exist.
 """
@@ -43,7 +43,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         problems = [str(r["problem"]) for r in tx.authz.connection_check() if r["severity"] == "error"]
     if problems:
         db.close_pool()
-        raise RuntimeError("FM_DATABASE_URL can't be used with rowfence: " + "; ".join(problems))
+        raise RuntimeError("FM_DATABASE_URL can't be used with rowstile: " + "; ".join(problems))
     storage.ensure_bucket()
     yield
     db.close_pool()
@@ -565,7 +565,7 @@ class NewLink(BaseModel):
 
 @app.post("/api/{kind}s/{id_}/links", status_code=201)
 def create_link(kind: Kind, id_: int, body: NewLink, user: DictRow = Depends(auth.current_user)) -> DictRow:
-    """The token is returned once; rowfence keeps its hash, and so does the app (to list and revoke links)."""
+    """The token is returned once; rowstile keeps its hash, and so does the app (to list and revoke links)."""
     with db.as_user(user["id"]) as tx:
         found(tx.row(f"SELECT 1 FROM {TABLES[kind]} WHERE id = %s", (id_,)))
         token = tx.authz.create_link(kind, id_, "viewer", body.expires_at)

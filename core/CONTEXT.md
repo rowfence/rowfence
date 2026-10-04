@@ -1,6 +1,6 @@
-# rowfence
+# rowstile
 
-Access rules for Postgres: developers write them in a policy language, the `rowfence` command compiles them, and the database enforces them with row-level security, using permission data that already lives in its tables.
+Access rules for Postgres: developers write them in a policy language, the `rowstile` command compiles them, and the database enforces them with row-level security, using permission data that already lives in its tables.
 
 ## Language
 
@@ -79,7 +79,7 @@ The application server that authenticates people itself and tells the database w
 _Avoid_: server, API
 
 **Migration**:
-The SQL that takes a database from the policy the lock file recorded to the policy now, written by `rowfence
+The SQL that takes a database from the policy the lock file recorded to the policy now, written by `rowstile
 migrate` for the app's migration tool. A policy change ships as one (two when an inheritance tree is
 built beside the one in use first).
 _Avoid_: apply script, upgrade script
@@ -90,7 +90,7 @@ with a hash each. The next migration starts from it.
 _Avoid_: snapshot, state file
 
 **Push**:
-Bringing a development database to the policy with the migration `rowfence migrate` would write, straight away.
+Bringing a development database to the policy with the migration `rowstile migrate` would write, straight away.
 Production takes migrations.
 
 **Development database**:
@@ -99,9 +99,9 @@ a person, once. Any other database with a policy takes only migrations.
 _Avoid_: dev DB, local database (it may be remote), test database
 
 **The command**:
-`rowfence`, which compiles a policy and applies the SQL it writes to a database, as the owner of the tables. rowfence is not a Postgres extension: nothing is installed in the database first.
+`rowstile`, which compiles a policy and applies the SQL it writes to a database, as the owner of the tables. rowstile is not a Postgres extension: nothing is installed in the database first.
 _Avoid_: extension, CLI tool, plugin
 
 **First adopter**:
-The file management app that uses rowfence as an ordinary user would and tests each feature before release.
+The file management app that uses rowstile as an ordinary user would and tests each feature before release.
 _Avoid_: pilot, customer, design partner, "our app"

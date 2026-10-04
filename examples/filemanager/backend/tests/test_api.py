@@ -1,4 +1,4 @@
-"""The API against real Postgres (with rowfence and db/policy.authz applied) and RustFS: run test.sh.
+"""The API against real Postgres (with rowstile and db/policy.authz applied) and RustFS: run test.sh.
 
 Every check goes through HTTP as a signed-in person, so what it proves is what row-level security and
 the authz.* functions decide, end to end.
@@ -436,7 +436,7 @@ def test_the_app_does_not_start_as_the_tables_owner(monkeypatch: pytest.MonkeyPa
     from app import db, main
     monkeypatch.setattr(main, "settings", dataclasses.replace(main.settings, database_url=ADMIN))
     try:
-        with pytest.raises(RuntimeError, match="can't be used with rowfence"), TestClient(app):
+        with pytest.raises(RuntimeError, match="can't be used with rowstile"), TestClient(app):
             pass
     finally:
         monkeypatch.undo()

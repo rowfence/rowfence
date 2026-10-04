@@ -1,13 +1,13 @@
 # Using it from app code
 
-Python apps use [the Python SDK](../../sdk/python/README.md): `Rowfence(app, engine, user=...)` for FastAPI, `install(engine)` for
+Python apps use [the Python SDK](../../sdk/python/README.md): `Rowstile(app, engine, user=...)` for FastAPI, `install(engine)` for
 SQLAlchemy, and transactions for psycopg and asyncpg sign each transaction in, turn refusals into 403 and
 hidden rows into 404, and check the app's connection at start-up. `integrations/fastapi` is its conformance
-suite. TypeScript apps use [the TypeScript SDK](../../sdk/typescript/README.md): `@rowfence/prisma` (a driver adapter that signs every
+suite. TypeScript apps use [the TypeScript SDK](../../sdk/typescript/README.md): `@rowstile/prisma` (a driver adapter that signs every
 transaction in, and a client extension), `/pg`, `/postgres` (postgres.js), `/drizzle`, `/next` (signed-in reads
 kept out of caches, 403 and 404 from route handlers and server actions), `/react` (`usePerms`, `<Can>`, a
 headless share dialog, live updates) and `/vitest`; `integrations/nextjs` is their conformance suite, and
-`rowfence client` writes only the policy's names for them (`src/authz.gen.ts`). Underneath, and for every
+`rowstile client` writes only the policy's names for them (`src/authz.gen.ts`). Underneath, and for every
 other stack:
 
 Everything is a SQL function in schema `authz`, callable by the app role, acting as
@@ -49,8 +49,8 @@ Administrators (the policy's owner and superusers; the app role is refused) also
 | ways around RLS | `authz.lint()`: see [Checking the database](governance.md#checking-the-database) |
 
 Generated clients wrap these with the policy's names, so a typo in a permission is a
-compile error: `rowfence client py > authz_client.py`
-(DB-API: psycopg and friends) or `rowfence client ts > authz.ts` (TypeScript, for `pg` or
+compile error: `rowstile client py > authz_client.py`
+(DB-API: psycopg and friends) or `rowstile client ts > authz.ts` (TypeScript, for `pg` or
 anything with `query(text, params)`). Generate it from the policy in force and commit it next to
 your code; regenerate when the policy changes (the file manager's tests fail when it is stale).
 

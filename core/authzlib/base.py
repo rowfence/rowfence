@@ -145,7 +145,7 @@ CREATE TABLE IF NOT EXISTS authz.review_items (
 CREATE TABLE IF NOT EXISTS authz.masked_tables (tbl text, role text, PRIMARY KEY (tbl, role));
 REVOKE ALL ON authz.changes, authz.requests, authz.reviews, authz.review_items, authz.masked_tables FROM PUBLIC;
 
--- Every policy the rowfence command applied or removed, with the rowfence version that did it
+-- Every policy the rowstile command applied or removed, with the rowstile version that did it
 CREATE TABLE IF NOT EXISTS authz.policy_versions (
   id      bigserial PRIMARY KEY,
   at      timestamptz NOT NULL DEFAULT now(),

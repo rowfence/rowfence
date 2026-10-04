@@ -1,6 +1,6 @@
 #!/bin/bash
-# run.sh: the scale benchmark, run inside a rowfence container (bench/scale.sh starts one). Loads the
-# example app at scale, applies docs.authz with the rowfence command, then measures
+# run.sh: the scale benchmark, run inside a rowstile container (bench/scale.sh starts one). Loads the
+# example app at scale, applies docs.authz with the rowstile command, then measures
 # (the gate's workload: tree writes are 90% folder creates, 9% moves of small folders, 1% links):
 #   1. reads through RLS, alone
 #   2. tree writes as clients go from 1 to 50: how far does throughput go?
@@ -24,7 +24,7 @@ wrong=0
 READ_RATE=${READ_RATE:-400}      # the gate's 400 reads/s; regress.sh sizes it to a small machine
 : > "$OUT"; rm -rf "$LOGS"; mkdir -p "$LOGS"
 
-say "# rowfence scale benchmark ($(date -u +%Y-%m-%d), $(psql -X -At -d postgres -c 'SHOW server_version' | cut -d' ' -f1), rowfence $(sed -n 's/^__version__ = "\([^"]*\)".*/\1/p' authzlib/__init__.py))"
+say "# rowstile scale benchmark ($(date -u +%Y-%m-%d), $(psql -X -At -d postgres -c 'SHOW server_version' | cut -d' ' -f1), rowstile $(sed -n 's/^__version__ = "\([^"]*\)".*/\1/p' authzlib/__init__.py))"
 say "# $FILES files, $FOLDERS folders $LEVELS levels deep, $USERS users, $TEAMS nested teams; $(nproc) CPUs shared by server and pgbench"
 say "# $(psql -X -At -d postgres -c "SELECT string_agg(name || '=' || current_setting(name), ', ' ORDER BY name) FROM pg_settings WHERE name IN ('shared_buffers', 'work_mem', 'max_connections', 'jit', 'synchronous_commit')")"
 say
@@ -40,7 +40,7 @@ psql -X -q -v ON_ERROR_STOP=1 -d "$DB" -v files="$FILES" -v folders="$FOLDERS" -
 PSQL -c "VACUUM ANALYZE" >/dev/null
 say "load the app data                       $(since "$t")"
 t=$(now)
-python3 cli/rowfence_cli.py --db "dbname=$DB" apply example/docs.authz >/dev/null 2>&1 || exit 1
+python3 cli/rowstile_cli.py --db "dbname=$DB" apply example/docs.authz >/dev/null 2>&1 || exit 1
 say "apply docs.authz, with backfill         $(since "$t")"
 t=$(now)
 psql -X -q -v ON_ERROR_STOP=1 -d "$DB" -v files="$FILES" -v folders="$FOLDERS" -v users="$USERS" -v teams="$TEAMS" \

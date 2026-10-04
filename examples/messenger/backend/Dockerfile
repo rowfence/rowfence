@@ -1,4 +1,4 @@
-# The messenger: the web app built, then the backend serving it. Build context: the repository root (for the rowfence command)
+# The messenger: the web app built, then the backend serving it. Build context: the repository root (for the rowstile command)
 FROM node:24-slim AS web
 WORKDIR /web
 COPY examples/messenger/frontend/package.json examples/messenger/frontend/package-lock.json ./
@@ -13,7 +13,7 @@ COPY examples/messenger/backend/pyproject.toml examples/messenger/backend/uv.loc
 RUN uv sync --frozen --no-dev --no-install-project
 COPY examples/messenger/backend/ ./
 COPY examples/messenger/db/ /ms/db/
-# the rowfence command, which migrate.py runs to apply the policy
+# the rowstile command, which migrate.py runs to apply the policy
 COPY core/authzlib /core/authzlib
 COPY core/cli /core/cli
 COPY --from=web /web/dist /ms/frontend/dist

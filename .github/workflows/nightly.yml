@@ -23,7 +23,7 @@ jobs:
     runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
     env:
       # the label on this job's containers: its run, attempt, job and version
-      ROWFENCE_CI_JOB: "${{ github.run_id }}-${{ github.run_attempt }}-${{ github.job }}-${{ matrix.pg }}"
+      ROWSTILE_CI_JOB: "${{ github.run_id }}-${{ github.run_attempt }}-${{ github.job }}-${{ matrix.pg }}"
     strategy:
       fail-fast: false
       matrix:
@@ -31,21 +31,21 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
       - run: bash core/ci.sh ${{ matrix.pg }}
-        env: {ROWFENCE_CI_LOGS: "${{ runner.temp }}"}
+        env: {ROWSTILE_CI_LOGS: "${{ runner.temp }}"}
       # a cancelled job may stop before ci.sh removes its container: this job's own (the label names the job)
       - if: always()
-        run: docker ps -aq --filter "label=rowfence.ci=$ROWFENCE_CI_JOB" | xargs -r docker rm -f -v
+        run: docker ps -aq --filter "label=rowstile.ci=$ROWSTILE_CI_JOB" | xargs -r docker rm -f -v
       - if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a   # v7.0.1
         with:
           name: suites-pg${{ matrix.pg }}
-          path: ${{ runner.temp }}/rowfence-ci-${{ matrix.pg }}.log
+          path: ${{ runner.temp }}/rowstile-ci-${{ matrix.pg }}.log
   proofs:
     if: ${{ !inputs.only || inputs.only == 'proofs' }}
     runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
     env:
       # the label on this job's containers: its run, attempt, job and version
-      ROWFENCE_CI_JOB: "${{ github.run_id }}-${{ github.run_attempt }}-${{ github.job }}-${{ matrix.pg }}"
+      ROWSTILE_CI_JOB: "${{ github.run_id }}-${{ github.run_attempt }}-${{ github.job }}-${{ matrix.pg }}"
     strategy:
       fail-fast: false
       matrix:
@@ -53,14 +53,14 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
       - run: bash core/ci.sh --proofs ${{ matrix.pg }}
-        env: {ROWFENCE_CI_LOGS: "${{ runner.temp }}"}
+        env: {ROWSTILE_CI_LOGS: "${{ runner.temp }}"}
       - if: always()
-        run: docker ps -aq --filter "label=rowfence.ci=$ROWFENCE_CI_JOB" | xargs -r docker rm -f -v
+        run: docker ps -aq --filter "label=rowstile.ci=$ROWSTILE_CI_JOB" | xargs -r docker rm -f -v
       - if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a   # v7.0.1
         with:
           name: proofs-pg${{ matrix.pg }}
-          path: ${{ runner.temp }}/rowfence-ci-${{ matrix.pg }}.log
+          path: ${{ runner.temp }}/rowstile-ci-${{ matrix.pg }}.log
   # The random checks (the parser fuzzer, every random-change run, random policies, races and stress), long and
   # with this run's id as the seed, so each night tries new cases; on one version a night in turn. The log is
   # kept either way: it says the seed, to run a failure again. ci.sh gives it three and a half hours.
@@ -68,21 +68,21 @@ jobs:
     if: ${{ !inputs.only || inputs.only == 'soak' }}
     runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
     env:
-      ROWFENCE_CI_JOB: "${{ github.run_id }}-${{ github.run_attempt }}-${{ github.job }}"
+      ROWSTILE_CI_JOB: "${{ github.run_id }}-${{ github.run_attempt }}-${{ github.job }}"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
       - run: |
           pg=$(( 16 + 10#$(date -u +%j) % 3 ))
           echo "PostgreSQL $pg, seed $SOAK_SEED"
           bash core/ci.sh --soak "$pg"
-        env: {ROWFENCE_CI_LOGS: "${{ runner.temp }}", SOAK_SEED: "${{ github.run_id }}"}
+        env: {ROWSTILE_CI_LOGS: "${{ runner.temp }}", SOAK_SEED: "${{ github.run_id }}"}
       - if: always()
-        run: docker ps -aq --filter "label=rowfence.ci=$ROWFENCE_CI_JOB" | xargs -r docker rm -f -v
+        run: docker ps -aq --filter "label=rowstile.ci=$ROWSTILE_CI_JOB" | xargs -r docker rm -f -v
       - if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a   # v7.0.1
         with:
           name: soak
-          path: ${{ runner.temp }}/rowfence-ci-*.log
+          path: ${{ runner.temp }}/rowstile-ci-*.log
   # The SDKs' conformance suites on 17 and 18 (ci.yml runs them on 16), and on 16 with the app through PgBouncer in
   # transaction mode (integrations/pooler.sh), one after the other: on a self-hosted runner each holds the lock its
   # CI job holds (one container name and port for the machine)
@@ -106,9 +106,9 @@ jobs:
         with: {version: "0.12.21"}
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020   # v7.0.0
         with: {node-version: "24"}
-      - run: flock /tmp/rowfence-ci-conformance-python.lock bash integrations/fastapi/test.sh
+      - run: flock /tmp/rowstile-ci-conformance-python.lock bash integrations/fastapi/test.sh
       - run: npm ci --no-audit --no-fund
-      - run: flock /tmp/rowfence-ci-conformance-typescript.lock bash integrations/nextjs/test.sh
+      - run: flock /tmp/rowstile-ci-conformance-typescript.lock bash integrations/nextjs/test.sh
   # The scale benchmark, small: fails when a measure got more than twice as slow as the runners' baseline
   # (recorded on the first run and kept in the cache; delete the cache entries to record it again, after an
   # intended change or on other runners), when a write fails, or when verify() doesn't say true. The gate's
@@ -125,7 +125,7 @@ jobs:
           path: core/bench/baseline-ci.txt
           key: bench-baseline-${{ github.sha }}
           restore-keys: bench-baseline-
-      - run: BASELINE=core/bench/baseline-ci.txt flock /tmp/rowfence-ci-bench.lock bash core/bench/regress.sh
+      - run: BASELINE=core/bench/baseline-ci.txt flock /tmp/rowstile-ci-bench.lock bash core/bench/regress.sh
       - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9   # v6.1.0
         with:
           path: core/bench/baseline-ci.txt

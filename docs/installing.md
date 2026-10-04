@@ -1,54 +1,54 @@
 # Installing
 
-rowfence is a command, `rowfence`, and an SDK for your app's language. Nothing is installed in the database:
+rowstile is a command, `rowstile`, and an SDK for your app's language. Nothing is installed in the database:
 the command writes migrations, and your migration tool runs them as the owner of your tables. Any PostgreSQL
 16, 17 or 18 works, managed or not.
 
 ## The command
 
-Only an alpha is published so far, 0.1.0-alpha.1, and a plain install doesn't get it. Ask for it:
+Only an alpha is published so far, 0.1.0-alpha.2, and a plain install doesn't get it. Ask for it:
 
-    npm i -D rowfence@next         # the command with its own Python: a TypeScript app needs none
-    pip install --pre rowfence     # the command and the Python SDK: rowfence[fastapi], [sqlalchemy], ...
-    docker run --rm -u "$(id -u):$(id -g)" -v "$PWD:/work" ghcr.io/rowfence/rowfence:0.1.0-alpha.1 migrate
+    npm i -D rowstile@next         # the command with its own Python: a TypeScript app needs none
+    pip install --pre rowstile     # the command and the Python SDK: rowstile[fastapi], [sqlalchemy], ...
+    docker run --rm -u "$(id -u):$(id -g)" -v "$PWD:/work" ghcr.io/rowstile/rowstile:0.1.0-alpha.2 migrate
 
-Once 0.1.0 is out, the plain `npm i -D rowfence`, `pip install rowfence` and `ghcr.io/rowfence/rowfence` get
+Once 0.1.0 is out, the plain `npm i -D rowstile`, `pip install rowstile` and `ghcr.io/rowstile/rowstile` get
 it.
 
 - **npm**: the package brings a Python of its own, built for your machine: Linux (glibc and musl, x64 and
-  arm64), macOS (x64 and arm64) and Windows x64. Run it as `npx rowfence`, or from a script in `package.json`.
+  arm64), macOS (x64 and arm64) and Windows x64. Run it as `npx rowstile`, or from a script in `package.json`.
 - **pip**: Python 3.11 or newer. The same package is the [Python SDK](../sdk/python/README.md), and its extras
-  bring what each part of it uses: `rowfence[fastapi]`, `rowfence[sqlalchemy]`, `rowfence[psycopg]`,
-  `rowfence[asyncpg]`. The command needs none of them.
-- **Docker**: the image holds the command and git (`rowfence review` asks git for the base branch's files),
+  bring what each part of it uses: `rowstile[fastapi]`, `rowstile[sqlalchemy]`, `rowstile[psycopg]`,
+  `rowstile[asyncpg]`. The command needs none of them.
+- **Docker**: the image holds the command and git (`rowstile review` asks git for the base branch's files),
   and works in the folder mounted at `/work`. It runs as root unless told otherwise: `-u` makes the files it
   writes yours.
 
-`rowfence --version` says which version runs, and on which Python.
+`rowstile --version` says which version runs, and on which Python.
 
 ## Alphas and release candidates
 
 A version that isn't final is never what a plain install gets. Ask for it:
 
-    npm i -D rowfence@next
-    pip install --pre rowfence
+    npm i -D rowstile@next
+    pip install --pre rowstile
 
-and the image by its version (`ghcr.io/rowfence/rowfence:0.2.0-rc.1`). An alpha is for trying a version
+and the image by its version (`ghcr.io/rowstile/rowstile:0.2.0-rc.1`). An alpha is for trying a version
 early: anything in it may still change. A release candidate is meant to become the release as it is.
 [The changelog](../CHANGELOG.md) says what each version changed, and under **Upgrading** what to do when
 moving to it.
 
 ## From the repository
 
-    git clone https://github.com/rowfence/rowfence
-    export PATH="$PWD/rowfence/core/cli:$PATH"
+    git clone https://github.com/rowstile/rowstile
+    export PATH="$PWD/rowstile/core/cli:$PATH"
 
 The command is Python 3.11 or newer and its standard library: there is nothing else to install.
 
 ## Then
 
-`rowfence init` finds the stack (Next.js, Prisma, Drizzle, FastAPI, SQLAlchemy, Alembic), writes
-`rowfence.toml` for its migration tool, adds the SDK's packages and says which line to change.
+`rowstile init` finds the stack (Next.js, Prisma, Drizzle, FastAPI, SQLAlchemy, Alembic), writes
+`rowstile.toml` for its migration tool, adds the SDK's packages and says which line to change.
 
 - [Getting started](getting-started.md): from a schema to a policy, its tests, the edit loop and the first
   migration.

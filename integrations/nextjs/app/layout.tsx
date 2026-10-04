@@ -1,4 +1,4 @@
-export const metadata = { title: "rowfence conformance" };
+export const metadata = { title: "rowstile conformance" };
 
 export default function Layout({ children }: { children: React.ReactNode }) {
   return (

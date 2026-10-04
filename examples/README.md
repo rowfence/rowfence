@@ -1,6 +1,6 @@
 # Examples
 
-Complete apps that use rowfence as any outside app would: their own policy, applied from their own
+Complete apps that use rowstile as any outside app would: their own policy, applied from their own
 migrations, and only the public surface (`check_public_surface.py` in each). Their backends have no
 permission checks. Each one's `test.sh` runs its tests in Docker, and CI runs them on every change.
 

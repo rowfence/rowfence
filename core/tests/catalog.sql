@@ -1,4 +1,4 @@
--- catalog.sql: what rowfence made in authz, authz_gen and authz_int, against the rules (tests/adversarial.sh).
+-- catalog.sql: what rowstile made in authz, authz_gen and authz_int, against the rules (tests/adversarial.sh).
 --   psql -At -v role=<app role> -v api='<the GRANT EXECUTE list, one signature per |>' -f tests/catalog.sql
 -- Prints one line per object that breaks a rule, nothing when all hold.
 WITH o AS (SELECT nspowner AS owner FROM pg_namespace WHERE nspname = 'authz_int'),

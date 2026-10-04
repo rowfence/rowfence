@@ -10,9 +10,9 @@ PSQL() { psql -X -q -At -v ON_ERROR_STOP=1 -d "$DB" "$@"; }
 ok() { echo "ok    $1"; }
 bad() { echo "FAIL  $1${2:+: $2}"; fails=$((fails + 1)); }
 T=$(mktemp -d)
-# applies the policy text $1 with the rowfence command
+# applies the policy text $1 with the rowstile command
 apply() { printf '%s\n' "$1" > "$T/p.authz"
-          out=$(python3 cli/rowfence_cli.py --db "dbname=$DB" apply "$T/p.authz" --force 2>&1) || { bad "apply" "$out"; exit 1; }; }
+          out=$(python3 cli/rowstile_cli.py --db "dbname=$DB" apply "$T/p.authz" --force 2>&1) || { bad "apply" "$out"; exit 1; }; }
 # the inheritance tables, by oid: the same oid after an apply means the table (and its rows) was kept
 trees() { PSQL -c "SELECT string_agg(c.relname || '=' || c.oid, ' ' ORDER BY c.relname) FROM pg_class c
                    WHERE c.relnamespace = 'authz_int'::regnamespace AND c.relkind = 'r' AND c.relname LIKE '%\_\_tree%'"; }

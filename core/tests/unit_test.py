@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """unit_test: fast checks that need no database: the generated SQL against golden files, included
-files, what the rowfence command runs against a database, its file reading, and the version.
+files, what the rowstile command runs against a database, its file reading, and the version.
 
     python3 tests/unit_test.py            # a few seconds; runs anywhere Python 3.9+ does
     python3 tests/unit_test.py --update   # after an intended change to the generated SQL: rewrite
@@ -22,7 +22,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 sys.path.insert(0, os.path.join(ROOT, "cli"))
 import authzlib  # noqa: E402
-import rowfence_cli  # noqa: E402
+import rowstile_cli  # noqa: E402
 from authzlib import (  # noqa: E402
     Compiler,
     PolicyError,
@@ -421,7 +421,7 @@ class Principals(unittest.TestCase):
 
 
 class CommandMode(unittest.TestCase):
-    """What the rowfence command runs inside its own transaction."""
+    """What the rowstile command runs inside its own transaction."""
 
     def test_no_transaction_control_but_base_tables(self) -> None:
         psql, cmd = compiled("docs"), compiled("docs", transaction=False)
@@ -513,7 +513,7 @@ class Command(unittest.TestCase):
             for name, body in files.items():
                 with open(os.path.join(d, *name.split("/")), "w", encoding="utf-8") as fh:
                     fh.write(body)
-            text, got = rowfence_cli.read_policy(os.path.join(d, "main.authz"))
+            text, got = rowstile_cli.read_policy(os.path.join(d, "main.authz"))
             self.assertEqual(text, files["main.authz"])
             self.assertEqual(got, {"sub/a.authz": files["sub/a.authz"], "sub/b.authz": files["sub/b.authz"]})
 
@@ -521,7 +521,7 @@ class Command(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             with open(os.path.join(d, "main.authz"), "w", encoding="utf-8") as fh:
                 fh.write('include "nope.authz"\n')
-            self.assertEqual(rowfence_cli.read_policy(os.path.join(d, "main.authz"))[1], {})
+            self.assertEqual(rowstile_cli.read_policy(os.path.join(d, "main.authz"))[1], {})
 
     def test_reads_nothing_outside_the_policys_folder(self) -> None:
         # the review runs on a pull request's files: an include must not read the runner's
@@ -538,7 +538,7 @@ class Command(unittest.TestCase):
                 pass                # Windows without the right to make links
             with open(os.path.join(d, "p", "main.authz"), "w", encoding="utf-8") as fh:
                 fh.write("".join(f'include "{n}"\n' for n in names))
-            self.assertEqual(rowfence_cli.read_policy(os.path.join(d, "p", "main.authz"))[1], {})
+            self.assertEqual(rowstile_cli.read_policy(os.path.join(d, "p", "main.authz"))[1], {})
 
     def test_a_link_to_another_drive_is_outside(self) -> None:
         # on Windows, commonpath raises for paths on two drives (a link or a junction to D:): outside, not a traceback
@@ -548,22 +548,22 @@ class Command(unittest.TestCase):
                 with open(os.path.join(d, name), "w", encoding="utf-8") as fh:
                     fh.write(text)
             with other_drive:
-                self.assertEqual(rowfence_cli.read_policy(os.path.join(d, "main.authz"))[1], {})
+                self.assertEqual(rowstile_cli.read_policy(os.path.join(d, "main.authz"))[1], {})
                 with self.assertRaises(SystemExit):
-                    rowfence_cli.Config(os.path.join(d, "rowfence.toml"), {}).inside("x.authz", "policy")
+                    rowstile_cli.Config(os.path.join(d, "rowstile.toml"), {}).inside("x.authz", "policy")
 
     def test_typescript_sdk_gets_only_the_names(self) -> None:
-        # an app on the TypeScript SDK (a @rowfence/* dependency) gets the policy's names, registered with it
+        # an app on the TypeScript SDK (a @rowstile/* dependency) gets the policy's names, registered with it
         with tempfile.TemporaryDirectory() as d:
-            toml = os.path.join(d, "rowfence.toml")
-            cfg = rowfence_cli.Config(toml, {"clients": {"ts": "src/authz.gen.ts", "py": "authz.py"}})
+            toml = os.path.join(d, "rowstile.toml")
+            cfg = rowstile_cli.Config(toml, {"clients": {"ts": "src/authz.gen.ts", "py": "authz.py"}})
             self.assertEqual(sorted(cfg.clients), ["py", "ts"])
             with open(os.path.join(d, "package.json"), "w", encoding="utf-8") as fh:
-                fh.write('{"dependencies": {"next": "16", "@rowfence/prisma": "0.1.0"}}')
+                fh.write('{"dependencies": {"next": "16", "@rowstile/prisma": "0.1.0"}}')
             self.assertEqual(sorted(cfg.clients), ["py", "ts-sdk"])
         names = Compiler(parse_policy(read(POLICIES["docs"]))).compile("x") and \
             database.client("ts-sdk", read(POLICIES["docs"]))
-        self.assertIn('declare module "@rowfence/client"', names)
+        self.assertIn('declare module "@rowstile/client"', names)
         self.assertIn("permissions: typeof permissions;", names)
         self.assertNotIn("class Refused", names)        # the SDK's own errors, or instanceof would fail
 
@@ -579,36 +579,36 @@ class Command(unittest.TestCase):
         s = stack.detect(at({"package.json": '{"dependencies": {"drizzle-orm": "1", "pg": "8"}}',
                              "drizzle.config.ts": 'export default { out: "./db/drizzle" }', "src/db.ts": "drizzle(pool)"}))
         self.assertEqual((s.tool, s.migrations_dir, s.clients, s.npm, s.setup_file),
-                         ("drizzle", "db/drizzle", {"ts": "src/authz.gen.ts"}, ["@rowfence/drizzle"], "src/db.ts"))
+                         ("drizzle", "db/drizzle", {"ts": "src/authz.gen.ts"}, ["@rowstile/drizzle"], "src/db.ts"))
         s = stack.detect(at({"requirements.txt": "fastapi>=0.110\nsqlmodel\n",
                              "alembic.ini": "script_location = %(here)s/alembic\n", "app/main.py": "app = FastAPI()\n"}))
         self.assertEqual((s.found, s.tool, s.migrations_dir, s.pip, s.setup_file),
-                         (["FastAPI", "SQLModel", "Alembic"], "alembic", "alembic/versions", "rowfence[fastapi,sqlalchemy]", "app/main.py"))
+                         (["FastAPI", "SQLModel", "Alembic"], "alembic", "alembic/versions", "rowstile[fastapi,sqlalchemy]", "app/main.py"))
         # a release's name is bare; an alpha, a candidate or main's build asks for at least itself, which lets pip
         # take a pre-release (a bare name got the 0.0.0 placeholder while only an alpha was published)
-        self.assertEqual(stack.pip_requirement("rowfence[fastapi]", "0.2.0"), "rowfence[fastapi]")
-        self.assertEqual(stack.pip_requirement("rowfence[fastapi]", "0.1.0-alpha.1"), "rowfence[fastapi]>=0.1.0a1")
-        self.assertEqual(stack.pip_requirement("rowfence", "0.2.0-rc.12"), "rowfence>=0.2.0rc12")
-        self.assertEqual(stack.pip_requirement("rowfence", "0.2.0-dev"), "rowfence>=0.2.0.dev0")
+        self.assertEqual(stack.pip_requirement("rowstile[fastapi]", "0.2.0"), "rowstile[fastapi]")
+        self.assertEqual(stack.pip_requirement("rowstile[fastapi]", "0.1.0-alpha.1"), "rowstile[fastapi]>=0.1.0a1")
+        self.assertEqual(stack.pip_requirement("rowstile", "0.2.0-rc.12"), "rowstile>=0.2.0rc12")
+        self.assertEqual(stack.pip_requirement("rowstile", "0.2.0-dev"), "rowstile>=0.2.0.dev0")
         s = stack.detect(at({"migrations/0001.sql": "CREATE TABLE t ();"}))
         self.assertEqual((s.tool, s.migrations_dir, s.npm, s.pip), ("sql", "migrations", [], ""))
         d = at({"package.json": '{\n\t"dependencies": {\n\t\t"next": "16"\n\t}\n}\n'})
-        self.assertEqual(stack.add_npm(d, ["@rowfence/next"], "1.2.3"), ["@rowfence/next", "rowfence"])
+        self.assertEqual(stack.add_npm(d, ["@rowstile/next"], "1.2.3"), ["@rowstile/next", "rowstile"])
         with open(os.path.join(d, "package.json"), encoding="utf-8") as fh:
             text = fh.read()
-        self.assertIn('\t\t"@rowfence/next": "^1.2.3"', text)
+        self.assertIn('\t\t"@rowstile/next": "^1.2.3"', text)
         self.assertIn('"devDependencies"', text)
-        self.assertEqual(stack.add_npm(d, ["@rowfence/next"], "1.2.3"), [])
+        self.assertEqual(stack.add_npm(d, ["@rowstile/next"], "1.2.3"), [])
 
     def test_without_git_and_help_after_a_command(self) -> None:
-        # a machine without git: the review says so, not a traceback; `rowfence review --help` is the usage
+        # a machine without git: the review says so, not a traceback; `rowstile review --help` is the usage
         with tempfile.TemporaryDirectory() as d:
-            with open(os.path.join(d, "rowfence.toml"), "w", encoding="utf-8") as fh:
+            with open(os.path.join(d, "rowstile.toml"), "w", encoding="utf-8") as fh:
                 fh.write('policy = "policy.authz"\n')
             with open(os.path.join(d, "policy.authz"), "w", encoding="utf-8") as fh:
                 fh.write(read(POLICIES["docs"]))
             env = dict(os.environ, PATH=d)
-            run = lambda *a: subprocess.run([sys.executable, os.path.join(ROOT, "cli", "rowfence_cli.py"), *a],
+            run = lambda *a: subprocess.run([sys.executable, os.path.join(ROOT, "cli", "rowstile_cli.py"), *a],
                                             cwd=d, env=env, capture_output=True, text=True)
             p = run("review", "--base", "main")
             self.assertEqual(p.returncode, 2, p.stderr)
@@ -616,7 +616,7 @@ class Command(unittest.TestCase):
             self.assertNotIn("Traceback", p.stderr)
             p = run("review", "--help")
             self.assertEqual(p.returncode, 0, p.stderr)
-            self.assertIn("rowfence review", p.stderr)
+            self.assertIn("rowstile review", p.stderr)
 
     def test_array_literal(self) -> None:
         self.assertEqual(database.text_array(["1", 'a"b', "c\\d"]), '{"1","a\\"b","c\\\\d"}')
@@ -648,14 +648,14 @@ class Statements(unittest.TestCase):
 
 
 def replaced(text: str, old: str, new: str) -> str:
-    """text with old replaced: a test that edits a policy fails when the text it edits isn't there (rowfence fmt
+    """text with old replaced: a test that edits a policy fails when the text it edits isn't there (rowstile fmt
     realigning a file would otherwise leave the policy as it was, and the test checking nothing)."""
     assert old in text, f"not in the policy: {old!r}"
     return text.replace(old, new)
 
 
 class Migrations(unittest.TestCase):
-    """What rowfence migrate writes, without a database (tests/migrate_test.py applies them)."""
+    """What rowstile migrate writes, without a database (tests/migrate_test.py applies them)."""
 
     def setUp(self) -> None:
         from authzlib import migrate
@@ -676,8 +676,8 @@ class Migrations(unittest.TestCase):
                              ("0.1.0-dev+abc", "0.1.0-alpha.1"), ("0.1.0-alpha.1", "0.1.0-dev+abc"), ("0.1.0-beta.1", "0.1.0"),
                              ("0.1.0", "0.1.0"), ("0.1.0", None), ("0.1.0", "what")):
             self.assertFalse(older(mine, theirs), (mine, theirs))
-        lock = self.migrate.lock_of(database.migratable(self.text, {})[1]).replace(f"# rowfence {authzlib.__version__}:", "# rowfence 99.0.0:", 1)
-        with self.assertRaisesRegex(database.Error, r"the lock file was last written by rowfence 99\.0\.0.*\[AZ616\]"):
+        lock = self.migrate.lock_of(database.migratable(self.text, {})[1]).replace(f"# rowstile {authzlib.__version__}:", "# rowstile 99.0.0:", 1)
+        with self.assertRaisesRegex(database.Error, r"the lock file was last written by rowstile 99\.0\.0.*\[AZ616\]"):
             database.migrations(self.text, {}, lock)
         self.assertTrue(all(m.empty for m in database.migrations(self.text, {}, lock, downgrade=True)))
 
@@ -714,9 +714,9 @@ class Migrations(unittest.TestCase):
         self.assertIn("DELETE FROM authz_gen.policy_lines", pushed.sql)
 
     def test_a_new_version_alone_needs_no_migration(self) -> None:
-        # upgrading rowfence fails no one's `migrate --check` unless the new version makes something different
+        # upgrading rowstile fails no one's `migrate --check` unless the new version makes something different
         lock = self.lock(self.text)
-        older = re.sub(r"^# rowfence \S+:", "# rowfence 0.0.1:", lock, count=1, flags=re.M)
+        older = re.sub(r"^# rowstile \S+:", "# rowstile 0.0.1:", lock, count=1, flags=re.M)
         self.assertNotEqual(older, lock)
         self.assertTrue(database.migration(self.text, {}, older).empty)
 
@@ -725,7 +725,7 @@ class Migrations(unittest.TestCase):
         self.assertRegex(lock, r"(?m)^always \| [0-9a-f]{12}$")
         m = database.migration(self.text, {}, re.sub(r"(?m)^always \| \w+$", "always | 000000000000", lock))
         self.assertIn("REVOKE ALL ON ALL FUNCTIONS IN SCHEMA authz FROM PUBLIC;", m.sql)
-        self.assertEqual(m.summary, ["the same policy; what rowfence makes of it changed"])
+        self.assertEqual(m.summary, ["the same policy; what rowstile makes of it changed"])
         self.assertIn(f"always | {self.migrate.always_hash(database.migratable(self.text, {})[1])}", m.lock)
 
     def test_a_lock_without_those_steps_goes_by_its_version(self) -> None:
@@ -733,10 +733,20 @@ class Migrations(unittest.TestCase):
         lock = re.sub(r"(?m)^always \| \w+\n", "", self.lock(self.text))
         self.assertIsNone(self.migrate.parse_lock(lock).always)
         self.assertTrue(database.migration(self.text, {}, lock).empty)
-        older = re.sub(r"^# rowfence \S+:", "# rowfence 0.0.1:", lock, count=1, flags=re.M)
+        older = re.sub(r"^# rowstile \S+:", "# rowstile 0.0.1:", lock, count=1, flags=re.M)
         m = database.migration(self.text, {}, older)
         self.assertRegex(m.lock, r"(?m)^always \| [0-9a-f]{12}$")
-        self.assertEqual(m.summary, [f"rowfence 0.0.1 -> {authzlib.__version__}: what the new version makes differently"])
+        self.assertEqual(m.summary, [f"rowstile 0.0.1 -> {authzlib.__version__}: what the new version makes differently"])
+
+    def test_a_lock_rowfence_wrote_goes_by_its_version(self) -> None:
+        # rowstile was called rowfence (and authzc): their lock files' headers still give the version
+        lock = self.lock(self.text)
+        for old in ("rowfence", "authzc"):
+            renamed = re.sub(r"^# rowstile ", f"# {old} ", lock, count=1, flags=re.M)
+            self.assertEqual(self.migrate.parse_lock(renamed).version, authzlib.__version__, old)
+        newer = re.sub(r"^# rowstile \S+:", "# rowfence 99.0.0:", lock, count=1, flags=re.M)
+        with self.assertRaises(database.Error):                     # still refused when a newer one wrote it
+            database.migrations(self.text, {}, newer)
 
     def test_a_tree_that_changes_is_built_beside_first(self) -> None:
         new = replaced(self.text, "can view  = edit or viewer or (parent.view and {inherit})", "can view  = edit or viewer or parent.view")
@@ -757,7 +767,7 @@ class Migrations(unittest.TestCase):
 
 
 class Review(unittest.TestCase):
-    """rowfence review without a database; tests/review.sh runs it with git and a database."""
+    """rowstile review without a database; tests/review.sh runs it with git and a database."""
 
     def setUp(self) -> None:
         from authzlib import review
@@ -807,7 +817,7 @@ class Review(unittest.TestCase):
         self.assertIn("a write rule loosened", {f["why"] for f in risk})
         self.assertTrue(all(f["line"] for f in risk))
         notes = self.review.annotations(self.run_review(looser), "example/docs.authz")
-        self.assertRegex(notes, r"^::warning file=example/docs.authz,line=\d+,title=rowfence review::")
+        self.assertRegex(notes, r"^::warning file=example/docs.authz,line=\d+,title=rowstile review::")
 
     def test_a_condition_it_cannot_read_reworded(self) -> None:
         """A subquery's `id` rewritten as `this.id` (two real changes, d62fa2e and e853285) was reported as a widening
@@ -831,7 +841,7 @@ class Review(unittest.TestCase):
         migration that locks every table and rebuilds every tree."""
         r = self.run_review(replaced(self.text, "app role app_user\n", "app role app_user   -- the app's role\n"), lock=False)
         self.assertEqual(r["deploy"]["migrations"], [])
-        self.assertIn("no lock file, so no migrations: `rowfence apply`", self.review.summary(r)["Deploy"])
+        self.assertIn("no lock file, so no migrations: `rowstile apply`", self.review.summary(r)["Deploy"])
 
     def test_tests_that_flip(self) -> None:
         before = {"t.authz": 'test "carol"\n  user 3 can view file 11\n  user 3 cannot view file 12\n'}
@@ -925,7 +935,7 @@ rules app.folders
         self.assertIn("removed from carol: `user 3 cannot view file 12`", md)
         self.assertIn("removed from carol: user 3 cannot view file 12", self.review.text(r))
 
-    # a policy as the language before this version wrote it (a pull request that upgrades rowfence rewrites it), and
+    # a policy as the language before this version wrote it (a pull request that upgrades rowstile rewrites it), and
     # the same policy now: `role`, `and` meeting `or`, `grant` (a role joins the permission's `or` part, under the
     # `and`), `everyone`, and a test section line that checked a user whatever its first word
     OLD = """role app_user
@@ -963,7 +973,7 @@ test
             "line 12: `and` and `or` without parentheses, now `owner or (org.admin and {not locked})`",
             "line 14: `everyone`, now `anyone`",
             "line 19: `service 1 can view folder 2` in the test section checked user 1"])
-        self.assertIn("The policy at the base is written in the language before this version of rowfence, and was "
+        self.assertIn("The policy at the base is written in the language before this version of rowstile, and was "
                       "read as that version meant it: line 1: `role app_user`", self.review.markdown(r))
         self.assertTrue(self.review.text(r).startswith("Base     The policy at the base is written in the language"))
         # the same policy in this language is read as it is, with nothing to say
@@ -996,11 +1006,11 @@ test
         r = self.review.review((main, {"org.authz": org}, {}),
                                (main, {"org.authz": org.replace("can manage = admin", "can manage = admin or member")}, {}), worlds=120)
         notes = self.review.annotations(r, "db/policy.authz")
-        self.assertRegex(notes, r"^::warning file=db/org.authz,line=4,title=rowfence review::a permission widened")
+        self.assertRegex(notes, r"^::warning file=db/org.authz,line=4,title=rowstile review::a permission widened")
 
 
 class Graph(unittest.TestCase):
-    """rowfence graph: the Mermaid diagram's nodes."""
+    """rowstile graph: the Mermaid diagram's nodes."""
 
     @staticmethod
     def nodes(policy: str) -> tuple[list[str], set[str]]:
@@ -1033,7 +1043,7 @@ class Graph(unittest.TestCase):
 
 
 class Draft(unittest.TestCase):
-    """rowfence init: the first policy, from tables whose names are not the tidy ones (tests/devx.sh applies one)."""
+    """rowstile init: the first policy, from tables whose names are not the tidy ones (tests/devx.sh applies one)."""
 
     @staticmethod
     def table(name: str, columns: dict[str, str], pk: list[str], fks: tuple[tuple[list[str], str, list[str]], ...] = (),
@@ -1302,7 +1312,7 @@ class Wire(unittest.TestCase):
         self.assertTrue(seen["tls"])
         start = seen["start"]
         assert isinstance(start, list)
-        self.assertIn(b"rowfence", start)                   # application_name
+        self.assertIn(b"rowstile", start)                   # application_name
         port, seen = self.server(tls=True)
         connect(host="127.0.0.1", port=port, timeout=5).close()                   # prefer: taken when the server has it
         self.assertTrue(seen["tls"])
@@ -1427,7 +1437,7 @@ class Fmt(unittest.TestCase):
 
 
 class Confidence(unittest.TestCase):
-    """rowfence prove (invariants in small worlds) and coverage (branches no test makes true)."""
+    """rowstile prove (invariants in small worlds) and coverage (branches no test makes true)."""
 
     def test_prove_finds_the_smallest_counterexample(self) -> None:
         from authzlib import prove
@@ -1618,16 +1628,16 @@ class ErrorCodes(unittest.TestCase):
                 self.assertTrue(isinstance(value, str) and value in CODES,
                                 f"authzlib/{name} line {node.lineno}: a mistake without a known code")
                 used.add(str(value))
-            used |= {a or b for a, b in re.findall(r"\[(AZ\d{3})\]|rowfence help (AZ\d{3})", src)}
+            used |= {a or b for a, b in re.findall(r"\[(AZ\d{3})\]|rowstile help (AZ\d{3})", src)}
         self.assertEqual(sorted(set(CODES) - used), [], "codes nothing raises (retire them in errors.py instead)")
 
-    # raised and caught inside rowfence, or wrapping lines that carry their own code
+    # raised and caught inside rowstile, or wrapping lines that carry their own code
     UNCODED = ("'bad'", "'the policy does not match this database:%'", "USING ERRCODE = 'AZT00'",
                "'given ", "'% policy test(s) failed'")
 
     def test_every_raise_has_a_code(self) -> None:
         """What the generated SQL raises carries a code: in its message ([AZ601], applying) or its HINT
-        (rowfence help AZ701, what apps see)."""
+        (rowstile help AZ701, what apps see)."""
         for name in sorted(os.listdir(os.path.join(ROOT, "authzlib"))):
             if not name.endswith(".py"):
                 continue
@@ -1635,7 +1645,7 @@ class ErrorCodes(unittest.TestCase):
             for m in re.finditer(r"RAISE EXCEPTION", src):
                 end = re.compile(r";(?=\n|\"|')").search(src, m.start())    # the statement's end, in SQL or a string
                 stmt = src[m.start():end.end() if end else len(src)]
-                if re.search(r"\[AZ\d{3}\]|rowfence help AZ\d{3}|HINT = \{lit\(hint\)\}", stmt) or any(u in stmt for u in self.UNCODED):
+                if re.search(r"\[AZ\d{3}\]|rowstile help AZ\d{3}|HINT = \{lit\(hint\)\}", stmt) or any(u in stmt for u in self.UNCODED):
                     continue
                 self.fail(f"authzlib/{name} line {src.count(chr(10), 0, m.start()) + 1}: a RAISE without a code: {stmt[:120]}")
 
@@ -1695,7 +1705,7 @@ class StackPages(unittest.TestCase):
     REPO = os.path.dirname(ROOT)
     SOURCES: ClassVar[dict[str, list[str]]] = {"fastapi.md": ["integrations/fastapi"], "python.md": ["integrations/fastapi"],
                "nextjs.md": ["integrations/nextjs"], "node.md": ["integrations/nextjs"],
-               "sql.md": ["docs/getting-started.md", "sdk/python/rowfence", "sdk/typescript"]}
+               "sql.md": ["docs/getting-started.md", "sdk/python/rowstile", "sdk/typescript"]}
     SKIP: ClassVar[set[str]] = {"node_modules", ".venv", ".next", ".work", "generated", "__pycache__", "dist"}
     CHECKED = ("python", "ts", "tsx", "toml", "authz", "sql")        # sh blocks are commands to type
 
@@ -1761,7 +1771,7 @@ def calls(text: str, opener: str) -> list[tuple[str, list[str]]]:
 
 class DocPages(unittest.TestCase):
     """What the pages show that no suite runs: the language page's example compiles, the guide's files are laid
-    out as `rowfence fmt` writes them, and each authz.* call a page writes is one the functions take."""
+    out as `rowstile fmt` writes them, and each authz.* call a page writes is one the functions take."""
     REPO = os.path.dirname(ROOT)
     # the types the language page's example names and leaves to its include
     REST = ("type org = app.orgs\n  member : user = app.org_members(org_id -> user_id)\n"
@@ -1789,12 +1799,12 @@ class DocPages(unittest.TestCase):
         blocks = re.findall(r"```authz[ \t]+(\S+)\n(.*?)```", guide, re.S)
         self.assertEqual([name for name, _ in blocks], ["db/policy.authz", "db/tests/first.authz"])
         for name, body in blocks:
-            self.assertEqual(fmt.format(body), body, f"docs/getting-started.md: {name} isn't as rowfence fmt writes it "
+            self.assertEqual(fmt.format(body), body, f"docs/getting-started.md: {name} isn't as rowstile fmt writes it "
                                                      "(the reference tells readers to run fmt --check in CI)")
 
     def test_the_repositorys_policies_are_laid_out_as_fmt_writes_them(self) -> None:
         # what readers copy (the docs app, the cookbook, the example apps, the conformance apps): run through
-        # `rowfence fmt --check` in their CI, as the reference says, they must pass. The suites' own fixtures are
+        # `rowstile fmt --check` in their CI, as the reference says, they must pass. The suites' own fixtures are
         # left as they are (some are wrong on purpose)
         from authzlib import fmt
         # walked, not asked of git: CI's container doesn't own the mounted checkout, and git refuses it
@@ -1807,11 +1817,11 @@ class DocPages(unittest.TestCase):
                           for n in names if n.endswith(".authz")]
         self.assertGreater(len(files), 10, "the policies aren't found")
         loose = [f for f in files if fmt.format_policy(self.page(f)) != self.page(f)]
-        self.assertEqual(loose, [], "not as rowfence fmt writes them: run rowfence fmt on each")
+        self.assertEqual(loose, [], "not as rowstile fmt writes them: run rowstile fmt on each")
 
     def test_the_guides_path_is_the_commands_folder(self) -> None:
         folder = search(r'export PATH="\$PWD/([\w/]+):\$PATH"', self.page("docs", "getting-started.md")).group(1)
-        self.assertTrue(os.path.exists(os.path.join(self.REPO, *folder.split("/"), "rowfence")),
+        self.assertTrue(os.path.exists(os.path.join(self.REPO, *folder.split("/"), "rowstile")),
                         f"docs/getting-started.md puts {folder} on the PATH: the command isn't there")
 
     def test_the_installing_page_holds_the_readmes_lines(self) -> None:
@@ -1824,7 +1834,7 @@ class DocPages(unittest.TestCase):
             self.assertIn(line + "\n", page, "docs/installing.md (the site's page) doesn't have this line of README.md's Installing")
         with open(os.path.join(self.REPO, "sdk", "python", "pyproject.toml"), "rb") as fh:
             extras = set(tomllib.load(fh)["project"]["optional-dependencies"])
-        self.assertEqual(set(re.findall(r"`rowfence\[(\w+)\]`", page)), extras, "docs/installing.md: the Python package's extras")
+        self.assertEqual(set(re.findall(r"`rowstile\[(\w+)\]`", page)), extras, "docs/installing.md: the Python package's extras")
 
     def test_the_install_lines_ask_for_what_is_published(self) -> None:
         # While the version is an alpha or a candidate, a plain install gets an older release (or the 0.0.0
@@ -1851,10 +1861,10 @@ class DocPages(unittest.TestCase):
                     continue
                 if not (fenced or line.startswith(("    ", "|"))):
                     continue
-                npm = re.search(r"\bnpm (?:i|install)\b.*?(?<![\w/@-])rowfence(@\w+)?(?![\w/-])", line.split("#")[0])
-                pip = re.search(r"\bpip install\b.*\browfence\b", line)
-                uv = re.search(r"\buv add\b.*\browfence\b", line)
-                image = re.search(r"ghcr\.io/rowfence/rowfence(:[\w.-]+)?", line)
+                npm = re.search(r"\bnpm (?:i|install)\b.*?(?<![\w/@-])rowstile(@\w+)?(?![\w/-])", line.split("#")[0])
+                pip = re.search(r"\bpip install\b.*\browstile\b", line)
+                uv = re.search(r"\buv add\b.*\browstile\b", line)
+                image = re.search(r"ghcr\.io/rowstile/rowstile(:[\w.-]+)?", line)
                 if pre:
                     bad = ((npm and npm.group(1) != "@next") or (pip and "--pre" not in line)
                            or (uv and "--prerelease=allow" not in line)
@@ -1890,7 +1900,7 @@ class DocPages(unittest.TestCase):
 
 
 class Why(unittest.TestCase):
-    """rowfence why: a change the database refused to try is named, not passed over (studio_test.py tries the
+    """rowstile why: a change the database refused to try is named, not passed over (studio_test.py tries the
     ones that work, on a database)."""
 
     def test_a_way_that_could_not_be_tried_is_said(self) -> None:
@@ -1988,7 +1998,7 @@ class Delivery(unittest.TestCase):
     def test_the_launcher_knows_the_platforms_built(self) -> None:
         build = read("../packaging/npm/build.mjs")
         targets = dict(re.findall(r'^  "([a-z0-9-]+)": \{ triple: [^\n]*\n\s+sha256: "([0-9a-f]*)" \}', build, re.M))
-        launcher = search(r"const PLATFORMS = \[(.*?)\];", read("../packaging/npm/rowfence/bin/rowfence.js"), re.S).group(1)
+        launcher = search(r"const PLATFORMS = \[(.*?)\];", read("../packaging/npm/rowstile/bin/rowstile.js"), re.S).group(1)
         self.assertEqual(sorted(targets), sorted(re.findall(r'"([a-z0-9-]+)"', launcher)))
         # each Python is the bytes its release published
         self.assertEqual([k for k, sha in targets.items() if not re.fullmatch(r"[0-9a-f]{64}", sha)], [])
@@ -2010,14 +2020,14 @@ class Delivery(unittest.TestCase):
         self.assertEqual(version.dist_tag("0.2.0", tags), "latest")
         self.assertEqual(version.dist_tag("0.2.1", tags), "latest")
         self.assertEqual(version.dist_tag("0.10.0-rc.1", tags), "next")
-        # an alpha is published like a candidate: never what `npm i rowfence` installs, also when it is the first
+        # an alpha is published like a candidate: never what `npm i rowstile` installs, also when it is the first
         self.assertEqual(version.dist_tag("0.1.0-alpha.1", []), "next")
         self.assertEqual(version.dist_tag("0.11.0-alpha.2", tags), "next")
         for good in ("0.1.0", "0.1.0-alpha.1", "0.1.0-alpha.12", "0.1.0-rc.2", "0.2.0-dev"):
             self.assertTrue(version.VERSION.match(good), good)
         for bad in ("0.1.0-alpha", "0.1.0-alpha1", "0.1.0a1", "0.1.0-beta.1", "0.1.0-alpha.1-dev", "v0.1.0-alpha.1"):
             self.assertFalse(version.VERSION.match(bad), bad)
-        # a patch to an older line doesn't become what `npm i rowfence` installs
+        # a patch to an older line doesn't become what `npm i rowstile` installs
         self.assertEqual(version.dist_tag("0.1.1", [*tags, "v0.1.1"]), "release-0.1")
         self.assertEqual(version.dist_tag("0.9.3", [*tags, "v0.10.0"]), "release-0.9")
         self.assertEqual(version.dist_tag("0.1.0", []), "latest")
@@ -2105,7 +2115,7 @@ class Private(unittest.TestCase):
     SKIP: ClassVar[set[str]] = {".git", ".claude", "node_modules", ".venv", ".next", ".work", "generated", "__pycache__", "dist",
             "out", ".cache", ".mypy_cache", ".pytest_cache"}
     WORDS = re.compile(r"\bADRs?" + r" ?\d{4}|docs/" + r"adr\b|\b(roadmap|v1-design|developer-experience|"
-                       r"language-review)" + r"\.md\b|rowfence-" + r"internal")
+                       r"language-review)" + r"\.md\b|rowstile-" + r"internal")
 
     def test_nothing_points_at_them(self) -> None:
         self.assertFalse(os.path.isdir(os.path.join(self.REPO, "docs", "adr")),
@@ -2162,11 +2172,11 @@ class Version(unittest.TestCase):
     def test_npm_packages_name_the_repository(self) -> None:
         # npm refuses a package published with provenance unless repository.url is the repository it came from;
         # the extension's is its Marketplace page's link
-        url = "git+https://github.com/rowfence/rowfence.git"
+        url = "git+https://github.com/rowstile/rowstile.git"
         sdks = sorted(glob.glob(os.path.join(self.REPO, "sdk", "typescript", "*", "")))
         self.assertLessEqual({"client", "pg", "postgres", "prisma", "drizzle", "next", "react", "vitest"},
                              {os.path.basename(os.path.dirname(d)) for d in sdks}, "the SDK's packages aren't found")
-        for d in sdks + [os.path.join(self.REPO, "packaging", "npm", "rowfence"), os.path.join(self.REPO, "editor")]:
+        for d in sdks + [os.path.join(self.REPO, "packaging", "npm", "rowstile"), os.path.join(self.REPO, "editor")]:
             with open(os.path.join(d, "package.json"), encoding="utf-8") as fh:
                 repo = json.load(fh).get("repository", {})
             self.assertEqual((repo.get("url"), repo.get("directory")),

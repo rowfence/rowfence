@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""confidence_test: rowfence prove, test --coverage, snapshot, indexes, plans and bench, on the docs example.
+"""confidence_test: rowstile prove, test --coverage, snapshot, indexes, plans and bench, on the docs example.
 
     PGHOST=... PGUSER=... python3 tests/confidence_test.py [--db authz_confidence]
 """
@@ -16,7 +16,7 @@ ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT)
 sys.path.insert(0, os.path.join(ROOT, "cli"))
 import pgwire  # noqa: E402
-import rowfence_cli  # noqa: E402
+import rowstile_cli  # noqa: E402
 from authzlib import database, perf  # noqa: E402
 from authzlib.connection import Db  # noqa: E402
 
@@ -69,7 +69,7 @@ def check(label: str, ok: object, detail: object = "") -> None:
 
 
 def cli(db: str | None, *args: str, cwd: str | None = None) -> tuple[int, str]:
-    r = subprocess.run([sys.executable, os.path.join(ROOT, "cli", "rowfence_cli.py"), *(["--db", f"dbname={db}"] if db else []), *args],
+    r = subprocess.run([sys.executable, os.path.join(ROOT, "cli", "rowstile_cli.py"), *(["--db", f"dbname={db}"] if db else []), *args],
                        capture_output=True, text=True, cwd=cwd)
     return r.returncode, r.stdout + r.stderr
 
@@ -93,9 +93,9 @@ def main() -> None:
     conn = pgwire.connect(**pgwire.parse_dsn(f"dbname={db}"))
 
     def work(fn: Callable[[Db], T], keep: bool = False) -> T:
-        return rowfence_cli.transaction(conn, fn, keep=keep)
+        return rowstile_cli.transaction(conn, fn, keep=keep)
 
-    print("-- rowfence prove")
+    print("-- rowstile prove")
     rc, out = cli(None, "prove", policy)
     check("an invariant the policy doesn't guarantee: exit 1, and the smallest counterexample",
           rc == 1 and "no   user 1 holds it on folder 1" in out and "folder.owner: folder 1 -> user 1" in out, out)
@@ -131,7 +131,7 @@ def main() -> None:
         with open(path, "w", encoding="utf-8") as fh:
             fh.write(TESTS)
         rc, out = cli(db, "test", "--coverage", path)
-        check("rowfence test --coverage", rc == 0 and "coverage: " in out and "branches made true by a test; no test reaches:" in out, out)
+        check("rowstile test --coverage", rc == 0 and "coverage: " in out and "branches made true by a test; no test reaches:" in out, out)
 
     with tempfile.TemporaryDirectory() as tmp:
         subprocess.run(["dropdb", "--if-exists", db + "_deny"], capture_output=True)
@@ -161,7 +161,7 @@ def main() -> None:
         snap = os.path.join(tmp, "access.snapshot")
         rc, out = cli(db, "snapshot", "--out", snap)
         rc2, out2 = cli(db, "snapshot", "--check", "--out", snap)
-        check("rowfence snapshot writes it, and --check finds it up to date", rc == 0 and rc2 == 0 and "up to date" in out2, out + out2)
+        check("rowstile snapshot writes it, and --check finds it up to date", rc == 0 and rc2 == 0 and "up to date" in out2, out + out2)
         subprocess.run(["psql", "-X", "-q", "-d", db, "-c",
                         "BEGIN; SELECT authz.act_as('user', '5'); SELECT authz.share('folder', '2', 'editor', 'user', '6'); COMMIT"],
                        capture_output=True, check=True)
@@ -196,7 +196,7 @@ def main() -> None:
     check("each governed table read as someone, with its time", set(tables) == {"app.folders", "app.files"}
           and all(t["ms"] is not None and t["ms"] >= 0 for t in tables.values()), p)
     rc, out = cli(db, "plans", "--as", "user:1")
-    check("rowfence plans", rc == 0 and "as user:1:" in out and "app.folders:" in out, out)
+    check("rowstile plans", rc == 0 and "as user:1:" in out and "app.folders:" in out, out)
     check("no warning on the example's few rows", all(t["warnings"] == [] for t in tables.values()), p)
 
     def grown(d: Db) -> perf.Plans:
@@ -217,7 +217,7 @@ def main() -> None:
     check("bench: reads, lists, checks and updates, p50 and p95", {"read app.folders", "authz.list folder view",
           "authz.can folder edit", "update app.folders"} <= set(paths) and all(x["p50"] is not None for x in paths.values()), b)
     rc, out = cli(db, "bench", "--rounds", "2", "--people", "2")
-    check("rowfence bench", rc == 0 and "p50" in out and "read app.files" in out, out)
+    check("rowstile bench", rc == 0 and "p50" in out and "read app.files" in out, out)
     check("... and nothing it did stays", count() == before, (before, count()))
 
     conn.close()

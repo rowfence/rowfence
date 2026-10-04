@@ -55,7 +55,7 @@ DECLARE v_to bigint := (SELECT s.value::bigint FROM authz.settings s WHERE s.key
 BEGIN
   IF p_pos < v_to THEN
     RAISE EXCEPTION 'the change feed up to position % was trimmed: read everything again, then follow from there', v_to
-      USING ERRCODE = 'object_not_in_prerequisite_state', HINT = 'rowfence help AZ712';
+      USING ERRCODE = 'object_not_in_prerequisite_state', HINT = 'rowstile help AZ712';
   END IF;
   RETURN QUERY SELECT * FROM authz.changes WHERE pos > p_pos ORDER BY pos LIMIT p_limit;
 END $f$;
@@ -84,7 +84,7 @@ LANGUAGE plpgsql {DEF} AS $f$
 DECLARE v_before timestamptz; n bigint;
 BEGIN
   IF p_keep IS NULL OR p_keep < interval '0' THEN
-    RAISE EXCEPTION 'say how long to keep the audit trail, e.g. authz.trim_audit(interval ''2 years'')' USING HINT = 'rowfence help AZ710';
+    RAISE EXCEPTION 'say how long to keep the audit trail, e.g. authz.trim_audit(interval ''2 years'')' USING HINT = 'rowstile help AZ710';
   END IF;
   v_before := now() - p_keep;
   -- the one way past the trigger is DDL, as the owner, here: nothing a session can set lets a DELETE through
@@ -103,7 +103,7 @@ END $f$;
 CREATE FUNCTION authz_int.audit_is_append_only() RETURNS trigger
 LANGUAGE plpgsql AS $f$
 BEGIN
-  RAISE EXCEPTION 'the audit trail cannot be changed' USING ERRCODE = 'insufficient_privilege', HINT = 'rowfence help AZ711';
+  RAISE EXCEPTION 'the audit trail cannot be changed' USING ERRCODE = 'insufficient_privilege', HINT = 'rowstile help AZ711';
 END $f$;
 CREATE TRIGGER authz_audit_append_only BEFORE UPDATE OR DELETE ON authz.audit
   FOR EACH ROW EXECUTE FUNCTION authz_int.audit_is_append_only();
@@ -304,15 +304,15 @@ DECLARE v_id bigint; v_tbl text;
 BEGIN
   p_id := authz_int.canon(p_type, p_id);
   PERFORM authz_int.check_writable();
-  IF authz.uid() IS NULL THEN RAISE EXCEPTION 'sign in first' USING ERRCODE = 'insufficient_privilege', HINT = 'rowfence help AZ701'; END IF;
-  IF coalesce(btrim(p_reason), '') = '' THEN RAISE EXCEPTION 'say why you need it' USING HINT = 'rowfence help AZ710'; END IF;
-  IF p_duration IS NOT NULL AND p_duration <= interval '0' THEN RAISE EXCEPTION 'the duration must be positive' USING HINT = 'rowfence help AZ710'; END IF;
+  IF authz.uid() IS NULL THEN RAISE EXCEPTION 'sign in first' USING ERRCODE = 'insufficient_privilege', HINT = 'rowstile help AZ701'; END IF;
+  IF coalesce(btrim(p_reason), '') = '' THEN RAISE EXCEPTION 'say why you need it' USING HINT = 'rowstile help AZ710'; END IF;
+  IF p_duration IS NOT NULL AND p_duration <= interval '0' THEN RAISE EXCEPTION 'the duration must be positive' USING HINT = 'rowstile help AZ710'; END IF;
   SELECT tbl INTO v_tbl FROM authz_int.types WHERE name = p_type;
-  IF v_tbl IS NULL THEN RAISE EXCEPTION 'no type % in the policy', p_type USING HINT = 'rowfence help AZ707'; END IF;
+  IF v_tbl IS NULL THEN RAISE EXCEPTION 'no type % in the policy', p_type USING HINT = 'rowstile help AZ707'; END IF;
   IF authz_int.manage_perm(p_type, p_relation, CASE WHEN p_relation LIKE 'role:%' THEN NULL ELSE 'user' END) IS NULL
      OR (p_relation LIKE 'role:%' AND NOT EXISTS (SELECT 1 FROM authz_int.role_subjects
                                                   WHERE object_type = p_type AND subject = 'user')) THEN
-    RAISE EXCEPTION 'the policy does not allow sharing %.% with a user', p_type, p_relation USING HINT = 'rowfence help AZ706';
+    RAISE EXCEPTION 'the policy does not allow sharing %.% with a user', p_type, p_relation USING HINT = 'rowstile help AZ706';
   END IF;
   -- no check that the object exists: that would tell people which hidden objects do. A request
   -- for a missing object simply never reaches anyone who could approve it.
@@ -348,15 +348,15 @@ LANGUAGE plpgsql {DEF} AS $f$
 DECLARE r authz.requests;
 BEGIN
   PERFORM authz_int.check_writable();
-  IF p_approve IS NULL THEN RAISE EXCEPTION 'approve (true) or deny (false)' USING HINT = 'rowfence help AZ710'; END IF;
+  IF p_approve IS NULL THEN RAISE EXCEPTION 'approve (true) or deny (false)' USING HINT = 'rowstile help AZ710'; END IF;
   SELECT * INTO r FROM authz.requests WHERE id = p_id AND status = 'pending' FOR UPDATE;
-  IF r.id IS NULL THEN RAISE EXCEPTION 'no pending request %', p_id USING HINT = 'rowfence help AZ708'; END IF;
+  IF r.id IS NULL THEN RAISE EXCEPTION 'no pending request %', p_id USING HINT = 'rowstile help AZ708'; END IF;
   IF authz.uid() IS NULL OR r.requester = authz.uid()::text THEN
-    RAISE EXCEPTION 'you cannot decide your own request' USING ERRCODE = 'insufficient_privilege', HINT = 'rowfence help AZ705';
+    RAISE EXCEPTION 'you cannot decide your own request' USING ERRCODE = 'insufficient_privilege', HINT = 'rowstile help AZ705';
   END IF;
   IF NOT authz_int.may_manage(r.object_type, r.object_id, r.relation,
                               CASE WHEN r.relation LIKE 'role:%' THEN NULL ELSE 'user' END) THEN
-    RAISE EXCEPTION 'you cannot decide request %', p_id USING ERRCODE = 'insufficient_privilege', HINT = 'rowfence help AZ705';
+    RAISE EXCEPTION 'you cannot decide request %', p_id USING ERRCODE = 'insufficient_privilege', HINT = 'rowstile help AZ705';
   END IF;
   IF p_approve THEN
     -- authz.share checks again that you may share it, and that you hold what it grants
@@ -374,7 +374,7 @@ BEGIN
   PERFORM authz_int.check_writable();
   UPDATE authz.requests SET status = 'cancelled', decided_at = now()
   WHERE id = p_id AND status = 'pending' AND requester = authz.uid()::text;
-  IF NOT FOUND THEN RAISE EXCEPTION 'no pending request % of yours', p_id USING HINT = 'rowfence help AZ708'; END IF;
+  IF NOT FOUND THEN RAISE EXCEPTION 'no pending request % of yours', p_id USING HINT = 'rowstile help AZ708'; END IF;
 END $f$;
 
 -- Emergency access: people who hold 'break_glass' on an object give themselves a relation on it
@@ -387,18 +387,18 @@ DECLARE g authz.shares; v_until timestamptz; v_audit bigint;
 BEGIN
   p_id := authz_int.canon(p_type, p_id);
   PERFORM authz_int.check_writable();
-  IF coalesce(btrim(p_reason), '') = '' THEN RAISE EXCEPTION 'say why (it is kept in the audit trail)' USING HINT = 'rowfence help AZ710'; END IF;
+  IF coalesce(btrim(p_reason), '') = '' THEN RAISE EXCEPTION 'say why (it is kept in the audit trail)' USING HINT = 'rowstile help AZ710'; END IF;
   IF p_duration IS NULL OR p_duration <= interval '0' OR p_duration > interval '1 day' THEN
-    RAISE EXCEPTION 'emergency access lasts more than nothing and one day at most' USING HINT = 'rowfence help AZ710';
+    RAISE EXCEPTION 'emergency access lasts more than nothing and one day at most' USING HINT = 'rowstile help AZ710';
   END IF;
   IF authz.uid() IS NULL
      OR NOT EXISTS (SELECT 1 FROM authz_int.perms WHERE type = p_type AND perm = 'break_glass')
      OR NOT authz.can(p_type, p_id, 'break_glass') THEN
-    RAISE EXCEPTION 'you cannot break the glass on % %', p_type, p_id USING ERRCODE = 'insufficient_privilege', HINT = 'rowfence help AZ705';
+    RAISE EXCEPTION 'you cannot break the glass on % %', p_type, p_id USING ERRCODE = 'insufficient_privilege', HINT = 'rowstile help AZ705';
   END IF;
   IF NOT EXISTS (SELECT 1 FROM authz_int.shared_relations WHERE object_type = p_type AND relation = p_relation
                  AND subject = 'user') THEN
-    RAISE EXCEPTION 'the policy does not allow sharing %.% with a user', p_type, p_relation USING HINT = 'rowfence help AZ706';
+    RAISE EXCEPTION 'the policy does not allow sharing %.% with a user', p_type, p_relation USING HINT = 'rowstile help AZ706';
   END IF;
   v_until := now() + p_duration;
   PERFORM set_config('authz_ctx.reason', p_reason, true);
@@ -436,7 +436,7 @@ BEGIN
   p_id := authz_int.canon(p_type, p_id);
   PERFORM authz_int.check_writable();
   IF NOT authz_int.may_inspect(p_type, p_id) THEN
-    RAISE EXCEPTION 'you cannot review % %', p_type, p_id USING ERRCODE = 'insufficient_privilege', HINT = 'rowfence help AZ705';
+    RAISE EXCEPTION 'you cannot review % %', p_type, p_id USING ERRCODE = 'insufficient_privilege', HINT = 'rowstile help AZ705';
   END IF;
   INSERT INTO authz.reviews (object_type, object_id, created_by, closes_at)
   VALUES (p_type, p_id, authz.uid()::text, p_closes_at) RETURNING id INTO v_id;
@@ -458,7 +458,7 @@ DECLARE v authz.reviews;
 BEGIN
   SELECT * INTO v FROM authz.reviews WHERE id = p_review;
   IF v.id IS NULL OR NOT authz_int.may_inspect(v.object_type, v.object_id) THEN
-    RAISE EXCEPTION 'you cannot see review %', p_review USING ERRCODE = 'insufficient_privilege', HINT = 'rowfence help AZ705';
+    RAISE EXCEPTION 'you cannot see review %', p_review USING ERRCODE = 'insufficient_privilege', HINT = 'rowstile help AZ705';
   END IF;
   RETURN QUERY SELECT i.item, i.relation, i.subject_type,
     CASE WHEN i.subject_type = 'link' THEN '(link)' ELSE i.subject_id END, i.subject_relation, i.expires_at, i.keep,
@@ -471,14 +471,14 @@ BEGIN
   PERFORM authz_int.check_writable();
   SELECT * INTO v FROM authz.reviews WHERE id = p_review AND closed_at IS NULL;
   IF v.id IS NULL OR NOT authz_int.may_inspect(v.object_type, v.object_id) THEN
-    RAISE EXCEPTION 'you cannot decide in review %', p_review USING ERRCODE = 'insufficient_privilege', HINT = 'rowfence help AZ705';
+    RAISE EXCEPTION 'you cannot decide in review %', p_review USING ERRCODE = 'insufficient_privilege', HINT = 'rowstile help AZ705';
   END IF;
   SELECT * INTO i FROM authz.review_items WHERE review_id = p_review AND item = p_item;
-  IF i.item IS NULL THEN RAISE EXCEPTION 'no item % in review %', p_item, p_review USING HINT = 'rowfence help AZ708'; END IF;
+  IF i.item IS NULL THEN RAISE EXCEPTION 'no item % in review %', p_item, p_review USING HINT = 'rowstile help AZ708'; END IF;
   IF NOT authz_int.may_manage(v.object_type, v.object_id, i.relation,
                               authz_int.subject_key(i.subject_type, i.subject_id, i.subject_relation)) THEN
     RAISE EXCEPTION 'you cannot decide on % in review % (you could not unshare it)', i.relation, p_review
-      USING ERRCODE = 'insufficient_privilege', HINT = 'rowfence help AZ705';
+      USING ERRCODE = 'insufficient_privilege', HINT = 'rowstile help AZ705';
   END IF;
   UPDATE authz.review_items SET keep = p_keep, decided_by = authz.uid()::text, decided_at = now()
   WHERE review_id = p_review AND item = p_item;
@@ -491,7 +491,7 @@ BEGIN
   PERFORM authz_int.check_writable();
   SELECT * INTO v FROM authz.reviews WHERE id = p_review AND closed_at IS NULL FOR UPDATE;
   IF v.id IS NULL OR NOT authz_int.may_inspect(v.object_type, v.object_id) THEN
-    RAISE EXCEPTION 'you cannot close review %', p_review USING ERRCODE = 'insufficient_privilege', HINT = 'rowfence help AZ705';
+    RAISE EXCEPTION 'you cannot close review %', p_review USING ERRCODE = 'insufficient_privilege', HINT = 'rowstile help AZ705';
   END IF;
   PERFORM set_config('authz_ctx.reason', 'access review ' || p_review, true);
   -- items marked 'revoke' were decided by someone allowed to unshare them; undecided ones need you to be

@@ -1,4 +1,4 @@
-import { route } from "@rowfence/next";
+import { route } from "@rowstile/next";
 import { db } from "@/db";
 
 export const GET = route(async () =>

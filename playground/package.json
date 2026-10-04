@@ -1,7 +1,7 @@
 {
-  "name": "rowfence-playground",
+  "name": "rowstile-playground",
   "private": true,
-  "description": "rowfence in the browser: the compiler in Pyodide, the SQL it writes in PGlite",
+  "description": "rowstile in the browser: the compiler in Pyodide, the SQL it writes in PGlite",
   "type": "module",
   "scripts": {
     "build": "node build.mjs",

@@ -1,6 +1,6 @@
-"""rowfence Studio: a local web page over a database with a policy in force.
+"""rowstile Studio: a local web page over a database with a policy in force.
 
-    rowfence studio [--port 4983] [--write]     (rowfence dev starts it too, able to write: a development database)
+    rowstile studio [--port 4983] [--write]     (rowstile dev starts it too, able to write: a development database)
 
 Browse the app's tables as anyone (rows they can't see greyed, masked columns as they get them), see why they hold a permission or not and the
 smallest change that would grant it (authz grant.py, each change tried and undone), the policy as a graph,
@@ -31,11 +31,11 @@ import pgwire
 from authzlib import Compiler, database, grant
 from authzlib.connection import Value as Json
 from authzlib.parse import Ref, Type
-from authzlib.sqlutil import lit, qt
+from authzlib.sqlutil import POLICY_MARKS, lit, qt
 from authzlib.sqlutil import q as quoted
 
 if TYPE_CHECKING:
-    from rowfence_cli import Config, Db
+    from rowstile_cli import Config, Db
 
 T = TypeVar("T")
 Message = dict[str, Json]
@@ -87,7 +87,7 @@ class Studio:
 
     def work(self, fn: Callable[[Db], T], write: bool = False) -> T:
         """fn(db) in one transaction: READ ONLY and rolled back, unless this is a write Studio may make."""
-        from rowfence_cli import Db
+        from rowstile_cli import Db
         conn = self.connect()
         try:
             conn.execute("BEGIN" if (self.writable and write) else "BEGIN READ ONLY")
@@ -117,7 +117,7 @@ class Studio:
     @staticmethod
     def app_role(db: Db) -> str:
         rows = db.rows("SELECT DISTINCT r.rolname AS r FROM pg_catalog.pg_policy p JOIN pg_catalog.pg_description d "
-                       "ON d.objoid = p.oid AND d.classoid = 'pg_catalog.pg_policy'::regclass AND d.description = 'rowfence' "
+                       f"ON d.objoid = p.oid AND d.classoid = 'pg_catalog.pg_policy'::regclass AND d.description IN {POLICY_MARKS} "
                        "CROSS JOIN unnest(p.polroles) ro JOIN pg_catalog.pg_roles r ON r.oid = ro")
         if not rows:
             raise Problem("no policy with rules is applied, so there is no app role to look through", 409)
@@ -235,7 +235,7 @@ class Studio:
 
     def diff(self, q: Query) -> Message:
         if not self.policy_path or not self.read_policy:
-            raise Problem("no policy file to compare with (rowfence.toml's policy)", 404)
+            raise Problem("no policy file to compare with (rowstile.toml's policy)", 404)
         try:
             text, files = self.read_policy(self.policy_path)
         except OSError as e:
@@ -248,8 +248,8 @@ class Studio:
             if not self.writable:
                 # it builds the file's policy in a transaction it undoes, which locks the app's tables
                 raise Problem("the access diff builds the policy file's policy in a transaction it undoes, which locks the "
-                              "app's tables: only on a development database (rowfence dev, or studio --write); for staging, "
-                              "rowfence review --db on a copy", 409)
+                              "app's tables: only on a development database (rowstile dev, or studio --write); for staging, "
+                              "rowstile review --db on a copy", 409)
             rows = database.diff(db, text, files)
             users: dict[tuple[str, str, str], set[str]] = {}
             ids: dict[tuple[str, str, str], set[str]] = {}
@@ -280,7 +280,7 @@ class Studio:
     def change(self, what: str, body: Message) -> Message:
         """A share, unshare or decision, made as the person Studio views as (only with --write)."""
         if not self.writable:
-            raise Problem("Studio is read-only here: start it with --write (or use rowfence dev) to change shares", 403)
+            raise Problem("Studio is read-only here: start it with --write (or use rowstile dev) to change shares", 403)
         who = principal(str(body.get("as") or ""))
         if who[0] is None:
             raise Problem("as whom? pick someone to view as: they make the change")
@@ -402,7 +402,7 @@ class Studio:
                 # as bytes: a header may hold anything, and compare_digest takes text only if it is ASCII
                 if not secrets.compare_digest(self.headers.get("X-Studio-Token", "").encode("latin-1", "replace"),
                                               studio.token.encode()):
-                    return self.send(401, {"title": "Unauthorized", "status": 401, "detail": "the token from the URL rowfence printed"})
+                    return self.send(401, {"title": "Unauthorized", "status": 401, "detail": "the token from the URL rowstile printed"})
                 q = {k: v[-1] for k, v in parse_qs(parsed.query).items()}
                 name = parsed.path[len("/api/"):]
                 try:
@@ -496,10 +496,10 @@ def serve(dsn: str | None, cfg: Config, policy_path: str | None, writable: bool,
     try:
         studio.work(lambda db: database.applied(db))
     except database.Error as e:
-        print(f"rowfence studio: {e}" + (f"\nHINT: {e.hint}" if e.hint else ""), file=sys.stderr)
+        print(f"rowstile studio: {e}" + (f"\nHINT: {e.hint}" if e.hint else ""), file=sys.stderr)
         sys.exit(1)
     url = studio.start(background=True)
-    print(f"rowfence studio: {url}  ({'can write: shares and requests' if writable else 'read-only'}; Ctrl-C stops it)",
+    print(f"rowstile studio: {url}  ({'can write: shares and requests' if writable else 'read-only'}; Ctrl-C stops it)",
           flush=True)
     try:
         threading.Event().wait()
