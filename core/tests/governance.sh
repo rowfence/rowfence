@@ -174,10 +174,11 @@ check "... dave (not decided) kept it" "t" "SET authz.user_id = 4; SELECT authz.
 expect_code "a closed review cannot be changed" 42501 -c "SET authz.user_id = 5" -c "SELECT authz.review_decide($REV, 1, false)"
 
 echo "-- reviews respect 'shared by'"
-sed -e 's/^  editor      : user, team#member              shared$/  editor      : user, team#member              shared by manage_editors/' \
+sed -e 's/^  editor      : user, team#member shared$/  editor      : user, team#member shared by manage_editors/' \
     -e 's/^  can share = owner or org.admin or (parent.share and {inherit})$/&\n  can manage_editors = owner/' \
     example/docs.authz > /tmp/authz_governance_by.authz
-grep -q "can manage_editors = owner" /tmp/authz_governance_by.authz || { echo "FAIL  could not make the variant policy"; fails=$((fails + 1)); }
+grep -q "can manage_editors = owner" /tmp/authz_governance_by.authz && grep -q "shared by manage_editors" /tmp/authz_governance_by.authz ||
+  { echo "FAIL  could not make the variant policy"; fails=$((fails + 1)); }
 python3 authzc.py /tmp/authz_governance_by.authz > /tmp/authz_governance_by.sql &&
 PGOPTIONS="-c client_min_messages=error" psql -X -q -v ON_ERROR_STOP=1 -d "$DB" -f /tmp/authz_governance_by.sql >/dev/null
 as 1 -c "SELECT authz.share('folder', 3, 'editor', 'user', 4)" >/dev/null
@@ -214,7 +215,8 @@ case "$got" in *'authz decision: user="1" type="file" id="11" perm="view" -> tru
 
 echo "-- previewing a policy change"
 TMPD=$(mktemp -d)
-sed -e 's/^           or linked_into.view .*$//' -e 's/^  linked_into : folder = .*$//' example/docs.authz > "$TMPD/nolinks.authz"
+sed -e 's/^           or linked_into.view .*$//' -e 's/^  linked_into : folder *= .*$//' example/docs.authz > "$TMPD/nolinks.authz"
+grep -q "linked_into" "$TMPD/nolinks.authz" && { echo "FAIL  could not make the policy without links"; fails=$((fails + 1)); }
 COUNTS="SELECT (SELECT count(*) FROM authz.shares) || '|' || (SELECT count(*) FROM authz.audit) || '|' || (SELECT count(*) FROM authz.changes)"
 BEFORE=$(PSQL -c "$COUNTS")
 python3 authzc.py "$TMPD/nolinks.authz" --diff > "$TMPD/diff.sql" &&

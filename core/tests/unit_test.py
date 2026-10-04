@@ -1797,9 +1797,14 @@ class DocPages(unittest.TestCase):
         # `rowfence fmt --check` in their CI, as the reference says, they must pass. The suites' own fixtures are
         # left as they are (some are wrong on purpose)
         from authzlib import fmt
-        files = subprocess.run(["git", "ls-files", "*.authz"], cwd=self.REPO, capture_output=True, text=True,
-                               check=True).stdout.split()
-        files = [f for f in files if not f.startswith(("core/tests/", "editor/"))]
+        # walked, not asked of git: CI's container doesn't own the mounted checkout, and git refuses it
+        skip = {".git", "node_modules", ".venv", ".next", ".work", "dist", "tests", "editor"}
+        files = []
+        for top in ("core", "docs", "examples", "integrations"):
+            for root, dirs, names in os.walk(os.path.join(self.REPO, top)):
+                dirs[:] = [d for d in dirs if d not in skip or (d == "tests" and not root.endswith("core"))]
+                files += [os.path.relpath(os.path.join(root, n), self.REPO).replace(os.sep, "/")
+                          for n in names if n.endswith(".authz")]
         self.assertGreater(len(files), 10, "the policies aren't found")
         loose = [f for f in files if fmt.format_policy(self.page(f)) != self.page(f)]
         self.assertEqual(loose, [], "not as rowfence fmt writes them: run rowfence fmt on each")

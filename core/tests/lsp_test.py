@@ -124,7 +124,8 @@ with tempfile.TemporaryDirectory() as d:
 
     dfn = c.request("textDocument/definition", at("org.admin", len("org.") + 1))
     ok("definition of org.admin is the admin line of org", dfn and dfn["range"]["start"]["line"] == pos(policy, "admin  : user")["line"], dfn)
-    dfn = c.request("textDocument/definition", at("  select                        : view", 34))
+    rule = "  select                            : view"
+    dfn = c.request("textDocument/definition", at(rule, rule.index("view")))
     ok("definition of a permission in rules goes to the type's", dfn and dfn["range"]["start"]["line"] == pos(policy, "can view  = edit or viewer", 0, 1)["line"], dfn)
 
     refs = c.request("textDocument/references", at("can share = owner or org.admin", 5))
