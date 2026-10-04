@@ -172,3 +172,38 @@ jobs:
           body_path: release-notes.md
           prerelease: ${{ needs.check.outputs.npm-tag == 'next' }}
           fail_on_unmatched_files: true
+
+  # the VS Code extension on the Marketplace and Open VSX, when its own version (editor/package.json, raised when
+  # the extension changes) isn't there yet. Their tokens are the environment vscode's, which takes v* tags only; a
+  # dry run, on a branch, packages it and goes without them
+  vscode:
+    needs: check
+    runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
+    environment: ${{ needs.check.outputs.publish == 'public' && 'vscode' || '' }}
+    permissions: {contents: read}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020   # v7.0.0
+        with: {node-version: "24"}
+      - run: cp LICENSE editor/ && cd editor && npm ci --omit=dev --no-audit --no-fund && npx --yes @vscode/vsce@3.9.2 package --out ../rowfence.vsix
+      - if: needs.check.outputs.publish == 'public'
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+        run: |
+          version=$(node -p "require('./editor/package.json').version")
+          # vsce show prints "undefined" for an extension the Marketplace doesn't have
+          if npx --yes @vscode/vsce@3.9.2 show rowfence.rowfence --json | node -e '
+            let s = ""; process.stdin.on("data", (d) => (s += d)).on("end", () => {
+              let versions = []; try { versions = JSON.parse(s).versions.map((v) => v.version) } catch {}
+              process.exit(versions.includes(process.argv[1]) ? 0 : 1)
+            })' "$version"; then
+            echo "the Marketplace has rowfence.rowfence $version already"
+          else
+            npx --yes @vscode/vsce@3.9.2 publish --packagePath rowfence.vsix
+          fi
+          if curl -sf "https://open-vsx.org/api/rowfence/rowfence/$version" > /dev/null; then
+            echo "Open VSX has rowfence.rowfence $version already"
+          else
+            npx --yes ovsx@1.2.0 publish rowfence.vsix
+          fi

@@ -4,6 +4,7 @@
   "description": "For .authz policy files: highlighting (with SQL inside { }), errors while typing, hover, go to definition, references, outline and completion, from the rowfence language server.",
   "version": "0.1.0",
   "publisher": "rowfence",
+  "preview": true,
   "license": "Apache-2.0",
   "repository": { "type": "git", "url": "git+https://github.com/rowfence/rowfence.git", "directory": "editor" },
   "files": ["extension.js", "language-configuration.json", "syntaxes", "README.md", "LICENSE", "node_modules"],
