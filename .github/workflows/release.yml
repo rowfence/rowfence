@@ -1,7 +1,7 @@
 # Publishes a version (RELEASING.md): set it with `python3 packaging/version.py X.Y.Z` (or X.Y.Z-alpha.N,
 # X.Y.Z-rc.N), commit,
 # push the tag vX.Y.Z. A -dev version (main between releases) is refused. Where it goes follows the repository:
-#   - public: PyPI (trusted publishing), npm (NPM_TOKEN, with provenance), the image on ghcr.io
+#   - public: PyPI and npm (trusted publishing: no token; npm with provenance), the image on ghcr.io
 #   - private: the @rowfence/* packages on GitHub Packages' npm registry, a private image; the public steps as
 #     dry runs. PyPI and npm have no private side, so the wheel, the sdist and the unscoped launcher (a
 #     tarball) are on the GitHub release
@@ -88,10 +88,15 @@ jobs:
       - run: for d in sdk/typescript/*/; do cp LICENSE "$d" && cp sdk/typescript/README.md "$d"; done
       # every package as the public publish would send it, the launcher too
       - run: for d in packaging/npm/out/cli-* packaging/npm/out/rowfence sdk/typescript/*/; do npm publish --dry-run --tag "$TAG" --access public "$d"; done
+      # npmjs.com trusts this workflow (each package's trusted publisher: rowfence/rowfence, release.yml): npm
+      # trades the job's OIDC token for one publish, from npm 11.5.1 on. GitHub Packages (private) takes GITHUB_TOKEN
       - if: env.PUBLISH != 'none'
         env:
-          NODE_AUTH_TOKEN: ${{ needs.check.outputs.publish == 'public' && secrets.NPM_TOKEN || secrets.GITHUB_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ needs.check.outputs.publish == 'private' && secrets.GITHUB_TOKEN || '' }}
         run: |
+          if [ "$PUBLISH" = public ] && ! node -e 'const [a, b, c] = process.argv[1].split(".").map(Number); process.exit(a > 11 || (a === 11 && (b > 5 || (b === 5 && c >= 1))) ? 0 : 1)' "$(npm --version)"; then
+            echo "::error::trusted publishing needs npm 11.5.1 or newer, this is $(npm --version)"; exit 1
+          fi
           flags=(--tag "$TAG")
           if [ "$PUBLISH" = public ]; then flags+=(--provenance --access public); fi
           # a version the registry has already is skipped (it refuses it a second time): a release that stopped
