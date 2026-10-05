@@ -10,7 +10,8 @@ class Compiler(TestMixin, DevMixin, OutputMixin):
     """A policy compiled: each part of the output is one of its bases (OutputMixin assembles them)."""
 
 
-__version__ = "0.1.0-dev"   # set with packaging/version.py (the packages copy it); authz.policy_versions records it on each apply
+# set with packaging/version.py (the packages copy it); authz.policy_versions records it on each apply
+__version__ = "0.1.0-dev"
 
 
 def _build() -> str:
