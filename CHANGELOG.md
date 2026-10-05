@@ -7,6 +7,10 @@ Each release upgrades from the one before it. How releases are numbered and made
 
 ## Unreleased
 
+### Added
+
+- The VS Code extension is on the VS Code Marketplace too, as `rowstile.rowstile` (a preview, like on Open VSX).
+
 ## 0.1.0 (alpha)
 
 **rowfence is now rowstile**, and 0.1.0-alpha.2 is its first release under the new name (0.1.0-alpha.1 was

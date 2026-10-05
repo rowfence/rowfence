@@ -14,10 +14,18 @@ server (`rowstile lsp`, in `cli/lsp.py`):
 
 ## VS Code
 
+Install **rowstile policy language** (`rowstile.rowstile`) from the VS Code Marketplace, or from Open VSX in
+VSCodium, Cursor and the other editors that install from there:
+
+    code --install-extension rowstile.rowstile
+
+From this repository instead:
+
     cd editor && npm install && npx vsce package      # makes rowstile-0.1.0.vsix
     code --install-extension rowstile-0.1.0.vsix
 
-The extension runs `rowstile lsp` (put `cli/` on your PATH), or whatever `rowstile.command` says, e.g.
+The extension runs `rowstile lsp` with the `rowstile` on your PATH (installed with npm, pip or uv:
+[Installing](../docs/installing.md)), or whatever `rowstile.command` says, e.g.
 `["python3", "/path/to/rowstile/cli/rowstile_cli.py", "lsp"]`. It starts in the workspace folder, where it looks
 for `rowstile.toml`.
 
