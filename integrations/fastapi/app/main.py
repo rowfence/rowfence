@@ -11,7 +11,11 @@ from rowstile.fastapi import Rowstile
 from sqlalchemy import delete, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from .authz_client import ObjectType, Permission
 from .models import Message, Note, Project
+
+# the queries by permission, taking only the policy's names: a misspelled one doesn't type-check
+queries = authz_sa.Queries[ObjectType, Permission]()
 
 
 def user_of(request: Request) -> str | None:
@@ -41,13 +45,13 @@ def make_app(url: str | None = None, check_connection: bool = True, pool_size: i
     @app.get("/projects/editable")
     async def editable() -> list[int]:
         async with Session() as s:
-            return sorted((await s.scalars(select(Project.id).where(Project.id.in_(authz_sa.ids("project", "edit"))))).all())
+            return sorted((await s.scalars(select(Project.id).where(Project.id.in_(queries.ids("project", "edit"))))).all())
 
     @app.get("/projects/buttons")
-    async def buttons() -> dict[str, list[str]]:
+    async def buttons() -> dict[str, list[Permission]]:
         async with Session() as s:
             ids = (await s.scalars(select(Project.id))).all()
-            return await authz_sa.perms_of(s, "project", ids)
+            return await queries.perms_of(s, "project", ids)
 
     @app.get("/notes")
     async def notes() -> list[int]:

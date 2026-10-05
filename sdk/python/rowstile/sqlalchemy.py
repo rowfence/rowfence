@@ -8,14 +8,18 @@ Queries by permission use set checks, never a function call per row:
     select(Folder).where(Folder.id.in_(ids("folder", "edit")))
     await perms_of(session, "folder", [f.id for f in folders])      # {id: ["view", "edit"]}: a list's buttons
 
+Queries[ObjectType, Permission]() has the same queries taking only the policy's names (the generated client's),
+so a misspelled one doesn't type-check.
+
 An ORM update or delete of a row the user may not change matches no row, and SQLAlchemy raises StaleDataError;
 why_stale() asks the database which it was, for each row of the flush that failed: NotFound (the row is
 hidden) or Refused (and why) for the first one the database says no for.
 """
 from __future__ import annotations
 
+import typing
 from collections.abc import Callable, Iterable, Sequence
-from typing import TYPE_CHECKING, Any, TypeVar
+from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
 from sqlalchemy import (
     BigInteger,
@@ -63,6 +67,9 @@ except ImportError:
 
 AnyEngine = TypeVar("AnyEngine", bound="Engine | AsyncEngine")
 Result = TypeVar("Result")
+# the policy's names, as the generated client writes them (ObjectType, Permission): Queries
+TypeName = TypeVar("TypeName", bound=str)
+PermissionName = TypeVar("PermissionName", bound=str)
 
 _engines: dict[Engine, Engine | AsyncEngine] = {}   # sync engine -> the engine install() was given (async or not)
 _mapper_events = False
@@ -220,6 +227,35 @@ async def perms_of(session: AsyncSession | AsyncConnection, type_: str, ids_: It
 def perms_of_sync(session: Session | Connection, type_: str, ids_: Iterable[Id]) -> dict[str, list[str]]:
     rows = session.execute(_PERMS_OF.bindparams(t=type_, ids=[str(i) for i in ids_])).all()
     return {r[0]: list(r[1] or []) for r in rows}
+
+
+class Queries(Generic[TypeName, PermissionName]):
+    """The queries by permission, taking only the policy's names, so a misspelled type or permission doesn't
+    type-check. The names are the generated client's (rowstile client py):
+
+        from app.authz_client import ObjectType, Permission
+        queries = Queries[ObjectType, Permission]()
+        select(Folder).where(Folder.id.in_(queries.ids("folder", "edit")))
+
+    Each method is the function of the same name."""
+
+    def ids(self, type_: TypeName, perm: PermissionName,
+            key_type: type[TypeEngine[Any]] | TypeEngine[Any] | None = BigInteger) -> Select[Any]:
+        return ids(type_, perm, key_type)
+
+    async def can(self, session: AsyncSession | AsyncConnection, type_: TypeName, id_: Id, perm: PermissionName) -> bool:
+        return await can(session, type_, id_, perm)
+
+    def can_sync(self, session: Session | Connection, type_: TypeName, id_: Id, perm: PermissionName) -> bool:
+        return can_sync(session, type_, id_, perm)
+
+    async def perms_of(self, session: AsyncSession | AsyncConnection, type_: TypeName,
+                       ids_: Iterable[Id]) -> dict[str, list[PermissionName]]:
+        return typing.cast("dict[str, list[PermissionName]]", await perms_of(session, type_, ids_))
+
+    def perms_of_sync(self, session: Session | Connection, type_: TypeName,
+                      ids_: Iterable[Id]) -> dict[str, list[PermissionName]]:
+        return typing.cast("dict[str, list[PermissionName]]", perms_of_sync(session, type_, ids_))
 
 
 async def connection_check(engine: Engine | AsyncEngine) -> list[tuple[str, str]]:
