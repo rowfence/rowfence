@@ -89,6 +89,11 @@ above takes 290 ms instead of 32). The audit trail and change feed add about 15 
   editor or parent.edit` and `can view = edit or viewer or parent.view`, `view` looks up `parent.view` alone,
   which includes `parent.edit`, so each type in a chain adds the same few views. A query that joins tables
   pays for each of them.
+  Planning is paid by every query that isn't a prepared statement. One that is gets planned in full its first
+  five runs on a connection, and then Postgres usually keeps the plan: a read that took 13 ms to plan took
+  0.1 ms from its sixth run. Whether queries are prepared is the driver's doing, not the policy's: behind a
+  pooler that keeps no prepared statements, where the drivers are told to make none ([Behind a
+  pooler](../operations.md#behind-a-pooler)), every query pays for its planning.
   `authz.lint()` warns when a table's select rule passes 50 (applying shows it). Name each permission once on
   the way: `can edit = owner or editor`, `can view = edit or viewer`, not `view` written out again inside
   three others. The same name twice in one `and` or `or` counts once.
