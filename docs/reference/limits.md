@@ -85,6 +85,10 @@ above takes 290 ms instead of 32). The audit trail and change feed add about 15 
   another type's permission (`folder.view`), which names others more than once, which do the same, multiplies:
   the policies in this repository make Postgres write out at most a dozen views for a read, and at around a
   hundred, planning alone takes tens to hundreds of milliseconds for every query, before a row is read.
+  Tiers that include each other and inherit from the row above don't multiply: with `can edit = owner or
+  editor or parent.edit` and `can view = edit or viewer or parent.view`, `view` looks up `parent.view` alone,
+  which includes `parent.edit`, so each type in a chain adds the same few views. A query that joins tables
+  pays for each of them.
   `authz.lint()` warns when a table's select rule passes 50 (applying shows it). Name each permission once on
   the way: `can edit = owner or editor`, `can view = edit or viewer`, not `view` written out again inside
   three others. The same name twice in one `and` or `or` counts once.

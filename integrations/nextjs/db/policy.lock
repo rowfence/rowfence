@@ -289,5 +289,5 @@ view authz_int."project__member" | 3d97709a57f2
 view authz_int."project__owner" | a8b17adcb96f
 view authz_int."project__service" | 52331b48eca0
 view authz_int."project__share" | f2e2aa15d6ba
-view authz_int."project__view" | 918a78e960b7
+view authz_int."project__view" | 4edbe418a495
 view authz_int."project__viewer" | cdcc2b806fee

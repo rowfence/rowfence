@@ -523,14 +523,14 @@ view authz_gen."version__edit" | f222dbbba6ff
 view authz_gen."version__file__edit" | 8885099f1290
 view authz_gen."version__file__view" | 009fe0dff52e
 view authz_gen."version__view" | db226cea6554
-view authz_int."file__edit" | bfb0098e4915
+view authz_int."file__edit" | 994cbaada15d
 view authz_int."file__editor" | 951979f6d539
 view authz_int."file__folder__edit" | 9e5565180980
 view authz_int."file__folder__share" | f540ead78baa
 view authz_int."file__folder__view" | 3258ab089d07
 view authz_int."file__owner" | 8c4b3be590ef
 view authz_int."file__share" | b115197b8db4
-view authz_int."file__view" | 5a55932df742
+view authz_int."file__view" | 57b566bba746
 view authz_int."file__viewer" | 7883e7569617
 view authz_int."folder__break_glass" | a852f0a4dcd0
 view authz_int."folder__edit" | 1d29d1584bbd
