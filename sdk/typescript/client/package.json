@@ -1,6 +1,6 @@
 {
   "name": "@rowstile/client",
-  "version": "0.1.0-alpha.3",
+  "version": "0.1.0-dev",
   "description": "rowstile for TypeScript apps: who each transaction acts for, refusals as errors, generated names",
   "license": "Apache-2.0",
   "repository": { "type": "git", "url": "git+https://github.com/rowstile/rowstile.git", "directory": "sdk/typescript/client" },
