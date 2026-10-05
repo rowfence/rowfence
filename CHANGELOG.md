@@ -7,36 +7,6 @@ Each release upgrades from the one before it. How releases are numbered and made
 
 ## Unreleased
 
-### Added
-
-- The VS Code extension is on the VS Code Marketplace too, as `rowstile.rowstile` (a preview, like on Open VSX).
-- The Python SDK copies the migrated test database for each pytest-xdist worker, as `@rowstile/vitest` does
-  for Vitest's: `rowstile.testing.database_per_worker(url)` returns the copy's URL (and the app role's), so
-  tests that write don't meet each other. It needs no driver of the app's.
-- `authz.list_links(type, id)` lists the share links on an object (an id, the relation, who made it, when,
-  until when) and `authz.revoke_link(type, id, link)` turns one off by that id, so an app no longer keeps a
-  table of its own to do it. For people who can share the object, or may make such links. The generated
-  clients have them as `list_links` and `revoke_link` (`listLinks`, `revokeLink`).
-- The Python SDK's queries by permission take the policy's names: `rowstile.sqlalchemy.Queries[ObjectType,
-  Permission]()`, with the generated client's two types, has `ids`, `can`, `can_sync`, `perms_of` and
-  `perms_of_sync`, and a misspelled type or permission no longer type-checks. The functions that take any
-  string stay.
-
-### Changed
-
-- Reads plan faster in policies with tiers that inherit. With `can edit = manage or editor or parent.edit` and
-  `can view = edit or viewer or parent.view`, the view of `view` looked up `parent.view`, `parent.edit` and
-  `parent.manage`, and each did the same one type up, so what Postgres planned for a read grew with the number
-  of ways down through the tiers. It now looks up `parent.view` alone, which includes the others. Five types
-  in a chain with three tiers: from 85 views and 13 ms of planning for each read to 20 views and 1.9 ms; seven
-  types with four tiers: from 519 views and 179 ms to 36 and 6.7 ms. Who holds what doesn't change, and no
-  policy has to.
-
-### Upgrading
-
-- The next `rowstile migrate` (or `apply`) replaces the views of permissions that name others of their type:
-  a migration with no change to the policy.
-
 ## 0.1.0 (alpha)
 
 **rowfence is now rowstile**, and 0.1.0-alpha.2 is its first release under the new name (0.1.0-alpha.1 was
@@ -71,6 +41,38 @@ The first release, as an alpha: for trying rowstile early. Anything in it may st
 
 PostgreSQL 16, 17 and 18. Installed with npm (the command with its own Python), pip or the Docker image:
 [Installing](docs/installing.md).
+
+What changed since 0.1.0-alpha.2:
+
+### Added
+
+- The VS Code extension is on the VS Code Marketplace too, as `rowstile.rowstile` (a preview, like on Open VSX).
+- The Python SDK copies the migrated test database for each pytest-xdist worker, as `@rowstile/vitest` does
+  for Vitest's: `rowstile.testing.database_per_worker(url)` returns the copy's URL (and the app role's), so
+  tests that write don't meet each other. It needs no driver of the app's.
+- `authz.list_links(type, id)` lists the share links on an object (an id, the relation, who made it, when,
+  until when) and `authz.revoke_link(type, id, link)` turns one off by that id, so an app no longer keeps a
+  table of its own to do it. For people who can share the object, or may make such links. The generated
+  clients have them as `list_links` and `revoke_link` (`listLinks`, `revokeLink`).
+- The Python SDK's queries by permission take the policy's names: `rowstile.sqlalchemy.Queries[ObjectType,
+  Permission]()`, with the generated client's two types, has `ids`, `can`, `can_sync`, `perms_of` and
+  `perms_of_sync`, and a misspelled type or permission no longer type-checks. The functions that take any
+  string stay.
+
+### Changed
+
+- Reads plan faster in policies with tiers that inherit. With `can edit = manage or editor or parent.edit` and
+  `can view = edit or viewer or parent.view`, the view of `view` looked up `parent.view`, `parent.edit` and
+  `parent.manage`, and each did the same one type up, so what Postgres planned for a read grew with the number
+  of ways down through the tiers. It now looks up `parent.view` alone, which includes the others. Five types
+  in a chain with three tiers: from 85 views and 13 ms of planning for each read to 20 views and 1.9 ms; seven
+  types with four tiers: from 519 views and 179 ms to 36 and 6.7 ms. Who holds what doesn't change, and no
+  policy has to.
+
+### Upgrading
+
+- The next `rowstile migrate` (or `apply`) replaces the views of permissions that name others of their type:
+  a migration with no change to the policy.
 
 What changed since 0.1.0-alpha.1:
 
