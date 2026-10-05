@@ -2741,6 +2741,23 @@ class Editors(unittest.TestCase):
         )
 
 
+class Layout(unittest.TestCase):
+    """One Ruff lays the Python out: the version CI checks with is the one the pre-commit hook runs and the one
+    the rules for contributors name, so a commit the hook lets through passes CI's layout check."""
+
+    REPO = os.path.dirname(ROOT)
+    NAMED_IN = (".github/workflows/ci.yml", ".githooks/pre-commit", "CONTRIBUTING.md", "CLAUDE.md", "ruff.toml")
+
+    def test_one_ruff_everywhere(self) -> None:
+        versions: dict[str, set[str]] = {}
+        for path in self.NAMED_IN:
+            with open(os.path.join(self.REPO, path), encoding="utf-8") as fh:
+                versions[path] = set(re.findall(r"ruff@(\d+(?:\.\d+)+)", fh.read()))
+        ci = versions[".github/workflows/ci.yml"]
+        self.assertEqual(len(ci), 1, "CI runs one version of Ruff")
+        self.assertEqual({path: found for path, found in versions.items() if found != ci}, {})
+
+
 class Executable(unittest.TestCase):
     """A script that starts with #! is executable in git: on Windows (core.fileMode off) nothing shows it
     isn't, and on Linux the suite that runs it directly fails (`git update-index --chmod=+x`)."""

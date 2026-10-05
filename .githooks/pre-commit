@@ -1,0 +1,43 @@
+#!/bin/bash
+# Refuses a commit whose staged Python isn't laid out as `ruff format` writes it (ruff.toml), so CI's layout check
+# never fails after the fact. It reads what is staged, not the working tree. Turn it on once in each clone:
+#
+#     git config core.hooksPath .githooks
+#
+# `git commit --no-verify` skips it; CI checks all the same.
+set -u
+RUFF="ruff@0.15.12"     # the version CI runs (.github/workflows/ci.yml): unit_test.py checks they agree
+
+cd "$(git rev-parse --show-toplevel)" || exit 1
+staged=()
+while IFS= read -r -d '' f; do staged+=("$f"); done < <(git diff --cached --name-only -z --diff-filter=ACMR -- '*.py')
+[ "${#staged[@]}" -eq 0 ] && exit 0
+
+if ! command -v uvx >/dev/null 2>&1; then
+  echo "pre-commit: uvx isn't installed, so the staged Python's layout can't be checked." >&2
+  echo "  Install uv (https://docs.astral.sh/uv/), or commit with --no-verify and let CI check." >&2
+  exit 1
+fi
+
+unformatted=() broken=()
+for f in "${staged[@]}"; do
+  # what `rowstile` generates is left out by ruff.toml's exclude, which --force-exclude applies to a named file too
+  git show ":$f" | uvx "$RUFF" format --check --quiet --force-exclude --stdin-filename "$f" >/dev/null 2>&1
+  case $? in
+    0) ;;
+    1) unformatted+=("$f") ;;
+    *) broken+=("$f") ;;
+  esac
+done
+
+if [ "${#broken[@]}" -gt 0 ]; then
+  echo "pre-commit: ruff couldn't read (a syntax error?):" >&2
+  printf '  %s\n' "${broken[@]}" >&2
+fi
+if [ "${#unformatted[@]}" -gt 0 ]; then
+  echo "pre-commit: not laid out as ruff format writes it:" >&2
+  printf '  %s\n' "${unformatted[@]}" >&2
+  echo "Lay them out and stage them again:" >&2
+  echo "  uvx $RUFF format ${unformatted[*]} && git add ${unformatted[*]}" >&2
+fi
+[ "${#broken[@]}" -eq 0 ] && [ "${#unformatted[@]}" -eq 0 ]
