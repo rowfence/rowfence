@@ -137,8 +137,10 @@ class Server:
         self.docs: dict[str, str] = {}   # uri -> text
         self.open: dict[str, str] = {}   # the open files: same_file(path) -> the uri the editor calls it by
         self.sent: dict[str, set[str]] = {}  # uri checked -> the uris its last check published problems for
-        self.models: dict[str, tuple[Policy, dict[str, str], str]] = {}  # uri -> last policy that parsed: (pol, files, main path)
-        self.catalog: dict[str, list[str]] | None = None  # {schema.table: [columns]} from the database, when there is one
+        # uri -> last policy that parsed: (pol, files, main path)
+        self.models: dict[str, tuple[Policy, dict[str, str], str]] = {}
+        # {schema.table: [columns]} from the database, when there is one
+        self.catalog: dict[str, list[str]] | None = None
         self.running = True
 
     # --- files -----------------------------------------------------------------------------------
