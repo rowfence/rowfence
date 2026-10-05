@@ -604,6 +604,7 @@ def _tls(sock: socket.socket, host: str, sslmode: str, sslrootcert: str | None) 
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
         context.check_hostname = False
         context.verify_mode = ssl.CERT_NONE         # encrypted, the server not checked: what require means
+    context.minimum_version = ssl.TLSVersion.TLSv1_2    # Python's default since 3.10, said for code scanners
     try:
         return context.wrap_socket(sock, server_hostname=host)
     except ssl.SSLError as e:
