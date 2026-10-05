@@ -146,6 +146,17 @@ def test_9_generated_names_type_check(tmp_path: Path) -> None:
     wrong = subprocess.run([sys.executable, "-m", "mypy", "--no-error-summary", str(bad)], env=env, capture_output=True, text=True)
     assert ok.returncode == 0, ok.stdout
     assert wrong.returncode != 0 and "edt" in wrong.stdout, wrong.stdout
+    # the SDK's own queries take the same names (rowstile.sqlalchemy.Queries, as app/main.py makes it)
+    sdk = ("from app.main import queries\nfrom sqlalchemy.orm import Session\n\n"
+           "def f(s: Session) -> bool:\n    wanted = queries.ids({0!r}, {1!r})\n"
+           "    return wanted is not None and queries.can_sync(s, {0!r}, 1, {1!r})\n")
+    for name, type_, perm, fine in (("sdk_good", "note", "edit", True), ("sdk_perm", "note", "edt", False),
+                                    ("sdk_type", "nte", "edit", False)):
+        path = tmp_path / f"{name}.py"
+        path.write_text(sdk.format(type_, perm))
+        got = subprocess.run([sys.executable, "-m", "mypy", "--no-error-summary", str(path)], env=env, capture_output=True, text=True)
+        assert (got.returncode == 0) is fine, got.stdout
+        assert fine or ("edt" if name == "sdk_perm" else "nte") in got.stdout, got.stdout
 
 
 # 10: a background job signs in as a service principal

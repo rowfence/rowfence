@@ -130,22 +130,28 @@ insert but not read the row, the 403 names the select rule.
 ## Lists by permission
 
 `ids(type, perm)` filters a query to the objects the user holds a permission on; `perms_of` answers a list's
-buttons in one call:
+buttons in one call. `Queries` has them taking only the policy's names, from the generated client, so a
+misspelled type or permission doesn't type-check:
 
 ```python
 from rowstile import sqlalchemy as authz_sa
+from .authz_client import ObjectType, Permission
+queries = authz_sa.Queries[ObjectType, Permission]()
 
     @app.get("/projects/editable")
     async def editable() -> list[int]:
         async with Session() as s:
-            return sorted((await s.scalars(select(Project.id).where(Project.id.in_(authz_sa.ids("project", "edit"))))).all())
+            return sorted((await s.scalars(select(Project.id).where(Project.id.in_(queries.ids("project", "edit"))))).all())
 
     @app.get("/projects/buttons")
-    async def buttons() -> dict[str, list[str]]:
+    async def buttons() -> dict[str, list[Permission]]:
         async with Session() as s:
             ids = (await s.scalars(select(Project.id))).all()
-            return await authz_sa.perms_of(s, "project", ids)
+            return await queries.perms_of(s, "project", ids)
 ```
+
+The same functions are in the module itself (`authz_sa.ids`, `authz_sa.perms_of`, `authz_sa.can`), taking any
+string.
 
 ## Background jobs
 

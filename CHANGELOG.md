@@ -17,6 +17,10 @@ Each release upgrades from the one before it. How releases are numbered and made
   until when) and `authz.revoke_link(type, id, link)` turns one off by that id, so an app no longer keeps a
   table of its own to do it. For people who can share the object, or may make such links. The generated
   clients have them as `list_links` and `revoke_link` (`listLinks`, `revokeLink`).
+- The Python SDK's queries by permission take the policy's names: `rowstile.sqlalchemy.Queries[ObjectType,
+  Permission]()`, with the generated client's two types, has `ids`, `can`, `can_sync`, `perms_of` and
+  `perms_of_sync`, and a misspelled type or permission no longer type-checks. The functions that take any
+  string stay.
 
 ## 0.1.0 (alpha)
 
