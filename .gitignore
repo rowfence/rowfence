@@ -32,8 +32,6 @@ site/node_modules/
 site/dist/
 site/.vitepress/cache/
 llms-full.txt
-.claude/settings.local.json
-.claude/scheduled_tasks.lock
 
 # ci.sh: the suites log and exit code, written by the container
 .ci/

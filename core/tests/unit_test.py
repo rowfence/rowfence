@@ -2153,17 +2153,19 @@ class Private(unittest.TestCase):
     """Decisions and plans are kept out of this repository: no file points at them, so no reader meets a link
     they can't follow. (The patterns are split so this file doesn't match itself.)"""
     REPO = os.path.dirname(ROOT)
-    SKIP: ClassVar[set[str]] = {".git", ".claude", "node_modules", ".venv", ".next", ".work", "generated", "__pycache__", "dist",
-            "out", ".cache", ".mypy_cache", ".pytest_cache"}
+    SKIP: ClassVar[set[str]] = {"node_modules", "generated", "__pycache__", "dist", "out", "grammars"}
+    # folders whose name starts with a dot are a tool's own (git's, an editor's, a cache), but for these two
+    DOTTED: ClassVar[set[str]] = {".github", ".vitepress"}
+    # (two names that stay out of the repository too, in a file or a pull request; the conventions file keeps its own)
     WORDS = re.compile(r"\bADRs?" + r" ?\d{4}|docs/" + r"adr\b|\b(roadmap|v1-design|developer-experience|"
-                       r"language-review)" + r"\.md\b|rowstile-" + r"internal")
+                       r"language-review)" + r"\.md\b|rowstile-" + r"internal|(?i:cl" + r"aude(?!\.md\b)|anth" + r"ropic)")
 
     def test_nothing_points_at_them(self) -> None:
         self.assertFalse(os.path.isdir(os.path.join(self.REPO, "docs", "adr")),
                          "decisions are kept outside this repository")
         found = []
         for d, dirs, files in os.walk(self.REPO):
-            dirs[:] = [x for x in dirs if x not in self.SKIP]
+            dirs[:] = [x for x in dirs if x not in self.SKIP and (not x.startswith(".") or x in self.DOTTED)]
             for f in files:
                 path = os.path.join(d, f)
                 if os.path.getsize(path) > 4_000_000:
