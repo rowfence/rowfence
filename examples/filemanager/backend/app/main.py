@@ -2,9 +2,7 @@
 
 Every route that touches folders, files or shares runs in a transaction signed in as the user
 (db.as_user), so what it may see and change is decided by row-level security and the authz.*
-functions of the policy in db/policy.authz; the backend adds no permission checks of its own, with one
-exception: the list of an object's share links is a table of the app's (rowstile keeps only a link's hash),
-so listing and revoking links ask authz.can(..., "share") first (may_share).
+functions of the policy in db/policy.authz; the backend adds no permission checks of its own.
 Something a user may not see answers 404, as if it didn't exist.
 """
 from collections.abc import AsyncIterator, Mapping, Sequence
@@ -565,38 +563,27 @@ class NewLink(BaseModel):
 
 @app.post("/api/{kind}s/{id_}/links", status_code=201)
 def create_link(kind: Kind, id_: int, body: NewLink, user: DictRow = Depends(auth.current_user)) -> DictRow:
-    """The token is returned once; rowstile keeps its hash, and so does the app (to list and revoke links)."""
+    """The token is returned once: rowstile keeps only its hash."""
     with db.as_user(user["id"]) as tx:
         found(tx.row(f"SELECT 1 FROM {TABLES[kind]} WHERE id = %s", (id_,)))
         token = tx.authz.create_link(kind, id_, "viewer", body.expires_at)
-        row = tx.one("INSERT INTO fm.share_links (kind, object_id, token_hash, created_by, expires_at) "
-                     "VALUES (%s, %s, encode(sha256(convert_to(%s, 'UTF8')), 'hex'), %s, %s) RETURNING id, created_at, expires_at",
-                     (kind, id_, token, user["id"], body.expires_at))
-    return dict(row, token=token, path=f"#/link/{kind}/{id_}/{token}")
-
-
-def may_share(tx: db.Tx, kind: Kind, id_: int) -> None:
-    found(tx.row(f"SELECT 1 FROM {TABLES[kind]} WHERE id = %s", (id_,)))
-    if not tx.authz.can(kind, id_, "share"):
-        raise HTTPException(403, "you may not share this")
+    return {"token": token, "path": f"#/link/{kind}/{id_}/{token}"}
 
 
 @app.get("/api/{kind}s/{id_}/links")
 def links(kind: Kind, id_: int, user: DictRow = Depends(auth.current_user)) -> list[DictRow]:
+    """Its links, for people who may share it (authz.list_links): each has an id, which is not its token."""
     with db.as_user(user["id"]) as tx:
-        may_share(tx, kind, id_)
-        return tx.rows("SELECT l.id, l.created_at, l.expires_at, u.name AS created_by FROM fm.share_links l "
-                       "JOIN fm.users u ON u.id = l.created_by WHERE l.kind = %s AND l.object_id = %s ORDER BY l.created_at",
-                       (kind, id_))
+        found(tx.row(f"SELECT 1 FROM {TABLES[kind]} WHERE id = %s", (id_,)))
+        return named(tx, tx.authz.list_links(kind, id_), "created_by", "created_by")
 
 
 @app.delete("/api/{kind}s/{id_}/links/{link_id}", status_code=204)
-def revoke_link(kind: Kind, id_: int, link_id: int, user: DictRow = Depends(auth.current_user)) -> None:
+def revoke_link(kind: Kind, id_: int, link_id: str, user: DictRow = Depends(auth.current_user)) -> None:
     with db.as_user(user["id"]) as tx:
-        may_share(tx, kind, id_)
-        row = found(tx.row("DELETE FROM fm.share_links WHERE id = %s AND kind = %s AND object_id = %s RETURNING token_hash",
-                           (link_id, kind, id_)))
-        tx.authz.unshare(kind, id_, "viewer", "link", row["token_hash"])
+        found(tx.row(f"SELECT 1 FROM {TABLES[kind]} WHERE id = %s", (id_,)))
+        found(next((x for x in tx.authz.list_links(kind, id_) if x["id"] == link_id), None))
+        tx.authz.revoke_link(kind, id_, link_id)
 
 
 def link_token(request: Request) -> str:

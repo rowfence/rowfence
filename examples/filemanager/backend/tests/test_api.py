@@ -298,10 +298,17 @@ def test_share_links(world: World) -> None:
     assert anon.get(f"/api/public/folders/{sub['id']}").status_code == 404                # no token
     assert anon.get(f"/api/public/folders/{sub['id']}", headers={"X-Link-Token": "guess"}).status_code == 404
     assert anon.get("/api/home").status_code == 401                                       # a link is not a sign-in
-    assert [x["id"] for x in alice.get(f"/api/folders/{sub['id']}/links").json()] == [link["id"]]
+    listed = alice.get(f"/api/folders/{sub['id']}/links").json()                          # from authz.list_links
+    assert [(x["created_by"], x["expires_at"]) for x in listed] == [("alice", None)]
+    link_id = listed[0]["id"]
+    assert link_id not in link["token"]                                                   # an id opens nothing
+    assert anon.get(f"/api/public/folders/{sub['id']}", headers={"X-Link-Token": link_id}).status_code == 404
     assert dave.get(f"/api/folders/{sub['id']}/links").status_code in (403, 404)         # he can't share it
-    assert dave.delete(f"/api/folders/{sub['id']}/links/{link['id']}").status_code in (403, 404)
-    assert alice.delete(f"/api/folders/{sub['id']}/links/{link['id']}").status_code == 204
+    assert dave.delete(f"/api/folders/{sub['id']}/links/{link_id}").status_code in (403, 404)
+    assert alice.delete(f"/api/folders/{sub['id']}/links/nothing").status_code == 404
+    assert alice.delete(f"/api/folders/{top['id']}/links/{link_id}").status_code == 404   # it is the folder below's
+    assert alice.delete(f"/api/folders/{sub['id']}/links/{link_id}").status_code == 204
+    assert alice.get(f"/api/folders/{sub['id']}/links").json() == []
     assert anon.get(f"/api/public/folders/{sub['id']}", headers=hdr).status_code == 404   # revoked
     old = alice.post(f"/api/folders/{sub['id']}/links", json={"expires_at": "2000-01-01T00:00:00Z"}).json()
     assert anon.get(f"/api/public/folders/{sub['id']}", headers={"X-Link-Token": old["token"]}).status_code == 404

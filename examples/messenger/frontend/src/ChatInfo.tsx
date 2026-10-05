@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api, ApiError, Bot, Chat, User } from "./api";
+import { api, ApiError, Bot, Chat, Invite, User } from "./api";
 
 type Props = { chat: Chat; me: User; onChanged: () => void; onClose: () => void; onLeft: () => void };
 
@@ -119,13 +119,22 @@ function Bots({ chat, manage, run }: { chat: Chat; manage: boolean; run: (fn: ()
 
 function InviteLink({ chatId }: { chatId: number }) {
   const [link, setLink] = useState("");
+  const [invites, setInvites] = useState<Invite[]>([]);
+  const load = () => api.invites(chatId).then(setInvites, () => setInvites([]));
+  useEffect(() => { load(); }, [chatId]);
   return (
     <section>
       <h3>Invite link</h3>
       {link ? <><input readOnly value={link} onFocus={(e) => e.target.select()} />
                 <p className="hint">Anyone with this link can join for a week. Only a hash of it is stored.</p></>
-        : <button className="link" onClick={async () => setLink(`${location.origin}/join/${(await api.invite(chatId)).token}`)}>
+        : <button className="link" onClick={async () => { setLink(`${location.origin}/join/${(await api.invite(chatId)).token}`); load(); }}>
             Create an invite link</button>}
+      <ul className="people">
+        {invites.map((i) => (
+          <li key={i.id}><div className="grow hint">Link made by {i.created_by ?? "someone"} on {new Date(i.created_at).toLocaleDateString()}
+              {i.expires_at ? `, until ${new Date(i.expires_at).toLocaleDateString()}` : ""}</div>
+            <button className="link danger" onClick={async () => { await api.turnOffInvite(chatId, i.id); load(); }}>turn off</button></li>))}
+      </ul>
     </section>
   );
 }

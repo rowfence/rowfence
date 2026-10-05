@@ -430,6 +430,27 @@ def invite(chat_id: int, user: DictRow = Depends(auth.current_user)) -> dict[str
         return {"token": tx.authz.create_link("chat", chat_id, "invitee", expires), "expires_at": expires}
 
 
+@app.get("/api/chats/{chat_id}/invites")
+def invites(chat_id: int, user: DictRow = Depends(auth.current_user)) -> list[DictRow]:
+    """The chat's invite links, for those who may make them (authz.list_links): each has an id, never its token."""
+    with db.as_user(user["id"]) as tx:
+        found(tx.row("SELECT 1 FROM ms.chats WHERE id = %s", (chat_id,)))
+        links = tx.authz.list_links("chat", chat_id)
+        names = {str(u["id"]): u["name"] for u in tx.rows("SELECT id, name FROM ms.users WHERE id::text = ANY (%s)",
+                                                          ([x["created_by"] for x in links],))}
+        return [{"id": x["id"], "created_by": names.get(x["created_by"]), "created_at": x["created_at"],
+                 "expires_at": x["expires_at"]} for x in links]
+
+
+@app.delete("/api/chats/{chat_id}/invites/{link_id}", status_code=204)
+def turn_off_invite(chat_id: int, link_id: str, user: DictRow = Depends(auth.current_user)) -> None:
+    """Nobody joins with that link any more (authz.revoke_link); those who did stay."""
+    with db.as_user(user["id"]) as tx:
+        found(tx.row("SELECT 1 FROM ms.chats WHERE id = %s", (chat_id,)))
+        found(next((x for x in tx.authz.list_links("chat", chat_id) if x["id"] == link_id), None))
+        tx.authz.revoke_link("chat", chat_id, link_id)
+
+
 def linked_chat(user_id: str, token: str) -> DictRow:
     """The group the link lets you join: the chats you may join holding it, less those you may without it."""
     with db.as_user(user_id) as tx:

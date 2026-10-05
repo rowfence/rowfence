@@ -264,6 +264,19 @@ def test_invite_links() -> None:
     assert cat.post(f"/api/join/{token}").json()["id"] == g
     assert say(cat, g, "hello book club").status_code == 201
     assert [m["role"] for m in ann.get(f"/api/chats/{g}").json()["members"] if m["name"] == "Cat"] == ["member"]
+    # the links are listed and turned off by those who may make them (authz.list_links, authz.revoke_link)
+    listed = ann.get(f"/api/chats/{g}/invites").json()
+    assert [x["created_by"] for x in listed] == ["Ann"] and listed[0]["expires_at"]
+    link_id = listed[0]["id"]
+    assert link_id not in token and cat.get(f"/api/join/{link_id}").status_code == 404   # an id opens nothing
+    assert ben.get(f"/api/chats/{g}/invites").status_code == 403                         # not an admin
+    assert ben.delete(f"/api/chats/{g}/invites/{link_id}").status_code == 403
+    assert ann.delete(f"/api/chats/{g}/invites/nothing").status_code == 404
+    assert ann.delete(f"/api/chats/{g}/invites/{link_id}").status_code == 204
+    assert ann.get(f"/api/chats/{g}/invites").json() == []
+    dan = person("Dan")
+    assert dan.get(f"/api/join/{token}").status_code == 404 and dan.post(f"/api/join/{token}").status_code == 404
+    assert say(cat, g, "still here").status_code == 201                                  # who joined with it stays
 
 
 def test_read_receipts() -> None:

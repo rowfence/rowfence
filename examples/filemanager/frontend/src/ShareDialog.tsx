@@ -12,7 +12,7 @@ export function ShareDialog({ kind, id, name, onClose }: { kind: Kind; id: numbe
   const [relation, setRelation] = useState<Relation>("viewer");
   const [expires, setExpires] = useState("");
   const [error, setError] = useState("");
-  const [links, setLinks] = useState<{ id: number; created_at: string; expires_at: string | null; created_by: string }[]>([]);
+  const [links, setLinks] = useState<{ id: string; created_at: string; expires_at: string | null; created_by: string }[]>([]);
   const [newLink, setNewLink] = useState("");
 
   const load = () => Promise.all([

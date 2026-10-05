@@ -94,11 +94,11 @@ export const api = {
   access: (kind: Kind, id: number, perm: string) => call<User[]>("GET", `/api/${plural(kind)}/${id}/access?perm=${perm}`),
   why: (kind: Kind, id: number, perm: string) => call<{ lines: string[] }>("GET", `/api/${plural(kind)}/${id}/why?perm=${perm}`),
 
-  links: (kind: Kind, id: number) => call<{ id: number; created_at: string; expires_at: string | null; created_by: string }[]>(
+  links: (kind: Kind, id: number) => call<{ id: string; created_at: string; expires_at: string | null; created_by: string }[]>(
     "GET", `/api/${plural(kind)}/${id}/links`),
   createLink: (kind: Kind, id: number, expires_at: string | null) =>
-    call<{ id: number; token: string; path: string }>("POST", `/api/${plural(kind)}/${id}/links`, { expires_at }),
-  revokeLink: (kind: Kind, id: number, linkId: number) => call<void>("DELETE", `/api/${plural(kind)}/${id}/links/${linkId}`),
+    call<{ token: string; path: string }>("POST", `/api/${plural(kind)}/${id}/links`, { expires_at }),
+  revokeLink: (kind: Kind, id: number, linkId: string) => call<void>("DELETE", `/api/${plural(kind)}/${id}/links/${linkId}`),
   // opened with a share link: the token goes in a header, not the URL the server sees
   publicFolder: (id: number, token: string) =>
     call<Omit<FolderPage, "perms">>("GET", `/api/public/folders/${id}`, undefined, { "X-Link-Token": token }),
