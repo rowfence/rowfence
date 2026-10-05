@@ -13,6 +13,8 @@ when they change: the Marketplace takes no alphas or release candidates. A relea
 on the Marketplace and Open VSX when its version isn't there yet, each once its token is set (`VSCE_PAT`,
 `OVSX_PAT`, in the environment `vscode`). `VSCE_PAT` isn't set: a new version goes to the Marketplace by hand,
 the release's `.vsix` uploaded on the publisher's page (marketplace.visualstudio.com/manage/publishers/rowstile).
+Zed's is by hand too: a pull request to zed-industries/extensions that moves the `extensions/rowstile` submodule
+to the release's commit and sets the same version in `extensions.toml`.
 
 | version | what it is | published |
 |---|---|---|
