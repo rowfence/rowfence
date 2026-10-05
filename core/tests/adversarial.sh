@@ -171,13 +171,17 @@ AS=1 expect "sharing a relation the policy doesn't share" "P0001" -c "SELECT aut
 # every way of asking to share a hidden object (file 12) answers as for a missing one: message and context
 said() { psql -X -q -At -1 -U "$ATTACKER" -d "$DB" -c "$(sign 3)" -c "$1" 2>&1 | sed "s/$2/<id>/g"; }
 for call in "share('file', ID, 'viewer', 'user', '4')" "share('file', ID, 'viewer', 'user', '424242')" \
-            "share('file', ID, 'owner', 'user', '4')" "create_link('file', ID, 'viewer', NULL)"; do
+            "share('file', ID, 'owner', 'user', '4')" "create_link('file', ID, 'viewer', NULL)" \
+            "list_links('file', ID)" "revoke_link('file', ID, 'abc')"; do
   hidden=$(said "SELECT authz.${call/ID/12}" "file 12"); missing=$(said "SELECT authz.${call/ID/999999}" "file 999999")
   [ "$hidden" = "$missing" ] && [ -n "$hidden" ] && echo "ok    authz.${call/ID/12} answers as for a missing file" ||
     { echo "FAIL  authz.$call tells hidden from missing: '$hidden' / '$missing'"; fails=$((fails + 1)); }
 done
 expect "listing the shares of a hidden object" "42501" -c "SELECT count(*) FROM authz.list_shares('folder', '5')"
 expect "...is refused as for a missing one" "42501" -c "SELECT count(*) FROM authz.list_shares('folder', '999999')"
+expect "listing the links of a hidden object" "42501" -c "SELECT count(*) FROM authz.list_links('folder', '5')"
+expect "...is refused as for a missing one" "42501" -c "SELECT count(*) FROM authz.list_links('folder', '999999')"
+expect "turning off a link of a hidden object" "42501" -c "SELECT authz.revoke_link('folder', '5', 'abc')"
 for cursor in "'12abc'" "''" "'99999999999999999999999'"; do
   expect "a page cursor that isn't an id ($cursor) is the caller's mistake, not a failed query" "22023" \
     -c "SELECT count(*) FROM authz.list('file', 'view', $cursor, 5)"

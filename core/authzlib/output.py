@@ -28,6 +28,8 @@ DEFINER = "SECURITY DEFINER SET search_path = pg_catalog, pg_temp"
 # for functions that run the policy's own SQL: the path applying vetted (search_path_sql), as views and policies resolve it
 DEFINER_FROM_CURRENT = "SECURITY DEFINER SET search_path FROM CURRENT"
 PT = "pg_catalog.current_setting('authz.principal_type', true)"   # the signed-in principal's type ('': a user)
+# a link's id, from its share g: the start of its token's hash (enough to name it among an object's links)
+LINK_ID = "left(g.subject_id, 16)"
 
 
 def subject_key(st: str, sr: str | None) -> str:
@@ -395,6 +397,13 @@ END $f$;
 CREATE TRIGGER authz_role_gone AFTER DELETE ON authz.roles
   REFERENCING OLD TABLE AS old_rows FOR EACH STATEMENT EXECUTE FUNCTION authz_int.role_gone();"""
 
+        link_columns = "id text, relation text, created_by text, created_at timestamptz, expires_at timestamptz"
+        link_overloads = "\n".join(
+            f"CREATE FUNCTION authz.list_links(p_type text, p_id {pt}) RETURNS TABLE ({link_columns}) LANGUAGE sql STABLE AS\n"
+            f"  $$ SELECT * FROM authz.list_links(p_type, p_id::text) $$;\n"
+            f"CREATE FUNCTION authz.revoke_link(p_type text, p_id {pt}, p_link text) RETURNS void LANGUAGE sql AS\n"
+            f"  $$ SELECT authz.revoke_link(p_type, p_id::text, p_link) $$;"
+            for pt in sorted({t.pktype for t in self.types.values()} - {"text"}))
         api = f"""-- Share: needs the relation's 'shared by' permission on the object, and every permission
 -- the relation grants (you can't grant more than you hold); the subject must exist
 CREATE FUNCTION authz.share(p_type text, p_id text, p_relation text,
@@ -551,6 +560,63 @@ BEGIN
 END $f$;
 CREATE FUNCTION authz.create_link(p_type text, p_id bigint, p_relation text, p_expires_at timestamptz DEFAULT NULL)
 RETURNS text LANGUAGE sql AS $$ SELECT authz.create_link(p_type, p_id::text, p_relation, p_expires_at) $$;
+
+-- The relations whose links on an object the caller may see: every one it has links of if they may inspect it
+-- (they can share it, or are an administrator), else those they may share with a link. NULL: none
+CREATE FUNCTION authz_int.link_relations(p_type text, p_id text) RETURNS text[]
+LANGUAGE plpgsql STABLE {DEFINER} AS $f$
+BEGIN
+  IF authz_int.may_inspect(p_type, p_id) THEN
+    RETURN coalesce((SELECT array_agg(DISTINCT g.relation) FROM authz.shares g
+                     WHERE g.object_type = p_type AND g.object_id = p_id AND g.subject_type = 'link'), '{{}}');
+  END IF;
+  RETURN (SELECT array_agg(s.relation) FROM authz_int.shared_relations s
+          WHERE s.object_type = p_type AND s.subject = 'link'
+            AND authz_int.may_manage(p_type, p_id, s.relation, 'link'));
+END $f$;
+-- The links on an object: SELECT * FROM authz.list_links('folder', 3). For those who can share it, or may make
+-- such links. A link's id names it for authz.revoke_link: it is not the token, and opens nothing.
+CREATE FUNCTION authz.list_links(p_type text, p_id text)
+RETURNS TABLE (id text, relation text, created_by text, created_at timestamptz, expires_at timestamptz)
+LANGUAGE plpgsql STABLE {DEFINER} AS $f$
+DECLARE v_relations text[];
+BEGIN
+  p_id := authz_int.canon(p_type, p_id);
+  v_relations := authz_int.link_relations(p_type, p_id);
+  IF v_relations IS NULL THEN
+    RAISE EXCEPTION 'you cannot see the links of % %', p_type, p_id USING ERRCODE = 'insufficient_privilege', HINT = 'rowstile help AZ705';
+  END IF;
+  RETURN QUERY SELECT {LINK_ID}, g.relation, g.created_by, g.created_at, g.expires_at
+  FROM authz.shares g WHERE g.object_type = p_type AND g.object_id = p_id AND g.subject_type = 'link'
+    AND g.relation = ANY (v_relations) ORDER BY g.created_at, g.subject_id;
+END $f$;
+-- Turn a link off, by its id in authz.list_links: needs what unsharing it needs
+CREATE FUNCTION authz.revoke_link(p_type text, p_id text, p_link text) RETURNS void
+LANGUAGE plpgsql {DEFINER} AS $f$
+DECLARE v_relations text[]; v record; v_found boolean := false;
+BEGIN
+  PERFORM authz_int.check_writable();
+  p_id := authz_int.canon(p_type, p_id);
+  v_relations := authz_int.link_relations(p_type, p_id);
+  IF v_relations IS NULL THEN
+    RAISE EXCEPTION 'you cannot turn off the links of % %', p_type, p_id USING ERRCODE = 'insufficient_privilege', HINT = 'rowstile help AZ705';
+  END IF;
+  FOR v IN SELECT g.relation, g.subject_id FROM authz.shares g
+           WHERE g.object_type = p_type AND g.object_id = p_id AND g.subject_type = 'link'
+             AND g.relation = ANY (v_relations) AND {LINK_ID} = p_link LOOP
+    IF NOT authz_int.may_manage(p_type, p_id, v.relation, 'link') THEN
+      RAISE EXCEPTION 'you cannot turn off link % of % % (you could not unshare it)', p_link, p_type, p_id
+        USING ERRCODE = 'insufficient_privilege', HINT = 'rowstile help AZ705';
+    END IF;
+    DELETE FROM authz.shares g WHERE g.object_type = p_type AND g.object_id = p_id AND g.relation = v.relation
+      AND g.subject_type = 'link' AND g.subject_id = v.subject_id;
+    v_found := true;
+  END LOOP;
+  IF NOT v_found THEN
+    RAISE EXCEPTION 'no link % on % %', p_link, p_type, p_id USING HINT = 'rowstile help AZ708';
+  END IF;
+END $f$;
+{link_overloads}
 
 -- Custom roles: defined per owner (e.g. an org) by people with 'manage_roles' there
 CREATE FUNCTION authz.create_role(p_owner_type text, p_owner_id text, p_object_type text, p_name text,

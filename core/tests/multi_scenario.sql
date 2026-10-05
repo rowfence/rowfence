@@ -146,6 +146,50 @@ SELECT set_config('authz_ctx.links', 'wrong-token', false);
 SELECT test.ok('a wrong token does nothing', test.docs() = '-');
 RESET authz_ctx.links;
 
+-- the links on an object, and turning one off
+SELECT test.as(1);
+SELECT test.ok('alice lists folder 2''s links: one, named by an id that is not its token',
+  (SELECT count(*) = 1 AND bool_and(l.relation = 'viewer' AND l.created_by = '00000000-0000-4000-8000-000000000001'
+                                    AND l.expires_at IS NULL AND l.created_at <= now() AND length(l.id) = 16
+                                    AND position(l.id in current_setting('test.token')) = 0)
+   FROM authz.list_links('folder', 2) l));
+SELECT test.ok('the shares still show it as (link)',
+  (SELECT count(*) = 1 FROM authz.list_shares('folder', 2) WHERE subject_type = 'link' AND subject_id = '(link)'));
+SELECT set_config('test.link', (SELECT id FROM authz.list_links('folder', 2)), false);
+SELECT test.as(4);
+SELECT test.ok('dave may not list them, nor those of a folder that isn''t there',
+  test.try($$SELECT * FROM authz.list_links('folder', 2)$$) = '42501'
+  AND test.try($$SELECT * FROM authz.list_links('folder', 999)$$) = '42501');
+SELECT test.ok('nor turn one off, whether its id names a link or not',
+  test.try(format('SELECT authz.revoke_link(''folder'', 2, %L)', current_setting('test.link'))) = '42501'
+  AND test.try($$SELECT authz.revoke_link('folder', 2, 'nothing')$$) = '42501');
+SELECT test.as(1);
+SELECT set_config('test.token2', authz.create_link('folder', 2, 'viewer', now() + interval '1 day'), false);
+SELECT test.ok('a second link, until tomorrow: both listed, the older first',
+  (SELECT array_agg(l.expires_at IS NULL) FROM authz.list_links('folder', 2) l) = '{t,f}');
+SELECT test.ok('an id that names no link there is said',
+  test.try($$SELECT authz.revoke_link('folder', 2, 'nothing')$$) = 'P0001'
+  AND test.try(format('SELECT authz.revoke_link(''folder'', 1, %L)', current_setting('test.link'))) = 'P0001');
+SELECT authz.revoke_link('folder', 2, current_setting('test.link'));
+SELECT test.ok('alice turns the first off: the other is left',
+  (SELECT count(*) = 1 AND bool_and(l.expires_at IS NOT NULL) FROM authz.list_links('folder', 2) l));
+SELECT test.as(4);
+SELECT set_config('authz_ctx.links', current_setting('test.token'), false);
+SELECT test.ok('its token opens nothing any more', test.docs() = '-');
+SELECT set_config('authz_ctx.links', current_setting('test.token2'), false);
+SELECT test.ok('the other link still does', test.docs() = '01, 02');
+RESET authz_ctx.links;
+-- project has no share permission: its links are listed and turned off by who may make them (shared by edit)
+SELECT test.as(2);
+SELECT set_config('test.token3', authz.create_link('project', 1, 'viewer'), false);
+SELECT test.ok('bob (edit on project 1) lists its link',
+  (SELECT count(*) = 1 AND bool_and(l.relation = 'viewer') FROM authz.list_links('project', 1) l));
+SELECT test.as(4);
+SELECT test.ok('dave may not', test.try($$SELECT * FROM authz.list_links('project', 1)$$) = '42501');
+SELECT test.as(2);
+SELECT authz.revoke_link('project', 1, (SELECT id FROM authz.list_links('project', 1)));
+SELECT test.ok('bob turns it off', (SELECT count(*) = 0 FROM authz.list_links('project', 1)));
+
 -- shares that start later, and caveats
 SELECT test.as(1);
 SELECT test.ok('alice shares folder 1 with dave from tomorrow',

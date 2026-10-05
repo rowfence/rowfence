@@ -252,6 +252,13 @@ export function authz(db: Queryable) {{
     /** A share with anyone holding the returned token (shown once; only its hash is stored). */
     createLink: async <T extends SharedType>(type: T, id: Id, relation: SharedRelation<T>, expiresAt?: Date): Promise<string> =>
       (await db.query("SELECT authz.create_link($1, $2::text, $3, $4) AS token", [type, s(id), relation, expiresAt ?? null])).rows[0].token,
+    /** The links on an object (id, relation, created_by, created_at, expires_at), for those who can share it or may
+     *  make such links. */
+    listLinks: async <T extends ObjectType>(type: T, id: Id): Promise<any[]> =>
+      (await db.query("SELECT * FROM authz.list_links($1, $2::text)", [type, s(id)])).rows,
+    /** Turns a link off, by its id in listLinks (not its token). */
+    revokeLink: async <T extends ObjectType>(type: T, id: Id, linkId: string) =>
+      db.query("SELECT authz.revoke_link($1, $2::text, $3)", [type, s(id), linkId]),
     /** Link tokens the request presents, for this transaction. */
     useLinks: async (tokens: string[]) => db.query("SELECT set_config('authz_ctx.links', $1, true)", [tokens.join(",")]),
     cancelRequest: async (requestId: Id) => db.query("SELECT authz.cancel_request($1::bigint)", [s(requestId)]),
@@ -536,6 +543,15 @@ class Authz:
         if relation not in SHARED_RELATIONS.get(type_, {{}}):
             raise ValueError(f"{{type_}}.{{relation}} is not shared in the policy")
         return str(self._one("SELECT authz.create_link(%s, %s::text, %s, %s)", (type_, _id(id_), relation, expires_at)))
+
+    def list_links(self, type_: ObjectType, id_: Id) -> Sequence[Row]:
+        """The links on an object (id, relation, created_by, created_at, expires_at), for those who can share it
+        or may make such links."""
+        return self._rows("SELECT * FROM authz.list_links(%s, %s::text)", (type_, _id(id_)))
+
+    def revoke_link(self, type_: ObjectType, id_: Id, link_id: str) -> None:
+        """Turns a link off, by its id in list_links (not its token)."""
+        self._one("SELECT authz.revoke_link(%s, %s::text, %s)", (type_, _id(id_), link_id))
 
     def use_links(self, tokens: Sequence[str]) -> None:
         """Link tokens the request presents, for this transaction (SET LOCAL authz_ctx.links)."""

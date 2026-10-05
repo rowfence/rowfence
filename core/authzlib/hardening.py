@@ -80,6 +80,7 @@ SELECT p.oid::regprocedure::text, gw.who, a.privilege_type,
                 "authz.unshare(text, bigint, text, text, bigint, text)",
                 "authz.unshare(text, bigint, text, text, text, text)",
                 "authz.create_link(text, text, text, timestamptz)", "authz.create_link(text, bigint, text, timestamptz)",
+                "authz.list_links(text, text)", "authz.revoke_link(text, text, text)",
                 "authz.create_role(text, text, text, text, text[])", "authz.create_role(text, bigint, text, text, text[])",
                 "authz.set_role_permissions(bigint, text[])", "authz.delete_role(bigint)", "authz.roles_of(text, text)",
                 "authz.roles_of(text, bigint)",
@@ -97,7 +98,8 @@ SELECT p.oid::regprocedure::text, gw.who, a.privilege_type,
                      "authz.review_items(bigint)",
                      "authz.review_decide(bigint, integer, boolean)", "authz.close_review(bigint, boolean)"]
         executes += [f"authz.{fn}(text, {pt}{args})" for pt in sorted({t.pktype for t in typed})
-                     for fn, args in (("who", ", text"), ("explain", ", text, text"), ("list_shares", ""))]
+                     for fn, args in (("who", ", text"), ("explain", ", text, text"), ("list_shares", ""), ("list_links", ""),
+                                      ("revoke_link", ", text"))]
         executes += [f"authz.can(text, {pt}, text)" for pt in sorted({t.pktype for t in typed})]
         executes += [f"authz.who_among(text, {pt}, text, text[], text)" for pt in sorted({t.pktype for t in typed})]
         executes += [f"authz.perms(text, {pt})" for pt in sorted({t.pktype for t in typed})]

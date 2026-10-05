@@ -152,6 +152,7 @@ def main() -> None:
         check("create_link refuses a relation that isn't shared, before asking the database", False)
     except ValueError:
         check("create_link refuses a relation that isn't shared, before asking the database", True)
+    check("list_links: erin may share file 11, which has none", list(a.list_links("file", 11)) == [], a.list_links("file", 11))
     a.use_links(["not-a-token"])
     a.use_links([])
     conn.execute("COMMIT")

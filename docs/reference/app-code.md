@@ -27,6 +27,7 @@ column that needs quoting), and the generated clients take a tuple or array.
 | the sharing dialog | `authz.list_shares('folder', 3)` |
 | share and unshare | `authz.share('file', 13, 'viewer', 'user', 4, '', now() + interval '1 day')` (then when it starts, a caveat and its arguments: [the language](language.md)), `authz.unshare(...)` |
 | share links | `authz.create_link('folder', 3, 'viewer')` returns a token; requests use it with `SET LOCAL authz_ctx.links = '<token>'` |
+| an object's links, and turning one off | `authz.list_links('folder', 3)`: each link's id, relation, who made it, when, and until when, for people who can share the object or may make such links; `authz.revoke_link('folder', 3, '<id>')` turns one off, and needs what unsharing its relation needs (the id is not the token, and opens nothing; an id that names no link there: AZ708) |
 | custom roles | `authz.create_role('org', 1, 'folder', 'reviewer', ARRAY['view'])` returns the role's id (needs `manage_roles` on the org); share it as `authz.share('folder', 3, 'role:<id>', 'user', 7)`; `authz.set_role_permissions(id, ARRAY[...])`, `authz.delete_role(id)`, `authz.roles_of('org', 1)` |
 | API keys | `authz.create_api_key('laptop', 'read')` (shown once), `authz.list_api_keys()`, `authz.revoke_api_key(id)` |
 | sign in | `authz.login_key('ak_...')`, `authz.login_jwt('eyJ...')` (HS256; settings in `authz.settings`) |
@@ -56,7 +57,7 @@ your code; regenerate when the policy changes (the file manager's tests fail whe
 
 - **Python: supported.** Part of the 1.0 surface: `sign_in`, `can`, `list` (with `after` and
   `limit` for pages), `perms`, `who`, `explain`, `share`, `unshare`, `list_shares`,
-  `create_link`, `use_links`, `request_access`, `decide_request`, `cancel_request`,
+  `create_link`, `list_links`, `revoke_link`, `use_links`, `request_access`, `decide_request`, `cancel_request`,
   `pending_requests`, `break_glass`, `start_review`, `review_items`, `review_decide`,
   `close_review`, `login_key`, `login_jwt`, `explain_rule`, `expect`, `who_among`, and the errors
   `Refused` (`.table`, `.command`, `.why`) and `NotFound`, with `refusal(error)` turning a driver's

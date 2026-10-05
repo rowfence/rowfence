@@ -13,6 +13,10 @@ Each release upgrades from the one before it. How releases are numbered and made
 - The Python SDK copies the migrated test database for each pytest-xdist worker, as `@rowstile/vitest` does
   for Vitest's: `rowstile.testing.database_per_worker(url)` returns the copy's URL (and the app role's), so
   tests that write don't meet each other. It needs no driver of the app's.
+- `authz.list_links(type, id)` lists the share links on an object (an id, the relation, who made it, when,
+  until when) and `authz.revoke_link(type, id, link)` turns one off by that id, so an app no longer keeps a
+  table of its own to do it. For people who can share the object, or may make such links. The generated
+  clients have them as `list_links` and `revoke_link` (`listLinks`, `revokeLink`).
 
 ## 0.1.0 (alpha)
 

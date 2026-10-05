@@ -174,7 +174,7 @@ check "... dave (not decided) kept it" "t" "SET authz.user_id = 4; SELECT authz.
 expect_code "a closed review cannot be changed" 42501 -c "SET authz.user_id = 5" -c "SELECT authz.review_decide($REV, 1, false)"
 
 echo "-- reviews respect 'shared by'"
-sed -e 's/^  editor      : user, team#member shared$/  editor      : user, team#member shared by manage_editors/' \
+sed -e 's/^  editor      : user, team#member shared$/  editor      : user, team#member, link shared by manage_editors/' \
     -e 's/^  can share = owner or org.admin or (parent.share and {inherit})$/&\n  can manage_editors = owner/' \
     example/docs.authz > /tmp/authz_governance_by.authz
 grep -q "can manage_editors = owner" /tmp/authz_governance_by.authz && grep -q "shared by manage_editors" /tmp/authz_governance_by.authz ||
@@ -189,6 +189,17 @@ ITEM2=$(as 5 -c "SELECT item FROM authz.review_items($REV2) WHERE subject_id = '
 expect_code "... nor revoke it in a review" 42501 -c "SET authz.user_id = 5" -c "SELECT authz.review_decide($REV2, $ITEM2, false)"
 check "... nor by closing the review with undecided items revoked" "0" "SET authz.user_id = 5; SELECT authz.close_review($REV2, true)"
 check "dave is still an editor" "t" "SET authz.user_id = 4; SELECT authz.can('folder', 3, 'edit')"
+as 1 -c "SELECT authz.create_link('folder', 3, 'editor')" >/dev/null
+LINK=$(as 1 -c "SELECT id FROM authz.list_links('folder', 3)")
+check "erin (share) sees the editors' link alice made" "$LINK|editor|1"   "SET authz.user_id = 5; SELECT id || '|' || relation || '|' || created_by FROM authz.list_links('folder', 3)"
+expect_code "... but cannot turn it off (not manage_editors)" 42501 -c "SET authz.user_id = 5"   -c "SELECT authz.revoke_link('folder', 3, '$LINK')"
+expect_code "a read-only session turns no link off" 42501 -c "SET authz.user_id = 1" -c "SET authz.scopes = 'read'"   -c "SELECT authz.revoke_link('folder', 3, '$LINK')"
+admin "the link is still there" "1" "SELECT count(*) FROM authz.shares WHERE object_type = 'folder' AND object_id = '3' AND subject_type = 'link'"
+as 1 -c "SELECT authz.revoke_link('folder', 3, '$LINK')" >/dev/null
+admin "alice (manage_editors) turns it off, and the audit trail has it as an unshare of hers" "unshare|1|folder|3|editor|link"   "SELECT action || '|' || user_id || '|' || object_type || '|' || object_id || '|' || relation || '|' || subject_type
+   FROM authz.audit ORDER BY id DESC LIMIT 1"
+as 1 -c "SELECT authz.create_link('folder', 3, 'editor')" >/dev/null
+admin "an administrator lists a link and turns it off" "0"   "SELECT authz.revoke_link('folder', 3, (SELECT id FROM authz.list_links('folder', 3))); SELECT count(*) FROM authz.list_links('folder', 3)"
 PGOPTIONS="-c client_min_messages=error" psql -X -q -v ON_ERROR_STOP=1 -d "$DB" -f /tmp/authz_governance.sql >/dev/null
 as 1 -c "SELECT authz.unshare('folder', 3, 'editor', 'user', 4)" >/dev/null
 
