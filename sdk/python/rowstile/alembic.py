@@ -8,6 +8,7 @@ In migrations/env.py:
 rowstile's migrations themselves are written by `rowstile migrate` (tool = "alembic" in rowstile.toml):
 a revision after the current head, with its SQL beside it.
 """
+
 from __future__ import annotations
 
 from collections.abc import MutableMapping
@@ -28,7 +29,9 @@ def include_name(name: str | None, type_: str, parent_names: ParentNames) -> boo
     return parent_names.get("schema_name") not in SCHEMAS
 
 
-def include_object(obj: SchemaItem, name: str | None, type_: str, reflected: bool, compare_to: SchemaItem | None) -> bool:
+def include_object(
+    obj: SchemaItem, name: str | None, type_: str, reflected: bool, compare_to: SchemaItem | None
+) -> bool:
     """Leaves out rowstile's tables and indexes, and the masked views it makes in the app's schemas."""
     schema = getattr(obj, "schema", None) or getattr(getattr(obj, "table", None), "schema", None)
     if schema in SCHEMAS:

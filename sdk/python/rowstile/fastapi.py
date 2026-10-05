@@ -13,6 +13,7 @@ middleware of the app's puts on request.state is there only if it was added afte
 runs the one added last first). It may raise an HTTPException (a 401 for a bad token), which is answered as
 it is. WebSockets are not signed in: use rowstile.acting_as() in the endpoint.
 """
+
 from __future__ import annotations
 
 import contextlib
@@ -51,8 +52,13 @@ UserOf: TypeAlias = "Callable[[Request], Who | Awaitable[Who]]"
 
 
 class Rowstile:
-    def __init__(self, app: FastAPI, engine: Engine | AsyncEngine | None = None, user: UserOf | None = None,
-                 check_connection: bool = True) -> None:
+    def __init__(
+        self,
+        app: FastAPI,
+        engine: Engine | AsyncEngine | None = None,
+        user: UserOf | None = None,
+        check_connection: bool = True,
+    ) -> None:
         self.app, self.engine, self.user = app, engine, user
         if engine is not None:
             sa.install(engine)
@@ -62,9 +68,10 @@ class Rowstile:
         try:
             from sqlalchemy.exc import DBAPIError
             from sqlalchemy.orm.exc import StaleDataError
+
             app.add_exception_handler(DBAPIError, _db_error)
             app.add_exception_handler(StaleDataError, _stale)
-        except ImportError:                                     # FastAPI without SQLAlchemy: psycopg or asyncpg
+        except ImportError:  # FastAPI without SQLAlchemy: psycopg or asyncpg
             pass
         if check_connection and engine is not None:
             # around the app's lifespan, whichever it has: Starlette runs "startup" handlers only when the app
@@ -77,6 +84,7 @@ class Rowstile:
                 async with inner(a) as state:
                     # what the app's own lifespan gave (its state, or nothing), as it gave it
                     yield cast("Mapping[str, Any]", state)
+
             app.router.lifespan_context = checked
 
     async def check(self) -> None:
@@ -101,7 +109,7 @@ class _SignIn:
             got = self.user(Request(scope, receive))
             # user(request) gave who, or an awaitable of who (ty sees what it awaits as an object)
             who = cast("Who", await got) if inspect.isawaitable(got) else got
-        except HTTPException as e:              # a bad token, say: this runs outside FastAPI's own handling
+        except HTTPException as e:  # a bad token, say: this runs outside FastAPI's own handling
             answer = JSONResponse({"detail": e.detail}, status_code=e.status_code, headers=e.headers)
             return await answer(scope, receive, send)
         token, writes = _current.set(Principal.of(who)), _writes.set([])
@@ -114,8 +122,9 @@ class _SignIn:
 
 def _json(problem: Problem) -> JSONResponse:
     status = problem["status"]
-    return JSONResponse(problem, status_code=status if isinstance(status, int) else 500,
-                        media_type="application/problem+json")
+    return JSONResponse(
+        problem, status_code=status if isinstance(status, int) else 500, media_type="application/problem+json"
+    )
 
 
 async def _problem(request: Request, exc: Exception) -> Response:
@@ -128,10 +137,12 @@ async def _db_error(request: Request, exc: Exception) -> Response:
     r = refusal(exc)
     if r is not None:
         return _json(r.problem())
-    if not_signed_in(exc):                      # the app's bug, not the user's doing: a 500 that says what
-        raise NotSignedIn("a query ran in a transaction nobody signed in to: every transaction must begin with "
-                          "authz.act_as() (rowstile.sqlalchemy.install(engine) does it; is this engine in "
-                          "AUTOCOMMIT, or the query on another connection?)") from exc
+    if not_signed_in(exc):  # the app's bug, not the user's doing: a 500 that says what
+        raise NotSignedIn(
+            "a query ran in a transaction nobody signed in to: every transaction must begin with "
+            "authz.act_as() (rowstile.sqlalchemy.install(engine) does it; is this engine in "
+            "AUTOCOMMIT, or the query on another connection?)"
+        ) from exc
     raise exc
 
 

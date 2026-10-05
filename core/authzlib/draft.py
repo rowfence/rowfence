@@ -5,6 +5,7 @@ types; foreign keys become relations (to users: owner, author, ...; to other row
 which it inherits view and edit from); tables that link rows to users (their key is the two foreign keys)
 become relations from a table, such as members. Every table gets rules.
 """
+
 from __future__ import annotations
 
 import json
@@ -16,29 +17,136 @@ from . import parse
 from .parse import COMMANDS, KEY_TYPES
 
 # names a relation doesn't get: the language's words, the commands, and the two permissions every drafted type has
-RESERVED = set(COMMANDS) | set(parse.RESERVED) | set(parse.KEYWORDS) | set(parse.RETIRED) | {
-    "anyone", "link", "or", "and", "not", "can", "signed_in", "nobody", "mask", "type", "rules", "role", "test", "given",
-    "as", "shared", "roles", "grant", "where", "user", "if", "after", "before", "by", "principal", "include", "scope",
-    "caveat", "invariants", "view", "edit"}
+RESERVED = (
+    set(COMMANDS)
+    | set(parse.RESERVED)
+    | set(parse.KEYWORDS)
+    | set(parse.RETIRED)
+    | {
+        "anyone",
+        "link",
+        "or",
+        "and",
+        "not",
+        "can",
+        "signed_in",
+        "nobody",
+        "mask",
+        "type",
+        "rules",
+        "role",
+        "test",
+        "given",
+        "as",
+        "shared",
+        "roles",
+        "grant",
+        "where",
+        "user",
+        "if",
+        "after",
+        "before",
+        "by",
+        "principal",
+        "include",
+        "scope",
+        "caveat",
+        "invariants",
+        "view",
+        "edit",
+    }
+)
 RENAMED = {"view": "viewer", "edit": "editor"}
 # the tables migration tools keep for themselves: never part of the policy
-TOOL_TABLES = {"_prisma_migrations", "alembic_version", "schema_migrations", "ar_internal_metadata", "goose_db_version",
-               "flyway_schema_history", "__drizzle_migrations", "knex_migrations", "knex_migrations_lock", "django_migrations"}
+TOOL_TABLES = {
+    "_prisma_migrations",
+    "alembic_version",
+    "schema_migrations",
+    "ar_internal_metadata",
+    "goose_db_version",
+    "flyway_schema_history",
+    "__drizzle_migrations",
+    "knex_migrations",
+    "knex_migrations_lock",
+    "django_migrations",
+}
 # words SQL keeps for itself: a column with such a name is written in quotes in a {condition}
-SQL_WORDS = {"all", "and", "any", "as", "asc", "both", "case", "check", "column", "constraint", "current_user", "default",
-             "desc", "distinct", "do", "else", "end", "false", "for", "foreign", "from", "grant", "group", "having", "in",
-             "into", "is", "limit", "not", "null", "offset", "on", "only", "or", "order", "primary", "references", "select",
-             "session_user", "some", "table", "then", "to", "true", "union", "unique", "user", "using", "when", "where",
-             "window", "with"}
+SQL_WORDS = {
+    "all",
+    "and",
+    "any",
+    "as",
+    "asc",
+    "both",
+    "case",
+    "check",
+    "column",
+    "constraint",
+    "current_user",
+    "default",
+    "desc",
+    "distinct",
+    "do",
+    "else",
+    "end",
+    "false",
+    "for",
+    "foreign",
+    "from",
+    "grant",
+    "group",
+    "having",
+    "in",
+    "into",
+    "is",
+    "limit",
+    "not",
+    "null",
+    "offset",
+    "on",
+    "only",
+    "or",
+    "order",
+    "primary",
+    "references",
+    "select",
+    "session_user",
+    "some",
+    "table",
+    "then",
+    "to",
+    "true",
+    "union",
+    "unique",
+    "user",
+    "using",
+    "when",
+    "where",
+    "window",
+    "with",
+}
 # the tables that may hold the users, the likeliest first ("members" is more often a link table: not one of them)
 USER_TABLES = ("users", "user", "accounts", "account", "people", "persons", "profiles")
 # a link table with an id of its own and no unique pair is a membership when it says who does what (one of these),
 # and holds nothing else than that and when (LINK_EXTRAS)
 ROLE_COLUMNS = ("role", "kind", "level", "access", "permission", "permissions")
-LINK_EXTRAS =re.compile(r"(role|kind|level|access|permission|permissions|(created|updated|inserted|joined|added)(_at|At|_on|On)?|"
-                         r"\w+(_at|At)|created_by|invited_by|added_by)")
-KEY_NAMES = {"bigint": "bigint", "int8": "bigint", "integer": "int", "int4": "int", "int": "int", "smallint": "smallint",
-             "int2": "smallint", "text": "text", "uuid": "uuid", "character varying": "varchar", "varchar": "varchar"}
+LINK_EXTRAS = re.compile(
+    r"(role|kind|level|access|permission|permissions|(created|updated|inserted|joined|added)(_at|At|_on|On)?|"
+    r"\w+(_at|At)|created_by|invited_by|added_by)"
+)
+KEY_NAMES = {
+    "bigint": "bigint",
+    "int8": "bigint",
+    "integer": "int",
+    "int4": "int",
+    "int": "int",
+    "smallint": "smallint",
+    "int2": "smallint",
+    "text": "text",
+    "uuid": "uuid",
+    "character varying": "varchar",
+    "varchar": "varchar",
+}
 
 
 class DraftError(Exception):
@@ -47,16 +155,16 @@ class DraftError(Exception):
 
 class ForeignKey(TypedDict):
     cols: list[str]
-    ref: str                    # schema.table
+    ref: str  # schema.table
     ref_cols: list[str]
 
 
 class Table(TypedDict):
-    name: str                   # schema.table
+    name: str  # schema.table
     columns: list[tuple[str, str]]  # (column, type), in order
-    pk: list[str]               # the primary key's columns; none: the table has no primary key
+    pk: list[str]  # the primary key's columns; none: the table has no primary key
     fks: list[ForeignKey]
-    uniques: NotRequired[list[list[str]]]   # the columns of each unique constraint or index besides the key
+    uniques: NotRequired[list[list[str]]]  # the columns of each unique constraint or index besides the key
 
 
 def names(value: object) -> list[str]:
@@ -67,6 +175,7 @@ def names(value: object) -> list[str]:
 
 def table_of(row: Mapping[str, object]) -> Table:
     """A row of CATALOG_SQL (its arrays are JSON text) as a Table."""
+
     def json_of(key: str) -> object:
         text = row.get(key)
         return json.loads(text) if isinstance(text, str) else None
@@ -77,8 +186,13 @@ def table_of(row: Mapping[str, object]) -> Table:
     assert isinstance(fks, list), fks
     uniques = json_of("uniques") or []
     assert isinstance(uniques, list), uniques
-    return {"name": str(row["name"]), "columns": [column_of(c) for c in columns], "pk": names(json_of("pk") or []),
-            "fks": [foreign_key_of(fk) for fk in fks], "uniques": [names(u) for u in uniques]}
+    return {
+        "name": str(row["name"]),
+        "columns": [column_of(c) for c in columns],
+        "pk": names(json_of("pk") or []),
+        "fks": [foreign_key_of(fk) for fk in fks],
+        "uniques": [names(u) for u in uniques],
+    }
 
 
 def column_of(value: object) -> tuple[str, str]:
@@ -121,7 +235,11 @@ def writable(name: str) -> bool:
 
 def in_sql(column: str) -> str:
     """A column as a {condition} writes it: in quotes when SQL would read the bare name as something else."""
-    return column if re.fullmatch(r"[a-z_][a-z0-9_]*", column) and column not in SQL_WORDS else '"' + column.replace('"', '""') + '"'
+    return (
+        column
+        if re.fullmatch(r"[a-z_][a-z0-9_]*", column) and column not in SQL_WORDS
+        else '"' + column.replace('"', '""') + '"'
+    )
 
 
 def free_name(rel: str, taken: set[str]) -> str:
@@ -133,7 +251,9 @@ def free_name(rel: str, taken: set[str]) -> str:
     return rel
 
 
-def draft(tables: list[Table], users: str | None = None, role: str = "app_user", schemas: Sequence[str] = ("public",)) -> str:
+def draft(
+    tables: list[Table], users: str | None = None, role: str = "app_user", schemas: Sequence[str] = ("public",)
+) -> str:
     """The policy's text, from the tables (table_of gives them from the catalog)."""
     skipped: list[str] = []
     kept: list[Table] = []
@@ -142,10 +262,14 @@ def draft(tables: list[Table], users: str | None = None, role: str = "app_user",
         if name in TOOL_TABLES:
             skipped.append(f"-- {t['name']}: the migration tool's own table")
         elif not (writable(schema) and writable(name)):
-            skipped.append(f"-- {t['name']}: a name the policy language can't write (letters, digits and _ only): "
-                           f"give it a view with a plain name, and name the view")
+            skipped.append(
+                f"-- {t['name']}: a name the policy language can't write (letters, digits and _ only): "
+                f"give it a view with a plain name, and name the view"
+            )
         elif not all(writable(c) for c in t["pk"]):
-            skipped.append(f"-- {t['name']}: its key has a column name the policy language can't write ({', '.join(t['pk'])})")
+            skipped.append(
+                f"-- {t['name']}: its key has a column name the policy language can't write ({', '.join(t['pk'])})"
+            )
         else:
             # the same foreign key declared twice (added again under another name): one relation
             fks = list({(tuple(fk["cols"]), fk["ref"], tuple(fk["ref_cols"])): fk for fk in t["fks"]}.values())
@@ -158,15 +282,19 @@ def draft(tables: list[Table], users: str | None = None, role: str = "app_user",
         if users not in keyed:
             raise DraftError(f"{users}: no such table with a primary key in {', '.join(schemas)}")
     else:
-        named = sorted((n for n in keyed if n.split(".")[1].lower() in USER_TABLES and len(keyed[n]["pk"]) == 1),
-                       key=lambda n: (USER_TABLES.index(n.split(".")[1].lower()), n))
+        named = sorted(
+            (n for n in keyed if n.split(".")[1].lower() in USER_TABLES and len(keyed[n]["pk"]) == 1),
+            key=lambda n: (USER_TABLES.index(n.split(".")[1].lower()), n),
+        )
         if named:
             users = named[0]
         else:
             refs: dict[str, int] = {}
             for t in tables:
                 for fk in t["fks"]:
-                    if len(fk["cols"]) == 1 and re.search(r"(user|owner|author|creator|created_by|sender)", fk["cols"][0]):
+                    if len(fk["cols"]) == 1 and re.search(
+                        r"(user|owner|author|creator|created_by|sender)", fk["cols"][0]
+                    ):
                         refs[fk["ref"]] = refs.get(fk["ref"], 0) + 1
             if not refs:
                 raise DraftError("which table holds your users? name it: rowstile init --users schema.table")
@@ -175,8 +303,10 @@ def draft(tables: list[Table], users: str | None = None, role: str = "app_user",
         raise DraftError(f"{users}: the user table needs a key of one column")
     user_key = dict(keyed[users]["columns"])[keyed[users]["pk"][0]]
     if key_type(user_key) is None:
-        raise DraftError(f"{users}: its key is {user_key}, and the user type's key must be one of {', '.join(KEY_TYPES)}: "
-                         f"name another table with --users, or change the key's type")
+        raise DraftError(
+            f"{users}: its key is {user_key}, and the user type's key must be one of {', '.join(KEY_TYPES)}: "
+            f"name another table with --users, or change the key's type"
+        )
 
     # --- types ----------------------------------------------------------------------------------
     type_names: dict[str, str] = {}
@@ -205,13 +335,19 @@ def draft(tables: list[Table], users: str | None = None, role: str = "app_user",
             c = t["pk"][0]
             ty = key_type(cols[c])
             return "" if (c, ty) == ("id", "bigint") else f" ({c}{'' if ty == 'bigint' else ' ' + (ty or '')})"
-        return " (" + ", ".join(c + ("" if key_type(cols[c]) == "bigint" else " " + (key_type(cols[c]) or "")) for c in t["pk"]) + ")"
+        return (
+            " ("
+            + ", ".join(c + ("" if key_type(cols[c]) == "bigint" else " " + (key_type(cols[c]) or "")) for c in t["pk"])
+            + ")"
+        )
 
     def cols_text(cols: list[str]) -> str:
         return cols[0] if len(cols) == 1 else "[" + ", ".join(cols) + "]"
 
     # --- relations ------------------------------------------------------------------------------
-    rels: dict[str, list[tuple[str, str, str, str]]] = {n: [] for n in type_names}  # table -> [(name, target type, source, kind)]
+    rels: dict[str, list[tuple[str, str, str, str]]] = {
+        n: [] for n in type_names
+    }  # table -> [(name, target type, source, kind)]
     notes: dict[str, list[str]] = {n: [] for n in type_names}
     for n in type_names:
         t = by_name[n]
@@ -223,8 +359,10 @@ def draft(tables: list[Table], users: str | None = None, role: str = "app_user",
             if fk["ref"] not in type_names or list(fk["ref_cols"]) != list(by_name[fk["ref"]]["pk"]):
                 continue
             if not all(writable(c) and c not in RESERVED for c in fk["cols"]):
-                notes[n].append(f"  -- left out: {', '.join(fk['cols'])} (to {fk['ref']}): a column name the policy language "
-                                f"can't write, or one of its words; a view that names it plainly can be used instead")
+                notes[n].append(
+                    f"  -- left out: {', '.join(fk['cols'])} (to {fk['ref']}): a column name the policy language "
+                    f"can't write, or one of its words; a view that names it plainly can be used instead"
+                )
                 continue
             rel = free_name(relation_name(fk["cols"][0]) if len(fk["cols"]) == 1 else type_names[fk["ref"]], used)
             used.add(rel)
@@ -235,8 +373,13 @@ def draft(tables: list[Table], users: str | None = None, role: str = "app_user",
     # than who does what and when (a role, timestamps)
     for n, t in by_name.items():
         # foreign keys to keys: a link through another unique column has another type than the ids it must match
-        fks = [fk for fk in t["fks"] if fk["ref"] in type_names and list(fk["ref_cols"]) == list(by_name[fk["ref"]]["pk"])
-               and all(writable(c) and c not in RESERVED for c in fk["cols"])]
+        fks = [
+            fk
+            for fk in t["fks"]
+            if fk["ref"] in type_names
+            and list(fk["ref_cols"]) == list(by_name[fk["ref"]]["pk"])
+            and all(writable(c) and c not in RESERVED for c in fk["cols"])
+        ]
         pk = set(t["pk"])
         to_user = [fk for fk in fks if fk["ref"] == users and len(fk["cols"]) == 1]
         others = [fk for fk in fks if fk["ref"] != users]
@@ -246,33 +389,44 @@ def draft(tables: list[Table], users: str | None = None, role: str = "app_user",
         pair = set(u["cols"]) | set(o["cols"])
         rest = [c for c, _ in t["columns"] if c not in pair | pk]
         roles = [c for c in rest if c in ROLE_COLUMNS]
-        own_id = (len(pk) == 1 and not pk & pair
-                  and (any(set(x) == pair for x in t.get("uniques", []))
-                       or (bool(roles) and all(LINK_EXTRAS.fullmatch(c) for c in rest))))
+        own_id = (
+            len(pk) == 1
+            and not pk & pair
+            and (
+                any(set(x) == pair for x in t.get("uniques", []))
+                or (bool(roles) and all(LINK_EXTRAS.fullmatch(c) for c in rest))
+            )
+        )
         if pk != pair and not own_id:
             continue
         target = o["ref"]
         rel = singular(n.split(".")[1])
         prefix = type_names[target] + "_"
-        rel = rel[len(prefix):] if rel.startswith(prefix) and len(rel) > len(prefix) else rel
+        rel = rel[len(prefix) :] if rel.startswith(prefix) and len(rel) > len(prefix) else rel
         rel = free_name(rel if writable(rel) else "linked", {r[0] for r in rels[target]})
         source = f"{n}({cols_text(o['cols'])} -> {u['cols'][0]})"
         rels[target].append((rel, "user", source, "link"))
         if pk != pair:
-            notes[target].append(f"  -- decide: {n} is read as a membership (the people it lists see what it links); "
-                                 f"remove {rel} if it isn't one")
+            notes[target].append(
+                f"  -- decide: {n} is read as a membership (the people it lists see what it links); "
+                f"remove {rel} if it isn't one"
+            )
         role_col = next((c for c, _ in t["columns"] if c in ("role", "kind", "level", "access")), None)
         if role_col:
-            notes[target].append(f"  -- decide: {n}.{role_col} may say who does more, e.g.\n"
-                                 f"  --   admin : user = {n}({cols_text(o['cols'])} -> {u['cols'][0]}) where {{{role_col} = 'admin'}}")
+            notes[target].append(
+                f"  -- decide: {n}.{role_col} may say who does more, e.g.\n"
+                f"  --   admin : user = {n}({cols_text(o['cols'])} -> {u['cols'][0]}) where {{{role_col} = 'admin'}}"
+            )
 
     # --- permissions and rules ------------------------------------------------------------------
-    out = [f"-- A first policy drafted by rowstile from the tables in {', '.join(schemas)}.",
-           "-- It compiles, and it is a draft: read every '-- decide:' and change what isn't so.",
-           "-- Then: rowstile dev (applies it on each save, runs the tests, writes the clients).",
-           "",
-           f"app role {role}                          -- decide: the Postgres role your app connects as",
-           ""]
+    out = [
+        f"-- A first policy drafted by rowstile from the tables in {', '.join(schemas)}.",
+        "-- It compiles, and it is a draft: read every '-- decide:' and change what isn't so.",
+        "-- Then: rowstile dev (applies it on each save, runs the tests, writes the clients).",
+        "",
+        f"app role {role}                          -- decide: the Postgres role your app connects as",
+        "",
+    ]
     rules: list[str] = []
     # Which types' edit and view start somewhere: their own users or links, or a parent whose do. A loop of foreign
     # keys with no owner anywhere in it (Cal.com, Mastodon, GitLab have them) gives nobody anything by inheritance,
@@ -308,15 +462,23 @@ def draft(tables: list[Table], users: str | None = None, role: str = "app_user",
             edit = users_edit + [f"{p}.edit" for p in parents if edit_base[parent_of[n][p]]]
             # each parent named once: a drafted type's view holds its edit, so parent.view holds parent.edit, and
             # `edit or parent.view` would name the parent twice at each level (lint warns of what that costs)
-            view = (users_edit + linked + [f"{p}.view" for p in parents if view_base[parent_of[n][p]]]) if parents \
+            view = (
+                (users_edit + linked + [f"{p}.view" for p in parents if view_base[parent_of[n][p]]])
+                if parents
                 else ["edit"] + linked
+            )
             no_owner = "   -- decide: the loop of foreign keys it is in has no owner anywhere; "
             if not edit:
-                out.append(f"  can edit = nobody{no_owner}who edits these?" if parents else
-                           "  can edit = nobody                      -- decide: nobody changes these through the app")
+                out.append(
+                    f"  can edit = nobody{no_owner}who edits these?"
+                    if parents
+                    else "  can edit = nobody                      -- decide: nobody changes these through the app"
+                )
             else:
-                out.append(f"  can edit = {' or '.join(edit)}" + ("   -- decide: owners, and whoever edits what it is in"
-                                                                    if parents else ""))
+                out.append(
+                    f"  can edit = {' or '.join(edit)}"
+                    + ("   -- decide: owners, and whoever edits what it is in" if parents else "")
+                )
             if not view:
                 out.append(f"  can view = signed_in{no_owner}may everyone signed in read them?")
             elif not linked and not parents and not users_edit:
@@ -326,18 +488,29 @@ def draft(tables: list[Table], users: str | None = None, role: str = "app_user",
         out.append("")
         r = [f"rules {n}", "  select : view"]
         if tname == "user":
-            r += ["  update : edit", "  -- no insert or delete rule: accounts are made and removed outside the app role"]
+            r += [
+                "  update : edit",
+                "  -- no insert or delete rule: accounts are made and removed outside the app role",
+            ]
         else:
-            mine = [f"{{{in_sql(src)} = authz.uid()}}" for rel, target, src, k in rels[n]
-                    if k == "user" and not src.startswith("[")][:1]
+            mine = [
+                f"{{{in_sql(src)} = authz.uid()}}"
+                for rel, target, src, k in rels[n]
+                if k == "user" and not src.startswith("[")
+            ][:1]
             where = [f"{parents[0]}.edit"] if parents else []
             insert = " and ".join(where + mine) or "signed_in"
-            r += [f"  insert : {insert}" + ("   -- decide: who may add one" if insert == "signed_in" or parents else ""),
-                  "  update : edit", "  delete : edit"]
+            r += [
+                f"  insert : {insert}" + ("   -- decide: who may add one" if insert == "signed_in" or parents else ""),
+                "  update : edit",
+                "  delete : edit",
+            ]
         # changing a relation's columns changes who has access: say who may, and check where a row moves to
         rel_cols = [c.strip() for _, _, src, k in rels[n] if k != "link" for c in src.strip("[]").split(",")]
         if rel_cols and tname != "user":
-            r.append(f"  update {', '.join(dict.fromkeys(rel_cols))} : edit   -- decide: who may change who owns it, or where it is")
+            r.append(
+                f"  update {', '.join(dict.fromkeys(rel_cols))} : edit   -- decide: who may change who owns it, or where it is"
+            )
         for rel, _, src, k in rels[n]:
             if k == "parent":
                 r.append(f"  update {', '.join(c.strip() for c in src.strip('[]').split(','))} after : {rel}.edit")

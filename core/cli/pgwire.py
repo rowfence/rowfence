@@ -6,6 +6,7 @@ says); TCP (with TLS, as sslmode says) or Unix sockets.
     conn = connect(host="/var/run/postgresql", user="app_user", password="...", database="app")
     conn.query("SELECT authz.can($1, $2, $3)", ["file", "11", "view"])   # -> [(True,)]
 """
+
 from __future__ import annotations
 
 import base64
@@ -39,9 +40,9 @@ class ConnectArgs(TypedDict):
     database: str
     options: str | None
     timeout: float
-    sslmode: str                # disable | allow | prefer | require | verify-ca | verify-full
-    sslrootcert: str | None     # the certificates verify-ca and verify-full trust (default: the system's)
-    channel_binding: str        # disable | prefer | require
+    sslmode: str  # disable | allow | prefer | require | verify-ca | verify-full
+    sslrootcert: str | None  # the certificates verify-ca and verify-full trust (default: the system's)
+    channel_binding: str  # disable | prefer | require
 
 
 class PgError(Exception):
@@ -84,7 +85,7 @@ def _parse_array(text: str) -> list[str | None]:
             i = j
         if text[i] == "}":
             break
-        i += 1   # the comma
+        i += 1  # the comma
     return out
 
 
@@ -111,21 +112,28 @@ def _convert(oid: int, value: bytes | None) -> Value:
         if oid == 1000:
             return [None if x is None else x == "t" for x in _parse_array(text)]
     except (ValueError, IndexError, ProtocolError):
-        return text             # two dimensions, or bounds ([0:1]={a,b}): as Postgres writes it
+        return text  # two dimensions, or bounds ([0:1]={a,b}): as Postgres writes it
     return text
 
 
 class Connection:
-    def __init__(self, sock: socket.socket, user: str, password: str | None, database: str, options: str | None,
-                 channel_binding: str = "prefer") -> None:
+    def __init__(
+        self,
+        sock: socket.socket,
+        user: str,
+        password: str | None,
+        database: str,
+        options: str | None,
+        channel_binding: str = "prefer",
+    ) -> None:
         self.sock = sock
         self.buf = b""
         self.params: dict[str, str] = {}
         self.in_error = False
-        self.busy = False          # a query was sent and its answer not fully read (the connection is unusable)
+        self.busy = False  # a query was sent and its answer not fully read (the connection is unusable)
         self.on_notice: Callable[[Fields], None] | None = None  # called with each NOTICE / WARNING the server sends
-        self.address: tuple[str, int] | None = None     # where connect() went, for cancel()
-        self.backend: tuple[int, int] | None = None     # this session's process id and key, for cancel()
+        self.address: tuple[str, int] | None = None  # where connect() went, for cancel()
+        self.backend: tuple[int, int] | None = None  # this session's process id and key, for cancel()
         self._startup(user, password, database, options, channel_binding)
 
     # --- framing ----------------------------------------------------------
@@ -181,11 +189,11 @@ class Connection:
         return fields
 
     # --- start-up and authentication --------------------------------------
-    def _startup(self, user: str, password: str | None, database: str, options: str | None,
-                 channel_binding: str = "prefer") -> None:
+    def _startup(
+        self, user: str, password: str | None, database: str, options: str | None, channel_binding: str = "prefer"
+    ) -> None:
         body = struct.pack("!i", 196608)
-        params = {"user": user, "database": database, "client_encoding": "UTF8",
-                  "application_name": "rowstile"}
+        params = {"user": user, "database": database, "client_encoding": "UTF8", "application_name": "rowstile"}
         if options:
             params["options"] = options
         for k, v in params.items():
@@ -193,15 +201,17 @@ class Connection:
         body += b"\0"
         self.sock.sendall(struct.pack("!i", len(body) + 4) + body)
         scram: _Scram | None = None
-        bound = False               # signed in with SCRAM bound to this TLS channel, the server's proof checked
+        bound = False  # signed in with SCRAM bound to this TLS channel, the server's proof checked
         while True:
             kind, payload = self._read()
             if kind == b"R":
                 code = struct.unpack("!i", payload[:4])[0]
                 if code == 0:
                     if channel_binding == "require" and not bound:
-                        raise ProtocolError("the server signed this connection in without channel binding, and "
-                                            "channel_binding=require asks for it")
+                        raise ProtocolError(
+                            "the server signed this connection in without channel binding, and "
+                            "channel_binding=require asks for it"
+                        )
                     continue
                 if password is None:
                     raise ProtocolError("the server asks for a password")
@@ -248,11 +258,15 @@ class Connection:
         if data is not None:
             return "p=tls-server-end-point,,", data
         if channel_binding == "require":
-            raise ProtocolError("channel_binding=require needs TLS (sslmode=require or stronger)" if not tls
-                                else "the server doesn't offer channel binding (SCRAM-SHA-256-PLUS), and "
-                                     "channel_binding=require asks for it" if "SCRAM-SHA-256-PLUS" not in mechs
-                                else "the server's certificate is signed in a way channel binding has no hash for, "
-                                     "and channel_binding=require asks for it")
+            raise ProtocolError(
+                "channel_binding=require needs TLS (sslmode=require or stronger)"
+                if not tls
+                else "the server doesn't offer channel binding (SCRAM-SHA-256-PLUS), and "
+                "channel_binding=require asks for it"
+                if "SCRAM-SHA-256-PLUS" not in mechs
+                else "the server's certificate is signed in a way channel binding has no hash for, "
+                "and channel_binding=require asks for it"
+            )
         if "SCRAM-SHA-256" not in mechs:
             raise ProtocolError(f"unsupported SASL mechanisms {mechs}")
         # y: this client could have bound the channel and the server didn't offer to (the server checks that it
@@ -280,11 +294,25 @@ class Connection:
                     raise ValueError("parameters cannot contain NUL characters")
                 bind += struct.pack("!i", len(v)) + v
         bind += struct.pack("!h", 0)
-        msg = (b"P" + struct.pack("!i", 4 + 1 + len(sql.encode()) + 1 + 2) + b"\0" + self._cstr(sql) + struct.pack("!h", 0) +
-               b"B" + struct.pack("!i", len(bind) + 4) + bind +
-               b"D" + struct.pack("!i", 6) + b"P\0" +
-               b"E" + struct.pack("!i", 9) + b"\0" + struct.pack("!i", 0) +
-               b"S" + struct.pack("!i", 4))
+        msg = (
+            b"P"
+            + struct.pack("!i", 4 + 1 + len(sql.encode()) + 1 + 2)
+            + b"\0"
+            + self._cstr(sql)
+            + struct.pack("!h", 0)
+            + b"B"
+            + struct.pack("!i", len(bind) + 4)
+            + bind
+            + b"D"
+            + struct.pack("!i", 6)
+            + b"P\0"
+            + b"E"
+            + struct.pack("!i", 9)
+            + b"\0"
+            + struct.pack("!i", 0)
+            + b"S"
+            + struct.pack("!i", 4)
+        )
         self.busy = True
         self.sock.sendall(msg)
         rows: list[tuple[Value, ...]] = []
@@ -298,7 +326,7 @@ class Connection:
                 for _ in range(n):
                     end = payload.index(b"\0", pos)
                     name = payload[pos:end].decode()
-                    oid = struct.unpack("!i", payload[end + 7:end + 11])[0]
+                    oid = struct.unpack("!i", payload[end + 7 : end + 11])[0]
                     cols.append((name, oid))
                     pos = end + 19
             elif kind == b"D":
@@ -306,9 +334,9 @@ class Connection:
                 pos = 2
                 row: list[Value] = []
                 for i in range(n):
-                    ln = struct.unpack("!i", payload[pos:pos + 4])[0]
+                    ln = struct.unpack("!i", payload[pos : pos + 4])[0]
                     pos += 4
-                    val = None if ln < 0 else payload[pos:pos + ln]
+                    val = None if ln < 0 else payload[pos : pos + ln]
                     pos += max(ln, 0)
                     row.append(_convert(cols[i][1], val))
                 rows.append(tuple(row))
@@ -401,9 +429,18 @@ def _saslprep(password: str) -> str:
         return password
     mapped = "".join(" " if stringprep.in_table_c12(c) else c for c in password if not stringprep.in_table_b1(c))
     out = unicodedata.normalize("NFKC", mapped)
-    prohibited = (stringprep.in_table_a1, stringprep.in_table_c12, stringprep.in_table_c21_c22, stringprep.in_table_c3,
-                  stringprep.in_table_c4, stringprep.in_table_c5, stringprep.in_table_c6, stringprep.in_table_c7,
-                  stringprep.in_table_c8, stringprep.in_table_c9)
+    prohibited = (
+        stringprep.in_table_a1,
+        stringprep.in_table_c12,
+        stringprep.in_table_c21_c22,
+        stringprep.in_table_c3,
+        stringprep.in_table_c4,
+        stringprep.in_table_c5,
+        stringprep.in_table_c6,
+        stringprep.in_table_c7,
+        stringprep.in_table_c8,
+        stringprep.in_table_c9,
+    )
     return password if any(f(c) for c in out for f in prohibited) else out
 
 
@@ -421,14 +458,29 @@ def _oid(dotted: str) -> bytes:
     return out
 
 
-_SIGNED_WITH = {_oid(o): h for o, h in (
-    ("1.2.840.113549.1.1.4", "sha256"), ("1.2.840.113549.1.1.5", "sha256"), ("1.2.840.113549.1.1.11", "sha256"),
-    ("1.2.840.113549.1.1.12", "sha384"), ("1.2.840.113549.1.1.13", "sha512"), ("1.2.840.113549.1.1.14", "sha224"),
-    ("1.2.840.10045.4.1", "sha256"), ("1.2.840.10045.4.3.1", "sha224"), ("1.2.840.10045.4.3.2", "sha256"),
-    ("1.2.840.10045.4.3.3", "sha384"), ("1.2.840.10045.4.3.4", "sha512"))}
-_RSA_PSS = _oid("1.2.840.113549.1.1.10")            # names its hash in its parameters (SHA-1 if it names none)
-_PSS_HASHES = {_oid("2.16.840.1.101.3.4.2.1"): "sha256", _oid("2.16.840.1.101.3.4.2.2"): "sha384",
-               _oid("2.16.840.1.101.3.4.2.3"): "sha512", _oid("2.16.840.1.101.3.4.2.4"): "sha224"}
+_SIGNED_WITH = {
+    _oid(o): h
+    for o, h in (
+        ("1.2.840.113549.1.1.4", "sha256"),
+        ("1.2.840.113549.1.1.5", "sha256"),
+        ("1.2.840.113549.1.1.11", "sha256"),
+        ("1.2.840.113549.1.1.12", "sha384"),
+        ("1.2.840.113549.1.1.13", "sha512"),
+        ("1.2.840.113549.1.1.14", "sha224"),
+        ("1.2.840.10045.4.1", "sha256"),
+        ("1.2.840.10045.4.3.1", "sha224"),
+        ("1.2.840.10045.4.3.2", "sha256"),
+        ("1.2.840.10045.4.3.3", "sha384"),
+        ("1.2.840.10045.4.3.4", "sha512"),
+    )
+}
+_RSA_PSS = _oid("1.2.840.113549.1.1.10")  # names its hash in its parameters (SHA-1 if it names none)
+_PSS_HASHES = {
+    _oid("2.16.840.1.101.3.4.2.1"): "sha256",
+    _oid("2.16.840.1.101.3.4.2.2"): "sha384",
+    _oid("2.16.840.1.101.3.4.2.3"): "sha512",
+    _oid("2.16.840.1.101.3.4.2.4"): "sha224",
+}
 
 
 def _der(data: bytes, at: int) -> tuple[int, int, int]:
@@ -436,7 +488,7 @@ def _der(data: bytes, at: int) -> tuple[int, int, int]:
     length, start = data[at + 1], at + 2
     if length & 0x80:
         n = length & 0x7F
-        length, start = int.from_bytes(data[start:start + n], "big"), start + n
+        length, start = int.from_bytes(data[start : start + n], "big"), start + n
     return data[at], start, start + length
 
 
@@ -469,7 +521,7 @@ def _end_point(sock: socket.socket) -> bytes | None:
 class _Scram:
     def __init__(self, password: str, header: str = "n,,", binding: bytes | None = None) -> None:
         self.password = _saslprep(password).encode()
-        self.header = header        # GS2: n,, (no channel binding), y,, (the server offered none), p=...,, (bound)
+        self.header = header  # GS2: n,, (no channel binding), y,, (the server offered none), p=...,, (bound)
         self.binding = binding
         self.mechanism = "SCRAM-SHA-256-PLUS" if binding is not None else "SCRAM-SHA-256"
         self.nonce = base64.b64encode(os.urandom(18)).decode()
@@ -488,7 +540,7 @@ class _Scram:
         salted = hashlib.pbkdf2_hmac("sha256", self.password, base64.b64decode(attrs["s"]), int(attrs["i"]))
         client_key = hmac.new(salted, b"Client Key", hashlib.sha256).digest()
         stored = hashlib.sha256(client_key).digest()
-        bind = base64.b64encode(self.header.encode() + (self.binding or b"")).decode()      # biws for n,,
+        bind = base64.b64encode(self.header.encode() + (self.binding or b"")).decode()  # biws for n,,
         without_proof = f"c={bind},r={attrs['r']}"
         self.auth_message = f"{self.first_bare},{server_first},{without_proof}".encode()
         signature = hmac.new(stored, self.auth_message, hashlib.sha256).digest()
@@ -506,12 +558,27 @@ class _Scram:
 SSLMODES = ("disable", "allow", "prefer", "require", "verify-ca", "verify-full")
 CHANNEL_BINDINGS = ("disable", "prefer", "require")
 # what a connection string may say, and where it goes; anything else in a keyword string is refused
-KEYS = {"host": "host", "port": "port", "user": "user", "password": "password", "dbname": "database",
-        "sslmode": "sslmode", "sslrootcert": "sslrootcert", "options": "options", "connect_timeout": "timeout",
-        "channel_binding": "channel_binding"}
+KEYS = {
+    "host": "host",
+    "port": "port",
+    "user": "user",
+    "password": "password",
+    "dbname": "database",
+    "sslmode": "sslmode",
+    "sslrootcert": "sslrootcert",
+    "options": "options",
+    "connect_timeout": "timeout",
+    "channel_binding": "channel_binding",
+}
 # options that would change what the connection is, which this client can't do: never dropped in silence
-REFUSED = {"sslcert": "client certificates", "sslkey": "client certificates", "service": "connection services",
-           "passfile": "password files", "gssencmode": "GSS encryption", "requirepeer": "requirepeer"}
+REFUSED = {
+    "sslcert": "client certificates",
+    "sslkey": "client certificates",
+    "service": "connection services",
+    "passfile": "password files",
+    "gssencmode": "GSS encryption",
+    "requirepeer": "requirepeer",
+}
 
 
 def parse_dsn(text: str | None) -> ConnectArgs:
@@ -536,10 +603,16 @@ def parse_dsn(text: str | None) -> ConnectArgs:
         try:
             port = u.port
         except ValueError:
-            raise ValueError("the URL's port isn't a number: a #, ? or / in the password must be written %23, %3F, "
-                             "%2F") from None
-        for k, v in (("host", u.hostname), ("port", port), ("user", u.username), ("password", u.password),
-                     ("database", u.path.lstrip("/") or None)):
+            raise ValueError(
+                "the URL's port isn't a number: a #, ? or / in the password must be written %23, %3F, %2F"
+            ) from None
+        for k, v in (
+            ("host", u.hostname),
+            ("port", port),
+            ("user", u.username),
+            ("password", u.password),
+            ("database", u.path.lstrip("/") or None),
+        ):
             if v is not None:
                 out[k] = urllib.parse.unquote(v) if isinstance(v, str) else str(v)
         for k, v in urllib.parse.parse_qsl(u.query, keep_blank_values=True):
@@ -548,8 +621,10 @@ def parse_dsn(text: str | None) -> ConnectArgs:
     try:
         parts = shlex.split(text or "")
     except ValueError:
-        raise ValueError("can't read the connection string: put a value with spaces or quotes in single quotes "
-                         "(password='it''s'), or use a postgresql:// URL") from None
+        raise ValueError(
+            "can't read the connection string: put a value with spaces or quotes in single quotes "
+            "(password='it''s'), or use a postgresql:// URL"
+        ) from None
     for part in parts:
         k, _, v = part.partition("=")
         setting(k, v, strict=True)
@@ -564,13 +639,23 @@ def parse_dsn(text: str | None) -> ConnectArgs:
     if channel_binding not in CHANNEL_BINDINGS:
         raise ValueError(f"channel_binding={channel_binding}: one of {', '.join(CHANNEL_BINDINGS)}")
     if not out["port"].isdigit() or not out.get("timeout", "10").isdigit():
-        raise ValueError(f"the port and connect_timeout are numbers, not {out['port']!r}" if not out["port"].isdigit()
-                         else f"connect_timeout is a number of seconds, not {out['timeout']!r}")
-    return {"host": out["host"], "port": int(out["port"]), "user": user, "password": password,
-            "database": out.get("database") or os.environ.get("PGDATABASE", user), "options": out.get("options"),
-            "timeout": float(out.get("timeout", "10")) or 10, "sslmode": sslmode,
-            "sslrootcert": out.get("sslrootcert") or os.environ.get("PGSSLROOTCERT"),
-            "channel_binding": channel_binding}
+        raise ValueError(
+            f"the port and connect_timeout are numbers, not {out['port']!r}"
+            if not out["port"].isdigit()
+            else f"connect_timeout is a number of seconds, not {out['timeout']!r}"
+        )
+    return {
+        "host": out["host"],
+        "port": int(out["port"]),
+        "user": user,
+        "password": password,
+        "database": out.get("database") or os.environ.get("PGDATABASE", user),
+        "options": out.get("options"),
+        "timeout": float(out.get("timeout", "10")) or 10,
+        "sslmode": sslmode,
+        "sslrootcert": out.get("sslrootcert") or os.environ.get("PGSSLROOTCERT"),
+        "channel_binding": channel_binding,
+    }
 
 
 def _socket(host: str, port: int, timeout: float) -> socket.socket:
@@ -603,17 +688,26 @@ def _tls(sock: socket.socket, host: str, sslmode: str, sslrootcert: str | None) 
     else:
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
         context.check_hostname = False
-        context.verify_mode = ssl.CERT_NONE         # encrypted, the server not checked: what require means
-    context.minimum_version = ssl.TLSVersion.TLSv1_2    # Python's default since 3.10, said for code scanners
+        context.verify_mode = ssl.CERT_NONE  # encrypted, the server not checked: what require means
+    context.minimum_version = ssl.TLSVersion.TLSv1_2  # Python's default since 3.10, said for code scanners
     try:
         return context.wrap_socket(sock, server_hostname=host)
     except ssl.SSLError as e:
         raise ProtocolError(f"TLS with the server failed (sslmode={sslmode}): {e}") from None
 
 
-def connect(host: str = "localhost", port: int = 5432, user: str = "postgres", password: str | None = None,
-            database: str | None = None, options: str | None = None, timeout: float = 10,
-            sslmode: str = "prefer", sslrootcert: str | None = None, channel_binding: str = "prefer") -> Connection:
+def connect(
+    host: str = "localhost",
+    port: int = 5432,
+    user: str = "postgres",
+    password: str | None = None,
+    database: str | None = None,
+    options: str | None = None,
+    timeout: float = 10,
+    sslmode: str = "prefer",
+    sslrootcert: str | None = None,
+    channel_binding: str = "prefer",
+) -> Connection:
     sock = _socket(host, port, timeout)
     try:
         if not host.startswith("/") and sslmode != "disable":

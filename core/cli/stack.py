@@ -2,6 +2,7 @@
 in the project folder (package.json, pyproject.toml, requirements*.txt, prisma/, drizzle.config.*, alembic.ini).
 What init does with it: rowstile.toml's [migrations] and [clients], the SDK packages to add, and the one line of
 setup to change. Reads files only; changes nothing."""
+
 from __future__ import annotations
 
 import json
@@ -14,19 +15,21 @@ SKIP = {"node_modules", ".git", ".venv", "venv", ".next", "dist", "build", "__py
 
 @dataclass
 class Stack:
-    found: list[str] = field(default_factory=list)     # what was found, in words: "Next.js", "Prisma (prisma/schema.prisma)"
-    tool: str = ""                                     # the migration tool: prisma, drizzle, alembic, sql, or "" (unknown)
+    found: list[str] = field(
+        default_factory=list
+    )  # what was found, in words: "Next.js", "Prisma (prisma/schema.prisma)"
+    tool: str = ""  # the migration tool: prisma, drizzle, alembic, sql, or "" (unknown)
     migrations_dir: str = ""
     clients: dict[str, str] = field(default_factory=dict)  # {"ts": "src/authz.gen.ts"} or {"py": "app/authz_types.py"}
-    npm: list[str] = field(default_factory=list)       # @rowstile/* packages to add
-    pip: str = ""                                      # the pip requirement to add: rowstile[fastapi]
-    setup: list[str] = field(default_factory=list)     # the change to make, in lines to print
-    setup_file: str = ""                               # where to make it, if found
+    npm: list[str] = field(default_factory=list)  # @rowstile/* packages to add
+    pip: str = ""  # the pip requirement to add: rowstile[fastapi]
+    setup: list[str] = field(default_factory=list)  # the change to make, in lines to print
+    setup_file: str = ""  # where to make it, if found
 
 
 def _read(root: str, name: str) -> str | None:
     try:
-        with open(os.path.join(root, name), encoding="utf-8-sig") as fh:       # a byte order mark is skipped
+        with open(os.path.join(root, name), encoding="utf-8-sig") as fh:  # a byte order mark is skipped
             return fh.read()
     except (OSError, UnicodeDecodeError):
         return None
@@ -64,8 +67,10 @@ def _python_names(root: str) -> set[str]:
                 text += (_read(root, n) or "") + "\n"
     except OSError:
         pass
-    return {m.group(1).lower().replace("_", "-") for m in re.finditer(r'(?m)^\s*"?([A-Za-z][A-Za-z0-9_.-]*)', text)} | \
-           {m.group(1).lower().replace("_", "-") for m in re.finditer(r'"([A-Za-z][A-Za-z0-9_.-]*)\s*(?:\[[^\]]*\])?\s*(?:[<>=!~;][^"]*)?"', text)}
+    return {m.group(1).lower().replace("_", "-") for m in re.finditer(r'(?m)^\s*"?([A-Za-z][A-Za-z0-9_.-]*)', text)} | {
+        m.group(1).lower().replace("_", "-")
+        for m in re.finditer(r'"([A-Za-z][A-Za-z0-9_.-]*)\s*(?:\[[^\]]*\])?\s*(?:[<>=!~;][^"]*)?"', text)
+    }
 
 
 def _object(value: object) -> dict[str, object]:
@@ -101,15 +106,22 @@ def detect(root: str = ".") -> Stack:
     in_package = _object(package.get("prisma")).get("schema")
     if isinstance(in_package, str):
         said.append(in_package)
-    prisma_schema = next((p.removeprefix("./") for p in (*said, "prisma/schema.prisma", "schema.prisma")
-                          if _read(root, p) is not None), "")
+    prisma_schema = next(
+        (p.removeprefix("./") for p in (*said, "prisma/schema.prisma", "schema.prisma") if _read(root, p) is not None),
+        "",
+    )
     if "prisma" in js or "@prisma/client" in js or prisma_schema:
         s.found.append(f"Prisma ({prisma_schema})" if prisma_schema else "Prisma")
         s.tool = "prisma"
         m = re.search(r"migrations\s*:\s*\{[^}]*path\s*:\s*[\"']([^\"']+)[\"']", cfg)
-        s.migrations_dir = (m.group(1) if m else os.path.dirname(prisma_schema or "prisma/x") + "/migrations").lstrip("./") or "prisma/migrations"
+        s.migrations_dir = (m.group(1) if m else os.path.dirname(prisma_schema or "prisma/x") + "/migrations").lstrip(
+            "./"
+        ) or "prisma/migrations"
     elif "drizzle-orm" in js or "drizzle-kit" in js:
-        config = next((c for c in ("drizzle.config.ts", "drizzle.config.js", "drizzle.config.mjs") if _read(root, c) is not None), "")
+        config = next(
+            (c for c in ("drizzle.config.ts", "drizzle.config.js", "drizzle.config.mjs") if _read(root, c) is not None),
+            "",
+        )
         s.found.append(f"Drizzle ({config})" if config else "Drizzle")
         s.tool = "drizzle"
         m = re.search(r"out\s*:\s*[\"']([^\"']+)[\"']", _read(root, config) or "") if config else None
@@ -122,12 +134,14 @@ def detect(root: str = ".") -> Stack:
         s.tool, s.migrations_dir = "alembic", f"{loc}/versions"
     else:
         for d in ("db/migrations", "migrations", "sql/migrations"):
-            if os.path.isdir(os.path.join(root, d)) and any(f.endswith(".sql") for f in os.listdir(os.path.join(root, d))):
+            if os.path.isdir(os.path.join(root, d)) and any(
+                f.endswith(".sql") for f in os.listdir(os.path.join(root, d))
+            ):
                 s.found.append(f"SQL migrations ({d})")
                 s.tool, s.migrations_dir = "sql", d
                 break
 
-    user_ts = "async () => (await auth())?.user.id"       # the app's own session: next-auth's auth(), or yours
+    user_ts = "async () => (await auth())?.user.id"  # the app's own session: next-auth's auth(), or yours
     if js:
         if "next" in js:
             s.found.insert(0, "Next.js")
@@ -145,14 +159,22 @@ def detect(root: str = ".") -> Stack:
         elif s.tool == "drizzle":
             s.npm.insert(0, "@rowstile/drizzle")
             s.setup_file = _find(root, (".ts", ".js", ".mjs"), r"drizzle\(")
-            s.setup = ['import { withAuthz } from "@rowstile/drizzle";',
-                       f"export const authz = withAuthz(db, {{ user: {user_ts} }});   // authz.transaction(tx => ...)"]
+            s.setup = [
+                'import { withAuthz } from "@rowstile/drizzle";',
+                f"export const authz = withAuthz(db, {{ user: {user_ts} }});   // authz.transaction(tx => ...)",
+            ]
         elif "postgres" in js:
             s.npm.insert(0, "@rowstile/postgres")
-            s.setup = ['import { authz } from "@rowstile/postgres";', f"export const db = authz(sql, {{ user: {user_ts} }});"]
+            s.setup = [
+                'import { authz } from "@rowstile/postgres";',
+                f"export const db = authz(sql, {{ user: {user_ts} }});",
+            ]
         elif "pg" in js:
             s.npm.insert(0, "@rowstile/pg")
-            s.setup = ['import { authz } from "@rowstile/pg";', f"export const db = authz(pool, {{ user: {user_ts} }});"]
+            s.setup = [
+                'import { authz } from "@rowstile/pg";',
+                f"export const db = authz(pool, {{ user: {user_ts} }});",
+            ]
         if "react" in js:
             s.npm.append("@rowstile/react")
         if "vitest" in js:
@@ -162,7 +184,11 @@ def detect(root: str = ".") -> Stack:
             if "next" in js and s.setup:
                 s.setup.insert(0, 'import "@rowstile/next";               // signed-in reads stay out of caches')
     if py and not s.npm:
-        extras = [x for x in ("fastapi", "sqlalchemy", "psycopg", "asyncpg") if x in py or (x == "sqlalchemy" and "sqlmodel" in py)]
+        extras = [
+            x
+            for x in ("fastapi", "sqlalchemy", "psycopg", "asyncpg")
+            if x in py or (x == "sqlalchemy" and "sqlmodel" in py)
+        ]
         if "fastapi" in py:
             s.found.insert(0, "FastAPI")
         if "sqlalchemy" in py or "sqlmodel" in py:
@@ -172,14 +198,21 @@ def detect(root: str = ".") -> Stack:
         s.clients["py"] = f"{pkg_dir}/authz_types.py".lstrip("./")
         if "fastapi" in py:
             s.setup_file = _find(root, (".py",), r"=\s*FastAPI\(")
-            s.setup = ["from rowstile.fastapi import Rowstile",
-                       "Rowstile(app, engine, user=current_user)   # before adding routes; current_user(request): the",
-                       "                                            # user's id from its session or token, None for nobody"]
+            s.setup = [
+                "from rowstile.fastapi import Rowstile",
+                "Rowstile(app, engine, user=current_user)   # before adding routes; current_user(request): the",
+                "                                            # user's id from its session or token, None for nobody",
+            ]
         elif "sqlalchemy" in py or "sqlmodel" in py:
-            s.setup = ["import rowstile.sqlalchemy", "rowstile.sqlalchemy.install(engine)   # with rowstile.acting_as(user_id): ..."]
+            s.setup = [
+                "import rowstile.sqlalchemy",
+                "rowstile.sqlalchemy.install(engine)   # with rowstile.acting_as(user_id): ...",
+            ]
         if s.tool == "alembic":
-            s.setup += ["# alembic env.py: context.configure(..., include_name=include_name, include_object=include_object)",
-                        "from rowstile.alembic import include_name, include_object"]
+            s.setup += [
+                "# alembic env.py: context.configure(..., include_name=include_name, include_object=include_object)",
+                "from rowstile.alembic import include_name, include_object",
+            ]
     return s
 
 
@@ -187,11 +220,15 @@ def config_lines(s: Stack) -> list[str]:
     """rowstile.toml's [clients] and [migrations] for the stack."""
     out: list[str] = []
     if s.clients:
-        out += ["[clients]                    # written on each change by rowstile dev"] + \
-               [f'{lang} = "{path}"' for lang, path in s.clients.items()]
+        out += ["[clients]                    # written on each change by rowstile dev"] + [
+            f'{lang} = "{path}"' for lang, path in s.clients.items()
+        ]
     if s.tool:
-        out += ["[migrations]                 # rowstile migrate writes the policy's changes for this tool",
-                f'tool = "{s.tool}"', f'dir  = "{s.migrations_dir}"']
+        out += [
+            "[migrations]                 # rowstile migrate writes the policy's changes for this tool",
+            f'tool = "{s.tool}"',
+            f'dir  = "{s.migrations_dir}"',
+        ]
     return out
 
 

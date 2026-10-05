@@ -7,6 +7,7 @@ Runs the policy in force's tests and the named tests in these files (keyed by fi
 `rowstile test` does) through authzlib.database, in a transaction that is rolled back. Prints one
 row per check: test, line, ok (t or f), detail, separated by tabs; newlines in detail become " | ".
 """
+
 import os
 import sys
 

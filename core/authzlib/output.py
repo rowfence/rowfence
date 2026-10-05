@@ -1,4 +1,5 @@
 """Assembling the compiled policy: catalog, triggers, policies and the API."""
+
 from __future__ import annotations
 
 import re
@@ -27,7 +28,7 @@ from .trees import TreeMixin
 DEFINER = "SECURITY DEFINER SET search_path = pg_catalog, pg_temp"
 # for functions that run the policy's own SQL: the path applying vetted (search_path_sql), as views and policies resolve it
 DEFINER_FROM_CURRENT = "SECURITY DEFINER SET search_path FROM CURRENT"
-PT = "pg_catalog.current_setting('authz.principal_type', true)"   # the signed-in principal's type ('': a user)
+PT = "pg_catalog.current_setting('authz.principal_type', true)"  # the signed-in principal's type ('': a user)
 # a link's id, from its share g: the start of its token's hash (enough to name it among an object's links)
 LINK_ID = "left(g.subject_id, 16)"
 
@@ -63,15 +64,20 @@ class OutputMixin(RefusalMixin, InsightMixin, GovernanceMixin, IdentityMixin, Li
         """Sharing a relation grants what it grants: the sharer must hold every
         permission the relation feeds into."""
         need = []
-        denies = {name for (tn, _), negs in self.denies.items() if tn == t.name for x in negs
-                  if (name := denied(x)) is not None}
+        denies = {
+            name
+            for (tn, _), negs in self.denies.items()
+            if tn == t.name
+            for x in negs
+            if (name := denied(x)) is not None
+        }
         for p in t.perms.values():
-            if p.hidden or p.name in denies:    # sharing into a deny takes away; it gives nothing to hold
+            if p.hidden or p.name in denies:  # sharing into a deny takes away; it gives nothing to hold
                 continue
             refs: set[str] = set()
             for item in self.flat_items(t, p):
                 self.positive_refs(item, refs)
-            if p.base is not None and p.base in refs:   # what the permission inherits, before its deny
+            if p.base is not None and p.base in refs:  # what the permission inherits, before its deny
                 for item in self.flat_items(t, t.perms[p.base]):
                     self.positive_refs(item, refs)
             if relname in refs:
@@ -94,23 +100,23 @@ BEGIN
     DELETE FROM authz.shares WHERE object_type = {name};
     DELETE FROM authz.shares WHERE subject_type = {name} AND subject_id <> '*';      -- '*' (every one signed in) names no row
   ELSE
-    DELETE FROM authz.shares WHERE object_type = {name} AND object_id IN (SELECT {self.key_text(t, 'o')} FROM old_rows o);
-    DELETE FROM authz.shares WHERE subject_type = {name} AND subject_id IN (SELECT {self.key_text(t, 'o')} FROM old_rows o);
+    DELETE FROM authz.shares WHERE object_type = {name} AND object_id IN (SELECT {self.key_text(t, "o")} FROM old_rows o);
+    DELETE FROM authz.shares WHERE subject_type = {name} AND subject_id IN (SELECT {self.key_text(t, "o")} FROM old_rows o);
   END IF;
   RETURN NULL;
 END $f$;
 CREATE FUNCTION {fn_row}() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER SET search_path FROM CURRENT AS $f$
 BEGIN
-  DELETE FROM authz.shares WHERE object_type = {name} AND object_id = {self.key_text(t, 'OLD')};
-  DELETE FROM authz.shares WHERE subject_type = {name} AND subject_id = {self.key_text(t, 'OLD')};
+  DELETE FROM authz.shares WHERE object_type = {name} AND object_id = {self.key_text(t, "OLD")};
+  DELETE FROM authz.shares WHERE subject_type = {name} AND subject_id = {self.key_text(t, "OLD")};
   RETURN NULL;
 END $f$;
-CREATE TRIGGER {q('authz_' + t.name + '_forget_del')} AFTER DELETE ON {tbl}
+CREATE TRIGGER {q("authz_" + t.name + "_forget_del")} AFTER DELETE ON {tbl}
   REFERENCING OLD TABLE AS old_rows FOR EACH STATEMENT EXECUTE FUNCTION {fn}();
-CREATE TRIGGER {q('authz_' + t.name + '_forget_id')} AFTER UPDATE ON {tbl} FOR EACH ROW
-  WHEN ({self.key(t, 'OLD')} IS DISTINCT FROM {self.key(t, 'NEW')}) EXECUTE FUNCTION {fn_row}();
-CREATE TRIGGER {q('authz_' + t.name + '_forget_trunc')} AFTER TRUNCATE ON {tbl}
+CREATE TRIGGER {q("authz_" + t.name + "_forget_id")} AFTER UPDATE ON {tbl} FOR EACH ROW
+  WHEN ({self.key(t, "OLD")} IS DISTINCT FROM {self.key(t, "NEW")}) EXECUTE FUNCTION {fn_row}();
+CREATE TRIGGER {q("authz_" + t.name + "_forget_trunc")} AFTER TRUNCATE ON {tbl}
   FOR EACH STATEMENT EXECUTE FUNCTION {fn}();"""
 
     # --- rules on changed columns (RLS can't compare old and new rows) ----
@@ -121,8 +127,7 @@ CREATE TRIGGER {q('authz_' + t.name + '_forget_trunc')} AFTER TRUNCATE ON {tbl}
         fn = f"authz_int.{q(f'{t.name}__update_{idx}')}"
         cols = ", ".join(rule.columns)
         when = "\n     OR ".join(f"OLD.{q(c)} IS DISTINCT FROM NEW.{q(c)}" for c in rule.columns)
-        msg = (f"changing {cols} of {rule.table} ".replace("%", "%%") + "%" +
-               f" needs: {rule.src}".replace("%", "%%"))
+        msg = f"changing {cols} of {rule.table} ".replace("%", "%%") + "%" + f" needs: {rule.src}".replace("%", "%%")
         # the explanation, as for refused inserts and updates (refusals.py)
         name = f"column_{idx}"
         why = self.rule_fn(rule.table, name, "why")
@@ -131,8 +136,8 @@ CREATE TRIGGER {q('authz_' + t.name + '_forget_trunc')} AFTER TRUNCATE ON {tbl}
 
 {self.rule_why_sql(t, rule.table, alias, rule, name)}
 
--- {rule.table} update {cols}{' after' if new else ''} ({rule.loc}): {rule.src}
--- checked on the row {'after' if new else 'before'} the change, for roles that row-level security applies to
+-- {rule.table} update {cols}{" after" if new else ""} ({rule.loc}): {rule.src}
+-- checked on the row {"after" if new else "before"} the change, for roles that row-level security applies to
 CREATE FUNCTION {fn}() RETURNS trigger
 LANGUAGE plpgsql SET search_path FROM CURRENT AS $f$
 DECLARE v_lines text;
@@ -144,12 +149,12 @@ BEGIN
     EXCEPTION WHEN OTHERS THEN
       v_lines := 'no explanation: ' || SQLERRM;
     END;
-    RAISE EXCEPTION {lit(msg)}, {self.key(t, 'OLD')} USING ERRCODE = 'insufficient_privilege', DETAIL = v_lines,
+    RAISE EXCEPTION {lit(msg)}, {self.key(t, "OLD")} USING ERRCODE = 'insufficient_privilege', DETAIL = v_lines,
       SCHEMA = {lit(schema)}, TABLE = {lit(table)}, CONSTRAINT = 'authz_update', HINT = 'rowstile help AZ709';
   END IF;
   RETURN NEW;
 END $f$;
-CREATE TRIGGER {q('authz_update_' + str(idx))} BEFORE UPDATE ON {qt(rule.table)} FOR EACH ROW
+CREATE TRIGGER {q("authz_update_" + str(idx))} BEFORE UPDATE ON {qt(rule.table)} FOR EACH ROW
   WHEN ({when})
   EXECUTE FUNCTION {fn}();"""
 
@@ -157,9 +162,11 @@ CREATE TRIGGER {q('authz_update_' + str(idx))} BEFORE UPDATE ON {qt(rule.table)}
     def uid_sql(self) -> str:
         u = self.T("user")
         setting = "pg_catalog.current_setting('authz.user_id', true)"
-        cast = (f"CASE WHEN {SESSION_OK} "
-                f"AND coalesce(pg_catalog.current_setting('authz.principal_type', true), '') IN ('', 'user') "
-                f"AND pg_catalog.pg_input_is_valid({setting}, {lit(u.pktype)}) THEN {setting}::{u.pktype} END")
+        cast = (
+            f"CASE WHEN {SESSION_OK} "
+            f"AND coalesce(pg_catalog.current_setting('authz.principal_type', true), '') IN ('', 'user') "
+            f"AND pg_catalog.pg_input_is_valid({setting}, {lit(u.pktype)}) THEN {setting}::{u.pktype} END"
+        )
         # A user is a row of the user type: an id its table doesn't have (a deleted user still signed in), or
         # one that fails the type's where, is nobody.
         # PL/pgSQL: its plans are kept for the session, and it runs once per statement (an initplan)
@@ -196,8 +203,11 @@ CREATE OR REPLACE FUNCTION authz.uid() RETURNS {u.pktype} {attrs} AS $uid$ {body
         for t in self.types.values():
             tbl = qt(t.table)
             order = ", ".join(f"o.{q(c)}" for c, _ in t.key)
-            after = (f"({order}) > ({', '.join(f'(p_after::{t.keytype}).{q(c)}' for c, _ in t.key)})"
-                     if t.composite else f"o.{q(self.pk(t))} > p_after::{t.pktype}")
+            after = (
+                f"({order}) > ({', '.join(f'(p_after::{t.keytype}).{q(c)}' for c, _ in t.key)})"
+                if t.composite
+                else f"o.{q(self.pk(t))} > p_after::{t.pktype}"
+            )
             for p in self.public_perms(t):
                 cond = self.row_sql(t, "o", Ref("ref", p), t.perms[p].loc)
                 if t.where:
@@ -212,12 +222,15 @@ CREATE OR REPLACE FUNCTION authz.uid() RETURNS {u.pktype} {attrs} AS $uid$ {body
                     f"      ELSE\n"
                     f"        RETURN QUERY {rows}{after} AND {cond}\n"
                     f"        ORDER BY {order} LIMIT p_limit;\n"
-                    f"      END IF;")
+                    f"      END IF;"
+                )
         return "\n".join(cases)
 
     def api_sql(self) -> str:
         perms_of = {t.name: self.public_perms(t) for t in self.types.values()}
-        no_perm = "RAISE EXCEPTION 'no permission %.% in the policy', p_type, p_perm USING HINT = 'rowstile help AZ707';"
+        no_perm = (
+            "RAISE EXCEPTION 'no permission %.% in the policy', p_type, p_perm USING HINT = 'rowstile help AZ707';"
+        )
 
         def can_branch(t: Type) -> str | None:
             if not t.perms:
@@ -227,7 +240,8 @@ CREATE OR REPLACE FUNCTION authz.uid() RETURNS {u.pktype} {attrs} AS $uid$ {body
             cases = "\n".join(
                 f"        WHEN {lit(p)} THEN RETURN coalesce((SELECT {self.can_sql(t, p)} FROM {qt(t.table)} o "
                 f"WHERE {self.key_is(t, 'o', 'v_' + t.pktype)}), false);"
-                for p in perms_of[t.name])
+                for p in perms_of[t.name]
+            )
             return f"      CASE p_perm\n{cases}\n        ELSE {no_perm}\n      END CASE;"
 
         self._invalid = "false"
@@ -235,13 +249,18 @@ CREATE OR REPLACE FUNCTION authz.uid() RETURNS {u.pktype} {attrs} AS $uid$ {body
         list_cases = self._list_cases
         perms_cases = "\n".join(
             f"    WHEN {lit(t.name)} THEN names := ARRAY[{', '.join(lit(p) for p in ps)}]::text[];"
-            for t in self.types.values() for ps in [perms_of[t.name]] if ps)
+            for t in self.types.values()
+            for ps in [perms_of[t.name]]
+            if ps
+        )
         id_types = sorted({t.pktype for t in self.types.values()} - {"text"})
         overloads = "\n".join(
             f"CREATE FUNCTION authz.can(p_type text, p_id {pt}, p_perm text) RETURNS boolean LANGUAGE sql STABLE AS\n"
             f"  $$ SELECT authz.can(p_type, p_id::text, p_perm) $$;\n"
             f"CREATE FUNCTION authz.perms(p_type text, p_id {pt}) RETURNS text[] LANGUAGE sql STABLE AS\n"
-            f"  $$ SELECT authz.perms(p_type, p_id::text) $$;" for pt in id_types)
+            f"  $$ SELECT authz.perms(p_type, p_id::text) $$;"
+            for pt in id_types
+        )
         return f"""-- Check a permission from app code: SELECT authz.can('file', 11, 'edit')
 -- (only objects that exist; plans are cached per session)
 CREATE FUNCTION authz.can(p_type text, p_id text, p_perm text) RETURNS boolean
@@ -320,34 +339,52 @@ END $f$;
                     req = self.required_perms(t, r.name)
                     for st, sr in src.subjects:
                         key = subject_key(st, sr)
-                        rows.append(f"({lit(t.name)}, {lit(r.name)}, {lit(key)}, {lit(src.shared_by or 'share')}, "
-                                    f"ARRAY[{', '.join(lit(p) for p in req)}]::text[], "
-                                    f"{lit(self.line_key(f'share {t.name}.{r.name} {key}', src.loc))})")
+                        rows.append(
+                            f"({lit(t.name)}, {lit(r.name)}, {lit(key)}, {lit(src.shared_by or 'share')}, "
+                            f"ARRAY[{', '.join(lit(p) for p in req)}]::text[], "
+                            f"{lit(self.line_key(f'share {t.name}.{r.name} {key}', src.loc))})"
+                        )
                         if src.shared_if:
                             ifs.append(
                                 f"    WHEN {lit(t.name + '.' + r.name + '.' + key)} THEN\n"
                                 f"      RETURN (SELECT coalesce(({row_cond(src.shared_if, 'share')}), false) FROM (SELECT "
                                 f"p_object_id::{t.pktype} AS object_id, p_subject_type AS subject_type, "
-                                f"p_subject_id AS subject_id, p_subject_relation AS subject_relation) share);")
+                                f"p_subject_id AS subject_id, p_subject_relation AS subject_relation) share);"
+                            )
         roles = [(t.name, subject_key(st, sr)) for t in self.types.values() if t.roles for st, sr in t.roles[0]]
         grantable = [(t.name, p) for t in self.types.values() if t.roles for p in t.roles[1]]
-        catalog = ["CREATE TABLE authz_int.shared_relations (object_type text, relation text, subject text, "
-                   "shared_by text, required text[], loc text, PRIMARY KEY (object_type, relation, subject));"]
+        catalog = [
+            "CREATE TABLE authz_int.shared_relations (object_type text, relation text, subject text, "
+            "shared_by text, required text[], loc text, PRIMARY KEY (object_type, relation, subject));"
+        ]
         if rows:
-            catalog.append("INSERT INTO authz_int.shared_relations VALUES\n  " + ",\n  ".join(dict.fromkeys(rows)) + ";")
-        catalog.append("CREATE TABLE authz_int.role_subjects (object_type text, subject text, PRIMARY KEY (object_type, subject));")
+            catalog.append(
+                "INSERT INTO authz_int.shared_relations VALUES\n  " + ",\n  ".join(dict.fromkeys(rows)) + ";"
+            )
+        catalog.append(
+            "CREATE TABLE authz_int.role_subjects (object_type text, subject text, PRIMARY KEY (object_type, subject));"
+        )
         if roles:
-            catalog.append("INSERT INTO authz_int.role_subjects VALUES " +
-                           ", ".join(dict.fromkeys(f"({lit(a)}, {lit(b)})" for a, b in roles)) + ";")
-        catalog.append("CREATE TABLE authz_int.role_grantable (object_type text, permission text, "
-                       "PRIMARY KEY (object_type, permission));")
+            catalog.append(
+                "INSERT INTO authz_int.role_subjects VALUES "
+                + ", ".join(dict.fromkeys(f"({lit(a)}, {lit(b)})" for a, b in roles))
+                + ";"
+            )
+        catalog.append(
+            "CREATE TABLE authz_int.role_grantable (object_type text, permission text, "
+            "PRIMARY KEY (object_type, permission));"
+        )
         if grantable:
-            catalog.append("INSERT INTO authz_int.role_grantable VALUES " +
-                           ", ".join(f"({lit(a)}, {lit(b)})" for a, b in grantable) + ";")
+            catalog.append(
+                "INSERT INTO authz_int.role_grantable VALUES "
+                + ", ".join(f"({lit(a)}, {lit(b)})" for a, b in grantable)
+                + ";"
+            )
         catalog.append("CREATE TABLE authz_int.caveats (name text PRIMARY KEY);")
         if self.pol.caveats:
-            catalog.append("INSERT INTO authz_int.caveats VALUES " +
-                           ", ".join(f"({lit(c)})" for c in self.pol.caveats) + ";")
+            catalog.append(
+                "INSERT INTO authz_int.caveats VALUES " + ", ".join(f"({lit(c)})" for c in self.pol.caveats) + ";"
+            )
         share_if = f"""-- 'shared if {{...}}' conditions (they run as the policy's owner, like permissions)
 CREATE FUNCTION authz_int.share_if(p_key text, p_object_id text, p_subject_type text, p_subject_id text,
   p_subject_relation text) RETURNS boolean
@@ -361,9 +398,14 @@ END $f$;"""
         owned = [t for t in self.types.values() if t.roles and t.roles_from]
         role_owned = "\n".join(
             f"    WHEN {lit(t.name)} THEN RETURN p_owner_type = {lit(self.role_owner_type(t))} AND p_owner_id IN "
-            f"({self.role_owners_sql(t, 'p_id' if t.composite else f'p_id::{t.pktype}')});" for t in owned)
-        role_owner_types = "\n".join(f"    WHEN {lit(t.name)} THEN RETURN {lit(self.role_owner_type(t))};" for t in owned)
-        role_relations = f"""-- `roles : ... from rel`: a role counts on an object only if what rel links the object to owns it
+            f"({self.role_owners_sql(t, 'p_id' if t.composite else f'p_id::{t.pktype}')});"
+            for t in owned
+        )
+        role_owner_types = "\n".join(
+            f"    WHEN {lit(t.name)} THEN RETURN {lit(self.role_owner_type(t))};" for t in owned
+        )
+        role_relations = (
+            f"""-- `roles : ... from rel`: a role counts on an object only if what rel links the object to owns it
 CREATE FUNCTION authz_int.role_owned(p_type text, p_id text, p_owner_type text, p_owner_id text) RETURNS boolean
 LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path FROM CURRENT AS $f$
 BEGIN
@@ -381,7 +423,8 @@ BEGIN
     ELSE RETURN NULL;
   END CASE;
 END $f$;
-""" + """-- relations ('role:<id>') of the custom roles that include a permission
+"""
+            + """-- relations ('role:<id>') of the custom roles that include a permission
 CREATE FUNCTION authz_int.role_relations(p_type text, p_perm text) RETURNS text[]
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $f$
   SELECT coalesce(array_agg('role:' || r.id), '{}') FROM authz.roles r
@@ -396,6 +439,7 @@ BEGIN
 END $f$;
 CREATE TRIGGER authz_role_gone AFTER DELETE ON authz.roles
   REFERENCING OLD TABLE AS old_rows FOR EACH STATEMENT EXECUTE FUNCTION authz_int.role_gone();"""
+        )
 
         link_columns = "id text, relation text, created_by text, created_at timestamptz, expires_at timestamptz"
         link_overloads = "\n".join(
@@ -403,7 +447,8 @@ CREATE TRIGGER authz_role_gone AFTER DELETE ON authz.roles
             f"  $$ SELECT * FROM authz.list_links(p_type, p_id::text) $$;\n"
             f"CREATE FUNCTION authz.revoke_link(p_type text, p_id {pt}, p_link text) RETURNS void LANGUAGE sql AS\n"
             f"  $$ SELECT authz.revoke_link(p_type, p_id::text, p_link) $$;"
-            for pt in sorted({t.pktype for t in self.types.values()} - {"text"}))
+            for pt in sorted({t.pktype for t in self.types.values()} - {"text"})
+        )
         api = f"""-- Share: needs the relation's 'shared by' permission on the object, and every permission
 -- the relation grants (you can't grant more than you hold); the subject must exist
 CREATE FUNCTION authz.share(p_type text, p_id text, p_relation text,
@@ -495,7 +540,7 @@ BEGIN
     END IF;
     IF NOT authz_int.share_if(p_type || '.' || p_relation || '.' || v_key, p_id, p_subject_type,
                               p_subject_id, p_subject_relation) THEN
-      RAISE EXCEPTION 'the policy does not allow this share (%)', {self.line_sql(None, None, 'v_rel.loc')} USING ERRCODE = 'insufficient_privilege', HINT = 'rowstile help AZ706';
+      RAISE EXCEPTION 'the policy does not allow this share (%)', {self.line_sql(None, None, "v_rel.loc")} USING ERRCODE = 'insufficient_privilege', HINT = 'rowstile help AZ706';
     END IF;
   END IF;
   IF p_caveat IS NOT NULL AND NOT EXISTS (SELECT 1 FROM authz_int.caveats WHERE name = p_caveat) THEN
@@ -749,13 +794,25 @@ END $r$;"""
             alias = q(table.split(".")[1])
             sel = next(r for r in self.rules if r.table == table and r.command == "select" and not r.columns)
             where = f"(SELECT authz_int.scope_cmd({lit(table)}, 'select')) AND {self.rule_sql(t, alias, sel)}"
-            masks = [(c, self.rule_sql(t, alias, r), r) for r in self.rules
-                     if r.table == table and r.command == "mask" for c in r.columns]
-            cases = "\n".join(f"      WHEN {lit(c)} THEN format('CASE WHEN %s THEN %I.%I END AS %I', {lit(cond)}, "
-                              f"{lit(table.split('.')[1])}, a.attname, a.attname)" for c, cond, r in masks)
-            col_expr = (f"CASE a.attname\n{cases}\n      ELSE format('%I.%I', {lit(table.split('.')[1])}, a.attname) END"
-                        if masks else f"format('%I.%I', {lit(table.split('.')[1])}, a.attname)")
-            notes = "".join(f"-- mask {', '.join(r.columns)} ({r.loc}): {r.src}\n" for r in {id(r): r for _, _, r in masks}.values())
+            masks = [
+                (c, self.rule_sql(t, alias, r), r)
+                for r in self.rules
+                if r.table == table and r.command == "mask"
+                for c in r.columns
+            ]
+            cases = "\n".join(
+                f"      WHEN {lit(c)} THEN format('CASE WHEN %s THEN %I.%I END AS %I', {lit(cond)}, "
+                f"{lit(table.split('.')[1])}, a.attname, a.attname)"
+                for c, cond, r in masks
+            )
+            col_expr = (
+                f"CASE a.attname\n{cases}\n      ELSE format('%I.%I', {lit(table.split('.')[1])}, a.attname) END"
+                if masks
+                else f"format('%I.%I', {lit(table.split('.')[1])}, a.attname)"
+            )
+            notes = "".join(
+                f"-- mask {', '.join(r.columns)} ({r.loc}): {r.src}\n" for r in {id(r): r for _, _, r in masks}.values()
+            )
             out.append(f"""-- {view}: the rows of {table} the user may select ({sel.loc}: {sel.src})
 {notes}-- @object view {qt(view)}
 DO $mv$
@@ -788,21 +845,24 @@ GRANT SELECT ON {qt(view)} TO {self.role};""")
             if r.command == "mask":
                 masked.setdefault(r.table, []).extend(r.columns)
         current = ", ".join(lit(qt(tb) + "|" + self.role) for tb in masked)
-        per_table = "\n".join(f"""  -- {tb}: {', '.join(cols)} only through {self.pol.views[tb]}
+        per_table = "\n".join(
+            f"""  -- {tb}: {", ".join(cols)} only through {self.pol.views[tb]}
   IF has_table_privilege({lit(self.role)}, {lit(qt(tb))}, 'SELECT')
      OR EXISTS (SELECT 1 FROM authz.masked_tables WHERE tbl = {lit(qt(tb))} AND role = {lit(self.role)}) THEN
     REVOKE SELECT ON {qt(tb)} FROM {self.role};
     SELECT string_agg(format('%I', attname), ', ') INTO cols FROM pg_attribute
     WHERE attrelid = {lit(qt(tb))}::regclass AND attnum > 0 AND NOT attisdropped
-      AND attname <> ALL (ARRAY[{', '.join(lit(c) for c in cols)}]);
+      AND attname <> ALL (ARRAY[{", ".join(lit(c) for c in cols)}]);
     IF cols IS NOT NULL THEN EXECUTE format('GRANT SELECT (%s) ON {qt(tb)} TO {self.role}', cols); END IF;
     INSERT INTO authz.masked_tables VALUES ({lit(qt(tb))}, {lit(self.role)}) ON CONFLICT DO NOTHING;
   END IF;
-  REVOKE SELECT ({', '.join(q(c) for c in cols)}) ON {qt(tb)} FROM {self.role};
-  IF {' OR '.join(f"has_column_privilege({lit(self.role)}, {lit(qt(tb))}, {lit(c)}, 'SELECT')" for c in cols)} THEN
+  REVOKE SELECT ({", ".join(q(c) for c in cols)}) ON {qt(tb)} FROM {self.role};
+  IF {" OR ".join(f"has_column_privilege({lit(self.role)}, {lit(qt(tb))}, {lit(c)}, 'SELECT')" for c in cols)} THEN
     RAISE EXCEPTION '{self.role} could still read masked columns of {tb} directly [AZ611]'
       USING HINT = 'SELECT on the table or these columns is granted to PUBLIC or to a role {self.role} belongs to; revoke it, then apply again';
-  END IF;""" for tb, cols in masked.items())
+  END IF;"""
+            for tb, cols in masked.items()
+        )
         out.append(f"""-- Column privileges: masked columns are read through the masked view only
 DO $mc$
 DECLARE r record; cols text;
@@ -816,9 +876,13 @@ BEGIN
   END LOOP;
 {per_table}
 END $mc$;""")
-        rows = ", ".join(f"({lit(qt(tb))}, {lit(c)}, {lit(qt(self.pol.views[tb]))})" for tb, cols in masked.items() for c in cols)
-        out.append("CREATE TABLE authz_int.masked_columns (tbl text, col text, view text, PRIMARY KEY (tbl, col));" +
-                   (f"\nINSERT INTO authz_int.masked_columns VALUES {rows};" if rows else ""))
+        rows = ", ".join(
+            f"({lit(qt(tb))}, {lit(c)}, {lit(qt(self.pol.views[tb]))})" for tb, cols in masked.items() for c in cols
+        )
+        out.append(
+            "CREATE TABLE authz_int.masked_columns (tbl text, col text, view text, PRIMARY KEY (tbl, col));"
+            + (f"\nINSERT INTO authz_int.masked_columns VALUES {rows};" if rows else "")
+        )
         return out
 
     def kept_views_sql(self) -> str:
@@ -858,8 +922,10 @@ END $kv$;"""
             t = next(t for t in self.types.values() if t.table == table)
             alias = q(table.split(".")[1])
             cmds = {r.command: r for r in rules if not r.columns}
-            policies.append(f"ALTER TABLE {qt(table)} ENABLE ROW LEVEL SECURITY;\n"
-                            + DESCENDANTS_RLS.replace("{table}", lit(qt(table))))
+            policies.append(
+                f"ALTER TABLE {qt(table)} ENABLE ROW LEVEL SECURITY;\n"
+                + DESCENDANTS_RLS.replace("{table}", lit(qt(table)))
+            )
             # refused writes raise with the rule and why (refusals.py); an allowed write never calls these
             explaining, refuse = self.refusal_sql(t, table, alias, rules)
             policies += explaining
@@ -873,33 +939,54 @@ END $kv$;"""
                         column_rules.append(self.column_rule_sql(t, alias, r, len(column_rules) + 1))
                     continue
                 # writes check one row at a time; select may read many, so it keeps the list-friendly views
-                sql = (f"((SELECT authz_int.scope_cmd({lit(table)}, {lit(r.command)})) AND "
-                       f"{self.rule_sql(t, alias, r, point=r.command != 'select', invoker=True)})")
+                sql = (
+                    f"((SELECT authz_int.scope_cmd({lit(table)}, {lit(r.command)})) AND "
+                    f"{self.rule_sql(t, alias, r, point=r.command != 'select', invoker=True)})"
+                )
                 head = f"-- {table} {r.command} ({r.loc}): {r.src}\n"
                 name = q("authz_" + r.command)
                 if r.command == "insert":
-                    policies.append(f"{head}CREATE POLICY {name} ON {qt(table)} FOR INSERT TO {self.role}\n"
-                                    f"  WITH CHECK ({sql}\n    OR {refuse['insert']});")
+                    policies.append(
+                        f"{head}CREATE POLICY {name} ON {qt(table)} FOR INSERT TO {self.role}\n"
+                        f"  WITH CHECK ({sql}\n    OR {refuse['insert']});"
+                    )
                 elif r.command == "update" and "update check" in cmds:
                     c = cmds["update check"]
                     check = self.rule_sql(t, alias, c, point=True, invoker=True)
                     head += f"-- {table} update after ({c.loc}): {c.src}\n"
-                    policies.append(f"{head}CREATE POLICY {name} ON {qt(table)} FOR UPDATE TO {self.role}\n"
-                                    f"  USING ({sql})\n  WITH CHECK ({check}\n    OR {refuse['update check']});")
+                    policies.append(
+                        f"{head}CREATE POLICY {name} ON {qt(table)} FOR UPDATE TO {self.role}\n"
+                        f"  USING ({sql})\n  WITH CHECK ({check}\n    OR {refuse['update check']});"
+                    )
                 elif r.command == "update":
                     # the new row is checked as Postgres would anyway (with USING), then refused with the reason
-                    policies.append(f"{head}CREATE POLICY {name} ON {qt(table)} FOR UPDATE TO {self.role}\n"
-                                    f"  USING ({sql})\n  WITH CHECK ({sql}\n    OR {refuse['update']});")
+                    policies.append(
+                        f"{head}CREATE POLICY {name} ON {qt(table)} FOR UPDATE TO {self.role}\n"
+                        f"  USING ({sql})\n  WITH CHECK ({sql}\n    OR {refuse['update']});"
+                    )
                 else:
-                    policies.append(f"{head}CREATE POLICY {name} ON {qt(table)} FOR {r.command.upper()} TO {self.role}\n"
-                                    f"  USING ({sql});")
+                    policies.append(
+                        f"{head}CREATE POLICY {name} ON {qt(table)} FOR {r.command.upper()} TO {self.role}\n"
+                        f"  USING ({sql});"
+                    )
                 policies.append(f"COMMENT ON POLICY {name} ON {qt(table)} IS 'rowstile';")
 
-        shared_types = {t.name for t in self.types.values()
-                        for r in t.relations.values() for src in r.sources if src.kind in ("shared", "roles")}
-        shared_types |= {st for t in self.types.values() for r in t.relations.values()
-                         for src in r.sources if src.kind in ("shared", "roles")
-                         for st, _ in src.subjects if st in self.types}
+        shared_types = {
+            t.name
+            for t in self.types.values()
+            for r in t.relations.values()
+            for src in r.sources
+            if src.kind in ("shared", "roles")
+        }
+        shared_types |= {
+            st
+            for t in self.types.values()
+            for r in t.relations.values()
+            for src in r.sources
+            if src.kind in ("shared", "roles")
+            for st, _ in src.subjects
+            if st in self.types
+        }
         forget_types = [n for n in self.types if n in shared_types]
         verify = " AND ".join([f"authz_int.{q(n + '_verify')}()" for n in self.trees.values()] or ["true"])
         checks = "\n".join(
@@ -907,14 +994,18 @@ END $kv$;"""
             f"  ELSIF NOT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = to_regclass({lit(qt(tbl))})\n"
             f"                    AND attname = {lit(col)} AND attnum > 0 AND NOT attisdropped) THEN\n"
             f"    missing := missing || E'\\n  {loc}: column {col} not found in {tbl} [AZ601]';\n  END IF;"
-            for tbl, col, loc in dict.fromkeys((a, b, str(c)) for a, b, c in self.columns))
+            for tbl, col, loc in dict.fromkeys((a, b, str(c)) for a, b, c in self.columns)
+        )
         pk_checks = "\n".join(
             f"  IF to_regclass({lit(qt(tbl))}) IS NOT NULL AND (SELECT atttypid FROM pg_attribute WHERE attrelid = "
             f"to_regclass({lit(qt(tbl))}) AND attname = {lit(pk)}) <> to_regtype({lit(pkt)}) THEN\n"
             f"    missing := missing || E'\\n  {loc}: {tbl}.{pk} is not {pkt}; write its type after the key, e.g. ({pk} uuid) [AZ602]';\n"
-            f"  END IF;" for tbl, pk, pkt, loc in self.pk_checks)
+            f"  END IF;"
+            for tbl, pk, pkt, loc in self.pk_checks
+        )
         rule_tables = ", ".join(f"{lit(qt(tb))}::regclass" for tb in by_table)
-        fk_warning = f"""-- Foreign keys that delete governed rows skip row-level security
+        fk_warning = (
+            f"""-- Foreign keys that delete governed rows skip row-level security
 DO $fk$
 DECLARE c record;
 BEGIN
@@ -924,34 +1015,54 @@ BEGIN
     RAISE WARNING 'foreign key % on % is ON DELETE CASCADE: deleting a row of % also deletes rows of %, and cascades skip row-level security, so a user could remove rows they cannot see. Use ON DELETE RESTRICT unless that is intended.',
       c.conname, c.child, c.parent, c.child;
   END LOOP;
-END $fk$;""" if by_table else ""
+END $fk$;"""
+            if by_table
+            else ""
+        )
 
         typed = [t for t in self.types.values() if t.pktype != "text"]
         index_names = [ident(f"shares_obj_{t.name}_{t.pktype}") for t in typed]
-        grant_indexes = [f"""-- per-type indexes on share ids, for lookups by object
+        grant_indexes = [
+            f"""-- per-type indexes on share ids, for lookups by object
 DO $gi$
 DECLARE i record;
 BEGIN
   FOR i IN SELECT c.relname FROM pg_index x JOIN pg_class c ON c.oid = x.indexrelid
            WHERE x.indrelid = 'authz.shares'::regclass AND (c.relname LIKE 'shares\\_obj\\_%' OR c.relname LIKE 'grants\\_obj\\_%')
-             AND c.relname <> ALL (ARRAY[{', '.join(lit(n) for n in index_names)}]::text[]) LOOP
+             AND c.relname <> ALL (ARRAY[{", ".join(lit(n) for n in index_names)}]::text[]) LOOP
     EXECUTE format('DROP INDEX authz.%I', i.relname);
   END LOOP;
-END $gi$;"""] + [f"CREATE INDEX IF NOT EXISTS {q(n)} ON authz.shares ((object_id::{t.pktype}), relation) "
-                  f"WHERE object_type = {lit(t.name)};" for t, n in zip(typed, index_names, strict=True)]
+END $gi$;"""
+        ] + [
+            f"CREATE INDEX IF NOT EXISTS {q(n)} ON authz.shares ((object_id::{t.pktype}), relation) "
+            f"WHERE object_type = {lit(t.name)};"
+            for t, n in zip(typed, index_names, strict=True)
+        ]
         canonical = CANONICAL_SHARES if any(t.pktype != "text" or t.composite for t in self.types.values()) else ""
         # (a subject id '*' names no row: it is every signed-in principal of the type, user:*)
-        sweep = (canonical + "-- Shares on rows that no longer exist (deleted while no trigger watched them) are dropped\n" +
-                 "\n".join(f"DELETE FROM authz.shares g WHERE g.{side}_type = {lit(t.name)} "
-                           + ("AND g.subject_id <> '*' " if side == "subject" else "") + "AND NOT EXISTS "
-                           f"(SELECT 1 FROM {qt(t.table)} x WHERE {self.key_text(t, 'x')} = g.{side}_id);"
-                           for t in self.types.values() for side in ("object", "subject")))
+        sweep = (
+            canonical
+            + "-- Shares on rows that no longer exist (deleted while no trigger watched them) are dropped\n"
+            + "\n".join(
+                f"DELETE FROM authz.shares g WHERE g.{side}_type = {lit(t.name)} "
+                + ("AND g.subject_id <> '*' " if side == "subject" else "")
+                + "AND NOT EXISTS "
+                f"(SELECT 1 FROM {qt(t.table)} x WHERE {self.key_text(t, 'x')} = g.{side}_id);"
+                for t in self.types.values()
+                for side in ("object", "subject")
+            )
+        )
         catalog_share, share_internal, share_api = self.share_sql()
         # these may add views, so they run before the views are written out
-        insight = ["-- these functions call each other; their bodies are checked when first used\n"
-                   "SET LOCAL check_function_bodies = off;",
-                   *self.who_sql(), *self.why_sql(), self.insight_api_sql(), self.invariant_sql(),
-                   "SET LOCAL check_function_bodies = on;"]
+        insight = [
+            "-- these functions call each other; their bodies are checked when first used\n"
+            "SET LOCAL check_function_bodies = off;",
+            *self.who_sql(),
+            *self.why_sql(),
+            self.insight_api_sql(),
+            self.invariant_sql(),
+            "SET LOCAL check_function_bodies = on;",
+        ]
         masked_views = self.masked_view_sql()
         self._list_cases = self.list_cases_sql()
         perms = [(t, p) for t in self.types.values() for p in self.public_perms(t)]
@@ -959,27 +1070,42 @@ END $gi$;"""] + [f"CREATE INDEX IF NOT EXISTS {q(n)} ON authz.shares ((object_id
             "-- per type: its table, key, how to find a row x by an id ($1, text), and a row's id (columns unqualified)\n"
             "CREATE TABLE authz_int.types (name text PRIMARY KEY, tbl text NOT NULL, pk text NOT NULL, pktype text NOT NULL,\n"
             "  keytype text NOT NULL, find text NOT NULL, id_of text NOT NULL, principal boolean NOT NULL);",
-            "INSERT INTO authz_int.types VALUES\n  " + ",\n  ".join(
+            "INSERT INTO authz_int.types VALUES\n  "
+            + ",\n  ".join(
                 f"({lit(t.name)}, {lit(qt(t.table))}, {lit(', '.join(c for c, _ in t.key))}, {lit(t.pktype)}, "
                 f"{lit(t.keytype)}, {lit(self.key_is(t, 'x', '$1' if t.composite else '$1::' + t.keytype))}, {lit(self.bare_key_text(t))}, {str(t.principal).lower()})"
-                for t in self.types.values()) + ";",
+                for t in self.types.values()
+            )
+            + ";",
             "CREATE TABLE authz_int.perms (type text, perm text, PRIMARY KEY (type, perm));",
-            ("INSERT INTO authz_int.perms VALUES\n  " + ",\n  ".join(
-                f"({lit(t.name)}, {lit(p)})" for t, p in perms) + ";") if perms else "",
+            (
+                "INSERT INTO authz_int.perms VALUES\n  "
+                + ",\n  ".join(f"({lit(t.name)}, {lit(p)})" for t, p in perms)
+                + ";"
+            )
+            if perms
+            else "",
             "CREATE TABLE authz_int.locks (type text PRIMARY KEY, n bigint NOT NULL);",
             "-- each inheritance table's definition and the tables it reads, to keep it on the next apply if they are the same\n"
             "CREATE TABLE authz_int.trees (name text PRIMARY KEY, hash text NOT NULL, oids oid[] NOT NULL);",
-            ("INSERT INTO authz_int.trees VALUES\n  " + ",\n  ".join(
-                f"({lit(n)}, {lit(h)}, {self.oids_sql(tables)})" for n, (h, tables) in self.tree_keep.items()) + ";")
-            if self.tree_keep else "",
-            *catalog_share]
+            (
+                "INSERT INTO authz_int.trees VALUES\n  "
+                + ",\n  ".join(
+                    f"({lit(n)}, {lit(h)}, {self.oids_sql(tables)})" for n, (h, tables) in self.tree_keep.items()
+                )
+                + ";"
+            )
+            if self.tree_keep
+            else "",
+            *catalog_share,
+        ]
         drop_generated = f"""-- Functions this policy generates are recreated (whatever their old signatures). One that something of
 -- the app's uses (a view that calls authz.can) stays, to be replaced in place
 DO $g$
 DECLARE f record; kept text := '';
 BEGIN
   FOR f IN SELECT p.oid, p.ctid, p.oid::regprocedure AS name FROM pg_proc p WHERE p.pronamespace = to_regnamespace('authz')
-           AND p.proname = ANY (ARRAY[{', '.join(lit(n) for n in GENERATED_FUNCTIONS)}]) LOOP
+           AND p.proname = ANY (ARRAY[{", ".join(lit(n) for n in GENERATED_FUNCTIONS)}]) LOOP
     BEGIN
       EXECUTE format('DROP FUNCTION %s', f.name);
     EXCEPTION WHEN dependent_objects_still_exist THEN
@@ -1019,92 +1145,127 @@ BEGIN
   END IF;
 END $w$;"""
         # right after the shared relations are written (so a migration that changes them warns too)
-        at = max(i for i, c in enumerate(catalog) if c.startswith(("CREATE TABLE authz_int.shared_relations",
-                                                                     "INSERT INTO authz_int.shared_relations")))
+        at = max(
+            i
+            for i, c in enumerate(catalog)
+            if c.startswith(("CREATE TABLE authz_int.shared_relations", "INSERT INTO authz_int.shared_relations"))
+        )
         catalog.insert(at + 1, shares_warning)
         uid_check, uid_fn = self.uid_sql().split("CREATE OR REPLACE FUNCTION authz.uid()")
         # What the migrations (migrate.py) do with each part: 'full', only in the whole script (it recreates
         # everything); 'always', in every migration; 'changed', when its SQL changed; 'created', also when
         # anything was made; 'objects', what changed of its functions, views, tables, triggers and policies;
         # 'tree', an inheritance tree, rebuilt when its definition changed.
-        parts = [("full", "header", f"-- Generated by rowstile from {source_name}. Edit the policy file, not this file."),
-                 ("full", "begin", "BEGIN;" if transaction else ""),
-                 ("full", "lock_timeout",
-                  "-- Applying locks the app's tables. Wait for them 10 s at most (unless lock_timeout is set) instead\n"
-                  "-- of queueing every query behind this transaction on a busy database; retry when it is quieter\n"
-                  "SELECT pg_catalog.set_config('lock_timeout', '10s', true) "
-                  "WHERE pg_catalog.current_setting('lock_timeout') IN ('0', '0ms');"),
-                 ("always", "search_path", self.search_path_sql()),
-                 # applying twice in one transaction: the first apply's table is still there
-                 ("full", "reset", "DROP TABLE IF EXISTS pg_temp.authz_old_tables;"),
-                 ("full", "reset", DROP_OLD_POLICIES),
-                 ("full", "reset", RESET_MASKED_VIEWS),
-                 ("full", "reset", self.keep_sql()),
-                 ("full", "reset", "DROP SCHEMA IF EXISTS authz_gen, authz_int CASCADE;"),
-                 ("full", "reset", drop_generated),
-                 ("changed", "base", BASE_SQL),
-                 ("changed", "tables",
-                  f"DO $chk$\nDECLARE missing text := '';\nBEGIN\n{checks}\n{pk_checks}\n"
-                  f"  IF missing <> '' THEN RAISE EXCEPTION 'the policy does not match this database:%', missing; END IF;\nEND $chk$;"),
-                 ("full", "uid_type", uid_check),
-                 ("objects", "uid", "CREATE OR REPLACE FUNCTION authz.uid()" + uid_fn),
-                 ("objects", "schemas", "CREATE SCHEMA authz_gen;\nCREATE SCHEMA authz_int;"),
-                 ("objects", "session", self.session_sql()),
-                 ("objects", "keys", self.keys_sql()),
-                 ("objects", "principals", self.principals_sql()),
-                 *[("objects", "catalog", c) for c in catalog if c],
-                 ("changed", "share_indexes", "\n".join(grant_indexes)),
-                 ("objects", "scopes", self.scope_sql()),
-                 ("objects", "feed", self.feed_sql()),
-                 ("changed", "sweep",
-                  "DO $r$ BEGIN PERFORM set_config('authz_ctx.reason', 'applying the policy: the row was deleted', true); END $r$;\n\n"
-                  + sweep + "\n\nDO $r$ BEGIN PERFORM set_config('authz_ctx.reason', '', true); END $r$;"),
-                 ("objects", "share_internal", share_internal),
-                 *[("tree", name, sql) for name, sql in zip(self.tree_names, self.tree_sql, strict=True)],
-                 ("full", "keep", "-- trees kept but no longer used (none, normally) go with the holding schema\n"
-                                  "DROP SCHEMA authz_keep CASCADE;"),
-                 *[("objects", "forget", self.forget_sql(self.T(n))) for n in forget_types],
-                 *[("objects", "audit", x) for x in self.relationship_audit_sql()],
-                 *[("objects", "views", x) for x in self.view_sql],
-                 *[("objects", "rules", x) for x in policies + column_rules],
-                 ("changed", "cascades", fk_warning),
-                 *[("objects", "masks", x) for x in masked_views[:-2]],
-                 ("changed", "mask_privileges", masked_views[-2]),
-                 ("objects", "masks", masked_views[-1]),
-                 ("objects", "api", self.api_sql()),
-                 ("objects", "share_api", share_api),
-                 ("objects", "explain_rule", self.explain_rule_sql(list(by_table))),
-                 ("objects", "who_among", self.who_among_sql()),
-                 *[("objects", "insight", x) for x in insight],
-                 ("objects", "identity", self.identity_api_sql()),
-                 ("objects", "workflow", self.workflow_sql()),
-                 ("objects", "lint", self.lint_sql()),
-                 ("objects", "connection_check", self.connection_check_sql()),
-                 ("objects", "verify", "-- Admin check: every inheritance table matches a from-scratch rebuild\n"
-                                       "CREATE FUNCTION authz.verify() RETURNS boolean LANGUAGE sql STABLE AS\n"
-                                       f"  $$ SELECT {verify} $$;"),
-                 # last: the generators above say which lines their messages name
-                 ("objects", "lines", self.lines_sql()),
-                 ("full", "kept_functions", kept_functions),
-                 ("full", "kept_views", self.kept_views_sql()),
-                 ("full", "lost_rules", LOST_RULES),
-                 ("always", "revoke", self.revoke_sql()),
-                 ("always", "revoke", "REVOKE ALL ON ALL FUNCTIONS IN SCHEMA authz FROM PUBLIC;"),
-                 ("always", "grant_usage", f"GRANT USAGE ON SCHEMA authz, authz_gen TO {self.role};"),
-                 ("created", "grant_views", f"GRANT SELECT ON ALL TABLES IN SCHEMA authz_gen TO {self.role};"),
-                 ("always", "revoke", "REVOKE ALL ON ALL FUNCTIONS IN SCHEMA authz_gen FROM PUBLIC;"),
-                 ("created", "grant_functions", f"GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA authz_gen TO {self.role};"),
-                 ("created", "grant_api", "GRANT EXECUTE ON FUNCTION\n  " + ",\n  ".join(executes) + f"\n  TO {self.role};"),
-                 ("full", "commit", "COMMIT;" if transaction else "")]
+        parts = [
+            ("full", "header", f"-- Generated by rowstile from {source_name}. Edit the policy file, not this file."),
+            ("full", "begin", "BEGIN;" if transaction else ""),
+            (
+                "full",
+                "lock_timeout",
+                "-- Applying locks the app's tables. Wait for them 10 s at most (unless lock_timeout is set) instead\n"
+                "-- of queueing every query behind this transaction on a busy database; retry when it is quieter\n"
+                "SELECT pg_catalog.set_config('lock_timeout', '10s', true) "
+                "WHERE pg_catalog.current_setting('lock_timeout') IN ('0', '0ms');",
+            ),
+            ("always", "search_path", self.search_path_sql()),
+            # applying twice in one transaction: the first apply's table is still there
+            ("full", "reset", "DROP TABLE IF EXISTS pg_temp.authz_old_tables;"),
+            ("full", "reset", DROP_OLD_POLICIES),
+            ("full", "reset", RESET_MASKED_VIEWS),
+            ("full", "reset", self.keep_sql()),
+            ("full", "reset", "DROP SCHEMA IF EXISTS authz_gen, authz_int CASCADE;"),
+            ("full", "reset", drop_generated),
+            ("changed", "base", BASE_SQL),
+            (
+                "changed",
+                "tables",
+                f"DO $chk$\nDECLARE missing text := '';\nBEGIN\n{checks}\n{pk_checks}\n"
+                f"  IF missing <> '' THEN RAISE EXCEPTION 'the policy does not match this database:%', missing; END IF;\nEND $chk$;",
+            ),
+            ("full", "uid_type", uid_check),
+            ("objects", "uid", "CREATE OR REPLACE FUNCTION authz.uid()" + uid_fn),
+            ("objects", "schemas", "CREATE SCHEMA authz_gen;\nCREATE SCHEMA authz_int;"),
+            ("objects", "session", self.session_sql()),
+            ("objects", "keys", self.keys_sql()),
+            ("objects", "principals", self.principals_sql()),
+            *[("objects", "catalog", c) for c in catalog if c],
+            ("changed", "share_indexes", "\n".join(grant_indexes)),
+            ("objects", "scopes", self.scope_sql()),
+            ("objects", "feed", self.feed_sql()),
+            (
+                "changed",
+                "sweep",
+                "DO $r$ BEGIN PERFORM set_config('authz_ctx.reason', 'applying the policy: the row was deleted', true); END $r$;\n\n"
+                + sweep
+                + "\n\nDO $r$ BEGIN PERFORM set_config('authz_ctx.reason', '', true); END $r$;",
+            ),
+            ("objects", "share_internal", share_internal),
+            *[("tree", name, sql) for name, sql in zip(self.tree_names, self.tree_sql, strict=True)],
+            (
+                "full",
+                "keep",
+                "-- trees kept but no longer used (none, normally) go with the holding schema\n"
+                "DROP SCHEMA authz_keep CASCADE;",
+            ),
+            *[("objects", "forget", self.forget_sql(self.T(n))) for n in forget_types],
+            *[("objects", "audit", x) for x in self.relationship_audit_sql()],
+            *[("objects", "views", x) for x in self.view_sql],
+            *[("objects", "rules", x) for x in policies + column_rules],
+            ("changed", "cascades", fk_warning),
+            *[("objects", "masks", x) for x in masked_views[:-2]],
+            ("changed", "mask_privileges", masked_views[-2]),
+            ("objects", "masks", masked_views[-1]),
+            ("objects", "api", self.api_sql()),
+            ("objects", "share_api", share_api),
+            ("objects", "explain_rule", self.explain_rule_sql(list(by_table))),
+            ("objects", "who_among", self.who_among_sql()),
+            *[("objects", "insight", x) for x in insight],
+            ("objects", "identity", self.identity_api_sql()),
+            ("objects", "workflow", self.workflow_sql()),
+            ("objects", "lint", self.lint_sql()),
+            ("objects", "connection_check", self.connection_check_sql()),
+            (
+                "objects",
+                "verify",
+                "-- Admin check: every inheritance table matches a from-scratch rebuild\n"
+                "CREATE FUNCTION authz.verify() RETURNS boolean LANGUAGE sql STABLE AS\n"
+                f"  $$ SELECT {verify} $$;",
+            ),
+            # last: the generators above say which lines their messages name
+            ("objects", "lines", self.lines_sql()),
+            ("full", "kept_functions", kept_functions),
+            ("full", "kept_views", self.kept_views_sql()),
+            ("full", "lost_rules", LOST_RULES),
+            ("always", "revoke", self.revoke_sql()),
+            ("always", "revoke", "REVOKE ALL ON ALL FUNCTIONS IN SCHEMA authz FROM PUBLIC;"),
+            ("always", "grant_usage", f"GRANT USAGE ON SCHEMA authz, authz_gen TO {self.role};"),
+            ("created", "grant_views", f"GRANT SELECT ON ALL TABLES IN SCHEMA authz_gen TO {self.role};"),
+            ("always", "revoke", "REVOKE ALL ON ALL FUNCTIONS IN SCHEMA authz_gen FROM PUBLIC;"),
+            ("created", "grant_functions", f"GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA authz_gen TO {self.role};"),
+            ("created", "grant_api", "GRANT EXECUTE ON FUNCTION\n  " + ",\n  ".join(executes) + f"\n  TO {self.role};"),
+            ("full", "commit", "COMMIT;" if transaction else ""),
+        ]
         self.parts = [(mode, name, sql.strip()) for mode, name, sql in parts if sql and sql.strip()]
         # the whole script replaces the functions the reset kept (migrations replace the ones that changed)
-        return re.sub(r"^CREATE FUNCTION authz\.", "CREATE OR REPLACE FUNCTION authz.",
-                      "\n\n".join(sql for _, _, sql in self.parts), flags=re.M) + "\n"
+        return (
+            re.sub(
+                r"^CREATE FUNCTION authz\.",
+                "CREATE OR REPLACE FUNCTION authz.",
+                "\n\n".join(sql for _, _, sql in self.parts),
+                flags=re.M,
+            )
+            + "\n"
+        )
 
     @staticmethod
     def oids_sql(tables: list[str]) -> str:
-        return "ARRAY[" + ", ".join(f"to_regclass({lit(qt(tb) if '.' in tb and not tb.startswith('authz.') else tb)})::oid"
-                                    for tb in tables) + "]::oid[]"
+        return (
+            "ARRAY["
+            + ", ".join(
+                f"to_regclass({lit(qt(tb) if '.' in tb and not tb.startswith('authz.') else tb)})::oid" for tb in tables
+            )
+            + "]::oid[]"
+        )
 
     def keep_sql(self) -> str:
         """Inheritance tables of the last apply whose definition and tables are the same now: moved aside
@@ -1139,14 +1300,19 @@ END $keep$;"""
         for t in self.types.values():
             if not t.principal or t.name == "user":
                 continue
-            cast = (f"CASE WHEN {SESSION_OK} AND {PT} = {lit(t.name)} "
-                    f"AND pg_catalog.pg_input_is_valid({setting}, {lit(t.pktype)}) THEN {setting}::{t.pktype} END")
+            cast = (
+                f"CASE WHEN {SESSION_OK} AND {PT} = {lit(t.name)} "
+                f"AND pg_catalog.pg_input_is_valid({setting}, {lit(t.pktype)}) THEN {setting}::{t.pktype} END"
+            )
             where = f" AND coalesce(({on_row(t.where, 'w')}), false)" if t.where else ""
             body = f"BEGIN RETURN (SELECT w.{q(self.pk(t))} FROM {qt(t.table)} w WHERE w.{q(self.pk(t))} = ({cast}){where}); END"
             attrs = "LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path FROM CURRENT"
-            out.append(f"-- the signed-in {t.name}, if a {t.name} is signed in (an id its table doesn't have"
-                       + (", or one failing the type's where," if t.where else "") + " counts as nobody)\n"
-                       f"CREATE FUNCTION authz_int.{q(t.name + '__me')}() RETURNS {t.pktype} {attrs} AS $me$ {body} $me$;")
+            out.append(
+                f"-- the signed-in {t.name}, if a {t.name} is signed in (an id its table doesn't have"
+                + (", or one failing the type's where," if t.where else "")
+                + " counts as nobody)\n"
+                f"CREATE FUNCTION authz_int.{q(t.name + '__me')}() RETURNS {t.pktype} {attrs} AS $me$ {body} $me$;"
+            )
             cases.append(f"    WHEN {lit(t.name)} THEN principal_id := authz_int.{q(t.name + '__me')}()::text;")
         whens = "\n".join(cases)
         out.append(f"""-- Who is signed in, whatever their type: SELECT * FROM authz.principal()
@@ -1178,8 +1344,11 @@ END $f$;""")
         cases = "\n".join(
             f"    WHEN {lit(t.name)} THEN\n"
             f"      IF pg_catalog.pg_input_is_valid(p_id, {lit(t.keytype)}) THEN RETURN p_id::{t.keytype}::text; END IF;"
-            for t in self.types.values() if t.pktype != "text" or t.composite)
-        canon = f"""-- an id as it is stored and compared: '(1, 42)' -> '(1,42)', '007' -> '7' (invalid ids as they are)
+            for t in self.types.values()
+            if t.pktype != "text" or t.composite
+        )
+        canon = (
+            f"""-- an id as it is stored and compared: '(1, 42)' -> '(1,42)', '007' -> '7' (invalid ids as they are)
 CREATE FUNCTION authz_int.canon(p_type text, p_id text) RETURNS text
 LANGUAGE plpgsql STABLE SET search_path = pg_catalog, pg_temp AS $f$
 BEGIN
@@ -1188,11 +1357,15 @@ BEGIN
     ELSE NULL;
   END CASE;
   RETURN p_id;
-END $f$;""" if cases else """CREATE FUNCTION authz_int.canon(p_type text, p_id text) RETURNS text
+END $f$;"""
+            if cases
+            else """CREATE FUNCTION authz_int.canon(p_type text, p_id text) RETURNS text
 LANGUAGE sql IMMUTABLE AS $f$ SELECT p_id $f$;"""
+        )
         # views cast stored ids to the key's type ('007' is 7), while the triggers that remove a row's shares and
         # apply's sweep compare text: every stored id must be canonical, whoever wrote it
-        trigger = """-- shares written directly get canonical ids too
+        trigger = (
+            """-- shares written directly get canonical ids too
 CREATE FUNCTION authz_int.shares_canon() RETURNS trigger
 LANGUAGE plpgsql SET search_path = pg_catalog, pg_temp AS $f$
 BEGIN
@@ -1201,7 +1374,10 @@ BEGIN
   RETURN NEW;
 END $f$;
 CREATE TRIGGER authz_shares_canon BEFORE INSERT OR UPDATE OF object_type, object_id, subject_type, subject_id
-  ON authz.shares FOR EACH ROW EXECUTE FUNCTION authz_int.shares_canon();""" if cases else ""
+  ON authz.shares FOR EACH ROW EXECUTE FUNCTION authz_int.shares_canon();"""
+            if cases
+            else ""
+        )
         return "\n".join(types + [canon, trigger])
 
 
@@ -1270,7 +1446,8 @@ END $mv$;"""
 
 # What apply does with them: gone, to be made again; one that something of the app's is built on (a view over it)
 # can't be dropped, so it is emptied in place, and CREATE OR REPLACE VIEW defines it again further down
-RESET_MASKED_VIEWS = f"""-- The masked views the previous version made are made again; one that something is built on stays, emptied
+RESET_MASKED_VIEWS = (
+    f"""-- The masked views the previous version made are made again; one that something is built on stays, emptied
 DO $mv$
 DECLARE v record; cols text;
 BEGIN
@@ -1279,11 +1456,14 @@ BEGIN
     BEGIN
       EXECUTE format('DROP VIEW %s', v.name);
     EXCEPTION WHEN dependent_objects_still_exist THEN
-      SELECT """ + STUB_COLUMNS.replace("VIEW", "v.oid") + """ INTO cols;
+      SELECT """
+    + STUB_COLUMNS.replace("VIEW", "v.oid")
+    + """ INTO cols;
       EXECUTE format('CREATE OR REPLACE VIEW %s AS SELECT %s WHERE false', v.name, cols);
     END;
   END LOOP;
 END $mv$;"""
+)
 
 LOST_RULES = """-- Tables that had rules before but have none now keep row-level security on
 DO $l$

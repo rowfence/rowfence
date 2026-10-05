@@ -12,6 +12,7 @@ The integrations: `rowstile.fastapi` (one line: Rowstile(app, engine, user=...))
 and async engines, SQLModel too), `rowstile.psycopg`, `rowstile.asyncpg`, `rowstile.alembic` (autogenerate
 leaves rowstile's objects alone) and `rowstile.testing` (pytest fixtures).
 """
+
 from __future__ import annotations
 
 import contextlib
@@ -29,7 +30,7 @@ if TYPE_CHECKING:
 Id: TypeAlias = "int | str"
 # who a transaction acts for: 42, '42' (a user, whatever the id holds), ('service', 3), a Principal, or None (nobody)
 Who: TypeAlias = "Principal | Id | tuple[str, Id | None] | None"
-Problem: TypeAlias = "dict[str, str | int | list[str] | None]"     # an RFC 9457 problem body
+Problem: TypeAlias = "dict[str, str | int | list[str] | None]"  # an RFC 9457 problem body
 P = ParamSpec("P")
 R = TypeVar("R")
 
@@ -38,6 +39,7 @@ R = TypeVar("R")
 class Principal:
     """Who a transaction acts for: a user (type 'user'), another principal type the policy declares
     (a service, a bot), or nobody (id None: only what `anyone` may see)."""
+
     type: str = "user"
     id: str | None = None
 
@@ -80,7 +82,7 @@ _writes: contextvars.ContextVar[list[_Write] | None] = contextvars.ContextVar("r
 
 
 class _Unset(enum.Enum):
-    UNSET = "unset"            # an argument left out: whoever the code acts for now
+    UNSET = "unset"  # an argument left out: whoever the code acts for now
 
 
 _UNSET = _Unset.UNSET
@@ -116,13 +118,16 @@ def job(who: Who) -> Callable[[Callable[P, R]], Callable[P, R]]:
             async def run_async(*a: P.args, **kw: P.kwargs) -> object:
                 with acting_as(who):
                     return await coroutine(*a, **kw)
-            return cast("Callable[P, R]", run_async)       # R is the coroutine run_async returns too
+
+            return cast("Callable[P, R]", run_async)  # R is the coroutine run_async returns too
 
         @functools.wraps(fn)
         def run(*a: P.args, **kw: P.kwargs) -> R:
             with acting_as(who):
                 return fn(*a, **kw)
+
         return run
+
     return wrap
 
 
@@ -149,18 +154,27 @@ def act_as_sql(who: Who | _Unset = _UNSET) -> str:
 # --- errors -------------------------------------------------------------------------------------------
 class Refused(Exception):
     """The database refused a write, and said why: the rule (table and command), and the explanation."""
-    code = "AZ709"                      # rowstile help AZ709
 
-    def __init__(self, message: str, table: str | None = None, command: str | None = None,
-                 why: Sequence[str] = ()) -> None:
+    code = "AZ709"  # rowstile help AZ709
+
+    def __init__(
+        self, message: str, table: str | None = None, command: str | None = None, why: Sequence[str] = ()
+    ) -> None:
         super().__init__(message)
         self.message, self.table, self.command, self.why = message, table, command, list(why)
 
     def problem(self) -> Problem:
         """An RFC 9457 problem body for a 403."""
-        return {"type": "https://rowstile.dev/problems/refused", "title": "Forbidden", "status": 403,
-                "detail": self.message, "table": self.table, "command": self.command, "why": self.why,
-                "code": self.code}
+        return {
+            "type": "https://rowstile.dev/problems/refused",
+            "title": "Forbidden",
+            "status": 403,
+            "detail": self.message,
+            "table": self.table,
+            "command": self.command,
+            "why": self.why,
+            "code": self.code,
+        }
 
 
 class NotFound(Exception):
@@ -171,13 +185,18 @@ class NotFound(Exception):
         self.table, self.id = table, None if id_ is None else str(id_)
 
     def problem(self) -> Problem:
-        return {"type": "https://rowstile.dev/problems/not-found", "title": "Not Found", "status": 404,
-                "detail": str(self)}
+        return {
+            "type": "https://rowstile.dev/problems/not-found",
+            "title": "Not Found",
+            "status": 404,
+            "detail": str(self),
+        }
 
 
 class NotSignedIn(Exception):
     """A query that needs to know who is asking ran in a transaction nobody signed in to (strict sign-in)."""
-    code = "AZ701"                      # rowstile help AZ701
+
+    code = "AZ701"  # rowstile help AZ701
 
 
 class ConnectionProblem(RuntimeError):
@@ -221,6 +240,7 @@ def error_code(exc: BaseException) -> str | None:
     """rowstile's code for a database error (AZ709; `rowstile help AZ709` says what it means): from its HINT,
     where the runtime puts it, or its message. None for an error rowstile didn't raise."""
     import re
+
     errs = _db_error(exc)
     for text in (_field(errs, "message_hint", "hint"), _field(errs, "message_primary", "message") or str(errs[-1])):
         m = re.search(r"(?:rowstile|rowfence) help (AZ\d{3})|\[(AZ\d{3})\]", text or "")
@@ -251,13 +271,21 @@ def refusal(exc: BaseException) -> Refused | None:
         # Postgres's own words, not rowstile's: the row was allowed in, but may not be read back
         # (INSERT ... RETURNING, or an ORM that reads the new row), which the select rule decides
         import re
+
         m = re.search(r'for table "([^"]+)"', message)
-        return Refused(f"{message}: the write was allowed, but the select rule doesn't let this user read the row "
-                       f"back (RETURNING); read it back only if the select rule allows it", m.group(1) if m else table,
-                       "select", [])
-    return Refused(message, f"{schema}.{table}" if schema and table else table,
-                   constraint[6:] if constraint.startswith("authz_") else None,
-                   detail.split("\n") if detail else [])
+        return Refused(
+            f"{message}: the write was allowed, but the select rule doesn't let this user read the row "
+            f"back (RETURNING); read it back only if the select rule allows it",
+            m.group(1) if m else table,
+            "select",
+            [],
+        )
+    return Refused(
+        message,
+        f"{schema}.{table}" if schema and table else table,
+        constraint[6:] if constraint.startswith("authz_") else None,
+        detail.split("\n") if detail else [],
+    )
 
 
 def not_signed_in(exc: BaseException) -> bool:
@@ -294,9 +322,11 @@ def explain_rule_sql(table: LiteralString, command: LiteralString, key: LiteralS
     """SELECT authz.explain_rule($1, $2, $3, NULL) with the driver's placeholders for the table, the command and
     the key (':t', '%(t)s', '$1'). The policy names tables with their schema; a table named without one (a
     model that names no schema) is looked up on the search_path."""
-    found = ("SELECT n.nspname || '.' || c.relname FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n "
-             f"ON n.oid = c.relnamespace WHERE position('.' in {table}) = 0 "
-             f"AND c.oid = pg_catalog.to_regclass(pg_catalog.quote_ident({table}))")
+    found = (
+        "SELECT n.nspname || '.' || c.relname FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n "
+        f"ON n.oid = c.relnamespace WHERE position('.' in {table}) = 0 "
+        f"AND c.oid = pg_catalog.to_regclass(pg_catalog.quote_ident({table}))"
+    )
     return f"SELECT authz.explain_rule(coalesce(({found}), {table}), {command}, {key}, NULL)"
 
 

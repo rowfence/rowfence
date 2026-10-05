@@ -1,6 +1,7 @@
 """The conformance suite (integrations/README.md): the same checks for every stack. This is FastAPI,
 SQLAlchemy async on asyncpg, Alembic. test.sh does check 11 (a fresh database: migrate, the policy's tests,
 then Alembic's own diff shows no change) before these run."""
+
 import asyncio
 import os
 import re
@@ -33,7 +34,7 @@ pytestmark = pytest.mark.anyio
 APP = os.environ.get("ROWSTILE_APP_URL", "")
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 EXPECTED: dict[str | None, list[int]] = {"1": [1, 3, 4], "2": [2, 3], "3": [1, 3, 4], None: [3]}
-PROJECTS: dict[str | None, list[int]] = {"1": [1, 3], "2": [2, 3], None: [3]}      # the projects each may see
+PROJECTS: dict[str | None, list[int]] = {"1": [1, 3], "2": [2, 3], None: [3]}  # the projects each may see
 
 
 def client(app: FastAPI) -> httpx.AsyncClient:
@@ -66,9 +67,9 @@ async def test_3_not_signed_in_is_an_error_that_says_how() -> None:
         async with conn.transaction():
             with pytest.raises(asyncpg.PostgresError) as e:
                 await conn.fetchval("SELECT count(*) FROM app.notes")
-        hint = str(getattr(e.value, "hint", "") or "")            # asyncpg sets its fields at run time
+        hint = str(getattr(e.value, "hint", "") or "")  # asyncpg sets its fields at run time
         assert rowstile.sqlstate(e.value) == "28000" and "act_as" in hint, (rowstile.sqlstate(e.value), hint)
-        assert rowstile.error_code(e.value) == "AZ701", hint                # rowstile help AZ701
+        assert rowstile.error_code(e.value) == "AZ701", hint  # rowstile help AZ701
     finally:
         await conn.close()
 
@@ -99,7 +100,7 @@ async def test_6_a_refused_insert_says_which_rule(app: FastAPI) -> None:
     body = r.json()
     assert r.headers["content-type"] == "application/problem+json"
     assert body["table"] == "app.notes" and body["command"] == "insert", body
-    assert body["code"] == "AZ709", body                                # rowstile help AZ709
+    assert body["code"] == "AZ709", body  # rowstile help AZ709
     assert "user 2 may not insert this row into app.notes" in body["detail"]
     assert any("project.edit" in line for line in body["why"]), body["why"]
 
@@ -134,37 +135,47 @@ async def test_8_insert_then_read_back(app: FastAPI) -> None:
 
 # 9: the generated names type-check, and a wrong permission name doesn't
 def test_9_generated_names_type_check(tmp_path: Path) -> None:
-    subprocess.run([sys.executable, "-m", "rowstile", "client"],
-                   cwd=HERE, check=True, capture_output=True)
+    subprocess.run([sys.executable, "-m", "rowstile", "client"], cwd=HERE, check=True, capture_output=True)
     good = tmp_path / "good.py"
     bad = tmp_path / "bad.py"
     use = "from app.authz_client import Authz\n\ndef f(a: Authz) -> bool:\n    return a.can('note', 1, {!r})\n"
     good.write_text(use.format("edit"))
     bad.write_text(use.format("edt"))
     env = {**os.environ, "MYPYPATH": HERE}
-    ok = subprocess.run([sys.executable, "-m", "mypy", "--no-error-summary", str(good)], env=env, capture_output=True, text=True)
-    wrong = subprocess.run([sys.executable, "-m", "mypy", "--no-error-summary", str(bad)], env=env, capture_output=True, text=True)
+    ok = subprocess.run(
+        [sys.executable, "-m", "mypy", "--no-error-summary", str(good)], env=env, capture_output=True, text=True
+    )
+    wrong = subprocess.run(
+        [sys.executable, "-m", "mypy", "--no-error-summary", str(bad)], env=env, capture_output=True, text=True
+    )
     assert ok.returncode == 0, ok.stdout
     assert wrong.returncode != 0 and "edt" in wrong.stdout, wrong.stdout
     # the SDK's own queries take the same names (rowstile.sqlalchemy.Queries, as app/main.py makes it)
-    sdk = ("from app.main import queries\nfrom sqlalchemy.orm import Session\n\n"
-           "def f(s: Session) -> bool:\n    wanted = queries.ids({0!r}, {1!r})\n"
-           "    return wanted is not None and queries.can_sync(s, {0!r}, 1, {1!r})\n")
-    for name, type_, perm, fine in (("sdk_good", "note", "edit", True), ("sdk_perm", "note", "edt", False),
-                                    ("sdk_type", "nte", "edit", False)):
+    sdk = (
+        "from app.main import queries\nfrom sqlalchemy.orm import Session\n\n"
+        "def f(s: Session) -> bool:\n    wanted = queries.ids({0!r}, {1!r})\n"
+        "    return wanted is not None and queries.can_sync(s, {0!r}, 1, {1!r})\n"
+    )
+    for name, type_, perm, fine in (
+        ("sdk_good", "note", "edit", True),
+        ("sdk_perm", "note", "edt", False),
+        ("sdk_type", "nte", "edit", False),
+    ):
         path = tmp_path / f"{name}.py"
         path.write_text(sdk.format(type_, perm))
-        got = subprocess.run([sys.executable, "-m", "mypy", "--no-error-summary", str(path)], env=env, capture_output=True, text=True)
+        got = subprocess.run(
+            [sys.executable, "-m", "mypy", "--no-error-summary", str(path)], env=env, capture_output=True, text=True
+        )
         assert (got.returncode == 0) is fine, got.stdout
         assert fine or ("edt" if name == "sdk_perm" else "nte") in got.stdout, got.stdout
 
 
 # 10: a background job signs in as a service principal
 async def test_10_a_job_acts_as_its_service(app: FastAPI) -> None:
-    with rowstile.acting_as(3):                    # whatever started it
+    with rowstile.acting_as(3):  # whatever started it
         count, who = await digest(app.state.Session)
     assert who == rowstile.Principal("service", "1")
-    assert count == 2                              # project 1 (it is added to) and the public one
+    assert count == 2  # project 1 (it is added to) and the public one
 
 
 # ... and only when the code names it: an id is a user's, whatever it holds (ids come from outside)
@@ -180,12 +191,14 @@ def test_10_an_id_with_a_colon_is_a_users_not_a_service() -> None:
 
 
 # 12: the framework's test database has the policy: a database per worker, copied from the migrated one
-async def test_12_a_test_database_per_worker_has_the_policy(worker_database: WorkerDatabase,
-                                                            monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_12_a_test_database_per_worker_has_the_policy(
+    worker_database: WorkerDatabase, monkeypatch: pytest.MonkeyPatch
+) -> None:
     import rowstile.psycopg as pgp
+
     tests = os.environ["ROWSTILE_TESTS_URL"]
     assert re.search(r"/conf_tests_w\d+$", worker_database.url), worker_database.url
-    assert worker_database.url.startswith("postgresql+psycopg://")              # the URL's own form, another database
+    assert worker_database.url.startswith("postgresql+psycopg://")  # the URL's own form, another database
     assert worker_database.app_url and worker_database.app_url.startswith("postgresql+asyncpg://conf_app:")
 
     def projects(who: int) -> list[int]:
@@ -200,13 +213,13 @@ async def test_12_a_test_database_per_worker_has_the_policy(worker_database: Wor
         conn.execute("INSERT INTO app.users VALUES (1, 'ann'), (2, 'bo')")
         conn.execute("INSERT INTO app.projects VALUES (1, 1, 'Plans', false)")
     copy = make_app(worker_database.app_url, check_connection=False)
-    await copy.state.authz.check()                                            # the app's role, under row-level security
+    await copy.state.authz.check()  # the app's role, under row-level security
     await copy.state.engine.dispose()
     assert projects(1) == [1] and projects(2) == []
-    assert users(tests) == 0                                                    # the original is left as it was migrated
-    assert database_per_worker(tests, fresh=False).url == worker_database.url   # kept, with what the tests wrote
+    assert users(tests) == 0  # the original is left as it was migrated
+    assert database_per_worker(tests, fresh=False).url == worker_database.url  # kept, with what the tests wrote
     assert users(worker_database.url) == 2
-    assert database_per_worker(tests).url == worker_database.url                # copied again: as migrated
+    assert database_per_worker(tests).url == worker_database.url  # copied again: as migrated
     assert users(worker_database.url) == 0
     # one for each of pytest-xdist's workers; a run without workers has one
     assert worker_id() == "0"
@@ -242,6 +255,7 @@ def test_sqlalchemy_sync_engine() -> None:
     from sqlalchemy import create_engine, select
     from sqlalchemy.orm import Session
     from sqlalchemy.orm.exc import StaleDataError
+
     engine = authz_sa.install(create_engine(APP.replace("+asyncpg", "+psycopg")))
     try:
         with rowstile.acting_as(2), Session(engine) as s:
@@ -261,6 +275,7 @@ def test_sqlalchemy_sync_engine() -> None:
 # the drivers without SQLAlchemy
 def test_psycopg_transactions() -> None:
     import rowstile.psycopg as pgp
+
     with psycopg.connect(libpq(APP)) as conn:
         with pgp.transaction(conn, 2):
             assert [r[0] for r in conn.execute("SELECT id FROM app.notes ORDER BY id")] == [2, 3]
@@ -271,6 +286,7 @@ def test_psycopg_transactions() -> None:
 
 async def test_asyncpg_transactions() -> None:
     import rowstile.asyncpg as pga
+
     conn = await asyncpg.connect(libpq(APP))
     try:
         with rowstile.acting_as(("service", "1")):
@@ -278,7 +294,9 @@ async def test_asyncpg_transactions() -> None:
                 assert [r["id"] for r in await conn.fetch("SELECT id FROM app.projects ORDER BY id")] == [1, 3]
         async with pga.transaction(conn, 2):
             with pytest.raises(rowstile.NotFound):
-                await pga.expect(conn, await conn.execute("DELETE FROM app.notes WHERE id = 1"), "app.notes", "delete", 1)
+                await pga.expect(
+                    conn, await conn.execute("DELETE FROM app.notes WHERE id = 1"), "app.notes", "delete", 1
+                )
     finally:
         await conn.close()
 
@@ -289,6 +307,7 @@ async def test_13_the_app_does_not_start_on_a_connection_that_skips_rls() -> Non
 
     from rowstile.fastapi import Rowstile
     from sqlalchemy.ext.asyncio import create_async_engine
+
     started: list[str] = []
 
     @contextlib.asynccontextmanager
@@ -342,6 +361,7 @@ async def test_user_may_raise() -> None:
 async def test_none_is_nobody_inside_acting_as() -> None:
     import rowstile.asyncpg as pga
     import rowstile.psycopg as pgp
+
     with rowstile.acting_as(1):
         assert rowstile.act_as_args(None) == (None, None) and rowstile.act_as_args() == ("user", "1")
         assert rowstile.act_as_sql(None) == "SELECT authz.act_as(NULL, NULL)"
@@ -362,18 +382,19 @@ async def test_none_is_nobody_inside_acting_as() -> None:
 async def test_a_block_inside_an_open_transaction_signs_out_again() -> None:
     import rowstile.asyncpg as pga
     import rowstile.psycopg as pgp
-    projects = "SELECT id FROM app.projects ORDER BY id"      # (the projects: no test adds one)
+
+    projects = "SELECT id FROM app.projects ORDER BY id"  # (the projects: no test adds one)
     with psycopg.connect(libpq(APP)) as conn:
-        conn.execute("SELECT 1")                               # psycopg begins a transaction here
+        conn.execute("SELECT 1")  # psycopg begins a transaction here
         with pgp.transaction(conn, 2):
             assert [r[0] for r in conn.execute(projects)] == PROJECTS["2"]
-        assert [r[0] for r in conn.execute(projects)] == PROJECTS[None]      # nobody, not bo
+        assert [r[0] for r in conn.execute(projects)] == PROJECTS[None]  # nobody, not bo
         conn.rollback()
         with pgp.transaction(conn, 1):
             with pgp.transaction(conn, 2):
                 assert [r[0] for r in conn.execute(projects)] == PROJECTS["2"]
-            assert [r[0] for r in conn.execute(projects)] == PROJECTS["1"]   # back to the block around it
-    if sys.platform != "win32":                                # psycopg's async connections need a selector loop
+            assert [r[0] for r in conn.execute(projects)] == PROJECTS["1"]  # back to the block around it
+    if sys.platform != "win32":  # psycopg's async connections need a selector loop
         async with await psycopg.AsyncConnection.connect(libpq(APP)) as aconn:
             await aconn.execute("SELECT 1")
             async with pgp.atransaction(aconn, 2):
@@ -397,9 +418,10 @@ def test_sqlalchemy_which_row_and_which_table() -> None:
     from sqlalchemy import BigInteger, Text, create_engine, text
     from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
     from sqlalchemy.orm.exc import StaleDataError
+
     engine = authz_sa.install(create_engine(APP.replace("+asyncpg", "+psycopg")))
     try:
-        with rowstile.acting_as(3):                            # cy may edit note 4, not note 1
+        with rowstile.acting_as(3):  # cy may edit note 4, not note 1
             with pytest.raises(StaleDataError) as e, Session(engine) as s, s.begin():
                 first, last = s.get(Note, 1), s.get(Note, 4)
                 assert first is not None and last is not None
@@ -407,7 +429,7 @@ def test_sqlalchemy_which_row_and_which_table() -> None:
             verdict = authz_sa.why_stale_sync(e.value)
             assert isinstance(verdict, Refused) and "app.notes 1" in verdict.message, verdict
             assert verdict.why[0].startswith("no"), verdict.why
-        for who in ("50%", "a%sb", "%(x)s"):                   # not a user of this app: nobody, and no error
+        for who in ("50%", "a%sb", "%(x)s"):  # not a user of this app: nobody, and no error
             with rowstile.acting_as(who), Session(engine) as s:
                 assert s.scalars(text("SELECT id FROM app.notes ORDER BY id")).all() == EXPECTED[None]
     finally:
@@ -421,7 +443,9 @@ def test_sqlalchemy_which_row_and_which_table() -> None:
         id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
         body: Mapped[str] = mapped_column(Text)
 
-    bare = authz_sa.install(create_engine(APP.replace("+asyncpg", "+psycopg"), connect_args={"options": "-c search_path=app"}))
+    bare = authz_sa.install(
+        create_engine(APP.replace("+asyncpg", "+psycopg"), connect_args={"options": "-c search_path=app"})
+    )
     try:
         with rowstile.acting_as(3):
             with pytest.raises(StaleDataError) as e, Session(bare) as s, s.begin():
@@ -438,8 +462,9 @@ def test_sqlalchemy_which_row_and_which_table() -> None:
 # a 42501 that isn't a policy's (a table the app role was never granted) isn't one either
 def test_refused_means_the_database_said_no() -> None:
     import rowstile.psycopg as pgp
+
     with psycopg.connect(libpq(APP)) as conn:
-        with pytest.raises(rowstile.NotFound), pgp.transaction(conn, 3):          # cy may edit note 4
+        with pytest.raises(rowstile.NotFound), pgp.transaction(conn, 3):  # cy may edit note 4
             cur = conn.execute("UPDATE app.notes SET body = 'x' WHERE id = 4 AND body = 'something else'")
             pgp.expect(conn, cur.rowcount, "app.notes", "update", 4)
         with pytest.raises(Refused), pgp.transaction(conn, 3):
@@ -455,16 +480,25 @@ def test_the_code_in_a_hint_rowfence_wrote() -> None:
     class Old(Exception):
         sqlstate = "28000"
         hint = "sign in with authz.act_as(); rowfence help AZ701"
+
     assert rowstile.error_code(Old("sign in first")) == "AZ701"
 
 
 # the pytest helpers (rowstile.testing), with sync and async functions
-async def test_the_pytest_helpers(as_user: AsUser, assert_refused: AssertRefused, assert_not_found: AssertNotFound) -> None:
+async def test_the_pytest_helpers(
+    as_user: AsUser, assert_refused: AssertRefused, assert_not_found: AssertNotFound
+) -> None:
     import rowstile.psycopg as pgp
 
     def update(note: int) -> None:
         with psycopg.connect(libpq(APP)) as conn, pgp.transaction(conn):
-            pgp.expect(conn, conn.execute("UPDATE app.notes SET body = 'x' WHERE id = %s", (note,)), "app.notes", "update", note)
+            pgp.expect(
+                conn,
+                conn.execute("UPDATE app.notes SET body = 'x' WHERE id = %s", (note,)),
+                "app.notes",
+                "update",
+                note,
+            )
 
     async def insert_later() -> None:
         with psycopg.connect(libpq(APP)) as conn, pgp.transaction(conn):
@@ -486,8 +520,10 @@ def test_14_a_policy_change_ships_as_the_next_migration(tmp_path: Path) -> None:
     work = tmp_path / "app"
     shutil.copytree(HERE, work, ignore=shutil.ignore_patterns(".venv", "__pycache__", ".pytest_cache", ".mypy_cache"))
     policy = work / "db" / "policy.authz"
-    policy.write_text(policy.read_text().replace("  can read = recipient\n", "  can read = recipient\n  can reply = recipient\n"))
-    cli = "-m", "rowstile"                          # the command, as the rowstile package installs it
+    policy.write_text(
+        policy.read_text().replace("  can read = recipient\n", "  can read = recipient\n  can reply = recipient\n")
+    )
+    cli = "-m", "rowstile"  # the command, as the rowstile package installs it
     subprocess.run([sys.executable, *cli, "migrate"], cwd=work, check=True, capture_output=True)
     subprocess.run([sys.executable, "-m", "alembic", "upgrade", "head"], cwd=work, check=True, capture_output=True)
     subprocess.run([sys.executable, *cli, "client"], cwd=work, check=True, capture_output=True)

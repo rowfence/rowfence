@@ -1,4 +1,5 @@
 """Compiling a policy into views, closure tables, triggers and RLS policies."""
+
 from __future__ import annotations
 
 import hashlib
@@ -70,15 +71,16 @@ Inherit: TypeAlias = "tuple[str, str | None, str]"
 
 class NextTree(TypedDict):
     """How to build a tree beside the one in use, while the app runs (TreeMixin.next_tree, migrate.py)."""
+
     types: list[str]
     tables: list[str]
     link_tables: list[str]
-    next: str                   # the table built beside
+    next: str  # the table built beside
     next_name: str
-    table: str                  # the tree's table, quoted
+    table: str  # the tree's table, quoted
     objects: list[tuple[str, str]]  # (kind, key) of what the first migration makes
-    build: str                  # the first migration's SQL
-    catch_up: str               # the second's: what changed since the first one's snapshot
+    build: str  # the first migration's SQL
+    catch_up: str  # the second's: what changed since the first one's snapshot
 
 
 def rule_name(rule: Rule) -> str:
@@ -143,8 +145,10 @@ class Core:
     def expansions(self, sql: str) -> int:
         """How many view definitions Postgres writes out to plan `sql` (a rule's check): each view it names,
         and for each of those the views it names, again for every use."""
+
         def name(x: str) -> str:
             return x[1:-1].replace('""', '"') if x.startswith('"') else x
+
         bodies: dict[str, str] = {}
         for entry in self.view_sql:
             m = VIEW_BODY.search(entry)
@@ -154,9 +158,10 @@ class Core:
 
         def count(view: str) -> int:
             if view not in counted:
-                counted[view] = 1          # (a view never names itself: trees and functions stand between)
+                counted[view] = 1  # (a view never names itself: trees and functions stand between)
                 counted[view] = 1 + sum(count(name(r)) for r in VIEW_NAME.findall(bodies[view]) if name(r) in bodies)
             return counted[view]
+
         return sum(count(name(r)) for r in VIEW_NAME.findall(sql) if name(r) in bodies)
 
     def line_sql(self, what: str | None, loc: Loc | str | None, key_sql: str | None = None) -> str:
@@ -175,48 +180,58 @@ class Core:
 
     def lines_sql(self) -> str:
         rows = ",\n  ".join(f"({lit(w)}, {lit(loc)})" for w, loc in sorted(self.lines.items()))
-        return ("-- where each rule, relation and invariant is written, for messages (Core.line_sql)\n"
-                "CREATE TABLE authz_gen.policy_lines (what text PRIMARY KEY, loc text NOT NULL);"
-                + (f"\nINSERT INTO authz_gen.policy_lines VALUES\n  {rows};" if rows else ""))
+        return (
+            "-- where each rule, relation and invariant is written, for messages (Core.line_sql)\n"
+            "CREATE TABLE authz_gen.policy_lines (what text PRIMARY KEY, loc text NOT NULL);"
+            + (f"\nINSERT INTO authz_gen.policy_lines VALUES\n  {rows};" if rows else "")
+        )
 
     def __init__(self, pol: Policy) -> None:
         self.pol = pol
         if pol.role is None:
-            fail(1, "name the app role, the Postgres role your app connects as, which the rules apply to: "
-                    "app role app_user", "AZ111")
+            fail(
+                1,
+                "name the app role, the Postgres role your app connects as, which the rules apply to: "
+                "app role app_user",
+                "AZ111",
+            )
         self.role: str = pol.role
         self.types, self.rules, self.tests = pol.types, pol.rules, pol.tests
-        self.view_state: dict[str, str] = {}        # view name -> 'busy' | 'done'
-        self.view_sql: list[str] = []                # CREATE VIEW / FUNCTION statements, dependency order
-        self.trees: dict[TreeKey, str] = {}          # tree key -> tree name
+        self.view_state: dict[str, str] = {}  # view name -> 'busy' | 'done'
+        self.view_sql: list[str] = []  # CREATE VIEW / FUNCTION statements, dependency order
+        self.trees: dict[TreeKey, str] = {}  # tree key -> tree name
         # tree name -> (hash of its definition, tables it reads): kept across applies
         self.tree_keep: dict[str, tuple[str, list[str]]] = {}
         self.tree_sql: list[str] = []
-        self.tree_names: list[str] = []              # the name of each tree_sql entry
+        self.tree_names: list[str] = []  # the name of each tree_sql entry
         # tree name -> how to build it beside the one in use (migrate.py, two phases)
         self.tree_next: dict[str, NextTree] = {}
-        self.lines: dict[str, str] = {}              # what -> where it is written ('line 12'), for run-time messages
-        self.nested: dict[str, str] = {}             # relation views that expand nested groups -> their type's key type
-        self.point_checks: dict[str, str] = {}       # recursive permission view -> its function checking one object
-        self.direct_checks: dict[str, str] = {}      # recursive permission view -> view of what its columns give
-        self.direct_sql: dict[str, str] = {}         # such views -> their SQL (permissions with the same share one)
-        self.locked_types: set[str] = set()          # types with closure tables (one lock row each)
+        self.lines: dict[str, str] = {}  # what -> where it is written ('line 12'), for run-time messages
+        self.nested: dict[str, str] = {}  # relation views that expand nested groups -> their type's key type
+        self.point_checks: dict[str, str] = {}  # recursive permission view -> its function checking one object
+        self.direct_checks: dict[str, str] = {}  # recursive permission view -> view of what its columns give
+        self.direct_sql: dict[str, str] = {}  # such views -> their SQL (permissions with the same share one)
+        self.locked_types: set[str] = set()  # types with closure tables (one lock row each)
         self.cond_lines: dict[tuple[str, str], Loc] = {}  # (type, condition) -> loc, for apply-time errors
-        self.columns: list[tuple[str, str, Loc]] = []     # (table, column, loc) to check exist
+        self.columns: list[tuple[str, str, Loc]] = []  # (table, column, loc) to check exist
         self.pk_checks: list[tuple[str, str, str, Loc]] = []  # (table, pk, pktype, loc)
-        self.recursive: dict[Name, SccKey] = {}      # (type, perm) -> scc key
+        self.recursive: dict[Name, SccKey] = {}  # (type, perm) -> scc key
         self.scc_members: dict[SccKey, list[Name]] = {}  # scc key -> [(type, perm)]
-        self.denies: dict[Name, list[Expr]] = {}     # (type, perm) with a deny -> its `not` items
-        self._invalid = "NULL"                       # what dispatch_type's functions return for an id that isn't one
+        self.denies: dict[Name, list[Expr]] = {}  # (type, perm) with a deny -> its `not` items
+        self._invalid = "NULL"  # what dispatch_type's functions return for an id that isn't one
         # the compiled policy in parts, (mode, name, SQL): what a migration does with each (output.compile)
         self.parts: list[tuple[str, str, str]] = []
-        self._list_cases = ""                        # authz.list's branches (output.list_cases_sql)
+        self._list_cases = ""  # authz.list's branches (output.list_cases_sql)
         if "user" not in self.types:
             fail(1, "declare the user type, e.g.: type user = app.users", "AZ202")
         for t in self.types.values():
             if t.principal and t.composite:
-                fail(t.loc, f"the {t.name} type signs in, so it needs a key of one column (who is signed in "
-                            f"is one value); give its table one, e.g. an identity column", "AZ206")
+                fail(
+                    t.loc,
+                    f"the {t.name} type signs in, so it needs a key of one column (who is signed in "
+                    f"is one value); give its table one, e.g. an identity column",
+                    "AZ206",
+                )
         self.add_custom_roles()
         self.split_denies()
         self.validate()
@@ -253,35 +268,62 @@ class Core:
         is one more relation of the `or` it is written in."""
         for rule in self.rules:
             if names_roles(rule.expr):
-                fail(rule.loc, f"`{ROLES}` goes in a permission, which says what a custom role gives: write it there "
-                               f"(`can edit = editor or roles`) and name the permission here", "AZ210")
+                fail(
+                    rule.loc,
+                    f"`{ROLES}` goes in a permission, which says what a custom role gives: write it there "
+                    f"(`can edit = editor or roles`) and name the permission here",
+                    "AZ210",
+                )
         for inv in self.pol.invariants:
             if names_roles(inv.expr):
-                fail(inv.loc, f"`{ROLES}` goes in a permission, which says what a custom role gives: name the "
-                              f"permission here", "AZ210")
+                fail(
+                    inv.loc,
+                    f"`{ROLES}` goes in a permission, which says what a custom role gives: name the permission here",
+                    "AZ210",
+                )
         for t in self.types.values():
             for p in t.perms.values():
                 if any(isinstance(x, Arrow) and x.rel == ROLES for x in leaves(p.expr)):
-                    fail(p.loc, f"{t.name}.{p.name}: `{ROLES}` gives the permission it is written in; it isn't a "
-                                f"relation to follow with a dot", "AZ210")
+                    fail(
+                        p.loc,
+                        f"{t.name}.{p.name}: `{ROLES}` gives the permission it is written in; it isn't a "
+                        f"relation to follow with a dot",
+                        "AZ210",
+                    )
             named = [p for p in t.perms.values() if names_roles(p.expr)]
             if not t.roles:
                 for p in named:
-                    fail(p.loc, f"{t.name}.{p.name} writes `{ROLES}`, but {t.name} has no `roles : ...` line saying who "
-                                f"may hold custom roles, e.g. roles : user from org", "AZ210")
+                    fail(
+                        p.loc,
+                        f"{t.name}.{p.name} writes `{ROLES}`, but {t.name} has no `roles : ...` line saying who "
+                        f"may hold custom roles, e.g. roles : user from org",
+                        "AZ210",
+                    )
                 continue
             subjects, _, loc = t.roles
             if t.roles_from:
-                self.role_owner_type(t)         # refuses a relation that can't name an owner
+                self.role_owner_type(t)  # refuses a relation that can't name an owner
             if not named:
-                fail(loc, f"{t.name} says who may hold custom roles, but no permission writes `{ROLES}`: write it "
-                          f"where a role gives the permission, e.g. can view = viewer or roles", "AZ210")
+                fail(
+                    loc,
+                    f"{t.name} says who may hold custom roles, but no permission writes `{ROLES}`: write it "
+                    f"where a role gives the permission, e.g. can view = viewer or roles",
+                    "AZ210",
+                )
             for p in named:
                 if any(names_roles(p.expr)):
-                    fail(p.loc, f"{t.name}.{p.name}: `not {ROLES}` would take a permission away from whoever holds a "
-                                f"custom role that includes it; a role only gives", "AZ210")
-                rel = Relation(f"roles:{p.name}", loc,
-                               [Source("roles", subjects, loc, perm=p.name, owner=t.roles_from)], synthetic=True)
+                    fail(
+                        p.loc,
+                        f"{t.name}.{p.name}: `not {ROLES}` would take a permission away from whoever holds a "
+                        f"custom role that includes it; a role only gives",
+                        "AZ210",
+                    )
+                rel = Relation(
+                    f"roles:{p.name}",
+                    loc,
+                    [Source("roles", subjects, loc, perm=p.name, owner=t.roles_from)],
+                    synthetic=True,
+                )
                 t.relations[rel.name] = rel
                 p.expr = renamed(p.expr, ROLES, rel.name)
 
@@ -294,12 +336,20 @@ class Core:
         kinds = {src.kind for src in r.sources} if r else set()
         subjects = {s for src in r.sources for s in src.subjects} if r else set()
         if r is None or not kinds <= {"column", "table"} or len(subjects) != 1:
-            fail(loc, f"custom roles on {t.name} come from '{name}', which must be a relation of {t.name} kept in "
-                      f"a column or a table and linking to one type, as `org : org = org_id`", "AZ211")
+            fail(
+                loc,
+                f"custom roles on {t.name} come from '{name}', which must be a relation of {t.name} kept in "
+                f"a column or a table and linking to one type, as `org : org = org_id`",
+                "AZ211",
+            )
         st, sr = next(iter(subjects))
         if sr is not None or st not in self.types:
-            fail(loc, f"custom roles on {t.name} come from '{name}', which must link to objects of a type "
-                      f"(the roles' owner), not to {st}{'#' + sr if sr else ''}", "AZ211")
+            fail(
+                loc,
+                f"custom roles on {t.name} come from '{name}', which must link to objects of a type "
+                f"(the roles' owner), not to {st}{'#' + sr if sr else ''}",
+                "AZ211",
+            )
         return st
 
     def role_rel_sql(self, t: Type, src: Source, obj: str) -> str:
@@ -308,8 +358,10 @@ class Core:
         sql = f"g.relation = ANY ((SELECT authz_int.role_relations({lit(t.name)}, {lit(src.perm)}))::text[])"
         if not src.owner:
             return sql
-        return (f"{sql} AND EXISTS (SELECT 1 FROM authz.roles ro WHERE 'role:' || ro.id = g.relation "
-                f"AND ro.owner_type = {lit(self.role_owner_type(t))} AND ro.owner_id IN ({self.role_owners_sql(t, obj)}))")
+        return (
+            f"{sql} AND EXISTS (SELECT 1 FROM authz.roles ro WHERE 'role:' || ro.id = g.relation "
+            f"AND ro.owner_type = {lit(self.role_owner_type(t))} AND ro.owner_id IN ({self.role_owners_sql(t, obj)}))"
+        )
 
     def role_owners_sql(self, t: Type, obj: str) -> str:
         """The ids (as text) of what `roles : ... from rel` links object obj to: the owners whose roles count."""
@@ -318,12 +370,16 @@ class Core:
         owners = []
         for o in t.relations[t.roles_from].sources:
             if o.kind == "column":
-                owners.append(f"SELECT ({self.subject_id(o, 'w', ot)})::text FROM {qt(t.table)} w "
-                              f"WHERE {self.key_is(t, 'w', obj)}")
+                owners.append(
+                    f"SELECT ({self.subject_id(o, 'w', ot)})::text FROM {qt(t.table)} w "
+                    f"WHERE {self.key_is(t, 'w', obj)}"
+                )
             else:
                 where = f" AND coalesce(({row_cond(o.where, 'w')}), false)" if o.where else ""
-                owners.append(f"SELECT ({self.subject_id(o, 'w', ot)})::text FROM {qt(self.source_table(o))} w "
-                              f"WHERE {self.key_is(t, 'w', obj, o.obj_col)}{where}")
+                owners.append(
+                    f"SELECT ({self.subject_id(o, 'w', ot)})::text FROM {qt(self.source_table(o))} w "
+                    f"WHERE {self.key_is(t, 'w', obj, o.obj_col)}{where}"
+                )
         return " UNION ALL ".join(owners)
 
     def split_denies(self) -> None:
@@ -367,28 +423,45 @@ class Core:
                         case _:
                             rest.append(x)
                 if len(rest) > 1:
-                    fail(p.loc, f"{t.name}.{p.name} inherits, so `and` can only join its inheritance with "
-                                f"{{conditions}} and `not <permission>`, e.g. (viewer or parent.{p.name}) and not denied", "AZ304")
+                    fail(
+                        p.loc,
+                        f"{t.name}.{p.name} inherits, so `and` can only join its inheritance with "
+                        f"{{conditions}} and `not <permission>`, e.g. (viewer or parent.{p.name}) and not denied",
+                        "AZ304",
+                    )
                 if not rest:
-                    continue            # recursion through a negation: analyze_recursion says why not
+                    continue  # recursion through a negation: analyze_recursion says why not
                 first = rest[0]
                 items = list(first.items) if isinstance(first, Or) else [first]
-                items = [(And("and", [*i.items, *conds]) if isinstance(i, And) else And("and", [i, *conds])) if conds else i
-                         for i in items]
+                items = [
+                    (And("and", [*i.items, *conds]) if isinstance(i, And) else And("and", [i, *conds])) if conds else i
+                    for i in items
+                ]
                 inherit = items[0] if len(items) == 1 else Or("or", items)
                 if not negs:
                     p.expr = inherit
                     continue
                 for x in negs:
                     if not (isinstance(x, Not) and isinstance(x.item, Ref)):
-                        fail(p.loc, f"{t.name}.{p.name} inherits, so a deny on it is `not <permission of "
-                                    f"{t.name}>` that inherits the same way, e.g. `can denied = blocked or "
-                                    f"parent.denied` and `... and not denied`", "AZ306")
+                        fail(
+                            p.loc,
+                            f"{t.name}.{p.name} inherits, so a deny on it is `not <permission of "
+                            f"{t.name}>` that inherits the same way, e.g. `can denied = blocked or "
+                            f"parent.denied` and `... and not denied`",
+                            "AZ306",
+                        )
                 base = f"{p.name}__base"
-                t.perms = {**{k: v for k, v in t.perms.items() if k != p.name},
-                           base: Perm(base, self.rename_arrows(t, inherit, p.name, base, p.loc),
-                                      f"{p.src}  (its inheritance, before the deny)", p.loc, hidden=True),
-                           p.name: p}
+                t.perms = {
+                    **{k: v for k, v in t.perms.items() if k != p.name},
+                    base: Perm(
+                        base,
+                        self.rename_arrows(t, inherit, p.name, base, p.loc),
+                        f"{p.src}  (its inheritance, before the deny)",
+                        p.loc,
+                        hidden=True,
+                    ),
+                    p.name: p,
+                }
                 p.expr, p.base = And("and", [Ref("ref", base), *negs]), base
                 self.denies[(t.name, p.name)] = negs
                 graph[(t.name, base)] = set()
@@ -400,8 +473,12 @@ class Core:
                 subjects = t.relations[rel].subjects()
                 if any(st == t.name and not sr for st, sr in subjects):
                     if any(st != t.name for st, _ in subjects):
-                        fail(loc, f"{t.name}.{old} has a deny and inherits through {rel}, which also points at "
-                                  f"other types; give those their own relation", "AZ306")
+                        fail(
+                            loc,
+                            f"{t.name}.{old} has a deny and inherits through {rel}, which also points at "
+                            f"other types; give those their own relation",
+                            "AZ306",
+                        )
                     return Arrow("arrow", rel, new)
             case ("not", item):
                 return Not("not", self.rename_arrows(t, item, old, new, loc))
@@ -419,32 +496,48 @@ class Core:
         for (tn, pn), negs in self.denies.items():
             t = self.T(tn)
             base_name = t.perms[pn].base
-            assert base_name is not None        # split_denies gave every permission with a deny its base
+            assert base_name is not None  # split_denies gave every permission with a deny its base
             base = t.perms[base_name]
             key = self.recursive.get((tn, base.name))
             if key is None or len(self.scc_members[key]) != 1:
-                fail(base.loc, f"{tn}.{pn} has a deny, so it can only inherit within {tn} (like parent.{pn}), "
-                               f"not through permissions of other types", "AZ306")
+                fail(
+                    base.loc,
+                    f"{tn}.{pn} has a deny, so it can only inherit within {tn} (like parent.{pn}), "
+                    f"not through permissions of other types",
+                    "AZ306",
+                )
             edges = self.perm_edges(t, base) or frozenset()
             for x in negs:
                 if not (isinstance(x, Not) and isinstance(x.item, Ref)):
-                    continue                    # split_denies refused anything else
+                    continue  # split_denies refused anything else
                 name = x.item.name
                 self.lookup(t, name, base.loc)
                 if name not in t.perms:
-                    fail(base.loc, f"{tn}.{pn}: `not {name}` must cover everything below, and {name} is a "
-                                   f"relation: make a permission that inherits, `can {name}_below = {name} or "
-                                   f"parent.{name}_below`, and deny with it", "AZ306")
+                    fail(
+                        base.loc,
+                        f"{tn}.{pn}: `not {name}` must cover everything below, and {name} is a "
+                        f"relation: make a permission that inherits, `can {name}_below = {name} or "
+                        f"parent.{name}_below`, and deny with it",
+                        "AZ306",
+                    )
                 if (tn, name) in self.denies:
-                    fail(base.loc, f"{tn}.{pn}: `not {name}` must cover everything below, and {name} has a deny of "
-                                   f"its own, which can cut it below a denied object: deny with a permission "
-                                   f"without one", "AZ306")
+                    fail(
+                        base.loc,
+                        f"{tn}.{pn}: `not {name}` must cover everything below, and {name} has a deny of "
+                        f"its own, which can cut it below a denied object: deny with a permission "
+                        f"without one",
+                        "AZ306",
+                    )
                 got = self.perm_edges(t, t.perms[name]) or frozenset()
                 missing = sorted({e[1] for e in edges if e not in got and (e[0], e[1], None, e[3]) not in got})
                 if missing:
-                    fail(base.loc, f"{tn}.{pn}: `not {name}` must cover everything below, so {name} must inherit "
-                                   f"through {', '.join(missing)} as {pn} does, e.g. `can {name} = ... or "
-                                   f"{missing[0]}.{name}`", "AZ306")
+                    fail(
+                        base.loc,
+                        f"{tn}.{pn}: `not {name}` must cover everything below, so {name} must inherit "
+                        f"through {', '.join(missing)} as {pn} does, e.g. `can {name} = ... or "
+                        f"{missing[0]}.{name}`",
+                        "AZ306",
+                    )
 
     def validate(self) -> None:
         for t in self.types.values():
@@ -459,8 +552,12 @@ class Core:
                         if st not in self.types:
                             fail(src.loc, f"{t.name}.{r.name}: unknown type '{st}'", "AZ201")
                         if sr == "*" and not self.T(st).principal:
-                            fail(src.loc, f"{t.name}.{r.name}: {st}:* means any signed-in {st}, but {st} doesn't sign "
-                                          f"in: mark it `type {st} = ... principal`", "AZ204")
+                            fail(
+                                src.loc,
+                                f"{t.name}.{r.name}: {st}:* means any signed-in {st}, but {st} doesn't sign "
+                                f"in: mark it `type {st} = ... principal`",
+                                "AZ204",
+                            )
                         if sr and sr != "*" and sr not in self.T(st).relations and sr not in self.T(st).perms:
                             fail(src.loc, f"{t.name}.{r.name}: {st} has no relation or permission '{sr}'", "AZ203")
                     if src.kind == "column":
@@ -476,18 +573,30 @@ class Core:
                             self.columns.append((src.table, c, src.loc))
                     elif src.kind == "shared":
                         if src.shared_by and src.shared_by not in t.perms:
-                            fail(src.loc, f"{t.name}.{r.name} is shared by '{src.shared_by}', but {t.name} "
-                                          f"has no such permission", "AZ207")
+                            fail(
+                                src.loc,
+                                f"{t.name}.{r.name} is shared by '{src.shared_by}', but {t.name} "
+                                f"has no such permission",
+                                "AZ207",
+                            )
                         if not src.shared_by and "share" not in t.perms:
-                            fail(src.loc, f"{t.name}.{r.name} is shared, which needs a share permission on "
-                                          f"{t.name}: add `can share = ...` or write `shared by <permission>`", "AZ207")
+                            fail(
+                                src.loc,
+                                f"{t.name}.{r.name} is shared, which needs a share permission on "
+                                f"{t.name}: add `can share = ...` or write `shared by <permission>`",
+                                "AZ207",
+                            )
         for rule in self.rules:
             mapped = [t.name for t in self.types.values() if t.table == rule.table]
             if not mapped:
                 fail(rule.loc, f"rules for {rule.table}, but no type maps to that table", "AZ401")
             if len(mapped) > 1:
-                fail(rule.loc, f"rules for {rule.table}, which types {' and '.join(mapped)} both map to: rules name "
-                               f"one type's permissions, so give each type its own table (or view)", "AZ401")
+                fail(
+                    rule.loc,
+                    f"rules for {rule.table}, which types {' and '.join(mapped)} both map to: rules name "
+                    f"one type's permissions, so give each type its own table (or view)",
+                    "AZ401",
+                )
             for c in rule.columns:
                 self.columns.append((rule.table, c, rule.loc))
         masked: dict[tuple[str, str], Loc] = {}
@@ -495,7 +604,11 @@ class Core:
             if rule.command != "mask":
                 continue
             if rule.table not in self.pol.views:
-                fail(rule.loc, f"masks are applied by a view: write 'rules {rule.table} view <schema.view_name>'", "AZ402")
+                fail(
+                    rule.loc,
+                    f"masks are applied by a view: write 'rules {rule.table} view <schema.view_name>'",
+                    "AZ402",
+                )
             for c in rule.columns:
                 if (rule.table, c) in masked:
                     fail(rule.loc, f"{rule.table}.{c} is masked twice (also on {masked[rule.table, c]})", "AZ109")
@@ -503,8 +616,9 @@ class Core:
         for table, view in self.pol.views.items():
             view_loc = self.pol.view_locs[table]
             if not any(r.table == table and r.command == "select" and not r.columns for r in self.rules):
-                fail(view_loc, f"the view {view} shows the rows 'select' allows, "
-                               f"so {table} needs a select rule", "AZ402")
+                fail(
+                    view_loc, f"the view {view} shows the rows 'select' allows, so {table} needs a select rule", "AZ402"
+                )
             if view == table or any(t.table == view for t in self.types.values()):
                 fail(view_loc, f"{view} is a table of the policy; name a new view", "AZ402")
         for sc in self.pol.scopes.values():
@@ -532,25 +646,35 @@ class Core:
 
     def check_this(self) -> None:
         """`this.` names the row a condition is about; a caveat has none, and `this` is no other name."""
+
         def conds(node: Expr) -> list[str]:
             return [x.sql for x in leaves(node) if isinstance(x, Cond)]
+
         written: list[tuple[str, Loc]] = []
         for t in self.types.values():
             written += [(c, p.loc) for p in t.perms.values() for c in conds(p.expr)]
             written += [(t.where, t.loc)] if t.where else []
-            written += [(c, src.loc) for r in t.relations.values() for src in r.sources
-                        for c in (src.where, src.shared_if) if c]
+            written += [
+                (c, src.loc) for r in t.relations.values() for src in r.sources for c in (src.where, src.shared_if) if c
+            ]
         written += [(c, r.loc) for r in self.rules for c in conds(r.expr)]
         written += [(c, i.loc) for i in self.pol.invariants for c in conds(i.expr)]
         for sql, loc in written:
             if this_alone(sql):
-                fail(loc, f"{{{sql}}}: `this` is the row the condition is about (this.column); call the table "
-                          f"something else", "AZ112")
+                fail(
+                    loc,
+                    f"{{{sql}}}: `this` is the row the condition is about (this.column); call the table something else",
+                    "AZ112",
+                )
         for cv in self.pol.caveats.values():
             if names_this(cv.sql) or this_alone(cv.sql):
-                fail(cv.loc, f"caveat {cv.name}: a caveat is checked with each request, on any share it goes with, "
-                             f"so there is no row for `this`: it reads the request (authz.ctx('ip')) and what the "
-                             f"share was made with (arg('ip'))", "AZ112")
+                fail(
+                    cv.loc,
+                    f"caveat {cv.name}: a caveat is checked with each request, on any share it goes with, "
+                    f"so there is no row for `this`: it reads the request (authz.ctx('ip')) and what the "
+                    f"share was made with (arg('ip'))",
+                    "AZ112",
+                )
 
     def check_runtime_permissions(self) -> None:
         """The permissions the runtime asks for by name (beside `share`, which shared relations check) are
@@ -559,30 +683,56 @@ class Core:
         roles_anywhere = any(t.roles and not t.roles_from for t in self.types.values())
         for t in self.types.values():
             if "impersonate" in t.perms and t.name != "user":
-                fail(t.perms["impersonate"].loc, f"{t.name}.impersonate: authz.view_as asks for `impersonate` on the "
-                     f"user type (who may view the app as that user); on {t.name} nothing asks for it", "AZ307")
+                fail(
+                    t.perms["impersonate"].loc,
+                    f"{t.name}.impersonate: authz.view_as asks for `impersonate` on the "
+                    f"user type (who may view the app as that user); on {t.name} nothing asks for it",
+                    "AZ307",
+                )
             if "manage_keys" in t.perms and not t.principal:
-                fail(t.perms["manage_keys"].loc, f"{t.name}.manage_keys: API keys are made for types that sign in, "
-                     f"and {t.name} doesn't (type {t.name} = ... principal)", "AZ307")
+                fail(
+                    t.perms["manage_keys"].loc,
+                    f"{t.name}.manage_keys: API keys are made for types that sign in, "
+                    f"and {t.name} doesn't (type {t.name} = ... principal)",
+                    "AZ307",
+                )
             if "manage_roles" in t.perms and not roles_anywhere and t.name not in owners_of_roles:
-                fail(t.perms["manage_roles"].loc, f"{t.name}.manage_roles lets people create custom roles owned by a "
-                     f"{t.name}, but no roles line counts them: write `roles : user from <relation to {t.name}>` on "
-                     f"the type they are for, and `roles` in the permissions they may give", "AZ307")
+                fail(
+                    t.perms["manage_roles"].loc,
+                    f"{t.name}.manage_roles lets people create custom roles owned by a "
+                    f"{t.name}, but no roles line counts them: write `roles : user from <relation to {t.name}>` on "
+                    f"the type they are for, and `roles` in the permissions they may give",
+                    "AZ307",
+                )
             if "break_glass" in t.perms and not any(
-                    src.kind == "shared" and any(st == "user" and not sr for st, sr in src.subjects)
-                    for r in t.relations.values() for src in r.sources):
-                fail(t.perms["break_glass"].loc, f"{t.name}.break_glass: authz.break_glass gives its holder a relation "
-                     f"of {t.name} shared with a user for a while, and {t.name} has none (`viewer : user shared`)", "AZ307")
+                src.kind == "shared" and any(st == "user" and not sr for st, sr in src.subjects)
+                for r in t.relations.values()
+                for src in r.sources
+            ):
+                fail(
+                    t.perms["break_glass"].loc,
+                    f"{t.name}.break_glass: authz.break_glass gives its holder a relation "
+                    f"of {t.name} shared with a user for a while, and {t.name} has none (`viewer : user shared`)",
+                    "AZ307",
+                )
             if t.roles and t.roles_from:
                 owner = self.role_owner_type(t)
                 if "manage_roles" not in self.T(owner).perms:
-                    fail(t.roles[2], f"custom roles on {t.name} are the roles of its {t.roles_from}, which people with "
-                                     f"manage_roles on a {owner} create, and {owner} has no `can manage_roles`", "AZ307")
+                    fail(
+                        t.roles[2],
+                        f"custom roles on {t.name} are the roles of its {t.roles_from}, which people with "
+                        f"manage_roles on a {owner} create, and {owner} has no `can manage_roles`",
+                        "AZ307",
+                    )
         if roles_anywhere and not any("manage_roles" in t.perms for t in self.types.values()):
             t = next(t for t in self.types.values() if t.roles and not t.roles_from)
             assert t.roles is not None
-            fail(t.roles[2], f"custom roles on {t.name} are made by people with manage_roles on their owner, and no "
-                             f"type has `can manage_roles` (on the org, say: can manage_roles = admin)", "AZ307")
+            fail(
+                t.roles[2],
+                f"custom roles on {t.name} are made by people with manage_roles on their owner, and no "
+                f"type has `can manage_roles` (on the org, say: can manage_roles = admin)",
+                "AZ307",
+            )
 
     @staticmethod
     def source_table(src: Source) -> str:
@@ -603,17 +753,22 @@ class Core:
         assert columns is not None, f"a {src.kind} source without a subject column"
         return columns
 
-    def check_key_columns(self, t: Type, r: Relation, src: Source, columns: Cols, targets: list[str],
-                          side: str) -> None:
+    def check_key_columns(
+        self, t: Type, r: Relation, src: Source, columns: Cols, targets: list[str], side: str
+    ) -> None:
         """[a, b] where the key has two columns, one column where it has one."""
         n = len(cols(columns))
         for tn in targets:
             k = len(self.T(tn).key) if tn in self.types else 1
             if n != k:
                 shown = "[" + ", ".join(c for c, _ in self.T(tn).key) + "]" if k > 1 else "one column"
-                fail(src.loc, f"{t.name}.{r.name}: the {side} is a {tn}, whose key is {shown}, "
-                              f"but this source gives {n} column{'s' if n > 1 else ''}"
-                              + (": write them in square brackets, [col1, col2]" if k > 1 else ""), "AZ206")
+                fail(
+                    src.loc,
+                    f"{t.name}.{r.name}: the {side} is a {tn}, whose key is {shown}, "
+                    f"but this source gives {n} column{'s' if n > 1 else ''}"
+                    + (": write them in square brackets, [col1, col2]" if k > 1 else ""),
+                    "AZ206",
+                )
 
     def check_unused_relations(self) -> None:
         """A relation nothing uses is almost always a typo (a second source of `member` spelt `memeber`
@@ -633,7 +788,7 @@ class Core:
                         self.lookup(t, rel, loc)
                     used.add((t.name, rel))
                     r = t.relations.get(rel)
-                    for st, _sr in (r.subjects() if r else []):
+                    for st, _sr in r.subjects() if r else []:
                         used.add((st, perm))
                 case ("not", item):
                     walk(t, item, loc)
@@ -643,7 +798,7 @@ class Core:
 
         for t in self.types.values():
             if t.roles_from:
-                used.add((t.name, t.roles_from))     # the roles' owner
+                used.add((t.name, t.roles_from))  # the roles' owner
             for p in t.perms.values():
                 walk(t, p.expr, p.loc)
             for r in t.relations.values():
@@ -663,9 +818,13 @@ class Core:
             for r in t.relations.values():
                 if r.synthetic or (t.name, r.name) in used or any(s.kind in ("shared", "roles") for s in r.sources):
                     continue
-                fail(r.loc, f"{t.name}.{r.name} is declared but nothing uses it (no permission, rule, test or "
-                            f"group refers to it): remove it, or if it is another source of an existing relation, "
-                            f"give it that relation's name", "AZ208")
+                fail(
+                    r.loc,
+                    f"{t.name}.{r.name} is declared but nothing uses it (no permission, rule, test or "
+                    f"group refers to it): remove it, or if it is another source of an existing relation, "
+                    f"give it that relation's name",
+                    "AZ208",
+                )
 
     def lookup(self, t: Type, name: str, loc: Loc) -> None:
         if name in t.perms or name in t.relations:
@@ -752,6 +911,7 @@ class Core:
                     if w == v:
                         break
                 sccs.append(comp)
+
         for v in graph:
             if v not in index:
                 visit(v)
@@ -777,17 +937,35 @@ class Core:
                         self.deps(t, item, inner)
                         if inner & members and isinstance(item, And):
                             for x in item.items:
-                                if isinstance(x, Arrow) and x.rel in t.relations and any(
-                                        not sr and (st, x.perm) in members for st, sr in t.relations[x.rel].subjects()):
-                                    fail(perm.loc, f"inheritance through {x.rel} can only be narrowed with "
-                                                   f"{{conditions}} on the row, e.g. ({x.rel}.{pn} and {{inherit}})", "AZ304")
+                                if (
+                                    isinstance(x, Arrow)
+                                    and x.rel in t.relations
+                                    and any(
+                                        not sr and (st, x.perm) in members for st, sr in t.relations[x.rel].subjects()
+                                    )
+                                ):
+                                    fail(
+                                        perm.loc,
+                                        f"inheritance through {x.rel} can only be narrowed with "
+                                        f"{{conditions}} on the row, e.g. ({x.rel}.{pn} and {{inherit}})",
+                                        "AZ304",
+                                    )
                         if inner & members:
-                            fail(perm.loc, f"{tn}.{pn} depends on itself; a permission can only recurse as "
-                                           f"'or rel.perm' (optionally 'and {{condition}}') through a relation "
-                                           f"to objects, and a group only as 'member : group#member'", "AZ302")
+                            fail(
+                                perm.loc,
+                                f"{tn}.{pn} depends on itself; a permission can only recurse as "
+                                f"'or rel.perm' (optionally 'and {{condition}}') through a relation "
+                                f"to objects, and a group only as 'member : group#member'",
+                                "AZ302",
+                            )
             if len(set(tnames)) != len(tnames):
-                fail(first.loc, "permissions " + ", ".join(f"{a}.{b}" for a, b in sorted(comp)) +
-                     " inherit through each other; a recursion can use one permission per type", "AZ302")
+                fail(
+                    first.loc,
+                    "permissions "
+                    + ", ".join(f"{a}.{b}" for a, b in sorted(comp))
+                    + " inherit through each other; a recursion can use one permission per type",
+                    "AZ302",
+                )
             key = tuple(sorted(comp))
             self.scc_members[key] = sorted(comp)
             for v in comp:
@@ -796,8 +974,12 @@ class Core:
     def check_tree_relation(self, t: Type, r: Relation, perm: Perm) -> None:
         for src in r.sources:
             if src.kind == "shared" and any(sr == "*" or st in ("anyone", "link") for st, sr in src.subjects):
-                fail(perm.loc, f"{t.name}.{r.name} is used for inheritance, so it can't be shared with "
-                               f"user:* (or another type:*), anyone or link", "AZ301")
+                fail(
+                    perm.loc,
+                    f"{t.name}.{r.name} is used for inheritance, so it can't be shared with "
+                    f"user:* (or another type:*), anyone or link",
+                    "AZ301",
+                )
 
     @staticmethod
     def top_items(perm: Perm) -> list[Expr]:
@@ -824,7 +1006,7 @@ class Core:
             item = arrows[0]
         if not isinstance(item, Arrow) or item.rel not in t.relations:
             return None, None
-        self.targets(t, item.rel, perm.loc)     # following users is an error in any case
+        self.targets(t, item.rel, perm.loc)  # following users is an error in any case
         return item, conds
 
     def recursive_parts(self, t: Type, perm: Perm, item: Expr) -> tuple[list[Inherit], Expr | None]:
@@ -840,8 +1022,12 @@ class Core:
                     if isinstance(x, Arrow) and x.rel in t.relations:
                         for st, sr in t.relations[x.rel].subjects():
                             if not sr and (st, x.perm) in members:
-                                fail(perm.loc, f"inheritance through {x.rel} can only be narrowed with "
-                                               f"{{conditions}} on the row, e.g. ({x.rel}.{perm.name} and {{inherit}})", "AZ304")
+                                fail(
+                                    perm.loc,
+                                    f"inheritance through {x.rel} can only be narrowed with "
+                                    f"{{conditions}} on the row, e.g. ({x.rel}.{perm.name} and {{inherit}})",
+                                    "AZ304",
+                                )
             return [], item
         r = t.relations[arrow.rel]
         inside = [st for st, _ in r.subjects() if (st, arrow.perm) in members]
@@ -868,22 +1054,32 @@ class Core:
     # only returns ids the current user holds.
     def add_view(self, name: str, sql: str, header: str, t: Type, public: bool = True) -> None:
         if t.where:
-            sql = (f"SELECT x.id FROM (\n  {sql}) x\n"
-                   f"  WHERE EXISTS (SELECT 1 FROM {qt(t.table)} w WHERE {self.key_is(t, 'w', 'x.id')} "
-                   f"AND coalesce(({row_cond(t.where, 'w')}), false))")
+            sql = (
+                f"SELECT x.id FROM (\n  {sql}) x\n"
+                f"  WHERE EXISTS (SELECT 1 FROM {qt(t.table)} w WHERE {self.key_is(t, 'w', 'x.id')} "
+                f"AND coalesce(({row_cond(t.where, 'w')}), false))"
+            )
         self.view_sql.append(
-            f"{header}CREATE VIEW authz_int.{q(name)} AS\n  {sql};" + (
+            f"{header}CREATE VIEW authz_int.{q(name)} AS\n  {sql};"
+            + (
                 f"\nCREATE VIEW authz_gen.{q(name)} WITH (security_barrier) AS SELECT id FROM authz_int.{q(name)};"
-                if public else ""))
+                if public
+                else ""
+            )
+        )
 
     def begin_view(self, name: str, loc: Loc, what: str) -> bool:
         state = self.view_state.get(name)
         if state == "done":
             return False
         if state == "busy":
-            fail(loc, f"{what} depends on itself; a permission can only recurse as "
-                      f"'or rel.perm' through a relation to objects, and a group only as "
-                      f"'member : group#member'", "AZ302")
+            fail(
+                loc,
+                f"{what} depends on itself; a permission can only recurse as "
+                f"'or rel.perm' through a relation to objects, and a group only as "
+                f"'member : group#member'",
+                "AZ302",
+            )
         self.view_state[name] = "busy"
         return True
 
@@ -903,8 +1099,10 @@ class Core:
         if view in self.direct_checks:
             # what the object's own columns give first: one index lookup, where most users who reach a
             # lot (an org admin: every folder) stop, instead of building every object they start from
-            return (f"(EXISTS (SELECT 1 FROM authz_gen.{q(self.direct_checks[view])} v WHERE v.id = {expr})"
-                    f"\n    OR EXISTS (SELECT 1 FROM authz_gen.{q(view)} v WHERE v.id = {expr}))")
+            return (
+                f"(EXISTS (SELECT 1 FROM authz_gen.{q(self.direct_checks[view])} v WHERE v.id = {expr})"
+                f"\n    OR EXISTS (SELECT 1 FROM authz_gen.{q(view)} v WHERE v.id = {expr}))"
+            )
         if view in self.nested:
             # a user's memberships are few: work them out once per query
             return f"coalesce({expr} = ANY ({self.group_ids(view)}), false)"
@@ -926,13 +1124,16 @@ class Core:
         """A share counts between its start and its expiry, and while its caveat holds."""
         caveats = self.pol.caveats
         if caveats:
-            cases = " ".join(f"WHEN {lit(c.name)} THEN coalesce(({self.caveat_sql(c, alias)}), false)"
-                             for c in caveats.values())
+            cases = " ".join(
+                f"WHEN {lit(c.name)} THEN coalesce(({self.caveat_sql(c, alias)}), false)" for c in caveats.values()
+            )
             cav = f"({alias}.caveat IS NULL OR CASE {alias}.caveat {cases} ELSE false END)"
         else:
             cav = f"{alias}.caveat IS NULL"
-        return (f"({alias}.expires_at IS NULL OR {alias}.expires_at > now()) "
-                f"AND ({alias}.starts_at IS NULL OR {alias}.starts_at <= now()) AND {cav}")
+        return (
+            f"({alias}.expires_at IS NULL OR {alias}.expires_at > now()) "
+            f"AND ({alias}.starts_at IS NULL OR {alias}.starts_at <= now()) AND {cav}"
+        )
 
     @staticmethod
     def caveat_sql(c: Caveat, alias: str = "g") -> str:
@@ -949,11 +1150,16 @@ class Core:
             body = per_type(t)
             if body is None:
                 continue
-            branches.append(f"    WHEN {lit(t.name)} THEN\n"
-                            f"      IF NOT pg_catalog.pg_input_is_valid(p_id, {lit(t.keytype)}) THEN RETURN {self._invalid}; END IF;\n"
-                            f"      v_{t.pktype} := p_id::{t.keytype}{'::text' if t.composite else ''};\n{body}")
-        return ("  CASE p_type\n" + "\n".join(branches) +
-                f"\n    ELSE\n      {missing_type}\n  END CASE;") if branches else f"  {missing_type}"
+            branches.append(
+                f"    WHEN {lit(t.name)} THEN\n"
+                f"      IF NOT pg_catalog.pg_input_is_valid(p_id, {lit(t.keytype)}) THEN RETURN {self._invalid}; END IF;\n"
+                f"      v_{t.pktype} := p_id::{t.keytype}{'::text' if t.composite else ''};\n{body}"
+            )
+        return (
+            ("  CASE p_type\n" + "\n".join(branches) + f"\n    ELSE\n      {missing_type}\n  END CASE;")
+            if branches
+            else f"  {missing_type}"
+        )
 
     # --- keys: one column, or several (a composite key, whose ids are its canonical row text) ----
     @staticmethod
@@ -973,8 +1179,11 @@ class Core:
         columns = cols(columns)
         if not t.composite:
             return f"{a}.{q(columns[0])}"
-        return (f"(CASE WHEN ({', '.join(f'{a}.{q(c)}' for c in columns)}) IS NOT NULL THEN ROW("
-                + ", ".join(f"{a}.{q(c)}::{ty}" for c, (_, ty) in zip(columns, t.key, strict=True)) + ")::text END)")
+        return (
+            f"(CASE WHEN ({', '.join(f'{a}.{q(c)}' for c in columns)}) IS NOT NULL THEN ROW("
+            + ", ".join(f"{a}.{q(c)}::{ty}" for c, (_, ty) in zip(columns, t.key, strict=True))
+            + ")::text END)"
+        )
 
     def key_is(self, t: Type, a: str, v: str, columns: Cols | None = None) -> str:
         """Row a's columns (t's key by default) hold the id v of a t, compared column by column so
@@ -983,17 +1192,18 @@ class Core:
         if not t.composite:
             return f"{a}.{q(columns[0])} = {v}"
         k = f"(({v})::{t.keytype})"
-        return (f"({', '.join(f'{a}.{q(c)}' for c in columns)}) = "
-                f"({', '.join(f'{k}.{q(kc)}' for kc, _ in t.key)})")
+        return f"({', '.join(f'{a}.{q(c)}' for c in columns)}) = ({', '.join(f'{k}.{q(kc)}' for kc, _ in t.key)})"
 
     def key_in(self, t: Type, a: str, sub: str, columns: Cols | None = None) -> str:
         """Row a's columns (t's key by default) hold one of the ids that sub (a query of id) selects."""
         columns = cols(columns) if columns else tuple(c for c, _ in t.key)
         if not t.composite:
             return f"{a}.{q(columns[0])} IN ({sub})"
-        return (f"({', '.join(f'{a}.{q(c)}' for c in columns)}) IN (SELECT "
-                + ", ".join(f"(k.k).{q(kc)}" for kc, _ in t.key)
-                + f" FROM (SELECT x.id::{t.keytype} AS k FROM ({sub}) x) k)")
+        return (
+            f"({', '.join(f'{a}.{q(c)}' for c in columns)}) IN (SELECT "
+            + ", ".join(f"(k.k).{q(kc)}" for kc, _ in t.key)
+            + f" FROM (SELECT x.id::{t.keytype} AS k FROM ({sub}) x) k)"
+        )
 
     def bare_key_text(self, t: Type) -> str:
         """A row's id as text, its columns unqualified (for dynamic SQL over the table or a view of it)."""
@@ -1009,8 +1219,9 @@ class Core:
             return self.ref_text(st, a, col) if st else f"{a}.{q(cols(col)[0])}::text"
         if not any(self.T(st).composite for st, _ in src.subjects if st in self.types):
             return f"{a}.{q(cols(col)[0])}::text"
-        whens = " ".join(f"WHEN {lit(st)} THEN {self.ref_text(self.T(st), a, col)}"
-                         for st, _ in src.subjects if st in self.types)
+        whens = " ".join(
+            f"WHEN {lit(st)} THEN {self.ref_text(self.T(st), a, col)}" for st, _ in src.subjects if st in self.types
+        )
         return f"(CASE {a}.{q(src.type_col)} {whens} END)"
 
     def key_text(self, t: Type, a: str) -> str:
@@ -1042,7 +1253,9 @@ class Core:
         assert st is not None, f"{subj_type}: a source with a type column links to types"
         if st.composite:
             return f"(CASE WHEN {alias}.{q(src.type_col)} = {lit(subj_type)} THEN {self.ref(st, alias, col)} END)"
-        return f"(CASE WHEN {alias}.{q(src.type_col)} = {lit(subj_type)} THEN {alias}.{q(cols(col)[0])} END)::{st.pktype}"
+        return (
+            f"(CASE WHEN {alias}.{q(src.type_col)} = {lit(subj_type)} THEN {alias}.{q(cols(col)[0])} END)::{st.pktype}"
+        )
 
     def is_principal(self, st: str) -> bool:
         return st in self.types and self.T(st).principal
@@ -1065,16 +1278,22 @@ class Core:
             else:
                 return None
             if src.kind == "column":
-                return (f"SELECT {self.key(t, 'r')} AS id FROM {qt(t.table)} r "
-                        f"WHERE {self.subject_id(src, 'r', st)} {match}")
+                return (
+                    f"SELECT {self.key(t, 'r')} AS id FROM {qt(t.table)} r "
+                    f"WHERE {self.subject_id(src, 'r', st)} {match}"
+                )
             assert src.table is not None and src.obj_col is not None
             extra = f" AND coalesce(({row_cond(src.where, 's')}), false)" if src.where else ""
-            return (f"SELECT {self.ref(t, 's', src.obj_col)} AS id FROM {qt(src.table)} s "
-                    f"WHERE {self.subject_id(src, 's', st)} {match}{extra}")
+            return (
+                f"SELECT {self.ref(t, 's', src.obj_col)} AS id FROM {qt(src.table)} s "
+                f"WHERE {self.subject_id(src, 's', st)} {match}{extra}"
+            )
         # shares and custom roles live in authz.shares
         if sr == "*":
-            who = (f"g.subject_type = {lit(st)} AND g.subject_relation = '' AND g.subject_id = '*' "
-                   f"AND {self.me(st)} IS NOT NULL")
+            who = (
+                f"g.subject_type = {lit(st)} AND g.subject_relation = '' AND g.subject_id = '*' "
+                f"AND {self.me(st)} IS NOT NULL"
+            )
         elif st == "anyone":
             who = "g.subject_type = 'anyone'"
         elif st == "link":
@@ -1083,19 +1302,34 @@ class Core:
             who = f"g.subject_type = {lit(st)} AND g.subject_relation = '' AND g.subject_id = {self.me(st, text=True)}"
         elif sr:
             inner = self.view_ref(self.T(st), sr, src.loc)
-            who = (f"g.subject_type = {lit(st)} AND g.subject_relation = {lit(sr)} "
-                   f"AND g.subject_id {self.ids_in(inner, text=True)}")
+            who = (
+                f"g.subject_type = {lit(st)} AND g.subject_relation = {lit(sr)} "
+                f"AND g.subject_id {self.ids_in(inner, text=True)}"
+            )
         else:
             return None
         if src.kind == "roles":
             rel = self.role_rel_sql(t, src, f"g.object_id::{t.pktype}")
         else:
             rel = f"g.relation = {lit(r.name)}"
-        return (f"SELECT g.object_id::{t.pktype} AS id FROM authz.shares g "
-                f"WHERE g.object_type = {lit(t.name)} AND {rel} AND {who} AND {self.live()}")
+        return (
+            f"SELECT g.object_id::{t.pktype} AS id FROM authz.shares g "
+            f"WHERE g.object_type = {lit(t.name)} AND {rel} AND {who} AND {self.live()}"
+        )
 
-    def pair_sql(self, t: Type, r: Relation, src: Source, subj_type: str, subj_rel: str | None, obj: str, subj: str,
-                 extra: str = "", tree: bool = False, match: tuple[str, str] | None = None) -> str:
+    def pair_sql(
+        self,
+        t: Type,
+        r: Relation,
+        src: Source,
+        subj_type: str,
+        subj_rel: str | None,
+        obj: str,
+        subj: str,
+        extra: str = "",
+        tree: bool = False,
+        match: tuple[str, str] | None = None,
+    ) -> str:
         """(object id, subject id) pairs of one source of relation r, for subjects of
         type subj_type (#subj_rel). Links used for inheritance ignore expiry: shares
         on them can't have any (a stored closure can't follow the clock). match=(side, v):
@@ -1112,19 +1346,25 @@ class Core:
                 m = " AND " + self.subject_is(src, a, subj_type, v)
             sid = self.subject_id(src, a, subj_type)
             if src.kind == "column":
-                return (f"SELECT {extra}{self.key(t, 'r')} AS {obj}, {sid} AS {subj} "
-                        f"FROM {qt(t.table)} r WHERE {sid} IS NOT NULL{m}")
+                return (
+                    f"SELECT {extra}{self.key(t, 'r')} AS {obj}, {sid} AS {subj} "
+                    f"FROM {qt(t.table)} r WHERE {sid} IS NOT NULL{m}"
+                )
             assert src.table is not None and src.obj_col is not None
             where = f" AND coalesce(({on_row(src.where, 's')}), false)" if src.where else ""
             oid = self.ref(t, "s", src.obj_col)
-            return (f"SELECT {extra}{oid} AS {obj}, {sid} AS {subj} "
-                    f"FROM {qt(src.table)} s WHERE {sid} IS NOT NULL "
-                    f"AND {oid} IS NOT NULL{where}{m}")
+            return (
+                f"SELECT {extra}{oid} AS {obj}, {sid} AS {subj} "
+                f"FROM {qt(src.table)} s WHERE {sid} IS NOT NULL "
+                f"AND {oid} IS NOT NULL{where}{m}"
+            )
         live = "" if tree else f" AND {self.live()}"
         m = {"obj": f" AND g.object_id = ({v})::text", "subj": f" AND g.subject_id = ({v})::text"}.get(side or "", "")
-        return (f"SELECT {extra}g.object_id::{t.pktype} AS {obj}, g.subject_id::{s.pktype} AS {subj} "
-                f"FROM authz.shares g WHERE g.object_type = {lit(t.name)} AND g.relation = {lit(r.name)} "
-                f"AND g.subject_type = {lit(subj_type)} AND g.subject_relation = {lit(subj_rel)}{live}{m}")
+        return (
+            f"SELECT {extra}g.object_id::{t.pktype} AS {obj}, g.subject_id::{s.pktype} AS {subj} "
+            f"FROM authz.shares g WHERE g.object_type = {lit(t.name)} AND g.relation = {lit(r.name)} "
+            f"AND g.subject_type = {lit(subj_type)} AND g.subject_relation = {lit(subj_rel)}{live}{m}"
+        )
 
     def is_group_loop(self, t: Type, r: Relation, st: str, sr: str | None) -> bool:
         return st == t.name and sr == r.name
@@ -1155,8 +1395,12 @@ class Core:
             if ext:
                 direct.append(f"SELECT NULL::{t.pktype} AS id WHERE false")
             else:
-                fail(loc, f"{t.name}.{r.name} links to {r.subjects()[0][0]} objects, not users; "
-                          f"follow it with a dot, e.g. {r.name}.view", "AZ301")
+                fail(
+                    loc,
+                    f"{t.name}.{r.name} links to {r.subjects()[0][0]} objects, not users; "
+                    f"follow it with a dot, e.g. {r.name}.view",
+                    "AZ301",
+                )
         if loops:
             # nested groups: members of a sub-group are members of the group, to
             # any depth; UNION stops on loops in the nesting. Nested through columns or
@@ -1166,19 +1410,29 @@ class Core:
             # each read. Nested through shares, even this estimates high (the random-change
             # tests: 5.8M, JIT inlining every read), so those keep the join.
             # A group that fails the type's where passes nothing on: the walk doesn't go through it.
-            valid = (f"EXISTS (SELECT 1 FROM {qt(t.table)} w WHERE {self.key_is(t, 'w', 'm.id')} "
-                     f"AND coalesce(({row_cond(t.where, 'w')}), false))") if t.where else ""
+            valid = (
+                (
+                    f"EXISTS (SELECT 1 FROM {qt(t.table)} w WHERE {self.key_is(t, 'w', 'm.id')} "
+                    f"AND coalesce(({row_cond(t.where, 'w')}), false))"
+                )
+                if t.where
+                else ""
+            )
             if loop_kinds <= {"column", "table"}:
-                step = (f"SELECT unnest(ARRAY(SELECT e.obj FROM (\n  {union(loops)}) e WHERE e.subj = m.id)) FROM m"
-                        + (f"\n    WHERE {valid}" if valid else ""))
+                step = f"SELECT unnest(ARRAY(SELECT e.obj FROM (\n  {union(loops)}) e WHERE e.subj = m.id)) FROM m" + (
+                    f"\n    WHERE {valid}" if valid else ""
+                )
             else:
-                step = (f"SELECT e.obj FROM (\n  {union(loops)}) e JOIN m ON e.subj = m.id"
-                        + (f"\n    WHERE {valid}" if valid else ""))
-            sql = (f"WITH RECURSIVE m(id) AS (\n"
-                   f"    SELECT id FROM (\n  {union(direct)}) d\n"
-                   f"    UNION\n"
-                   f"    {step})\n"
-                   f"  SELECT id FROM m")
+                step = f"SELECT e.obj FROM (\n  {union(loops)}) e JOIN m ON e.subj = m.id" + (
+                    f"\n    WHERE {valid}" if valid else ""
+                )
+            sql = (
+                f"WITH RECURSIVE m(id) AS (\n"
+                f"    SELECT id FROM (\n  {union(direct)}) d\n"
+                f"    UNION\n"
+                f"    {step})\n"
+                f"  SELECT id FROM m"
+            )
             self.nested[name] = t.pktype
         else:
             sql = union(direct)
@@ -1192,12 +1446,14 @@ class Core:
                 f"-- {t.name}.{label} for the user signed in, as an array (reads ask once per statement)\n"
                 f"CREATE FUNCTION authz_gen.{q(name + '__ids')}() RETURNS {t.pktype}[]\n"
                 f"LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path FROM CURRENT AS $f$\n"
-                f"BEGIN\n  RETURN ARRAY(SELECT id FROM authz_int.{q(name)});\nEND $f$;")
+                f"BEGIN\n  RETURN ARRAY(SELECT id FROM authz_int.{q(name)});\nEND $f$;"
+            )
         self.view_state[name] = "done"
         return name
 
-    def ensure_link_view(self, t: Type, r: Relation, perm_name: str, loc: Loc,
-                         targets: Sequence[str] | None = None, ext: bool = False) -> str:
+    def ensure_link_view(
+        self, t: Type, r: Relation, perm_name: str, loc: Loc, targets: Sequence[str] | None = None, ext: bool = False
+    ) -> str:
         """Ids of t whose r points at something the user holds perm_name on."""
         all_targets = [st for st, _ in r.subjects()]
         targets = list(targets) if targets else all_targets
@@ -1214,18 +1470,24 @@ class Core:
                 if (st, None) not in src.subjects:
                     continue
                 if src.kind == "column":
-                    parts.append(f"SELECT {self.key(t, 'r')} AS id FROM {qt(t.table)} r "
-                                 f"WHERE {self.subject_id(src, 'r', st)} {self.ids_in(inner)}")
+                    parts.append(
+                        f"SELECT {self.key(t, 'r')} AS id FROM {qt(t.table)} r "
+                        f"WHERE {self.subject_id(src, 'r', st)} {self.ids_in(inner)}"
+                    )
                 elif src.kind == "table":
                     assert src.table is not None and src.obj_col is not None
                     extra = f" AND coalesce(({row_cond(src.where, 's')}), false)" if src.where else ""
-                    parts.append(f"SELECT {self.ref(t, 's', src.obj_col)} AS id FROM {qt(src.table)} s "
-                                 f"WHERE {self.subject_id(src, 's', st)} {self.ids_in(inner)}{extra}")
+                    parts.append(
+                        f"SELECT {self.ref(t, 's', src.obj_col)} AS id FROM {qt(src.table)} s "
+                        f"WHERE {self.subject_id(src, 's', st)} {self.ids_in(inner)}{extra}"
+                    )
                 else:
-                    parts.append(f"SELECT g.object_id::{t.pktype} AS id FROM authz.shares g "
-                                 f"WHERE g.object_type = {lit(t.name)} AND g.relation = {lit(r.name)} "
-                                 f"AND g.subject_type = {lit(st)} AND g.subject_relation = '' "
-                                 f"AND g.subject_id {self.ids_in(inner, text=True)} AND {self.live()}")
+                    parts.append(
+                        f"SELECT g.object_id::{t.pktype} AS id FROM authz.shares g "
+                        f"WHERE g.object_type = {lit(t.name)} AND g.relation = {lit(r.name)} "
+                        f"AND g.subject_type = {lit(st)} AND g.subject_relation = '' "
+                        f"AND g.subject_id {self.ids_in(inner, text=True)} AND {self.live()}"
+                    )
         if not parts:
             parts.append(f"SELECT NULL::{t.pktype} AS id WHERE false")
         self.add_view(view, union(parts), f"-- {t.name}.{r.name}.{perm_name}\n", t)
@@ -1261,7 +1523,9 @@ class Core:
         if not items:
             key = self.recursive.get((t.name, perm.name))
             members = self.scc_members[key] if key is not None else [(t.name, perm.name)]
-            if len(members) == 1 or not any(self.own_base_items(self.T(tn), self.T(tn).perms[pn]) for tn, pn in members):
+            if len(members) == 1 or not any(
+                self.own_base_items(self.T(tn), self.T(tn).perms[pn]) for tn, pn in members
+            ):
                 fail(perm.loc, f"{t.name}.{perm.name} needs a starting point besides inheritance", "AZ303")
         return items
 
@@ -1292,8 +1556,7 @@ class Core:
                 # session instead of with every query that uses this permission.
                 tree = self.ensure_tree(t, edges)
                 start = self.start_function(t, perm, (t.name, edges))
-                sql = (f"SELECT c.descendant AS id FROM authz_int.{q(tree)} c\n"
-                       f"  WHERE c.ancestor IN (SELECT {start}())")
+                sql = f"SELECT c.descendant AS id FROM authz_int.{q(tree)} c\n  WHERE c.ancestor IN (SELECT {start}())"
                 self.add_view(name, sql, header, t)
                 self.view_state[name] = "done"
                 self.point_check_function(t, perm, tree, (t.name, edges))
@@ -1306,9 +1569,12 @@ class Core:
                 mt = self.T(tn)
                 fn = self.start_function(mt, mt.perms[pn], None)
                 starts.append(f"SELECT {lit(tn)}::text, x::text FROM {fn}() x")
-            sql = (f"SELECT c.did::{t.pktype} AS id FROM authz_int.{q(tree)} c\n"
-                   f"  WHERE c.dtype = {lit(t.name)} AND (c.atype, c.aid) IN (\n  "
-                   + "\n  UNION ALL\n  ".join(starts) + ")")
+            sql = (
+                f"SELECT c.did::{t.pktype} AS id FROM authz_int.{q(tree)} c\n"
+                f"  WHERE c.dtype = {lit(t.name)} AND (c.atype, c.aid) IN (\n  "
+                + "\n  UNION ALL\n  ".join(starts)
+                + ")"
+            )
         self.add_view(name, sql, header, t)
         self.view_state[name] = "done"
 
@@ -1316,12 +1582,17 @@ class Core:
         """The ids where a recursive permission starts for the current user: what it holds directly (none, for
         a permission of a loop that only inherits: base_items)."""
         items = self.base_items(t, perm)
-        body = (union([self.set_sql(t, i, perm.loc, flatten) for i in items]) if items
-                else f"SELECT NULL::{t.pktype} AS id WHERE false")
+        body = (
+            union([self.set_sql(t, i, perm.loc, flatten) for i in items])
+            if items
+            else f"SELECT NULL::{t.pktype} AS id WHERE false"
+        )
         if t.where:
-            body = (f"SELECT x.id FROM (\n  {body}) x\n"
-                    f"  WHERE EXISTS (SELECT 1 FROM {qt(t.table)} w WHERE {self.key_is(t, 'w', 'x.id')} "
-                    f"AND coalesce(({row_cond(t.where, 'w')}), false))")
+            body = (
+                f"SELECT x.id FROM (\n  {body}) x\n"
+                f"  WHERE EXISTS (SELECT 1 FROM {qt(t.table)} w WHERE {self.key_is(t, 'w', 'x.id')} "
+                f"AND coalesce(({row_cond(t.where, 'w')}), false))"
+            )
         return body
 
     def point_check_function(self, t: Type, perm: Perm, tree: str, flatten: Flatten) -> None:
@@ -1332,8 +1603,14 @@ class Core:
         name = f"{t.name}__{perm.name}__has"
         self.point_checks[f"{t.name}__{perm.name}"] = name
         # like every view (add_view): an object failing its type's where holds nothing
-        where = (f"\n    AND EXISTS (SELECT 1 FROM {qt(t.table)} w WHERE {self.key_is(t, 'w', 'p_id')} "
-                 f"AND coalesce(({row_cond(t.where, 'w')}), false))") if t.where else ""
+        where = (
+            (
+                f"\n    AND EXISTS (SELECT 1 FROM {qt(t.table)} w WHERE {self.key_is(t, 'w', 'p_id')} "
+                f"AND coalesce(({row_cond(t.where, 'w')}), false))"
+            )
+            if t.where
+            else ""
+        )
         self.view_sql.append(
             f"-- {t.name}.{perm.name} for one object (checks of single rows and authz.can)\n"
             f"CREATE FUNCTION authz_gen.{q(name)}(p_id {t.pktype}) RETURNS boolean\n"
@@ -1342,7 +1619,8 @@ class Core:
             f"  RETURN EXISTS (SELECT 1 FROM authz_int.{q(tree)} c\n"
             f"    WHERE c.descendant = p_id\n"
             f"      AND EXISTS (SELECT 1 FROM (\n  {self.start_sql(t, perm, flatten)}) s WHERE s.id = c.ancestor)){where};\n"
-            f"END $f$;")
+            f"END $f$;"
+        )
 
     def direct_view(self, t: Type, perm: Perm, view: str) -> None:
         """The starting points of t.perm that an object's own columns decide (owner, org.admin, {cond}).
@@ -1373,8 +1651,7 @@ class Core:
             if isinstance(item, Ref) and item.name in t.perms:
                 inner = t.perms[item.name]
                 e = self.perm_edges(t, inner)
-                if (e is not None and e <= edges
-                        and len(self.scc_members[self.recursive[(t.name, inner.name)]]) == 1):
+                if e is not None and e <= edges and len(self.scc_members[self.recursive[(t.name, inner.name)]]) == 1:
                     out += self.start_items(t, inner, edges)
                     continue
             out.append(item)
@@ -1391,8 +1668,9 @@ class Core:
                 return all(self.own_columns(t, x) for x in items)
             case ("ref", name) | ("arrow", name, _) | ("arrow_on", name, _, _) if name in t.relations:
                 r = t.relations[name]
-                return (all(src.kind == "column" for src in r.sources)
-                        and not any(sr and sr != "*" and self.is_group_loop(t, r, st, sr) for st, sr in r.subjects()))
+                return all(src.kind == "column" for src in r.sources) and not any(
+                    sr and sr != "*" and self.is_group_loop(t, r, st, sr) for st, sr in r.subjects()
+                )
         return False
 
     def item_cost(self, t: Type, item: Expr) -> int:
@@ -1416,7 +1694,8 @@ class Core:
                 if name in t.relations:
                     rn = t.relations[name]
                     direct = all(src.kind == "column" for src in rn.sources) and all(
-                        self.is_principal(st) and not sr for st, sr in rn.subjects())
+                        self.is_principal(st) and not sr for st, sr in rn.subjects()
+                    )
                     return 0 if direct else 1
                 if (t.name, name) in self.recursive:
                     return 2
@@ -1435,7 +1714,8 @@ class Core:
             f"-- {t.name}.{perm.name}: where inheritance starts, for the current user\n"
             f"CREATE FUNCTION {fn}() RETURNS SETOF {t.pktype}\n"
             f"LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path FROM CURRENT ROWS 100 AS $f$\n"
-            f"BEGIN\n  RETURN QUERY\n  {body};\nEND $f$;")
+            f"BEGIN\n  RETURN QUERY\n  {body};\nEND $f$;"
+        )
         return fn
 
     # --- set SQL: ids of t for which the expression holds -----------------
@@ -1448,8 +1728,13 @@ class Core:
                     return f"SELECT id FROM authz_int.{q(self.ensure_rel_view(t, t.relations[name], loc))}"
                 perm = t.perms[name]
                 edges = self.perm_edges(t, perm)
-                if (flatten and edges is not None and flatten[0] == t.name and edges <= flatten[1]
-                        and len(self.scc_members[self.recursive[(t.name, perm.name)]]) == 1):
+                if (
+                    flatten
+                    and edges is not None
+                    and flatten[0] == t.name
+                    and edges <= flatten[1]
+                    and len(self.scc_members[self.recursive[(t.name, perm.name)]]) == 1
+                ):
                     # its links are a subset of the ones being walked: one walk covers both
                     return union([self.set_sql(t, i, loc, flatten) for i in self.base_items(t, perm)])
                 self.ensure_view(t, perm)
@@ -1473,8 +1758,7 @@ class Core:
                 case ("not", ("cond", sql)):
                     where.append(f"NOT coalesce(({row_cond(sql, 'r')}), false)")
                 case ("not", inner):
-                    where.append(f"NOT EXISTS (SELECT 1 FROM ({self.set_sql(t, inner, loc)}) x "
-                                 f"WHERE x.id = {rid})")
+                    where.append(f"NOT EXISTS (SELECT 1 FROM ({self.set_sql(t, inner, loc)}) x WHERE x.id = {rid})")
                 case _:
                     where.append(self.key_in(t, "r", self.set_sql(t, item, loc)))
         return f"SELECT {rid} AS id FROM {tbl} r\n  WHERE " + "\n    AND ".join(where)
@@ -1514,8 +1798,11 @@ class Core:
             conds = [x for x in item.items if isinstance(x, Cond)]
             if len(arrows) == 1 and len(conds) == 1:
                 item, cond = arrows[0], conds[0].sql
-        if (isinstance(item, Arrow) and item.rel in t.relations
-                and all(not sr for _, sr in t.relations[item.rel].subjects())):
+        if (
+            isinstance(item, Arrow)
+            and item.rel in t.relations
+            and all(not sr for _, sr in t.relations[item.rel].subjects())
+        ):
             return (item.rel, item.perm, cond)
         return None
 
@@ -1552,8 +1839,16 @@ class Core:
     # invoker: the SQL runs as the app role (row-level security, column rules' triggers, refusals). There
     # nothing reads another table itself: what the policy reads, it reads with its own rights, in views and
     # functions that run as the owner, so a permission means the same wherever it is checked.
-    def row_sql(self, t: Type, alias: str, node: Expr, loc: Loc, stack: tuple[Name, ...] = (),
-                point: bool = False, invoker: bool = False) -> str:
+    def row_sql(
+        self,
+        t: Type,
+        alias: str,
+        node: Expr,
+        loc: Loc,
+        stack: tuple[Name, ...] = (),
+        point: bool = False,
+        invoker: bool = False,
+    ) -> str:
         match node:
             case ("cond", sql):
                 if invoker and reads_more(sql):
@@ -1566,8 +1861,14 @@ class Core:
             case ("and", items) | ("or", items):
                 # cheapest first: Postgres evaluates AND and OR from the left and stops once the answer is known
                 joiner = f"\n    {node[0].upper()} "
-                return "(" + joiner.join(self.row_sql(t, alias, x, loc, stack, point, invoker)
-                                         for x in self.cheapest_first(t, once(items))) + ")"
+                return (
+                    "("
+                    + joiner.join(
+                        self.row_sql(t, alias, x, loc, stack, point, invoker)
+                        for x in self.cheapest_first(t, once(items))
+                    )
+                    + ")"
+                )
             case ("arrow", rel, perm_name) | ("arrow_on", rel, perm_name, _):
                 return self.row_arrow(t, alias, node, rel, perm_name, loc, point, invoker)
             case ("ref", name):
@@ -1591,10 +1892,13 @@ class Core:
                 f"-- {t.name}: a condition that reads other rows, run with the policy's rights wherever it is checked\n"
                 f"CREATE FUNCTION {fn}(p_row {qt(t.table)}) RETURNS boolean\n"
                 f"LANGUAGE sql STABLE SECURITY DEFINER SET search_path FROM CURRENT AS $f$\n"
-                f"  SELECT coalesce(({row_cond(sql, bare)}), false) FROM (SELECT (p_row).*) AS {bare}\n$f$;")
+                f"  SELECT coalesce(({row_cond(sql, bare)}), false) FROM (SELECT (p_row).*) AS {bare}\n$f$;"
+            )
         return f"{fn}(ROW({alias}.*)::{qt(t.table)})"
 
-    def link_checks(self, t: Type, r: Relation, names: list[str], checks: Mapping[str, str | None], obj: str) -> list[str]:
+    def link_checks(
+        self, t: Type, r: Relation, names: list[str], checks: Mapping[str, str | None], obj: str
+    ) -> list[str]:
         """rel.perm through the relation's link tables and shares, for the object whose id is obj: its links, each
         target checked on its own (what ensure_link_view selects)."""
         parts = []
@@ -1607,18 +1911,23 @@ class Core:
                 if src.kind == "table":
                     assert src.table is not None and src.obj_col is not None
                     extra = f" AND coalesce(({row_cond(src.where, 's')}), false)" if src.where else ""
-                    parts.append(f"EXISTS (SELECT 1 FROM {qt(src.table)} s WHERE "
-                                 f"{self.key_is(t, 's', obj, src.obj_col)}{extra} "
-                                 f"AND {fn}({self.subject_id(src, 's', st)}))")
+                    parts.append(
+                        f"EXISTS (SELECT 1 FROM {qt(src.table)} s WHERE "
+                        f"{self.key_is(t, 's', obj, src.obj_col)}{extra} "
+                        f"AND {fn}({self.subject_id(src, 's', st)}))"
+                    )
                 else:
-                    parts.append(f"EXISTS (SELECT 1 FROM authz.shares g WHERE g.object_type = {lit(t.name)} "
-                                 f"AND g.object_id = {obj}::text AND g.relation = {lit(r.name)} "
-                                 f"AND g.subject_type = {lit(st)} AND g.subject_relation = '' AND {self.live()} "
-                                 f"AND {fn}(g.subject_id::{self.T(st).pktype}))")
+                    parts.append(
+                        f"EXISTS (SELECT 1 FROM authz.shares g WHERE g.object_type = {lit(t.name)} "
+                        f"AND g.object_id = {obj}::text AND g.relation = {lit(r.name)} "
+                        f"AND g.subject_type = {lit(st)} AND g.subject_relation = '' AND {self.live()} "
+                        f"AND {fn}(g.subject_id::{self.T(st).pktype}))"
+                    )
         return parts
 
-    def definer_links(self, t: Type, r: Relation, perm_name: str, names: list[str],
-                      checks: Mapping[str, str | None], alias: str) -> str:
+    def definer_links(
+        self, t: Type, r: Relation, perm_name: str, names: list[str], checks: Mapping[str, str | None], alias: str
+    ) -> str:
         """link_checks where the app role checks the row: a function that runs as the owner (the app role may read
         neither authz.shares nor, maybe, the link tables), on the row's id."""
         suffix = "" if names == [st for st, _ in r.subjects()] else "__on_" + "_".join(names)
@@ -1631,11 +1940,13 @@ class Core:
                 f"-- {t.name}.{r.name}.{perm_name} for one object, through link tables and shares: as the owner\n"
                 f"CREATE FUNCTION {fn}(p_id {t.pktype}) RETURNS boolean\n"
                 f"LANGUAGE sql STABLE SECURITY DEFINER SET search_path FROM CURRENT AS $f$\n"
-                f"  SELECT {body}\n$f$;")
+                f"  SELECT {body}\n$f$;"
+            )
         return f"{fn}({self.key(t, alias)})"
 
-    def row_arrow(self, t: Type, alias: str, node: Expr, rel: str, perm_name: str, loc: Loc, point: bool,
-                  invoker: bool = False) -> str:
+    def row_arrow(
+        self, t: Type, alias: str, node: Expr, rel: str, perm_name: str, loc: Loc, point: bool, invoker: bool = False
+    ) -> str:
         """rel.perm on the row itself: its columns looked up, then the relation's other sources."""
         r, targets = self.targets(t, rel, loc)
         on = only_on(node)
@@ -1680,18 +1991,25 @@ class Core:
                 elif sr:
                     parts.append(self.lookup_sql(self.view_ref(self.T(st), sr, loc), sid, point))
         if any(src.kind != "column" for src in r.sources):
-            ext = any(src.kind == "column" for src in r.sources)   # only split off when needed
+            ext = any(src.kind == "column" for src in r.sources)  # only split off when needed
             parts.append(self.lookup_sql(self.ensure_rel_view(t, r, loc, ext=ext), self.key(t, alias), point))
         if not parts:
-            fail(loc, f"{t.name}.{r.name} links to {r.subjects()[0][0]} objects, not users; "
-                      f"follow it with a dot, e.g. {r.name}.view", "AZ301")
+            fail(
+                loc,
+                f"{t.name}.{r.name} links to {r.subjects()[0][0]} objects, not users; "
+                f"follow it with a dot, e.g. {r.name}.view",
+                "AZ301",
+            )
         return or_join(parts)
 
     def rule_sql(self, t: Type, alias: str, rule: Rule, point: bool = False, invoker: bool = False) -> str:
         """The rule on the row aliased alias, and the type's where; invoker: as the app role checks it (row_sql)."""
         sql = self.row_sql(t, alias, rule.expr, rule.loc, point=point, invoker=invoker)
         if t.where:
-            where = (self.definer_cond(t, t.where, alias) if invoker and reads_more(t.where)
-                     else f"coalesce(({row_cond(t.where, alias)}), false)")
+            where = (
+                self.definer_cond(t, t.where, alias)
+                if invoker and reads_more(t.where)
+                else f"coalesce(({row_cond(t.where, alias)}), false)"
+            )
             sql = f"({sql}\n    AND {where})"
         return sql

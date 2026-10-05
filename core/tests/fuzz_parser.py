@@ -9,6 +9,7 @@ accepted or refused; what must never happen is any other exception (an IndexErro
 RecursionError...), a refusal without a line number, or a case taking seconds. Policy authors are
 trusted (see docs/threat-model.md), so this is about robustness and clear errors, not an attack surface.
 """
+
 import argparse
 import os
 import random
@@ -23,9 +24,51 @@ from authzlib import Compiler  # noqa: E402
 from authzlib.parse import PolicyError, parse_policy  # noqa: E402
 
 SEEDS = ["example/docs.authz", "tests/alt.authz", "tests/multi.authz", "tests/composite.authz"]
-ODD = ["(", ")", "[", "]", "{", "}", "#", ".", ":", "=", ",", "->", "--", "'", '"', "\\", "\t", "é", "​",
-       "and", "or", "not", "can", "type", "rules", "shared", "by", "if", "grant", "scope", "caveat", "include",
-       "test", "invariants", "never", "role", "user:*", "anyone", "link", "{", "select", "update x check", "*"]
+ODD = [
+    "(",
+    ")",
+    "[",
+    "]",
+    "{",
+    "}",
+    "#",
+    ".",
+    ":",
+    "=",
+    ",",
+    "->",
+    "--",
+    "'",
+    '"',
+    "\\",
+    "\t",
+    "é",
+    "​",
+    "and",
+    "or",
+    "not",
+    "can",
+    "type",
+    "rules",
+    "shared",
+    "by",
+    "if",
+    "grant",
+    "scope",
+    "caveat",
+    "include",
+    "test",
+    "invariants",
+    "never",
+    "role",
+    "user:*",
+    "anyone",
+    "link",
+    "{",
+    "select",
+    "update x check",
+    "*",
+]
 
 
 def tokens(text: str) -> list[str]:
@@ -35,26 +78,26 @@ def tokens(text: str) -> list[str]:
 def mutate(rnd: random.Random, text: str) -> str:
     kind = rnd.randrange(8)
     lines = text.split("\n")
-    if kind == 0:                                   # drop a line
+    if kind == 0:  # drop a line
         del lines[rnd.randrange(len(lines))]
         return "\n".join(lines)
-    if kind == 1:                                   # repeat a line elsewhere
+    if kind == 1:  # repeat a line elsewhere
         lines.insert(rnd.randrange(len(lines)), rnd.choice(lines))
         return "\n".join(lines)
-    if kind == 2:                                   # cut the text short
-        return text[:rnd.randrange(len(text))]
+    if kind == 2:  # cut the text short
+        return text[: rnd.randrange(len(text))]
     toks = tokens(text)
     i = rnd.randrange(len(toks))
-    if kind == 3:                                   # drop a token
+    if kind == 3:  # drop a token
         del toks[i]
-    elif kind == 4:                                 # replace a token with an odd one
+    elif kind == 4:  # replace a token with an odd one
         toks[i] = rnd.choice(ODD)
-    elif kind == 5:                                 # replace a token with another from the policy
+    elif kind == 5:  # replace a token with another from the policy
         toks[i] = rnd.choice(toks)
-    elif kind == 6:                                 # swap two tokens
+    elif kind == 6:  # swap two tokens
         j = rnd.randrange(len(toks))
         toks[i], toks[j] = toks[j], toks[i]
-    else:                                           # insert an odd token
+    else:  # insert an odd token
         toks.insert(i, " " + rnd.choice(ODD) + " ")
     return "".join(toks)
 
@@ -94,8 +137,10 @@ def main() -> int:
             problems.append((n, f"took {took:.1f} s", text))
     for n, what, text in problems[:5]:
         print(f"--- case {n}: {what.strip()}\n{text[:1500]}\n")
-    print(f"fuzz_parser: {args.cases} mutated policies, {accepted} accepted, {refused} refused, "
-          f"{len(problems)} problems; slowest {slowest * 1000:.0f} ms")
+    print(
+        f"fuzz_parser: {args.cases} mutated policies, {accepted} accepted, {refused} refused, "
+        f"{len(problems)} problems; slowest {slowest * 1000:.0f} ms"
+    )
     return 1 if problems else 0
 
 

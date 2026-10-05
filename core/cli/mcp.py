@@ -7,6 +7,7 @@ kept between calls.
 
     {"mcpServers": {"rowstile": {"command": "rowstile", "args": ["mcp"]}}}
 """
+
 from __future__ import annotations
 
 import json
@@ -23,8 +24,8 @@ from authzlib.connection import (
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 COMMAND = os.path.join(HERE, "rowstile_cli.py")
-VERSIONS = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"]     # newest first
-TIMEOUT = 600                                                           # seconds, for one call
+VERSIONS = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"]  # newest first
+TIMEOUT = 600  # seconds, for one call
 ERROR = re.compile(r"^(?P<file>.+?): (?:(?P<inc>\S+) )?line (?P<line>\d+): (?P<message>.*)$", re.S)
 
 INSTRUCTIONS = """rowstile compiles an access policy (.authz) into row-level security for Postgres.
@@ -40,63 +41,102 @@ Message = dict[str, Json]
 
 POLICY: Json = {"type": "string", "description": "the policy file (default: rowstile.toml's `policy`)"}
 WHO: Json = {"type": "string", "description": "who asks: user:42, bot:7 (a principal type and id), or anyone"}
-OUTPUT: Json = {"type": "object", "properties": {
-    "ok": {"type": "boolean", "description": "true when the command found nothing wrong"},
-    "exit_code": {"type": "integer"},
-    "output": {"type": "string", "description": "what the command printed"},
-    "error": {"type": "object", "description": "check: the mistake, when there is one"}},
-    "required": ["ok", "exit_code", "output"]}
+OUTPUT: Json = {
+    "type": "object",
+    "properties": {
+        "ok": {"type": "boolean", "description": "true when the command found nothing wrong"},
+        "exit_code": {"type": "integer"},
+        "output": {"type": "string", "description": "what the command printed"},
+        "error": {"type": "object", "description": "check: the mistake, when there is one"},
+    },
+    "required": ["ok", "exit_code", "output"],
+}
+
 
 class Tool(NamedTuple):
     description: str
     properties: dict[str, Json]
     required: list[str]
-    notes: dict[str, bool]      # MCP's annotations: readOnlyHint, destructiveHint, idempotentHint
+    notes: dict[str, bool]  # MCP's annotations: readOnlyHint, destructiveHint, idempotentHint
     command: Callable[[Message], list[str]]  # the arguments to the command, from the call's arguments
 
 
 TOOLS: dict[str, Tool] = {
     "check": Tool(
         "Compile the policy without a database and report its first mistake, with the file, line and code.",
-        {"policy": POLICY}, [], {"readOnlyHint": True},
-        lambda a: ["check", *opt_policy(a)]),
+        {"policy": POLICY},
+        [],
+        {"readOnlyHint": True},
+        lambda a: ["check", *opt_policy(a)],
+    ),
     "prove": Tool(
         "Check every invariant of the policy in many small worlds (no database): the smallest counterexample, "
         "or that none was found.",
         {"policy": POLICY, "worlds": {"type": "integer", "description": "how many worlds to try (default 400)"}},
-        [], {"readOnlyHint": True},
-        lambda a: ["prove", *opt("--worlds", a.get("worlds")), *opt_policy(a)]),
+        [],
+        {"readOnlyHint": True},
+        lambda a: ["prove", *opt("--worlds", a.get("worlds")), *opt_policy(a)],
+    ),
     "review": Tool(
         "What the policy change since a git ref does: meaning, access, risk, tests and deploy (the pull request "
         "comment, as markdown). Needs git.",
         {"base": {"type": "string", "description": "the ref to compare with (default: main)"}, "policy": POLICY},
-        [], {"readOnlyHint": True},
-        lambda a: ["review", "--markdown", *opt("--base", a.get("base")), *opt_policy(a)]),
+        [],
+        {"readOnlyHint": True},
+        lambda a: ["review", "--markdown", *opt("--base", a.get("base")), *opt_policy(a)],
+    ),
     "test": Tool(
         "Run the policy's tests, the test files rowstile.toml names (or these), and the invariants, on the "
         "database; nothing stays. With coverage, the branches of each permission no test makes true.",
-        {"files": {"type": "array", "items": {"type": "string"}, "description": "test files (default: rowstile.toml's `tests`)"},
-         "coverage": {"type": "boolean"}},
-        [], {"readOnlyHint": True},
-        lambda a: ["test", *(["--coverage"] if a.get("coverage") else []), *strings(a.get("files"))]),
+        {
+            "files": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "test files (default: rowstile.toml's `tests`)",
+            },
+            "coverage": {"type": "boolean"},
+        },
+        [],
+        {"readOnlyHint": True},
+        lambda a: ["test", *(["--coverage"] if a.get("coverage") else []), *strings(a.get("files"))],
+    ),
     "why": Tool(
         "Whether someone holds a permission on an object, and why; if not, why not, and the smallest changes to "
         "the data that would grant it (each tried on the database and undone).",
-        {"as": WHO, "type": {"type": "string", "description": "the policy's type, e.g. folder"},
-         "id": {"type": "string"}, "perm": {"type": "string", "description": "a permission or relation"}},
-        ["as", "type", "id", "perm"], {"readOnlyHint": True},
-        lambda a: ["why", "--as", plain("as", a["as"]), plain("type", a["type"]), ident(a["id"]), plain("perm", a["perm"])]),
+        {
+            "as": WHO,
+            "type": {"type": "string", "description": "the policy's type, e.g. folder"},
+            "id": {"type": "string"},
+            "perm": {"type": "string", "description": "a permission or relation"},
+        },
+        ["as", "type", "id", "perm"],
+        {"readOnlyHint": True},
+        lambda a: [
+            "why",
+            "--as",
+            plain("as", a["as"]),
+            plain("type", a["type"]),
+            ident(a["id"]),
+            plain("perm", a["perm"]),
+        ],
+    ),
     "lint": Tool(
         "The ways around row-level security the database leaves open (authz.lint()): the app role owning a "
         "table, bypassing RLS, tables without rules, grants on masked columns, ...",
-        {}, [], {"readOnlyHint": True},
-        lambda a: ["lint"]),
+        {},
+        [],
+        {"readOnlyHint": True},
+        lambda a: ["lint"],
+    ),
     "push": Tool(
         "Bring the development database to the policy, with the migration production would get. Only a database "
         "marked as a development database (a person marks one with rowstile push --development; the first push "
         "to one with no policy marks it): production takes migrations (rowstile migrate).",
-        {"policy": POLICY}, [], {"readOnlyHint": False, "destructiveHint": True, "idempotentHint": True},
-        lambda a: ["push", *opt_policy(a)]),
+        {"policy": POLICY},
+        [],
+        {"readOnlyHint": False, "destructiveHint": True, "idempotentHint": True},
+        lambda a: ["push", *opt_policy(a)],
+    ),
 }
 
 
@@ -134,10 +174,17 @@ def strings(items: Json) -> list[str]:
 
 
 def tool_list() -> list[Json]:
-    return [{"name": name, "title": f"rowstile {name}", "description": desc,
-             "inputSchema": {"type": "object", "properties": props, "required": required},
-             "outputSchema": OUTPUT, "annotations": {"openWorldHint": False, **notes}}
-            for name, (desc, props, required, notes, _) in TOOLS.items()]
+    return [
+        {
+            "name": name,
+            "title": f"rowstile {name}",
+            "description": desc,
+            "inputSchema": {"type": "object", "properties": props, "required": required},
+            "outputSchema": OUTPUT,
+            "annotations": {"openWorldHint": False, **notes},
+        }
+        for name, (desc, props, required, notes, _) in TOOLS.items()
+    ]
 
 
 def run(dsn: str | None, args: list[str]) -> tuple[int, str]:
@@ -145,8 +192,9 @@ def run(dsn: str | None, args: list[str]) -> tuple[int, str]:
     argv = [sys.executable, COMMAND, *(["--db", dsn] if dsn else []), *args]
     env = dict(os.environ, PYTHONIOENCODING="utf-8", PYTHONUTF8="1")
     try:
-        p = subprocess.run(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                           timeout=TIMEOUT, env=env)
+        p = subprocess.run(
+            argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=TIMEOUT, env=env
+        )
     except subprocess.TimeoutExpired:
         return 2, f"rowstile {args[0]} took more than {TIMEOUT} s and was stopped"
     return p.returncode, p.stdout.decode("utf-8", "replace").replace("\r\n", "\n")
@@ -160,16 +208,21 @@ def call(dsn: str | None, name: Json, arguments: Json) -> Message:
     result: Message = {"ok": code == 0, "exit_code": code, "output": out}
     if name == "check" and code != 0:
         from authzlib import errors
+
         first, mistake = errors.split(out.strip().split("\n")[0])
         m = ERROR.match(first)
         if m:
             # an included file is named relative to the policy's folder
             path = os.path.join(os.path.dirname(m.group("file")), m.group("inc")) if m.group("inc") else m.group("file")
             try:
-                path = os.path.relpath(path)            # relative to the project, as the agent names files
+                path = os.path.relpath(path)  # relative to the project, as the agent names files
             except ValueError:
-                pass                                    # another drive
-            found: Message = {"file": path.replace(os.sep, "/"), "line": int(m.group("line")), "message": m.group("message")}
+                pass  # another drive
+            found: Message = {
+                "file": path.replace(os.sep, "/"),
+                "line": int(m.group("line")),
+                "message": m.group("message"),
+            }
             if mistake is not None and mistake in errors.CODES:
                 # the code's page: what the mistake means, and the same mistake fixed
                 found.update(code=mistake, help=errors.page(mistake))
@@ -177,8 +230,11 @@ def call(dsn: str | None, name: Json, arguments: Json) -> Message:
             result["error"] = found
     # a finding (a mistake, a failing test, a counterexample) is an answer; exit code 2 is a call that couldn't
     # run (no policy file, no database, a wrong argument), which the agent has to fix first
-    return {"content": [{"type": "text", "text": out or "(no output)"}], "structuredContent": result,
-            "isError": code not in (0, 1)}
+    return {
+        "content": [{"type": "text", "text": out or "(no output)"}],
+        "structuredContent": result,
+        "isError": code not in (0, 1),
+    }
 
 
 class Server:
@@ -190,14 +246,20 @@ class Server:
         raw = msg.get("params")
         method, params, mid = msg.get("method"), raw if isinstance(raw, dict) else {}, msg.get("id")
         if mid is None:
-            return None                      # notifications/initialized, notifications/cancelled, ...
+            return None  # notifications/initialized, notifications/cancelled, ...
         if method == "initialize":
             from authzlib import __version__
+
             asked = params.get("protocolVersion")
-            return ok(mid, {"protocolVersion": asked if asked in VERSIONS else VERSIONS[0],
-                            "capabilities": {"tools": {"listChanged": False}},
-                            "serverInfo": {"name": "rowstile", "title": "rowstile", "version": __version__},
-                            "instructions": INSTRUCTIONS})
+            return ok(
+                mid,
+                {
+                    "protocolVersion": asked if asked in VERSIONS else VERSIONS[0],
+                    "capabilities": {"tools": {"listChanged": False}},
+                    "serverInfo": {"name": "rowstile", "title": "rowstile", "version": __version__},
+                    "instructions": INSTRUCTIONS,
+                },
+            )
         if method == "ping":
             return ok(mid, {})
         if method == "tools/list":
@@ -232,13 +294,13 @@ def serve(dsn: str | None = None) -> None:
         answer: Message | None
         try:
             got = json.loads(raw)
-        except (ValueError, RecursionError):     # nested too deep to read is not JSON this server takes either
+        except (ValueError, RecursionError):  # nested too deep to read is not JSON this server takes either
             answer = error(None, -32700, "not JSON")
         else:
             msg: Message = {str(k): v for k, v in got.items()} if isinstance(got, dict) else {}
             try:
                 answer = server.handle(msg) if isinstance(got, dict) else error(None, -32600, "not a request")
-            except Exception as e:       # answer and carry on: a dead server stops the agent's whole session
+            except Exception as e:  # answer and carry on: a dead server stops the agent's whole session
                 answer = error(msg.get("id"), -32603, f"{type(e).__name__}: {e}") if msg.get("id") is not None else None
         if answer is not None:
             out.write(json.dumps(answer).encode() + b"\n")

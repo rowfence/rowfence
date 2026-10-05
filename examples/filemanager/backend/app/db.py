@@ -1,5 +1,6 @@
 """Database access. Every request that touches files or folders runs in a transaction signed in as the
 user (authz.user_id, through the generated client), so row-level security decides what it sees."""
+
 from __future__ import annotations
 
 from collections.abc import Iterable, Iterator

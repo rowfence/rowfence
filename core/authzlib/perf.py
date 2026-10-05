@@ -13,6 +13,7 @@ scan of a large table other than the one read, and subplans run once per row.
 Bench. The app's read paths (each governed table, authz.list per permission), checks (authz.can) and write
 paths (an update of a visible row, undone), as several people, on the database's own data: p50 and p95.
 """
+
 from __future__ import annotations
 
 import json
@@ -28,8 +29,8 @@ from .sqlutil import POLICY_MARKS, lit, q, qt
 if TYPE_CHECKING:
     from . import Compiler
 
-BIG = 10_000             # rows: a full scan of a table this size is worth a warning
-SLOW_MS = 100            # a read slower than this on the data there is worth a warning
+BIG = 10_000  # rows: a full scan of a table this size is worth a warning
+SLOW_MS = 100  # a read slower than this on the data there is worth a warning
 
 # a lookup the policy makes: (table, columns, why, the policy line)
 Lookup: TypeAlias = "tuple[str, tuple[str, ...], str, str]"
@@ -37,7 +38,7 @@ Lookup: TypeAlias = "tuple[str, tuple[str, ...], str, str]"
 
 class TablePlan(TypedDict):
     table: str
-    ms: float | None           # None: the read failed
+    ms: float | None  # None: the read failed
     rows: int | None
     warnings: list[str]
 
@@ -54,7 +55,7 @@ class Path(TypedDict):
 
 
 class Bench(TypedDict):
-    round_trip: float | None    # ms: what any statement costs from where the command runs, before the server's work
+    round_trip: float | None  # ms: what any statement costs from where the command runs, before the server's work
     people: int
     rounds: int
     paths: list[Path]
@@ -74,6 +75,7 @@ def needed_indexes(c: Compiler) -> list[Lookup]:
         if key not in seen:
             seen.add(key)
             out.append((table, columns, why, str(loc)))
+
     for t in c.types.values():
         own = tuple(k for k, _ in t.key) if t.key else ((t.pk,) if t.pk else ())
         for r in t.relations.values():
@@ -82,12 +84,26 @@ def needed_indexes(c: Compiler) -> list[Lookup]:
                 if src.kind == "column":
                     columns = lead + cols(c.source_columns(src))
                     if columns != own:
-                        add(t.table, columns, f"finding the {t.name}s by their {t.name}.{r.name} (lists, select rules)", r.loc)
+                        add(
+                            t.table,
+                            columns,
+                            f"finding the {t.name}s by their {t.name}.{r.name} (lists, select rules)",
+                            r.loc,
+                        )
                 elif src.kind == "table":
                     table = c.source_table(src)
-                    add(table, lead + cols(c.source_columns(src)), f"finding the {t.name}s by their {t.name}.{r.name} "
-                                                                  f"(lists, select rules)", r.loc)
-                    add(table, cols(c.source_obj_columns(src)), f"finding the {r.name}s of {an(t.name)} (checks, explanations)", r.loc)
+                    add(
+                        table,
+                        lead + cols(c.source_columns(src)),
+                        f"finding the {t.name}s by their {t.name}.{r.name} (lists, select rules)",
+                        r.loc,
+                    )
+                    add(
+                        table,
+                        cols(c.source_obj_columns(src)),
+                        f"finding the {r.name}s of {an(t.name)} (checks, explanations)",
+                        r.loc,
+                    )
     return out
 
 
@@ -95,15 +111,17 @@ def table_indexes(db: Db, table: str) -> list[tuple[str, ...]]:
     """The column lists of the table's indexes (a primary key and unique constraints included): the columns
     each one starts with, up to its first expression (an index on (lower(name), team_id) serves no lookup by
     team_id). Valid indexes only."""
-    rows = db.rows("SELECT array(SELECT a.attname::text FROM unnest(i.indkey::int2[]) WITH ORDINALITY k(n, o) "
-                   "LEFT JOIN pg_catalog.pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = k.n ORDER BY k.o) AS cols "
-                   "FROM pg_catalog.pg_index i WHERE i.indrelid = to_regclass($1) AND i.indpred IS NULL AND i.indisvalid",
-                   [table])
+    rows = db.rows(
+        "SELECT array(SELECT a.attname::text FROM unnest(i.indkey::int2[]) WITH ORDINALITY k(n, o) "
+        "LEFT JOIN pg_catalog.pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = k.n ORDER BY k.o) AS cols "
+        "FROM pg_catalog.pg_index i WHERE i.indrelid = to_regclass($1) AND i.indpred IS NULL AND i.indisvalid",
+        [table],
+    )
     out: list[tuple[str, ...]] = []
     for r in rows:
         leading: list[str] = []
         for x in r["cols"] or []:
-            if not isinstance(x, str):          # an expression: what comes after it leads nothing
+            if not isinstance(x, str):  # an expression: what comes after it leads nothing
                 break
             leading.append(x)
         out.append(tuple(leading))
@@ -117,7 +135,7 @@ def missing_indexes(db: Db, c: Compiler) -> list[Lookup]:
     for table, columns, why, line in needed_indexes(c):
         if table not in cache:
             cache[table] = table_indexes(db, table)
-        if not any(ix[:len(columns)] == columns or set(ix[:len(columns)]) == set(columns) for ix in cache[table]):
+        if not any(ix[: len(columns)] == columns or set(ix[: len(columns)]) == set(columns) for ix in cache[table]):
             out.append((table, columns, why, line))
     return out
 
@@ -131,8 +149,10 @@ def advice(table: str, columns: Sequence[str], tool: str | None) -> str:
     if tool == "drizzle":
         return f"index({lit(name)}).on({', '.join('t.' + x for x in columns)}) in the table for {table}"
     if tool == "alembic":
-        return (f"Index({lit(name)}, {', '.join(lit(x) for x in columns)}) in {table}'s model "
-                f"(or index=True on the column), then alembic revision --autogenerate")
+        return (
+            f"Index({lit(name)}, {', '.join(lit(x) for x in columns)}) in {table}'s model "
+            f"(or index=True on the column), then alembic revision --autogenerate"
+        )
     return f"CREATE INDEX CONCURRENTLY {q(name)} ON {qt(table)} ({', '.join(q(x) for x in columns)});"
 
 
@@ -146,9 +166,11 @@ def describe_missing(missing: list[Lookup], tool: str | None) -> str:
 
 # --- plans ---------------------------------------------------------------------------------------------
 def app_role(db: Db) -> str | None:
-    rows = db.rows("SELECT DISTINCT r.rolname AS r FROM pg_catalog.pg_policy p JOIN pg_catalog.pg_description d "
-                   f"ON d.objoid = p.oid AND d.classoid = 'pg_catalog.pg_policy'::regclass AND d.description IN {POLICY_MARKS} "
-                   "CROSS JOIN unnest(p.polroles) ro JOIN pg_catalog.pg_roles r ON r.oid = ro")
+    rows = db.rows(
+        "SELECT DISTINCT r.rolname AS r FROM pg_catalog.pg_policy p JOIN pg_catalog.pg_description d "
+        f"ON d.objoid = p.oid AND d.classoid = 'pg_catalog.pg_policy'::regclass AND d.description IN {POLICY_MARKS} "
+        "CROSS JOIN unnest(p.polroles) ro JOIN pg_catalog.pg_roles r ON r.oid = ro"
+    )
     return text(rows[0], "r") if rows else None
 
 
@@ -197,6 +219,7 @@ def plans(db: Db, c: Compiler, who: tuple[str, str] | None = None) -> Plans:
     """Each governed table read as someone (default: a user in the data), with EXPLAIN ANALYZE as the app
     role: how long it took, how many rows, and what looks slow. Runs in the caller's transaction (roll it back)."""
     from .database import Error, may_take, savepoint
+
     role = app_role(db)
     if role is None:
         raise Error("no policy with rules is applied, so there is no app role to read as", "55000")
@@ -210,7 +233,11 @@ def plans(db: Db, c: Compiler, who: tuple[str, str] | None = None) -> Plans:
                 db.rows(f'SET LOCAL ROLE "{role}"')
                 db.rows("SET LOCAL statement_timeout = '10s'")
                 # VERBOSE: each scan's table with its schema
-                raw = next(iter(db.rows(f"EXPLAIN (ANALYZE, VERBOSE, FORMAT JSON) SELECT count(*) FROM {qt(table)}")[0].values()))
+                raw = next(
+                    iter(
+                        db.rows(f"EXPLAIN (ANALYZE, VERBOSE, FORMAT JSON) SELECT count(*) FROM {qt(table)}")[0].values()
+                    )
+                )
                 data = json.loads(raw) if isinstance(raw, str) else raw
                 top = data[0] if isinstance(data, list) and data and isinstance(data[0], dict) else {}
                 plan = top.get("Plan")
@@ -248,13 +275,17 @@ def bench(db: Db, c: Compiler, people: int = 10, rounds: int = 20, seed: int = 0
     """p50 and p95 (ms) of the app's paths as several people in the data: reads of each governed table, authz.list
     per permission, authz.can on objects, and updates of visible rows (undone). Runs in the caller's transaction."""
     from .database import Undo, may_take, savepoint
+
     rng = random.Random(seed)
     role = app_role(db)
     may_take(db, role)
     users: list[tuple[str | None, str | None]] = []
     for t in c.types.values():
         if t.principal:
-            ids = [text(r, "id") for r in db.rows(f"SELECT ({c.key(t, 'r')})::text AS id FROM {qt(t.table)} r ORDER BY 1 LIMIT 1000")]
+            ids = [
+                text(r, "id")
+                for r in db.rows(f"SELECT ({c.key(t, 'r')})::text AS id FROM {qt(t.table)} r ORDER BY 1 LIMIT 1000")
+            ]
             users += [(t.name, i) for i in rng.sample(ids, min(len(ids), people))]
     users = users[:people] or [(None, None)]
     timings: dict[str, list[float]] = {}
@@ -265,7 +296,7 @@ def bench(db: Db, c: Compiler, people: int = 10, rounds: int = 20, seed: int = 0
             with savepoint(db, "authz_bench"):
                 if as_app and role:
                     db.rows(f'SET LOCAL ROLE "{role}"')
-                start = time.perf_counter()             # the statement alone: one round trip, and the server's work
+                start = time.perf_counter()  # the statement alone: one round trip, and the server's work
                 db.rows(sql, list(args))
                 took = (time.perf_counter() - start) * 1000
                 raise Undo
@@ -282,8 +313,10 @@ def bench(db: Db, c: Compiler, people: int = 10, rounds: int = 20, seed: int = 0
     reads = sorted({r.table for r in c.pol.rules if r.command == "select"})
     updates = sorted({r.table for r in c.pol.rules if r.command == "update"})
     perms = [(t, p) for t in c.types.values() for p in c.public_perms(t)]
-    ids = {t.name: [text(r, "id") for r in db.rows(f"SELECT ({c.key(t, 'r')})::text AS id FROM {qt(t.table)} r LIMIT 200")]
-           for t in c.types.values()}
+    ids = {
+        t.name: [text(r, "id") for r in db.rows(f"SELECT ({c.key(t, 'r')})::text AS id FROM {qt(t.table)} r LIMIT 200")]
+        for t in c.types.values()
+    }
     for _ in range(rounds):
         ptype, pid = rng.choice(users)
         db.rows("SELECT authz.act_as($1, $2)", [ptype, pid])
@@ -298,10 +331,17 @@ def bench(db: Db, c: Compiler, people: int = 10, rounds: int = 20, seed: int = 0
             col = plain_column(db, c, t) if t else None
             if t and ids[t.name] and col:
                 oid = rng.choice(ids[t.name])
-                timed(f"update {table}", f"UPDATE {qt(table)} r SET {q(col)} = r.{q(col)} WHERE {c.key_is(t, 'r', lit(oid))}",
-                      as_app=True)
-    return {"round_trip": round_trip, "people": len(users), "rounds": rounds,
-            "paths": [{"path": k, "n": len(v), "p50": pct(v, 50), "p95": pct(v, 95)} for k, v in sorted(timings.items())]}
+                timed(
+                    f"update {table}",
+                    f"UPDATE {qt(table)} r SET {q(col)} = r.{q(col)} WHERE {c.key_is(t, 'r', lit(oid))}",
+                    as_app=True,
+                )
+    return {
+        "round_trip": round_trip,
+        "people": len(users),
+        "rounds": rounds,
+        "paths": [{"path": k, "n": len(v), "p50": pct(v, 50), "p95": pct(v, 95)} for k, v in sorted(timings.items())],
+    }
 
 
 def plain_column(db: Db, c: Compiler, t: Type) -> str | None:
@@ -311,15 +351,21 @@ def plain_column(db: Db, c: Compiler, t: Type) -> str | None:
         for src in r.sources:
             if src.kind == "column":
                 used |= set(cols(c.source_columns(src))) | ({src.type_col} if src.type_col else set())
-    rows = db.rows("SELECT attname::text AS a FROM pg_catalog.pg_attribute WHERE attrelid = to_regclass($1) AND attnum > 0 "
-                   "AND NOT attisdropped AND attgenerated = '' ORDER BY attnum", [t.table])
+    rows = db.rows(
+        "SELECT attname::text AS a FROM pg_catalog.pg_attribute WHERE attrelid = to_regclass($1) AND attnum > 0 "
+        "AND NOT attisdropped AND attgenerated = '' ORDER BY attnum",
+        [t.table],
+    )
     return next((text(r, "a") for r in rows if r["a"] not in used), None)
 
 
 def describe_bench(b: Bench) -> str:
     width = max([len(x["path"]) for x in b["paths"]] + [4])
-    lines = [f"{b['rounds']} rounds as {b['people']} people (ms, from here: a statement that does nothing takes "
-             f"{b['round_trip']}):", f"  {'path'.ljust(width)}   p50      p95"]
+    lines = [
+        f"{b['rounds']} rounds as {b['people']} people (ms, from here: a statement that does nothing takes "
+        f"{b['round_trip']}):",
+        f"  {'path'.ljust(width)}   p50      p95",
+    ]
     for x in b["paths"]:
         lines.append(f"  {x['path'].ljust(width)}  {x['p50']:>6}  {x['p95']:>7}")
     return "\n".join(lines)

@@ -6,6 +6,7 @@
 Inside a transaction already open the block is a savepoint: when it ends, the transaction acts again for
 whoever it acted for before the block (the block around it, else nobody).
 """
+
 from __future__ import annotations
 
 import contextlib

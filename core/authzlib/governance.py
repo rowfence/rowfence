@@ -1,5 +1,6 @@
 """Governance: the audit trail, the change feed, access requests and emergency
 access, access reviews, invariants, and previewing a policy change."""
+
 from __future__ import annotations
 
 from .compiler import Core
@@ -20,13 +21,15 @@ def trigger_if_table(table: str, trigger_sql: str, what: str) -> str:
     m = made(trigger_sql)
     assert m is not None, "a CREATE TRIGGER makes a trigger"
     kind, key = m
-    return (f"-- @object {kind} {key}\n"
-            f"DO $tr$ BEGIN\n"
-            f"  IF (SELECT relkind FROM pg_class WHERE oid = {lit(qt(table))}::regclass) IN ('r', 'p') THEN\n"
-            f"    EXECUTE '{body}';\n"
-            f"  ELSE\n"
-            f"    RAISE NOTICE '{qt(table).replace(chr(39), chr(39) * 2)} is not a table: changes to it are not audited or fed ({what})';\n"
-            f"  END IF;\nEND $tr$;")
+    return (
+        f"-- @object {kind} {key}\n"
+        f"DO $tr$ BEGIN\n"
+        f"  IF (SELECT relkind FROM pg_class WHERE oid = {lit(qt(table))}::regclass) IN ('r', 'p') THEN\n"
+        f"    EXECUTE '{body}';\n"
+        f"  ELSE\n"
+        f"    RAISE NOTICE '{qt(table).replace(chr(39), chr(39) * 2)} is not a table: changes to it are not audited or fed ({what})';\n"
+        f"  END IF;\nEND $tr$;"
+    )
 
 
 class GovernanceMixin(Core):
@@ -151,8 +154,8 @@ CREATE TRIGGER authz_role_perm_audit AFTER INSERT OR DELETE ON authz.role_permis
     def relationship_audit_sql(self) -> list[str]:
         """Audit and feed rows for relationships kept in your own tables."""
         out: list[str] = []
-        tables: dict[str, list[tuple[Type, Relation, Source]]] = {}   # link table -> [(type, relation, source)]
-        cols: dict[str, list[tuple[Relation, Source]]] = {}           # object type -> [(relation, source)]
+        tables: dict[str, list[tuple[Type, Relation, Source]]] = {}  # link table -> [(type, relation, source)]
+        cols: dict[str, list[tuple[Relation, Source]]] = {}  # object type -> [(relation, source)]
         for t in self.types.values():
             for r in t.relations.values():
                 for src in r.sources:
@@ -168,10 +171,15 @@ CREATE TRIGGER authz_role_perm_audit AFTER INSERT OR DELETE ON authz.role_permis
                 srel = lit(src.subjects[0][1] or "") if not src.type_col else "''"
                 where = f" AND coalesce(({on_row(src.where, 'x')}), false)" if src.where else ""
                 for which, action in (("new_rows", "relate"), ("old_rows", "unrelate")):
-                    rows.append((which, f"SELECT {lit(action)} AS action, {lit(t.name)} AS ot, "
-                                        f"{self.ref_text(t, 'x', self.source_obj_columns(src))} AS oid, "
-                                        f"{lit(r.name)} AS rel, {styp} AS st, {self.subject_text(src, 'x')} AS sid, {srel} AS sr "
-                                        f"FROM {which} x WHERE true{where}"))
+                    rows.append(
+                        (
+                            which,
+                            f"SELECT {lit(action)} AS action, {lit(t.name)} AS ot, "
+                            f"{self.ref_text(t, 'x', self.source_obj_columns(src))} AS oid, "
+                            f"{lit(r.name)} AS rel, {styp} AS st, {self.subject_text(src, 'x')} AS sid, {srel} AS sr "
+                            f"FROM {which} x WHERE true{where}",
+                        )
+                    )
             new_q = " UNION ALL ".join(sql for w, sql in rows if w == "new_rows")
             old_q = " UNION ALL ".join(sql for w, sql in rows if w == "old_rows")
             ins = lambda src, other: (
@@ -180,23 +188,36 @@ CREATE TRIGGER authz_role_perm_audit AFTER INSERT OR DELETE ON authz.role_permis
     SELECT authz_int.caller_role(), authz_int.actor(),
            nullif(current_setting('authz.acting_user', true), ''), c.action, c.ot, c.oid, c.rel, c.st, c.sid, c.sr,
            nullif(current_setting('authz_ctx.reason', true), '')
-    FROM ({src}) c""" + (f"""
+    FROM ({src}) c"""
+                + (
+                    f"""
     WHERE NOT EXISTS (SELECT 1 FROM ({other}) o WHERE (o.ot, o.oid, o.rel, o.st, o.sid) = (c.ot, c.oid, c.rel, c.st, c.sid))"""
-                         if other else "") + f""";
-    PERFORM authz_int.changed(c.ot, array_agg(DISTINCT c.oid), 'relationship') FROM ({src}) c GROUP BY c.ot;""")
-            bodies = {"ins": ins(new_q, None), "del": ins(old_q, None),
-                      "upd": ins(new_q, old_q) + "\n" + ins(old_q, new_q)}
+                    if other
+                    else ""
+                )
+                + f""";
+    PERFORM authz_int.changed(c.ot, array_agg(DISTINCT c.oid), 'relationship') FROM ({src}) c GROUP BY c.ot;"""
+            )
+            bodies = {
+                "ins": ins(new_q, None),
+                "del": ins(old_q, None),
+                "upd": ins(new_q, old_q) + "\n" + ins(old_q, new_q),
+            }
             object_types = sorted({t.name for t, r, src in uses})
             bodies["trunc"] = "\n".join(
                 f"    PERFORM authz_int.audit('truncate', {lit(ot)}, NULL, NULL, NULL, NULL, NULL, "
                 f"jsonb_build_object('table', {lit(table)}));\n"
-                f"    PERFORM authz_int.changed({lit(ot)}, ARRAY['*'], 'relationship');" for ot in object_types)
+                f"    PERFORM authz_int.changed({lit(ot)}, ARRAY['*'], 'relationship');"
+                for ot in object_types
+            )
             head = f"-- relationships kept in {table}"
             parts = [head]
-            for op, event, ref in (("ins", "INSERT", "REFERENCING NEW TABLE AS new_rows "),
-                                   ("upd", "UPDATE", "REFERENCING OLD TABLE AS old_rows NEW TABLE AS new_rows "),
-                                   ("del", "DELETE", "REFERENCING OLD TABLE AS old_rows "),
-                                   ("trunc", "TRUNCATE", "")):
+            for op, event, ref in (
+                ("ins", "INSERT", "REFERENCING NEW TABLE AS new_rows "),
+                ("upd", "UPDATE", "REFERENCING OLD TABLE AS old_rows NEW TABLE AS new_rows "),
+                ("del", "DELETE", "REFERENCING OLD TABLE AS old_rows "),
+                ("trunc", "TRUNCATE", ""),
+            ):
                 fn = f"authz_int.{q('rel_audit_' + str(i + 1) + '_' + op)}"
                 parts.append(f"""CREATE FUNCTION {fn}() RETURNS trigger
 LANGUAGE plpgsql {DEF_CURRENT} AS $f$
@@ -204,9 +225,14 @@ BEGIN
 {bodies[op]}
   RETURN NULL;
 END $f$;""")
-                parts.append(trigger_if_table(
-                    table, f"CREATE TRIGGER {q('authz_rel_audit_' + str(i + 1) + '_' + op)} AFTER {event} ON {qt(table)} "
-                           f"{ref}FOR EACH STATEMENT EXECUTE FUNCTION {fn}()", "audit"))
+                parts.append(
+                    trigger_if_table(
+                        table,
+                        f"CREATE TRIGGER {q('authz_rel_audit_' + str(i + 1) + '_' + op)} AFTER {event} ON {qt(table)} "
+                        f"{ref}FOR EACH STATEMENT EXECUTE FUNCTION {fn}()",
+                        "audit",
+                    )
+                )
             out.append("\n".join(parts))
         for tname, uses in cols.items():
             t = self.T(tname)
@@ -225,21 +251,27 @@ END $f$;""")
                 f"NEW.{q(col)}::text, jsonb_build_object('column', {lit(col)}, 'was', OLD.{q(col)}), "
                 f"nullif(current_setting('authz_ctx.reason', true), ''));\n"
                 f"  END IF;"
-                for rel, col in pairs)
+                for rel, col in pairs
+            )
             watched = list(dict.fromkeys(col for _, col in pairs))
             bodies = {
                 "ins": f"    PERFORM authz_int.changed({lit(tname)}, ARRAY(SELECT {kt('n')} FROM new_rows n), 'insert');",
                 "upd": f"    PERFORM authz_int.changed({lit(tname)}, ARRAY(SELECT {kt('n')} FROM new_rows n "
-                       f"UNION SELECT {kt('o')} FROM old_rows o), 'update');",
+                f"UNION SELECT {kt('o')} FROM old_rows o), 'update');",
                 "del": f"    PERFORM authz_int.changed({lit(tname)}, ARRAY(SELECT {kt('o')} FROM old_rows o), 'delete');",
                 "trunc": f"    PERFORM authz_int.audit('truncate', {lit(tname)}, NULL, NULL, NULL, NULL, NULL, "
-                         f"jsonb_build_object('table', {lit(t.table)}));\n"
-                         f"    PERFORM authz_int.changed({lit(tname)}, ARRAY['*'], 'truncate');"}
-            parts = [f"-- relationships kept in columns of {t.table}: audited when they change; the feed hears of every row"]
-            for op, event, ref in (("ins", "INSERT", "REFERENCING NEW TABLE AS new_rows "),
-                                   ("upd", "UPDATE", "REFERENCING OLD TABLE AS old_rows NEW TABLE AS new_rows "),
-                                   ("del", "DELETE", "REFERENCING OLD TABLE AS old_rows "),
-                                   ("trunc", "TRUNCATE", "")):
+                f"jsonb_build_object('table', {lit(t.table)}));\n"
+                f"    PERFORM authz_int.changed({lit(tname)}, ARRAY['*'], 'truncate');",
+            }
+            parts = [
+                f"-- relationships kept in columns of {t.table}: audited when they change; the feed hears of every row"
+            ]
+            for op, event, ref in (
+                ("ins", "INSERT", "REFERENCING NEW TABLE AS new_rows "),
+                ("upd", "UPDATE", "REFERENCING OLD TABLE AS old_rows NEW TABLE AS new_rows "),
+                ("del", "DELETE", "REFERENCING OLD TABLE AS old_rows "),
+                ("trunc", "TRUNCATE", ""),
+            ):
                 fn = f"authz_int.{q(tname + '__col_audit_' + op)}"
                 parts.append(f"""CREATE FUNCTION {fn}() RETURNS trigger
 LANGUAGE plpgsql {DEF} AS $f$
@@ -247,9 +279,14 @@ BEGIN
 {bodies[op]}
   RETURN NULL;
 END $f$;""")
-                parts.append(trigger_if_table(
-                    t.table, f"CREATE TRIGGER {q('authz_' + tname + '_col_audit_' + op)} AFTER {event} ON {qt(t.table)} "
-                             f"{ref}FOR EACH STATEMENT EXECUTE FUNCTION {fn}()", "audit"))
+                parts.append(
+                    trigger_if_table(
+                        t.table,
+                        f"CREATE TRIGGER {q('authz_' + tname + '_col_audit_' + op)} AFTER {event} ON {qt(t.table)} "
+                        f"{ref}FOR EACH STATEMENT EXECUTE FUNCTION {fn}()",
+                        "audit",
+                    )
+                )
             fn = f"authz_int.{q(tname + '__col_audit_row')}"
             parts.append(f"""-- one audit row per changed relationship column (a row trigger, so it also works when the key changes)
 CREATE FUNCTION {fn}() RETURNS trigger
@@ -258,11 +295,16 @@ BEGIN
 {audits}
   RETURN NULL;
 END $f$;""")
-            parts.append(trigger_if_table(
-                t.table, f"CREATE TRIGGER {q('authz_' + tname + '_col_audit_row')} AFTER UPDATE "
-                         f"ON {qt(t.table)} FOR EACH ROW WHEN ("
-                         + " OR ".join(f"OLD.{q(c)} IS DISTINCT FROM NEW.{q(c)}" for c in watched)
-                         + f") EXECUTE FUNCTION {fn}()", "audit"))
+            parts.append(
+                trigger_if_table(
+                    t.table,
+                    f"CREATE TRIGGER {q('authz_' + tname + '_col_audit_row')} AFTER UPDATE "
+                    f"ON {qt(t.table)} FOR EACH ROW WHEN ("
+                    + " OR ".join(f"OLD.{q(c)} IS DISTINCT FROM NEW.{q(c)}" for c in watched)
+                    + f") EXECUTE FUNCTION {fn}()",
+                    "audit",
+                )
+            )
             out.append("\n".join(parts))
         return out
 
@@ -516,19 +558,26 @@ END $f$;"""
         # everyone who can sign in: each principal type's rows (users first), named as the audit trail names them
         people = " UNION ALL ".join(
             f"SELECT {lit('' if t.name == 'user' else t.name)}, x.{q(self.pk(t))}::text FROM {qt(t.table)} x"
-            for t in sorted(self.types.values(), key=lambda t: t.name != "user") if t.name == "user" or t.principal)
+            for t in sorted(self.types.values(), key=lambda t: t.name != "user")
+            if t.name == "user" or t.principal
+        )
         checks: list[str] = []
         for i, inv in enumerate(self.pol.invariants):
             t = self.T(inv.type)
             view = f"{t.name}__never_{i + 1}"
             if not self.begin_view(view, inv.loc, f"invariant {i + 1}"):
                 continue
-            self.add_view(view, self.set_sql(t, inv.expr, inv.loc), f"-- invariant ({inv.loc}): never {t.name}: {inv.src}\n", t,
-                          public=False)
+            self.add_view(
+                view,
+                self.set_sql(t, inv.expr, inv.loc),
+                f"-- invariant ({inv.loc}): never {t.name}: {inv.src}\n",
+                t,
+                public=False,
+            )
             self.view_state[view] = "done"
             checks.append(f"""      v_ids := ARRAY(SELECT id::text FROM authz_int.{q(view)} ORDER BY 1 LIMIT 5);
       IF cardinality(v_ids) > 0 THEN
-        invariant := {lit(f'never {t.name}: {inv.src} (')} || {self.line_sql(f'invariant never {t.name}: {inv.src}', inv.loc)} || ')'; user_id := nullif(CASE WHEN v_p = '' THEN v_u ELSE v_p || ':' || v_u END, ''); object_ids := v_ids;
+        invariant := {lit(f"never {t.name}: {inv.src} (")} || {self.line_sql(f"invariant never {t.name}: {inv.src}", inv.loc)} || ')'; user_id := nullif(CASE WHEN v_p = '' THEN v_u ELSE v_p || ':' || v_u END, ''); object_ids := v_ids;
         RETURN NEXT;
       END IF;""")
         body = "\n".join(checks) if checks else "      NULL;"
@@ -572,7 +621,8 @@ END $f$;"""
         # everyone who can sign in, and nobody: each user, then each other principal named as the audit trail
         # names it ('service:7'); --users names them the same way
         only = ("CONTINUE WHEN v_u <> ALL (ARRAY[" + ", ".join(lit(u) for u in users) + "]::text[]);") if users else ""
-        snapshot = lambda into: f"""DO $snap$
+        snapshot = lambda into: (
+            f"""DO $snap$
 DECLARE who record; v_id text; v_u text; p record; pol record; m record;
 BEGIN
   IF to_regclass('authz_int.types') IS NULL THEN RETURN; END IF;
@@ -618,12 +668,17 @@ BEGIN
   PERFORM set_config('authz.principal_type', '', true);
   PERFORM set_config('authz.user_id', '', true);
 END $snap$;"""
+        )
         setup = f"""SET LOCAL client_min_messages = warning;
 CREATE TEMP TABLE authz_diff_before (user_id text, type text, what text, id text) ON COMMIT DROP;
 CREATE TEMP TABLE authz_diff_after (user_id text, type text, what text, id text) ON COMMIT DROP;
 CREATE TEMP TABLE authz_diff_cols (tbl text, col text) ON COMMIT DROP;{"".join(chr(10) + f"INSERT INTO authz_diff_cols VALUES ({lit(qt(r.table))}, {lit(c)});" for r in self.rules if r.command == "mask" for c in r.columns)}"""
-        return {"setup": setup, "before": snapshot('authz_diff_before'), "body": body,
-                "after": snapshot('authz_diff_after')}
+        return {
+            "setup": setup,
+            "before": snapshot("authz_diff_before"),
+            "body": body,
+            "after": snapshot("authz_diff_after"),
+        }
 
     def compile_diff(self, source_name: str, users: list[str] | None = None, limit: int = 200) -> str:
         p = self.diff_parts(source_name, users)

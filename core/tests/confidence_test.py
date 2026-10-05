@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """confidence_test: rowstile prove, test --coverage, snapshot, indexes, plans and bench, on the docs example.
 
-    PGHOST=... PGUSER=... python3 tests/confidence_test.py [--db authz_confidence]
+PGHOST=... PGUSER=... python3 tests/confidence_test.py [--db authz_confidence]
 """
+
 import os
 import re
 import subprocess
@@ -69,8 +70,17 @@ def check(label: str, ok: object, detail: object = "") -> None:
 
 
 def cli(db: str | None, *args: str, cwd: str | None = None) -> tuple[int, str]:
-    r = subprocess.run([sys.executable, os.path.join(ROOT, "cli", "rowstile_cli.py"), *(["--db", f"dbname={db}"] if db else []), *args],
-                       capture_output=True, text=True, cwd=cwd)
+    r = subprocess.run(
+        [
+            sys.executable,
+            os.path.join(ROOT, "cli", "rowstile_cli.py"),
+            *(["--db", f"dbname={db}"] if db else []),
+            *args,
+        ],
+        capture_output=True,
+        text=True,
+        cwd=cwd,
+    )
     return r.returncode, r.stdout + r.stderr
 
 
@@ -78,8 +88,11 @@ def main() -> None:
     db = sys.argv[sys.argv.index("--db") + 1] if "--db" in sys.argv else "authz_confidence"
     subprocess.run(["dropdb", "--if-exists", db], capture_output=True)
     subprocess.run(["createdb", db], check=True)
-    subprocess.run(["psql", "-X", "-q", "-v", "ON_ERROR_STOP=1", "-d", db, "-f", os.path.join(ROOT, "example", "app_schema.sql")],
-                   check=True, capture_output=True)
+    subprocess.run(
+        ["psql", "-X", "-q", "-v", "ON_ERROR_STOP=1", "-d", db, "-f", os.path.join(ROOT, "example", "app_schema.sql")],
+        check=True,
+        capture_output=True,
+    )
     policy = os.path.join(ROOT, "example", "docs.authz")
     # the policy without its test section (it needs the scenario's data): coverage counts this file's tests only
     with open(policy, encoding="utf-8") as fh:
@@ -97,8 +110,11 @@ def main() -> None:
 
     print("-- rowstile prove")
     rc, out = cli(None, "prove", policy)
-    check("an invariant the policy doesn't guarantee: exit 1, and the smallest counterexample",
-          rc == 1 and "no   user 1 holds it on folder 1" in out and "folder.owner: folder 1 -> user 1" in out, out)
+    check(
+        "an invariant the policy doesn't guarantee: exit 1, and the smallest counterexample",
+        rc == 1 and "no   user 1 holds it on folder 1" in out and "folder.owner: folder 1 -> user 1" in out,
+        out,
+    )
     with tempfile.TemporaryDirectory() as tmp:
         ok = os.path.join(tmp, "p.authz")
         with open(policy, encoding="utf-8") as fh:
@@ -108,114 +124,196 @@ def main() -> None:
         rc, out = cli(None, "prove", ok, "--worlds", "60")
         check("one it does: exit 0", rc == 0 and "ok   holds in every world tried (60 worlds" in out, out)
         with open(ok, "w", encoding="utf-8") as fh:
-            fh.write(text.replace("can view  = edit or viewer or (parent.view and {inherit})",
-                                  "can view  = edit or viewer or (parnt.view and {inherit})"))
+            fh.write(
+                text.replace(
+                    "can view  = edit or viewer or (parent.view and {inherit})",
+                    "can view  = edit or viewer or (parnt.view and {inherit})",
+                )
+            )
         rc, out = cli(None, "prove", ok)
-        check("a policy check refuses: its message, line and code, no traceback",
-              rc == 1 and "[AZ" in out and "line " in out and "Traceback" not in out, out)
+        check(
+            "a policy check refuses: its message, line and code, no traceback",
+            rc == 1 and "[AZ" in out and "line " in out and "Traceback" not in out,
+            out,
+        )
         rc, out = cli(None, "prove", ok, "--worlds", "abc")
-        check("--worlds that isn't a number: a usage error", rc == 2 and "--worlds needs a whole number" in out
-              and "Traceback" not in out, out)
+        check(
+            "--worlds that isn't a number: a usage error",
+            rc == 2 and "--worlds needs a whole number" in out and "Traceback" not in out,
+            out,
+        )
 
     print("-- coverage")
     rows, report = work(lambda d: database.coverage(d, {"t.authz": TESTS}))
     check("the tests pass", rows and all(r[2] for r in rows), rows)
     missing = {(name, item) for _, name, item in report["missing"]}
-    check("the branches a passing check made true are covered", ("folder.edit", "share") not in missing
-          and ("folder.share", "owner") not in missing, report)
-    check("... and those none did are named, with their lines", ("folder.edit", "editor") in missing
-          and all(line.startswith("line ") for line, _, _ in report["missing"]), report)
+    check(
+        "the branches a passing check made true are covered",
+        ("folder.edit", "share") not in missing and ("folder.share", "owner") not in missing,
+        report,
+    )
+    check(
+        "... and those none did are named, with their lines",
+        ("folder.edit", "editor") in missing and all(line.startswith("line ") for line, _, _ in report["missing"]),
+        report,
+    )
     check("a check that someone cannot adds nothing", ("folder.view", "viewer") in missing, report)
     with tempfile.TemporaryDirectory() as tmp:
         path = os.path.join(tmp, "t.authz")
         with open(path, "w", encoding="utf-8") as fh:
             fh.write(TESTS)
         rc, out = cli(db, "test", "--coverage", path)
-        check("rowstile test --coverage", rc == 0 and "coverage: " in out and "branches made true by a test; no test reaches:" in out, out)
+        check(
+            "rowstile test --coverage",
+            rc == 0 and "coverage: " in out and "branches made true by a test; no test reaches:" in out,
+            out,
+        )
 
     with tempfile.TemporaryDirectory() as tmp:
         subprocess.run(["dropdb", "--if-exists", db + "_deny"], capture_output=True)
         subprocess.run(["createdb", db + "_deny"], check=True)
-        subprocess.run(["psql", "-X", "-q", "-v", "ON_ERROR_STOP=1", "-d", db + "_deny", "-c", DENY_SCHEMA], check=True, capture_output=True)
+        subprocess.run(
+            ["psql", "-X", "-q", "-v", "ON_ERROR_STOP=1", "-d", db + "_deny", "-c", DENY_SCHEMA],
+            check=True,
+            capture_output=True,
+        )
         pol, tests = os.path.join(tmp, "p.authz"), os.path.join(tmp, "t.authz")
         for path, text in ((pol, DENY_POLICY), (tests, DENY_TESTS)):
             with open(path, "w", encoding="utf-8") as fh:
                 fh.write(text)
         rc, out = cli(db + "_deny", "apply", pol)
         rc, out = cli(db + "_deny", "test", "--coverage", tests) if rc == 0 else (rc, out)
-        check("a deny inside inheritance: the branches are those of its `or` part, in the policy's words",
-              rc == 0 and "coverage: 1 of 6 branches" in out and "folder.view: owner" not in out
-              and all(x in out for x in ("folder.view: viewer", "folder.view: parent.view", "folder.see: signed_in")), out)
+        check(
+            "a deny inside inheritance: the branches are those of its `or` part, in the policy's words",
+            rc == 0
+            and "coverage: 1 of 6 branches" in out
+            and "folder.view: owner" not in out
+            and all(x in out for x in ("folder.view: viewer", "folder.view: parent.view", "folder.see: signed_in")),
+            out,
+        )
         with open(tests, "a", encoding="utf-8") as fh:
             fh.write("  user $u can view folder $g\n")
         rc, out = cli(db + "_deny", "test", "--coverage", tests)
-        check("... and the inherited one is covered by a check on what is below",
-              rc == 0 and "coverage: 2 of 6 branches" in out and "folder.view: parent.view" not in out, out)
+        check(
+            "... and the inherited one is covered by a check on what is below",
+            rc == 0 and "coverage: 2 of 6 branches" in out and "folder.view: parent.view" not in out,
+            out,
+        )
         subprocess.run(["dropdb", "--if-exists", db + "_deny"], capture_output=True)
 
     print("-- snapshot")
     lines = work(database.snapshot)
-    check("who holds what, one sorted line per object and permission", lines and all(": " in x for x in lines)
-          and any(x.startswith("folder 1 view: ") for x in lines), lines[:5])
+    check(
+        "who holds what, one sorted line per object and permission",
+        lines and all(": " in x for x in lines) and any(x.startswith("folder 1 view: ") for x in lines),
+        lines[:5],
+    )
     with tempfile.TemporaryDirectory() as tmp:
         snap = os.path.join(tmp, "access.snapshot")
         rc, out = cli(db, "snapshot", "--out", snap)
         rc2, out2 = cli(db, "snapshot", "--check", "--out", snap)
-        check("rowstile snapshot writes it, and --check finds it up to date", rc == 0 and rc2 == 0 and "up to date" in out2, out + out2)
-        subprocess.run(["psql", "-X", "-q", "-d", db, "-c",
-                        "BEGIN; SELECT authz.act_as('user', '5'); SELECT authz.share('folder', '2', 'editor', 'user', '6'); COMMIT"],
-                       capture_output=True, check=True)
+        check(
+            "rowstile snapshot writes it, and --check finds it up to date",
+            rc == 0 and rc2 == 0 and "up to date" in out2,
+            out + out2,
+        )
+        subprocess.run(
+            [
+                "psql",
+                "-X",
+                "-q",
+                "-d",
+                db,
+                "-c",
+                "BEGIN; SELECT authz.act_as('user', '5'); SELECT authz.share('folder', '2', 'editor', 'user', '6'); COMMIT",
+            ],
+            capture_output=True,
+            check=True,
+        )
         rc, out = cli(db, "snapshot", "--check", "--out", snap)
-        check("... a change of access makes it out of date, and says what changed",
-              rc == 1 and "+ folder 2 edit: 5, 6" in out, out)
+        check(
+            "... a change of access makes it out of date, and says what changed",
+            rc == 1 and "+ folder 2 edit: 5, 6" in out,
+            out,
+        )
 
     print("-- indexes")
-    check("the example's tables have every index the policy needs", work(lambda d: perf.missing_indexes(
-        d, database.policy_compiler(*database.applied(d)))) == [])
+    check(
+        "the example's tables have every index the policy needs",
+        work(lambda d: perf.missing_indexes(d, database.policy_compiler(*database.applied(d)))) == [],
+    )
 
     def without(d: Db) -> list[perf.Lookup]:
         d.script("DROP INDEX app.team_members_user_id_idx")
         return perf.missing_indexes(d, database.policy_compiler(*database.applied(d)))
+
     missing = work(without)
-    check("a dropped index is named, with why", [(m[0], m[1]) for m in missing] == [("app.team_members", ("user_id",))]
-          and "team.member" in missing[0][2], missing)
-    check("... and the line to add, for the app's tool",
-          perf.advice("app.team_members", ("user_id",), "prisma").startswith("@@index([user_id])")
-          and perf.advice("app.team_members", ("user_id",), "sql").startswith("CREATE INDEX CONCURRENTLY"))
+    check(
+        "a dropped index is named, with why",
+        [(m[0], m[1]) for m in missing] == [("app.team_members", ("user_id",))] and "team.member" in missing[0][2],
+        missing,
+    )
+    check(
+        "... and the line to add, for the app's tool",
+        perf.advice("app.team_members", ("user_id",), "prisma").startswith("@@index([user_id])")
+        and perf.advice("app.team_members", ("user_id",), "sql").startswith("CREATE INDEX CONCURRENTLY"),
+    )
 
     def behind_an_expression(d: Db) -> list[perf.Lookup]:
-        d.script("DROP INDEX app.team_members_user_id_idx; "
-                 "CREATE INDEX team_members_expr ON app.team_members ((team_id + 0), user_id)")
+        d.script(
+            "DROP INDEX app.team_members_user_id_idx; "
+            "CREATE INDEX team_members_expr ON app.team_members ((team_id + 0), user_id)"
+        )
         return perf.missing_indexes(d, database.policy_compiler(*database.applied(d)))
-    check("an index that starts with an expression serves no lookup by its later columns",
-          [(m[0], m[1]) for m in work(behind_an_expression)] == [("app.team_members", ("user_id",))])
+
+    check(
+        "an index that starts with an expression serves no lookup by its later columns",
+        [(m[0], m[1]) for m in work(behind_an_expression)] == [("app.team_members", ("user_id",))],
+    )
 
     print("-- plans and bench")
     p = work(lambda d: perf.plans(d, database.policy_compiler(*database.applied(d)), ("user", "1")))
     tables = {t["table"]: t for t in p["tables"]}
-    check("each governed table read as someone, with its time", set(tables) == {"app.folders", "app.files"}
-          and all(t["ms"] is not None and t["ms"] >= 0 for t in tables.values()), p)
+    check(
+        "each governed table read as someone, with its time",
+        set(tables) == {"app.folders", "app.files"}
+        and all(t["ms"] is not None and t["ms"] >= 0 for t in tables.values()),
+        p,
+    )
     rc, out = cli(db, "plans", "--as", "user:1")
     check("rowstile plans", rc == 0 and "as user:1:" in out and "app.folders:" in out, out)
     check("no warning on the example's few rows", all(t["warnings"] == [] for t in tables.values()), p)
 
     def grown(d: Db) -> perf.Plans:
         # a link table grown past what a scan should read, and the index its lookup needs gone
-        d.script("INSERT INTO app.users (id, name) SELECT i, 'u' || i FROM generate_series(1000, 13000) i; "
-                 "INSERT INTO app.org_members SELECT 2, i, 'member' FROM generate_series(1000, 13000) i; "
-                 "DROP INDEX app.org_members_user_id_idx; ALTER TABLE app.org_members DROP CONSTRAINT org_members_pkey; "
-                 "ANALYZE app.org_members")       # the key too: Postgres 18 can skip through (org_id, user_id)
+        d.script(
+            "INSERT INTO app.users (id, name) SELECT i, 'u' || i FROM generate_series(1000, 13000) i; "
+            "INSERT INTO app.org_members SELECT 2, i, 'member' FROM generate_series(1000, 13000) i; "
+            "DROP INDEX app.org_members_user_id_idx; ALTER TABLE app.org_members DROP CONSTRAINT org_members_pkey; "
+            "ANALYZE app.org_members"
+        )  # the key too: Postgres 18 can skip through (org_id, user_id)
         return perf.plans(d, database.policy_compiler(*database.applied(d)), ("user", "7"))
+
     slow = work(grown)
-    check("a scan that reads a big table and keeps little is named (a missing index)",
-          any("reads all of app.org_members" in w for t in slow["tables"] for w in t["warnings"]), slow)
-    count: Callable[[], str] = lambda: subprocess.run(["psql", "-X", "-At", "-d", db, "-c", "SELECT count(*), sum(length(name)) FROM app.folders"],
-                                   capture_output=True, text=True).stdout.strip()
+    check(
+        "a scan that reads a big table and keeps little is named (a missing index)",
+        any("reads all of app.org_members" in w for t in slow["tables"] for w in t["warnings"]),
+        slow,
+    )
+    count: Callable[[], str] = lambda: subprocess.run(
+        ["psql", "-X", "-At", "-d", db, "-c", "SELECT count(*), sum(length(name)) FROM app.folders"],
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
     before = count()
     b = work(lambda d: perf.bench(d, database.policy_compiler(*database.applied(d)), people=3, rounds=3))
     paths = {x["path"]: x for x in b["paths"]}
-    check("bench: reads, lists, checks and updates, p50 and p95", {"read app.folders", "authz.list folder view",
-          "authz.can folder edit", "update app.folders"} <= set(paths) and all(x["p50"] is not None for x in paths.values()), b)
+    check(
+        "bench: reads, lists, checks and updates, p50 and p95",
+        {"read app.folders", "authz.list folder view", "authz.can folder edit", "update app.folders"} <= set(paths)
+        and all(x["p50"] is not None for x in paths.values()),
+        b,
+    )
     rc, out = cli(db, "bench", "--rounds", "2", "--people", "2")
     check("rowstile bench", rc == 0 and "p50" in out and "read app.files" in out, out)
     check("... and nothing it did stays", count() == before, (before, count()))

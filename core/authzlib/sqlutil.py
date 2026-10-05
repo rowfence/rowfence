@@ -1,4 +1,5 @@
 """Small helpers for writing SQL."""
+
 from __future__ import annotations
 
 import hashlib
@@ -57,29 +58,179 @@ def reads_tables(sql: str) -> bool:
 
 # built-in functions that read nothing but their arguments (and the clock or the session): a condition calling only
 # these reads only its row, whoever runs it
-PURE_FUNCTIONS = frozenset({
-    "abs", "age", "array_length", "array_position", "array_positions", "array_to_string", "btrim", "cardinality",
-    "ceil", "ceiling", "char_length", "character_length", "clock_timestamp", "concat", "concat_ws", "current_setting",
-    "date_part", "date_trunc", "floor", "format", "gen_random_uuid", "initcap", "isfinite", "json_array_length",
-    "json_typeof", "jsonb_array_length", "jsonb_extract_path", "jsonb_extract_path_text", "jsonb_typeof", "left",
-    "length", "lower", "lpad", "ltrim", "make_date", "make_interval", "make_timestamp", "md5", "mod", "now",
-    "num_nonnulls", "num_nulls", "octet_length", "pg_input_is_valid", "power", "random", "regexp_like",
-    "regexp_match", "regexp_matches", "regexp_replace", "repeat", "replace", "reverse", "right", "round", "rpad",
-    "rtrim", "sign", "split_part", "sqrt", "starts_with", "statement_timestamp", "string_to_array", "strpos",
-    "substr", "timeofday", "to_char", "to_date", "to_number", "to_timestamp", "transaction_timestamp", "trunc",
-    "upper", "authz.uid", "authz.ctx", "authz.principal", "authz.link_hashes"})
+PURE_FUNCTIONS = frozenset(
+    {
+        "abs",
+        "age",
+        "array_length",
+        "array_position",
+        "array_positions",
+        "array_to_string",
+        "btrim",
+        "cardinality",
+        "ceil",
+        "ceiling",
+        "char_length",
+        "character_length",
+        "clock_timestamp",
+        "concat",
+        "concat_ws",
+        "current_setting",
+        "date_part",
+        "date_trunc",
+        "floor",
+        "format",
+        "gen_random_uuid",
+        "initcap",
+        "isfinite",
+        "json_array_length",
+        "json_typeof",
+        "jsonb_array_length",
+        "jsonb_extract_path",
+        "jsonb_extract_path_text",
+        "jsonb_typeof",
+        "left",
+        "length",
+        "lower",
+        "lpad",
+        "ltrim",
+        "make_date",
+        "make_interval",
+        "make_timestamp",
+        "md5",
+        "mod",
+        "now",
+        "num_nonnulls",
+        "num_nulls",
+        "octet_length",
+        "pg_input_is_valid",
+        "power",
+        "random",
+        "regexp_like",
+        "regexp_match",
+        "regexp_matches",
+        "regexp_replace",
+        "repeat",
+        "replace",
+        "reverse",
+        "right",
+        "round",
+        "rpad",
+        "rtrim",
+        "sign",
+        "split_part",
+        "sqrt",
+        "starts_with",
+        "statement_timestamp",
+        "string_to_array",
+        "strpos",
+        "substr",
+        "timeofday",
+        "to_char",
+        "to_date",
+        "to_number",
+        "to_timestamp",
+        "transaction_timestamp",
+        "trunc",
+        "upper",
+        "authz.uid",
+        "authz.ctx",
+        "authz.principal",
+        "authz.link_hashes",
+    }
+)
 # words followed by ( that are SQL's own, not functions
-CALL_WORDS = frozenset({
-    "all", "and", "any", "array", "between", "case", "cast", "coalesce", "else", "exists", "extract", "filter",
-    "greatest", "in", "is", "least", "not", "nullif", "or", "over", "overlay", "position", "row", "some",
-    "substring", "then", "trim", "values", "when", "within"})
+CALL_WORDS = frozenset(
+    {
+        "all",
+        "and",
+        "any",
+        "array",
+        "between",
+        "case",
+        "cast",
+        "coalesce",
+        "else",
+        "exists",
+        "extract",
+        "filter",
+        "greatest",
+        "in",
+        "is",
+        "least",
+        "not",
+        "nullif",
+        "or",
+        "over",
+        "overlay",
+        "position",
+        "row",
+        "some",
+        "substring",
+        "then",
+        "trim",
+        "values",
+        "when",
+        "within",
+    }
+)
 CALL = re.compile(r"(?<![\w.$\"])([A-Za-z_][A-Za-z0-9_]*(?:\s*\.\s*[A-Za-z_][A-Za-z0-9_]*)?)\s*\(")
 # the operators Postgres has for its own types (comparison, arithmetic, text, patterns, arrays, JSON, ranges, network
 # addresses): any other is one an app made, and its function may read anything
-BUILTIN_OPERATORS = frozenset({
-    "=", "<>", "!=", "<", ">", "<=", ">=", "+", "-", "*", "/", "%", "^", "||", "|/", "||/", "@", "&", "|", "#", "~",
-    "<<", ">>", "~~", "~~*", "!~~", "!~~*", "~*", "!~", "!~*", "^@", "@>", "<@", "&&", "?", "?|", "?&", "->", "->>",
-    "#>", "#>>", "#-", "@?", "@@", "-|-", "&<", "&>", "<<=", ">>=", "<->"})
+BUILTIN_OPERATORS = frozenset(
+    {
+        "=",
+        "<>",
+        "!=",
+        "<",
+        ">",
+        "<=",
+        ">=",
+        "+",
+        "-",
+        "*",
+        "/",
+        "%",
+        "^",
+        "||",
+        "|/",
+        "||/",
+        "@",
+        "&",
+        "|",
+        "#",
+        "~",
+        "<<",
+        ">>",
+        "~~",
+        "~~*",
+        "!~~",
+        "!~~*",
+        "~*",
+        "!~",
+        "!~*",
+        "^@",
+        "@>",
+        "<@",
+        "&&",
+        "?",
+        "?|",
+        "?&",
+        "->",
+        "->>",
+        "#>",
+        "#>>",
+        "#-",
+        "@?",
+        "@@",
+        "-|-",
+        "&<",
+        "&>",
+        "<<=",
+        ">>=",
+        "<->",
+    }
+)
 OPERATOR = re.compile(r"[+\-*/<>=~!@#%^&|`?]+")
 
 
@@ -107,8 +258,10 @@ def reads_more(sql: str) -> bool:
         return True
     # a quoted name stands as one no built-in has (app."f"(x) and "app".f(x) are calls of a function of the
     # app's), a comment as a space (f /* c */ (x) is a call), a string literal as an empty one
-    shown = "".join(text if code else "_quoted_" if text.startswith('"') else " " if text.startswith("/*") else "''"
-                    for code, text in sql_code(sql))
+    shown = "".join(
+        text if code else "_quoted_" if text.startswith('"') else " " if text.startswith("/*") else "''"
+        for code, text in sql_code(sql)
+    )
     for m in CALL.finditer(shown):
         name = re.sub(r"\s+", "", m.group(1)).lower()
         if name not in PURE_FUNCTIONS and name not in CALL_WORDS:
@@ -157,7 +310,7 @@ def sql_code(sql: str) -> list[tuple[bool, str]]:
             end = j + 1
         elif c == '"':
             j = sql.find('"', i + 1)
-            while j != -1 and sql[j + 1:j + 2] == '"':
+            while j != -1 and sql[j + 1 : j + 2] == '"':
                 j = sql.find('"', j + 2)
             end = n if j == -1 else j + 1
         elif sql.startswith("$$", i):
@@ -201,8 +354,7 @@ def this_alone(sql: str) -> bool:
     """Whether a condition writes the word `this` other than as `this.` (a table called this, say)."""
     if "this" not in sql.lower():
         return False
-    return any(code and re.search(r"(?<![\w.$\"])this\b(?!\s*\.)", text, re.IGNORECASE)
-               for code, text in sql_code(sql))
+    return any(code and re.search(r"(?<![\w.$\"])this\b(?!\s*\.)", text, re.IGNORECASE) for code, text in sql_code(sql))
 
 
 def on_row(sql: str, alias: str) -> str:
@@ -222,19 +374,30 @@ def row_cond(sql: str, alias: str) -> str:
 
 # Conditions whose result is stored (inheritance) must give the same answer for
 # everyone at any time.
-UNSTABLE = re.compile(r"\b(now|current_timestamp|current_date|current_time|localtime|localtimestamp|"
-                      r"clock_timestamp|statement_timestamp|transaction_timestamp|timeofday|random|"
-                      r"current_setting|current_user|session_user|current_role|user|"
-                      r"authz\s*\.\s*(uid|ctx|me))\b", re.IGNORECASE)
+UNSTABLE = re.compile(
+    r"\b(now|current_timestamp|current_date|current_time|localtime|localtimestamp|"
+    r"clock_timestamp|statement_timestamp|transaction_timestamp|timeofday|random|"
+    r"current_setting|current_user|session_user|current_role|user|"
+    r"authz\s*\.\s*(uid|ctx|me))\b",
+    re.IGNORECASE,
+)
 
 
 def check_stable_condition(cond: str, loc: Loc, what: str = "limit inheritance") -> None:
     lit_m = re.search(r"'\s*(now|today|tomorrow|yesterday)\s*'", cond, re.IGNORECASE)
     if lit_m:
-        fail(loc, f"{{{cond}}} can't {what}: '{lit_m.group(1)}' means the current time, but inherited "
-                  f"rights are stored, so the condition must give the same answer for every user at any time", "AZ305")
+        fail(
+            loc,
+            f"{{{cond}}} can't {what}: '{lit_m.group(1)}' means the current time, but inherited "
+            f"rights are stored, so the condition must give the same answer for every user at any time",
+            "AZ305",
+        )
     m = UNSTABLE.search(strip_literals(cond))
     if m:
-        fail(loc, f"{{{cond}}} can't {what}: it depends on {m.group(0)}, but inherited "
-                  f"rights are stored, so the condition must give the same answer for every user "
-                  f"at any time", "AZ305")
+        fail(
+            loc,
+            f"{{{cond}}} can't {what}: it depends on {m.group(0)}, but inherited "
+            f"rights are stored, so the condition must give the same answer for every user "
+            f"at any time",
+            "AZ305",
+        )

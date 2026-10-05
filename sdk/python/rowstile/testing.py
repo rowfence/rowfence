@@ -14,6 +14,7 @@ With an async function, await the helper in an async test: `await assert_refused
 A database per worker: database_per_worker(owner_url) copies the migrated test database (with the policy) once
 for each pytest-xdist worker, so tests that write don't meet each other.
 """
+
 from __future__ import annotations
 
 import importlib.util
@@ -37,6 +38,7 @@ AsUser = Callable[[Who], AbstractContextManager["Principal | None"]]
 @dataclass(frozen=True)
 class WorkerDatabase:
     """A worker's own test database: its URL (the owner's), and the app role's if one was given."""
+
     url: str
     app_url: str | None = None
 
@@ -49,6 +51,7 @@ class _Connection(Protocol):
 
 class _Postgres(Protocol):
     """What this module uses of the command's Postgres client (cli/pgwire.py)."""
+
     PgError: type[Exception]
 
     def parse_dsn(self, text: str | None) -> Mapping[str, object]: ...
@@ -113,7 +116,8 @@ def database_per_worker(url: str, app_url: str | None = None, fresh: bool = True
                     f"rowstile.testing: {template} can't be copied while anything is connected to it: close what "
                     "holds it (the app, a migration tool, a console). Where the service keeps a connection of its "
                     "own for minutes after yours (Neon does), a copy per worker can't be made: use one test "
-                    "database, where each test rolls back, or a branch for each run") from e
+                    "database, where each test rolls back, or a branch for each run"
+                ) from e
     finally:
         conn.close()
     return WorkerDatabase(_with_database(url, name), _with_database(app_url, name) if app_url else None)
@@ -124,8 +128,9 @@ Raised = TypeVar("Raised", Refused, NotFound)
 
 class AssertRefused(Protocol):
     @overload
-    def __call__(self, fn: Callable[[], Awaitable[object]], command: str | None = None,
-                 table: str | None = None) -> Awaitable[Refused]: ...
+    def __call__(
+        self, fn: Callable[[], Awaitable[object]], command: str | None = None, table: str | None = None
+    ) -> Awaitable[Refused]: ...
 
     @overload
     def __call__(self, fn: Callable[[], object], command: str | None = None, table: str | None = None) -> Refused: ...
@@ -155,8 +160,9 @@ def _raised(e: Exception, expected: type[Raised]) -> Raised:
     raise e
 
 
-def _checked(fn: Callable[[], object], expected: type[Raised], what: str,
-             check: Callable[[Raised], None]) -> Raised | Awaitable[Raised]:
+def _checked(
+    fn: Callable[[], object], expected: type[Raised], what: str, check: Callable[[Raised], None]
+) -> Raised | Awaitable[Raised]:
     """fn() must raise `expected`: the error, checked; for an async function, an awaitable of it."""
     try:
         out = fn()
@@ -176,21 +182,26 @@ def _checked(fn: Callable[[], object], expected: type[Raised], what: str,
             check(err)
             return err
         raise AssertionError(f"expected {what}, got {got!r}")
+
     return later()
 
 
 @pytest.fixture
 def assert_refused() -> AssertRefused:
     """assert_refused(fn, command=None, table=None): fn() must be refused by the policy; returns the Refused."""
-    def check(fn: Callable[[], object], command: str | None = None,
-              table: str | None = None) -> Refused | Awaitable[Refused]:
+
+    def check(
+        fn: Callable[[], object], command: str | None = None, table: str | None = None
+    ) -> Refused | Awaitable[Refused]:
         def the_rule(err: Refused) -> None:
             if command:
                 named = err.command is not None and err.command.startswith(command)
                 assert named, f"expected the {command} rule to refuse it, but: {err.command}: {err.message}"
             if table:
                 assert err.table == table, err.table
+
         return _checked(fn, Refused, "a refusal", the_rule)
+
     return cast("AssertRefused", check)
 
 
@@ -198,6 +209,7 @@ def assert_refused() -> AssertRefused:
 def assert_not_found() -> AssertNotFound:
     def check(fn: Callable[[], object]) -> NotFound | Awaitable[NotFound]:
         return _checked(fn, NotFound, "NotFound", lambda err: None)
+
     return cast("AssertNotFound", check)
 
 

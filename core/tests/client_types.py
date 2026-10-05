@@ -6,6 +6,7 @@ calls and refuses names the policy doesn't have. No database.
 
 tools_test.py runs the same check where tsc is installed; CI's javascript job runs this file.
 """
+
 import os
 import shutil
 import subprocess
@@ -56,8 +57,22 @@ def type_check(ts: str, use: str = USE) -> tuple[bool, str] | None:
         for name, text in (("authz.ts", ts), ("use.ts", use)):
             with open(os.path.join(tmp, name), "w", encoding="utf-8") as fh:
                 fh.write(text)
-        r = subprocess.run([*cmd, "--noEmit", "--strict", "--target", "es2020", "--module", "esnext", "--moduleResolution", "bundler",
-                            os.path.join(tmp, "use.ts")], capture_output=True, text=True)
+        r = subprocess.run(
+            [
+                *cmd,
+                "--noEmit",
+                "--strict",
+                "--target",
+                "es2020",
+                "--module",
+                "esnext",
+                "--moduleResolution",
+                "bundler",
+                os.path.join(tmp, "use.ts"),
+            ],
+            capture_output=True,
+            text=True,
+        )
     return r.returncode == 0, r.stdout + r.stderr
 
 
@@ -66,10 +81,19 @@ def main() -> None:
     ts = compile_policy.load(policy).client("ts", "docs.authz")
     fails = 0
     for label, use, want in (
-            ("tsc --strict accepts correct calls and refuses wrong names", USE, True),
-            # each @ts-expect-error above must be needed: without them, the wrong names are errors
-            ("... and a wrong name is an error", USE.replace("    // @ts-expect-error: files have no permission 'fly'\n", ""), False),
-            ("... as is a relation that isn't shared", USE.replace("    // @ts-expect-error: 'owner' is not a shared relation\n", ""), False)):
+        ("tsc --strict accepts correct calls and refuses wrong names", USE, True),
+        # each @ts-expect-error above must be needed: without them, the wrong names are errors
+        (
+            "... and a wrong name is an error",
+            USE.replace("    // @ts-expect-error: files have no permission 'fly'\n", ""),
+            False,
+        ),
+        (
+            "... as is a relation that isn't shared",
+            USE.replace("    // @ts-expect-error: 'owner' is not a shared relation\n", ""),
+            False,
+        ),
+    ):
         got = type_check(ts, use)
         if got is None:
             raise SystemExit("client_types: tsc not found (install TypeScript, or npm ci at the repository's root)")

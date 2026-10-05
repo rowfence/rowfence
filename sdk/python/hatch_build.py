@@ -1,5 +1,6 @@
 """Puts the rowstile command into the package (rowstile/_command) when building from the repository: authzlib,
 every module of core/cli and Studio's page (cli/studio). A build from the sdist has it there already."""
+
 import os
 from typing import Any
 
@@ -16,4 +17,4 @@ class CommandHook(BuildHookInterface):
         for name in sorted(os.listdir(cli)):
             if name.endswith(".py"):
                 build_data["force_include"][os.path.join(cli, name)] = "rowstile/_command/cli/" + name
-        build_data["force_include"][os.path.join(cli, "studio")] = "rowstile/_command/cli/studio"    # Studio's page
+        build_data["force_include"][os.path.join(cli, "studio")] = "rowstile/_command/cli/studio"  # Studio's page

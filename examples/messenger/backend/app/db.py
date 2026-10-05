@@ -1,5 +1,6 @@
 """Database access. Every request runs in a transaction signed in as the person (or the bot) asking,
 so row-level security decides what it sees and changes. There are no permission checks in Python."""
+
 from __future__ import annotations
 
 from collections.abc import Iterable, Iterator

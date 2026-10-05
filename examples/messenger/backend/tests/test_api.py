@@ -3,6 +3,7 @@
 Every check goes through HTTP as a signed-in person (or a bot with its key), so what it proves is what
 row-level security decides: the backend has no permission checks of its own.
 """
+
 import json
 import os
 import random
@@ -23,6 +24,7 @@ Answer = Any
 
 class Person(TestClient):
     """A client signed in as someone, and who they are (the API's answer at sign-up)."""
+
     me: Answer
 
 
@@ -46,7 +48,7 @@ def person(name: str) -> Person:
 def admin(sql: LiteralString, args: Params = ()) -> list[tuple[Answer, ...]]:
     with psycopg.connect(ADMIN, autocommit=True) as conn:
         cur = conn.execute(sql, args)
-        return cur.fetchall() if cur.description else []           # the rows, if it returns any
+        return cur.fetchall() if cur.description else []  # the rows, if it returns any
 
 
 def direct(a: Person, b: Person) -> int:
@@ -94,14 +96,14 @@ def test_people_are_found_by_phone() -> None:
 def test_direct_chat() -> None:
     ann, ben, cat = person("Ann"), person("Ben"), person("Cat")
     chat = direct(ann, ben)
-    assert direct(ben, ann) == chat                                  # one chat per pair
+    assert direct(ben, ann) == chat  # one chat per pair
     assert say(ann, chat, "hi Ben").status_code == 201
     assert say(ben, chat, "hi Ann").status_code == 201
     assert bodies(ben, chat) == ["hi Ben", "hi Ann"]
-    assert bodies(cat, chat) == 404                                  # not in it: it doesn't exist
+    assert bodies(cat, chat) == 404  # not in it: it doesn't exist
     assert say(cat, chat, "hello?").status_code == 404
     assert [c["name"] for c in ann.get("/api/chats").json()] == ["Ben"]
-    assert ann.get("/api/chats").json()[0]["unread"] == 1            # Ben's message
+    assert ann.get("/api/chats").json()[0]["unread"] == 1  # Ben's message
     # a direct chat stays two people
     r = ann.post(f"/api/chats/{chat}/members", json={"user_id": cat.me["id"]})
     assert r.status_code == 403 and r.json()["why"], r.text
@@ -131,12 +133,12 @@ def test_blocking() -> None:
     assert ann.post("/api/blocks", json={"user_id": ben.me["id"]}).status_code == 201
     r = say(ben, chat, "are you there?")
     assert r.status_code == 403
-    assert any("blocked" in line for line in r.json()["why"]), r.json()     # authz.explain says why
-    assert say(ann, chat, "no").status_code == 403                  # nor the other way, while blocked
+    assert any("blocked" in line for line in r.json()["why"]), r.json()  # authz.explain says why
+    assert say(ann, chat, "no").status_code == 403  # nor the other way, while blocked
     assert "post" not in ann.get(f"/api/chats/{chat}").json()["perms"]
     assert ann.delete(f"/api/blocks/{ben.me['id']}").status_code == 204
     r = say(ben, chat, "hello again")
-    assert r.status_code == 201, r.text                             # with the reason, should it be refused
+    assert r.status_code == 201, r.text  # with the reason, should it be refused
     # someone who blocked you can't be put in a chat with you
     cat = person("Cat")
     cat.post("/api/blocks", json={"user_id": ann.me["id"]})
@@ -196,22 +198,23 @@ def test_a_clock_that_steps_back_refuses_nothing() -> None:
 def test_only_setting_a_group_up_makes_its_owner() -> None:
     """The API never sends a role when adding someone: the policy alone must refuse an admin adding an owner."""
     from app import db
+
     ann, ben, cat, dan = person("Ann"), person("Ben"), person("Cat"), person("Dan")
     g = group(ann, ben)
     assert ann.patch(f"/api/chats/{g}/members/{ben.me['id']}", json={"role": "admin"}).status_code == 200
     with pytest.raises(psycopg.errors.InsufficientPrivilege), db.as_user(ben.me["id"]) as tx:
         tx.run("INSERT INTO ms.members (chat_id, user_id, role) VALUES (%s, %s, 'owner')", (g, cat.me["id"]))
-    with db.as_user(ben.me["id"]) as tx:                           # an admin may add an admin
+    with db.as_user(ben.me["id"]) as tx:  # an admin may add an admin
         tx.run("INSERT INTO ms.members (chat_id, user_id, role) VALUES (%s, %s, 'admin')", (g, dan.me["id"]))
     say(ann, g, "before Cat")
-    with db.as_user(ann.me["id"]) as tx:                           # joined_seq is the database's to say
+    with db.as_user(ann.me["id"]) as tx:  # joined_seq is the database's to say
         tx.run("INSERT INTO ms.members (chat_id, user_id, joined_seq) VALUES (%s, %s, 0)", (g, cat.me["id"]))
     assert bodies(cat, g) == []
 
 
 def test_lint_has_nothing_new_to_say() -> None:
     """authz.lint() on the app's database: no warning but the ones listed here, each with its reason."""
-    known = {"ms.credentials_for(text)", "ms.sign_up(text,text,text)"}     # accounts are the app's, outside the policy
+    known = {"ms.credentials_for(text)", "ms.sign_up(text,text,text)"}  # accounts are the app's, outside the policy
     found = admin("SELECT severity, object, problem FROM authz.lint() WHERE severity NOT IN ('info')")
     assert {o for _, o, _ in found} <= known, found
     # the app role doesn't read password hashes: signing in goes through the two functions above
@@ -235,8 +238,8 @@ def test_editing_and_deleting() -> None:
     seq = say(ben, g, "teh plan").json()["seq"]
     mine = ben.get(f"/api/chats/{g}/messages").json()[-1]
     assert mine["can_edit"] and mine["can_remove"]
-    assert not ann.get(f"/api/chats/{g}/messages").json()[-1]["can_edit"]      # not Ann's message...
-    assert ann.get(f"/api/chats/{g}/messages").json()[-1]["can_remove"]         # ...but she is an admin
+    assert not ann.get(f"/api/chats/{g}/messages").json()[-1]["can_edit"]  # not Ann's message...
+    assert ann.get(f"/api/chats/{g}/messages").json()[-1]["can_remove"]  # ...but she is an admin
     assert ben.patch(f"/api/chats/{g}/messages/{seq}", json={"body": "the plan"}).status_code == 200
     assert ann.patch(f"/api/chats/{g}/messages/{seq}", json={"body": "my plan"}).status_code == 403
     assert bodies(ann, g) == ["the plan"]
@@ -256,10 +259,10 @@ def test_editing_and_deleting() -> None:
 def test_invite_links() -> None:
     ann, ben, cat = person("Ann"), person("Ben"), person("Cat")
     g = group(ann, ben, title="Book club")
-    assert ben.post(f"/api/chats/{g}/invite").status_code == 403            # not an admin
+    assert ben.post(f"/api/chats/{g}/invite").status_code == 403  # not an admin
     token = ann.post(f"/api/chats/{g}/invite").json()["token"]
-    assert cat.get(f"/api/join/{token}").json()["title"] == "Book club"     # the link shows the group...
-    assert bodies(cat, g) == 404                                              # ...not its messages
+    assert cat.get(f"/api/join/{token}").json()["title"] == "Book club"  # the link shows the group...
+    assert bodies(cat, g) == 404  # ...not its messages
     assert cat.get("/api/join/not-a-token").status_code == 404
     assert cat.post(f"/api/join/{token}").json()["id"] == g
     assert say(cat, g, "hello book club").status_code == 201
@@ -268,15 +271,15 @@ def test_invite_links() -> None:
     listed = ann.get(f"/api/chats/{g}/invites").json()
     assert [x["created_by"] for x in listed] == ["Ann"] and listed[0]["expires_at"]
     link_id = listed[0]["id"]
-    assert link_id not in token and cat.get(f"/api/join/{link_id}").status_code == 404   # an id opens nothing
-    assert ben.get(f"/api/chats/{g}/invites").status_code == 403                         # not an admin
+    assert link_id not in token and cat.get(f"/api/join/{link_id}").status_code == 404  # an id opens nothing
+    assert ben.get(f"/api/chats/{g}/invites").status_code == 403  # not an admin
     assert ben.delete(f"/api/chats/{g}/invites/{link_id}").status_code == 403
     assert ann.delete(f"/api/chats/{g}/invites/nothing").status_code == 404
     assert ann.delete(f"/api/chats/{g}/invites/{link_id}").status_code == 204
     assert ann.get(f"/api/chats/{g}/invites").json() == []
     dan = person("Dan")
     assert dan.get(f"/api/join/{token}").status_code == 404 and dan.post(f"/api/join/{token}").status_code == 404
-    assert say(cat, g, "still here").status_code == 201                                  # who joined with it stays
+    assert say(cat, g, "still here").status_code == 201  # who joined with it stays
 
 
 def test_read_receipts() -> None:
@@ -300,9 +303,9 @@ def test_bots() -> None:
     assert bot["key"].startswith("ak_")
     key = {"Authorization": f"Bearer {bot['key']}"}
     c = TestClient(app)
-    assert c.get("/api/bot/chats", headers=key).json() == []               # in no chat yet
+    assert c.get("/api/bot/chats", headers=key).json() == []  # in no chat yet
     assert ann.post(f"/api/chats/{g}/bots", json={"bot_id": bot["id"]}).status_code == 201
-    assert ben.post(f"/api/chats/{other}/bots", json={"bot_id": bot["id"]}).status_code == 403   # not Ben's bot
+    assert ben.post(f"/api/chats/{other}/bots", json={"bot_id": bot["id"]}).status_code == 403  # not Ben's bot
     assert [x["id"] for x in c.get("/api/bot/chats", headers=key).json()] == [g]
     assert [m["body"] for m in c.get(f"/api/bot/chats/{g}/messages", headers=key).json()] == ["deploy please"]
     assert c.post(f"/api/bot/chats/{g}/messages", headers=key, json={"body": "deployed v42"}).status_code == 201

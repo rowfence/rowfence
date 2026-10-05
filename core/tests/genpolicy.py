@@ -20,6 +20,7 @@ and at the end, `rowstile prove`: an invariant it says holds must not be broken 
 A failing policy is shrunk (an invariant, a rule, a type, a part of a permission taken away while it still fails)
 and printed with its seed, so `--only SEED` runs it again.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -45,27 +46,27 @@ from difftest import DB, Checker, Gen, Ids, idsql, lit  # noqa: E402
 # a permission's definition, as a tree that can be shrunk: an atom's text, or (op, parts)
 Node: TypeAlias = "str | tuple[str, list[Node]]"
 SCHEMA = "gp"
-USERS = 5           # users 1..5
-GONE = str(USERS + 1)   # an id the user table doesn't have: links may name it, and it signs in, as nobody
-ROWS = 7            # rows of each object type at the start
+USERS = 5  # users 1..5
+GONE = str(USERS + 1)  # an id the user table doesn't have: links may name it, and it signs in, as nobody
+ROWS = 7  # rows of each object type at the start
 
 
 @dataclass
 class Rel:
     name: str
-    kind: str                   # column | table | shared
-    subjects: list[str]         # user, bot, user:*, anyone, tN#member, or an object type (links: up, parent)
-    where: bool = False         # a link table's `where {active}`
-    by: str = ""                # shared: `shared by <permission>`
+    kind: str  # column | table | shared
+    subjects: list[str]  # user, bot, user:*, anyone, tN#member, or an object type (links: up, parent)
+    where: bool = False  # a link table's `where {active}`
+    by: str = ""  # shared: `shared by <permission>`
 
 
 @dataclass
 class Obj:
     name: str
-    where: bool                 # `where {not b3}`
+    where: bool  # `where {not b3}`
     rels: list[Rel]
-    perms: dict[str, Node]      # p1, p2, p3
-    rules: list[tuple[str, Node]]   # (head, expression): 'select', 'update', 'update b1', 'delete', 'insert'
+    perms: dict[str, Node]  # p1, p2, p3
+    rules: list[tuple[str, Node]]  # (head, expression): 'select', 'update', 'update b1', 'delete', 'insert'
 
 
 @dataclass
@@ -88,8 +89,11 @@ CONDS = ["{b1}", "{not b2}", "{b1 and b2}", "signed_in", "anyone", "nobody"]
 # subquery, a function called by a quoted name, an operator the app made. They must read with the policy's rights
 # where the app role checks a row; write rules take them (not inheritance: the trees would store their answer).
 # Each reads the next row of t1, one the user may not see even where the row checked is t1's own
-READS = [f"{{exists (select 1 from {SCHEMA}.t1 x where x.id = this.id + 1 and x.b2)}}",
-         f'{{{SCHEMA}."Flag"(this.id + 1)}}', "{=!= (this.id + 1)}"]
+READS = [
+    f"{{exists (select 1 from {SCHEMA}.t1 x where x.id = this.id + 1 and x.b2)}}",
+    f'{{{SCHEMA}."Flag"(this.id + 1)}}',
+    "{=!= (this.id + 1)}",
+]
 
 
 def make(seed: int) -> Spec:
@@ -110,9 +114,11 @@ def make(seed: int) -> Spec:
                 subjects = [r.choice(["user", *groups])]
             else:
                 subjects = [r.choice(["user", "user", *(["bot"] if spec.bot else [])])]
-            rels.append(Rel(f"r{i}", kind, subjects, kind == "table" and r.random() < 0.4, r.choice(["p1", "p2", "p3"])))
+            rels.append(
+                Rel(f"r{i}", kind, subjects, kind == "table" and r.random() < 0.4, r.choice(["p1", "p2", "p3"]))
+            )
             held.append(f"r{i}")
-        if r.random() < 0.5:                    # members: others' `tN#member` subjects, groups in groups
+        if r.random() < 0.5:  # members: others' `tN#member` subjects, groups in groups
             kind = r.choice(["table", "shared"])
             subjects = ["user"] + ([f"{name}#member"] if kind == "shared" and r.random() < 0.5 else [])
             rels.append(Rel("member", kind, subjects, by=r.choice(["p1", "p2", "p3"])))
@@ -127,8 +133,12 @@ def make(seed: int) -> Spec:
         deny = parent and r.random() < 0.3
         base: dict[str, Node] = {}
         for i in (1, 2, 3):
-            atoms = held + [f"p{j}" for j in range(1, i)] + [f"up.p{j}" for j in (1, 2, 3) if has(o, "up")] + \
-                [f"parent.p{j}" for j in range(1, i) if parent]
+            atoms = (
+                held
+                + [f"p{j}" for j in range(1, i)]
+                + [f"up.p{j}" for j in (1, 2, 3) if has(o, "up")]
+                + [f"parent.p{j}" for j in range(1, i) if parent]
+            )
             base[f"p{i}"] = r.choice(held) if deny and i == 1 else expr(r, atoms, 2)
         # every relation is used (AZ208): one nothing names goes into p3, before any inheritance
         named = " ".join(text(e) for e in base.values()).replace(".", " . ").replace("(", " ").replace(")", " ").split()
@@ -136,9 +146,9 @@ def make(seed: int) -> Spec:
             if rel.name not in named:
                 base["p3"] = ("or", [base["p3"], f"{rel.name}.p1" if rel.name in ("up", "parent") else rel.name])
         for p, e in base.items():
-            if deny and p == "p1":              # a deny that inherits: p1 = r or parent.p1
+            if deny and p == "p1":  # a deny that inherits: p1 = r or parent.p1
                 e = ("or", [e, "parent.p1"])
-            elif parent and r.random() < 0.6:   # inheritance, stopped by a condition or a deny or not at all
+            elif parent and r.random() < 0.6:  # inheritance, stopped by a condition or a deny or not at all
                 e = ("or", [e, f"parent.{p}"])
                 if deny and r.random() < 0.6:
                     e = ("and", [e, ("not", ["p1"])])
@@ -154,8 +164,9 @@ def make(seed: int) -> Spec:
             o.rules.append(("insert", r.choice(["{b1}", *[f"up.p{j}" for j in (1, 2) if has(o, "up")]])))
         if r.random() < 0.2 and any(h == "update" for h, _ in o.rules):
             o.rules.append(("update b1", r.choice(perms)))
-        o.rules = [(head, ("and", [e, r.choice(READS)]) if head != "select" and r.random() < 0.4 else e)
-                   for head, e in o.rules]
+        o.rules = [
+            (head, ("and", [e, r.choice(READS)]) if head != "select" and r.random() < 0.4 else e) for head, e in o.rules
+        ]
         spec.objs.append(o)
     for _ in range(r.randint(0, 2)):
         o = r.choice(spec.objs)
@@ -186,7 +197,7 @@ def text(n: Node, top: bool = True) -> str:
     op, parts = n
     if op == "not":
         return "not " + text(parts[0], False)
-    flat: list[Node] = []           # (a or b) or c is written a or b or c
+    flat: list[Node] = []  # (a or b) or c is written a or b or c
     for x in parts:
         flat += x[1] if not isinstance(x, str) and x[0] == op else [x]
     s = f" {op} ".join(text(x, False) for x in flat)
@@ -225,12 +236,20 @@ def policy_text(spec: Spec) -> str:
 
 
 def schema_text(spec: Spec) -> str:
-    s = [f"CREATE SCHEMA {SCHEMA};",
-         f"CREATE TABLE {SCHEMA}.users (id bigint PRIMARY KEY, active boolean NOT NULL DEFAULT true);",
-         f"CREATE TABLE {SCHEMA}.bots (id bigint PRIMARY KEY, active boolean NOT NULL DEFAULT true);"]
+    s = [
+        f"CREATE SCHEMA {SCHEMA};",
+        f"CREATE TABLE {SCHEMA}.users (id bigint PRIMARY KEY, active boolean NOT NULL DEFAULT true);",
+        f"CREATE TABLE {SCHEMA}.bots (id bigint PRIMARY KEY, active boolean NOT NULL DEFAULT true);",
+    ]
     for o in spec.objs:
-        cols = ["id bigint PRIMARY KEY", "b1 boolean", "b2 boolean", "b3 boolean NOT NULL DEFAULT false",
-                "parent_type text", "parent_id bigint"]
+        cols = [
+            "id bigint PRIMARY KEY",
+            "b1 boolean",
+            "b2 boolean",
+            "b3 boolean NOT NULL DEFAULT false",
+            "parent_type text",
+            "parent_id bigint",
+        ]
         cols += [f"c_{rel.name} bigint" for rel in o.rels if rel.kind == "column" and rel.name != "parent"]
         s.append(f"CREATE TABLE {SCHEMA}.{o.name} ({', '.join(cols)});")
         for rel in o.rels:
@@ -239,15 +258,21 @@ def schema_text(spec: Spec) -> str:
                 # (a leftover row would still count); a user they name may be no row at all (GONE)
                 follow = "ON DELETE CASCADE ON UPDATE CASCADE"
                 group = rel.subjects[0].split("#")[0] if "#" in rel.subjects[0] else ""
-                s.append(f"CREATE TABLE {SCHEMA}.{o.name}_{rel.name} (obj_id bigint REFERENCES {SCHEMA}.{o.name} {follow}, "
-                         f"subj_id bigint{f' REFERENCES {SCHEMA}.{group} {follow}' if group else ''}, "
-                         "active boolean NOT NULL DEFAULT true, UNIQUE (obj_id, subj_id));")
+                s.append(
+                    f"CREATE TABLE {SCHEMA}.{o.name}_{rel.name} (obj_id bigint REFERENCES {SCHEMA}.{o.name} {follow}, "
+                    f"subj_id bigint{f' REFERENCES {SCHEMA}.{group} {follow}' if group else ''}, "
+                    "active boolean NOT NULL DEFAULT true, UNIQUE (obj_id, subj_id));"
+                )
     # what READS calls: t1's b2, read by a function with a quoted name and by an operator made on it
-    s.append(f'CREATE FUNCTION {SCHEMA}."Flag"(p bigint) RETURNS boolean LANGUAGE sql STABLE '
-             f"AS 'SELECT exists (SELECT 1 FROM {SCHEMA}.t1 x WHERE x.id = p AND x.b2)';")
+    s.append(
+        f'CREATE FUNCTION {SCHEMA}."Flag"(p bigint) RETURNS boolean LANGUAGE sql STABLE '
+        f"AS 'SELECT exists (SELECT 1 FROM {SCHEMA}.t1 x WHERE x.id = p AND x.b2)';"
+    )
     s.append(f'CREATE OPERATOR public.=!= (FUNCTION = {SCHEMA}."Flag", RIGHTARG = bigint);')
-    s.append("DO $$ BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'app_user') THEN CREATE ROLE app_user; "
-             "END IF; END $$;")
+    s.append(
+        "DO $$ BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'app_user') THEN CREATE ROLE app_user; "
+        "END IF; END $$;"
+    )
     s.append(f"GRANT USAGE ON SCHEMA {SCHEMA} TO app_user;")
     s.append(f"GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA {SCHEMA} TO app_user;")
     return "\n".join(s) + "\n"
@@ -258,6 +283,7 @@ def schema_text(spec: Spec) -> str:
 # ----------------------------------------------------------------------
 class GenPolicyGen(Gen):
     """Data for a generated policy: rows with random flags and links, link tables, shares; random changes."""
+
     spec: ClassVar[Spec]
 
     def subject_ids(self, subject: str, ids: Ids | None) -> list[str]:
@@ -271,7 +297,12 @@ class GenPolicyGen(Gen):
     def row(self, o: Obj, i: int, ids: Ids | None) -> str:
         r = self.r
         cols = ["id", "b1", "b2", "b3"]
-        vals = [str(i), r.choice(["true", "false", "NULL"]), r.choice(["true", "false"]), r.choice(["true", "false", "false"])]
+        vals = [
+            str(i),
+            r.choice(["true", "false", "NULL"]),
+            r.choice(["true", "false"]),
+            r.choice(["true", "false", "false"]),
+        ]
         for rel in o.rels:
             if rel.kind != "column":
                 continue
@@ -290,8 +321,10 @@ class GenPolicyGen(Gen):
 
     def initial(self) -> str:
         r = self.r
-        s = [f"INSERT INTO {SCHEMA}.users SELECT i, random() < 0.8 FROM generate_series(1, {USERS}) i;",
-             f"INSERT INTO {SCHEMA}.bots VALUES (1, true), (2, {str(r.random() < 0.5).lower()});"]
+        s = [
+            f"INSERT INTO {SCHEMA}.users SELECT i, random() < 0.8 FROM generate_series(1, {USERS}) i;",
+            f"INSERT INTO {SCHEMA}.bots VALUES (1, true), (2, {str(r.random() < 0.5).lower()});",
+        ]
         for o in self.spec.objs:
             s += [self.row(o, i, None) for i in range(1, ROWS + 1)]
             for rel in o.rels:
@@ -303,8 +336,10 @@ class GenPolicyGen(Gen):
         r = self.r
         obj = r.choice(self.subject_ids(o.name, ids))
         subj = r.choice(self.subject_ids(rel.subjects[0], ids))
-        return (f"INSERT INTO {SCHEMA}.{o.name}_{rel.name} VALUES ({obj}, {subj}, {str(r.random() < 0.8).lower()}) "
-                "ON CONFLICT DO NOTHING;")
+        return (
+            f"INSERT INTO {SCHEMA}.{o.name}_{rel.name} VALUES ({obj}, {subj}, {str(r.random() < 0.8).lower()}) "
+            "ON CONFLICT DO NOTHING;"
+        )
 
     def grants(self) -> str:
         return "\n".join(self.grant(None) for _ in range(12))
@@ -316,12 +351,17 @@ class GenPolicyGen(Gen):
             return "SELECT 1;"
         o, rel = r.choice(shared)
         subject = r.choice(rel.subjects)
-        st, sr = subject.split("#")[0] if "#" in subject else subject.split(":")[0], subject.split("#")[1] if "#" in subject else ""
+        st, sr = (
+            subject.split("#")[0] if "#" in subject else subject.split(":")[0],
+            subject.split("#")[1] if "#" in subject else "",
+        )
         sid = "*" if subject in ("user:*", "anyone") else r.choice(self.subject_ids(subject, ids))
         expires = r.choice(["NULL", "NULL", "NULL", difftest.EXPIRED, "now() + interval '1 day'"])
-        return (f"INSERT INTO authz.shares (object_type, object_id, relation, subject_type, subject_id, subject_relation, "
-                f"expires_at) VALUES ({lit(o.name)}, {lit(r.choice(self.subject_ids(o.name, ids)))}, {lit(rel.name)}, "
-                f"{lit(st)}, {lit(sid)}, {lit(sr)}, {expires}) ON CONFLICT DO NOTHING;")
+        return (
+            f"INSERT INTO authz.shares (object_type, object_id, relation, subject_type, subject_id, subject_relation, "
+            f"expires_at) VALUES ({lit(o.name)}, {lit(r.choice(self.subject_ids(o.name, ids)))}, {lit(rel.name)}, "
+            f"{lit(st)}, {lit(sid)}, {lit(sr)}, {expires}) ON CONFLICT DO NOTHING;"
+        )
 
     def change(self, ids: Ids) -> str:
         r = self.r
@@ -345,15 +385,27 @@ class GenPolicyGen(Gen):
         ]
         for rel in o.rels:
             if rel.kind == "column" and rel.name == "parent":
-                ops.append(lambda: f"UPDATE {tbl} SET parent_type = {lit(o.name)}, parent_id = {r.choice(mine)} WHERE id = {x};")
+                ops.append(
+                    lambda: (
+                        f"UPDATE {tbl} SET parent_type = {lit(o.name)}, parent_id = {r.choice(mine)} WHERE id = {x};"
+                    )
+                )
                 ops.append(lambda: f"UPDATE {tbl} SET parent_type = NULL, parent_id = NULL WHERE id = {x};")
                 if len(rel.subjects) == 2:
                     other = rel.subjects[1]
-                    ops.append(lambda other=other: f"UPDATE {tbl} SET parent_type = {lit(other)}, parent_id = "
-                               f"{r.choice(self.subject_ids(other, ids))} WHERE id = {x};")
+                    ops.append(
+                        lambda other=other: (
+                            f"UPDATE {tbl} SET parent_type = {lit(other)}, parent_id = "
+                            f"{r.choice(self.subject_ids(other, ids))} WHERE id = {x};"
+                        )
+                    )
             elif rel.kind == "column":
-                ops.append(lambda rel=rel: f"UPDATE {tbl} SET c_{rel.name} = "
-                           f"{r.choice([*self.subject_ids(rel.subjects[0], ids), 'NULL'])} WHERE id = {x};")
+                ops.append(
+                    lambda rel=rel: (
+                        f"UPDATE {tbl} SET c_{rel.name} = "
+                        f"{r.choice([*self.subject_ids(rel.subjects[0], ids), 'NULL'])} WHERE id = {x};"
+                    )
+                )
             elif rel.kind == "table":
                 lt = f"{tbl}_{rel.name}"
                 ops.append(lambda rel=rel: self.link(o, rel, ids))
@@ -370,6 +422,7 @@ def gen_class(spec: Spec, policy_path: str, schema_path: str) -> type[GenPolicyG
 
     class G(GenPolicyGen):
         pass
+
     G.spec, G.policy, G.schema, G.users = spec, policy_path, schema_path, users
     return G
 
@@ -391,14 +444,15 @@ def invariant_problems(checker: Checker) -> list[str]:
     if not pol.invariants:
         return []
     got: dict[tuple[int, str], list[str]] = {}
-    for inv, user, ids in checker.db.rows("SELECT invariant, coalesce(user_id, ''), array_to_json(object_ids) "
-                                           "FROM authz.check_invariants()"):
+    for inv, user, ids in checker.db.rows(
+        "SELECT invariant, coalesce(user_id, ''), array_to_json(object_ids) FROM authz.check_invariants()"
+    ):
         i = next(n for n, x in enumerate(pol.invariants) if inv.startswith(f"never {x.type}: {x.src} ("))
         got[(i, user)] = json.loads(ids)
     snap = checker.snapshot_data_only()
     problems: list[str] = []
     for u in checker.users:
-        if u == GONE:            # invariants are asked as each row of a principal type, and as nobody
+        if u == GONE:  # invariants are asked as each row of a principal type, and as nobody
             continue
         data = evaluate.Data.of({tuple(k[2:]): v for k, v in snap.items() if k[0] == u and k[1] == "data"})
         state = checker.ref.evaluate(data, u, set())
@@ -407,8 +461,10 @@ def invariant_problems(checker: Checker) -> list[str]:
             bad = checker.ref.eval_expr(state, t, inv.expr) & checker.ref.ids(t) & checker.ref.valid(t)
             have = set(got.get((i, u), []))
             if (len(bad) <= 5 and have != bad) or (len(bad) > 5 and (len(have) != 5 or not have <= bad)):
-                problems.append(f"{u or '(nobody)'}: check_invariants() for 'never {inv.type}: {inv.src}' "
-                                f"gives {sorted(have)}, expected {sorted(bad)[:5]}")
+                problems.append(
+                    f"{u or '(nobody)'}: check_invariants() for 'never {inv.type}: {inv.src}' "
+                    f"gives {sorted(have)}, expected {sorted(bad)[:5]}"
+                )
     return problems
 
 
@@ -433,7 +489,7 @@ def run(spec: Spec, db: DB, steps: int, workdir: str, seconds: float = 900) -> l
     db.run(compiled.stdout)
     db.run(gen.grants())
     checker = Checker(db, policy_path, gen)
-    broken: set[int] = set()            # invariants the data broke at some step
+    broken: set[int] = set()  # invariants the data broke at some step
     for step in range(steps + 1):
         if time.monotonic() - started > seconds:
             raise Slow(f"over {seconds:.0f} s at step {step} of {steps}")
@@ -444,8 +500,10 @@ def run(spec: Spec, db: DB, steps: int, workdir: str, seconds: float = 900) -> l
             broken |= {n for n, x in enumerate(checker.pol.invariants) if inv.startswith(f"never {x.type}: {x.src} (")}
         if step == steps:
             break
-        ids: Ids = {t.name: [x[0] for x in db.rows(f"SELECT {idsql(t)} FROM {t.table} ORDER BY 1")]
-                    for t in checker.types.values()}
+        ids: Ids = {
+            t.name: [x[0] for x in db.rows(f"SELECT {idsql(t)} FROM {t.table} ORDER BY 1")]
+            for t in checker.types.values()
+        }
         sql = gen.change(ids)
         code, _, err = db.run(sql, check=False)
         if code != 0 and not any(e in err for e in gen.expected_errors):
@@ -465,22 +523,25 @@ def smaller(spec: Spec) -> list[Spec]:
     """Each spec with one thing taken away or made simpler."""
     out: list[Spec] = []
     for i in range(len(spec.invariants)):
-        out.append(dataclasses.replace(spec, invariants=spec.invariants[:i] + spec.invariants[i + 1:]))
+        out.append(dataclasses.replace(spec, invariants=spec.invariants[:i] + spec.invariants[i + 1 :]))
     for k, o in enumerate(spec.objs):
-        if k == len(spec.objs) - 1 and len(spec.objs) > 1:     # the last type: nothing after it names it
-            out.append(dataclasses.replace(spec, objs=spec.objs[:-1],
-                                           invariants=[x for x in spec.invariants if x[0] != o.name]))
+        if k == len(spec.objs) - 1 and len(spec.objs) > 1:  # the last type: nothing after it names it
+            out.append(
+                dataclasses.replace(
+                    spec, objs=spec.objs[:-1], invariants=[x for x in spec.invariants if x[0] != o.name]
+                )
+            )
         for i in range(len(o.rules)):
-            out.append(with_obj(spec, k, dataclasses.replace(o, rules=o.rules[:i] + o.rules[i + 1:])))
+            out.append(with_obj(spec, k, dataclasses.replace(o, rules=o.rules[:i] + o.rules[i + 1 :])))
         for p, e in o.perms.items():
             for simpler in parts_of(e):
                 out.append(with_obj(spec, k, dataclasses.replace(o, perms={**o.perms, p: simpler})))
         for i, rel in enumerate(o.rels):
-            out.append(with_obj(spec, k, dataclasses.replace(o, rels=o.rels[:i] + o.rels[i + 1:])))
+            out.append(with_obj(spec, k, dataclasses.replace(o, rels=o.rels[:i] + o.rels[i + 1 :])))
             if len(rel.subjects) > 1:
                 for j in range(len(rel.subjects)):
-                    fewer = dataclasses.replace(rel, subjects=rel.subjects[:j] + rel.subjects[j + 1:])
-                    out.append(with_obj(spec, k, dataclasses.replace(o, rels=o.rels[:i] + [fewer] + o.rels[i + 1:])))
+                    fewer = dataclasses.replace(rel, subjects=rel.subjects[:j] + rel.subjects[j + 1 :])
+                    out.append(with_obj(spec, k, dataclasses.replace(o, rels=o.rels[:i] + [fewer] + o.rels[i + 1 :])))
     if spec.bot:
         out.append(dataclasses.replace(spec, bot=False))
     if spec.user_where:
@@ -489,7 +550,7 @@ def smaller(spec: Spec) -> list[Spec]:
 
 
 def with_obj(spec: Spec, k: int, o: Obj) -> Spec:
-    return dataclasses.replace(spec, objs=spec.objs[:k] + [o] + spec.objs[k + 1:])
+    return dataclasses.replace(spec, objs=spec.objs[:k] + [o] + spec.objs[k + 1 :])
 
 
 def parts_of(n: Node) -> list[Node]:
@@ -500,8 +561,8 @@ def parts_of(n: Node) -> list[Node]:
     out: list[Node] = list(parts) if op != "not" else []
     for i, x in enumerate(parts):
         if op != "not" and len(parts) > 2:
-            out.append((op, parts[:i] + parts[i + 1:]))
-        out += [(op, parts[:i] + [y] + parts[i + 1:]) for y in parts_of(x)]
+            out.append((op, parts[:i] + parts[i + 1 :]))
+        out += [(op, parts[:i] + [y] + parts[i + 1 :]) for y in parts_of(x)]
     return out
 
 
@@ -534,11 +595,13 @@ def main() -> None:
     failed = passed = 0
     slow: list[int] = []
     with tempfile.TemporaryDirectory() as workdir:
+
         def fails(s: Spec) -> bool:
             try:
                 return bool(run(s, db, args.steps, workdir, args.seconds))
             except (Refused, Slow):
                 return False
+
         for seed in seeds:
             spec = make(seed)
             if args.only is not None:
@@ -568,9 +631,12 @@ def main() -> None:
                 print("    " + policy_text(small).replace("\n", "\n    ").rstrip())
                 for p in run(small, db, args.steps, workdir):
                     print("   ", p)
-    print(f"genpolicy seeds {seeds[0]}..{seeds[-1]}: {passed} passed, {failed} failed, "
-          f"{sum(refused.values())} refused by the compiler" + (f" ({refused})" if refused else "")
-          + (f", {len(slow)} too slow to check (seeds {', '.join(map(str, slow))})" if slow else ""))
+    print(
+        f"genpolicy seeds {seeds[0]}..{seeds[-1]}: {passed} passed, {failed} failed, "
+        f"{sum(refused.values())} refused by the compiler"
+        + (f" ({refused})" if refused else "")
+        + (f", {len(slow)} too slow to check (seeds {', '.join(map(str, slow))})" if slow else "")
+    )
     sys.exit(1 if failed else 0)
 
 

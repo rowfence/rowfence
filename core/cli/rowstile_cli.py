@@ -96,6 +96,7 @@ rowstile.toml:
 The compiler runs here: the database only runs the SQL it writes, and the authz.* functions
 apps call. Applying, previewing and testing each run in one transaction on the database.
 """
+
 from __future__ import annotations
 
 import glob
@@ -119,8 +120,8 @@ from authzlib.sqlutil import POLICY_MARKS  # noqa: E402
 T = TypeVar("T")
 
 CONFIG = "rowstile.toml"
-OLD_CONFIG = "rowfence.toml"   # the file's name before rowstile was renamed, read with a warning
-EXPLAIN_SHOWN = 12          # lines of a failing check's explanation shown
+OLD_CONFIG = "rowfence.toml"  # the file's name before rowstile was renamed, read with a warning
+EXPLAIN_SHOWN = 12  # lines of a failing check's explanation shown
 
 
 def read_text(path: str) -> str:
@@ -143,10 +144,11 @@ def read_policy(path: str) -> tuple[str, dict[str, str]]:
         full = os.path.join(folder, *name.split("/"))
         if got is None and os.path.isfile(full):
             try:
-                read_text(full)         # there, and not read: not UTF-8 (or a link out of the folder: the compiler says)
+                read_text(full)  # there, and not read: not UTF-8 (or a link out of the folder: the compiler says)
             except OSError as e:
                 raise OSError(0, f"the file it includes, {name}, is {e.strerror}") from None
         return got
+
     return text, collect_includes(text, read)
 
 
@@ -157,6 +159,7 @@ def fail(msg: str | None, code: int = 1) -> NoReturn:
 
 class Db:
     """The connection authzlib.database works with (authzlib.connection.Db)."""
+
     errors = pgwire.PgError
 
     def __init__(self, conn: pgwire.Connection) -> None:
@@ -171,8 +174,15 @@ class Db:
 
     def warn(self, message: str, detail: str | None = None, hint: str | None = None) -> None:
         if self.conn.on_notice:
-            self.conn.on_notice({"S": "WARNING", "V": "WARNING", "M": message,
-                                 **({"D": detail} if detail else {}), **({"H": hint} if hint else {})})
+            self.conn.on_notice(
+                {
+                    "S": "WARNING",
+                    "V": "WARNING",
+                    "M": message,
+                    **({"D": detail} if detail else {}),
+                    **({"H": hint} if hint else {}),
+                }
+            )
 
 
 def transaction(conn: pgwire.Connection, work: Callable[[Db], T], keep: bool = True) -> T:
@@ -183,7 +193,7 @@ def transaction(conn: pgwire.Connection, work: Callable[[Db], T], keep: bool = T
     except BaseException:
         try:
             if conn.busy:
-                conn.cancel()       # stopped in the middle of a statement (Ctrl-C): end it on the server too
+                conn.cancel()  # stopped in the middle of a statement (Ctrl-C): end it on the server too
             else:
                 conn.execute("ROLLBACK")
         except (pgwire.PgError, pgwire.ProtocolError, OSError):
@@ -227,8 +237,11 @@ class Config:
         path = self.file(name)
         top = os.path.realpath(self.dir)
         if os.path.isabs(name) or not within(top, os.path.realpath(path)):
-            fail(f"{self.path}: {what} = \"{name}\" is outside the folder {CONFIG} is in (or a link out of it): "
-                 f"the files it names stay in that folder", 2)
+            fail(
+                f'{self.path}: {what} = "{name}" is outside the folder {CONFIG} is in (or a link out of it): '
+                f"the files it names stay in that folder",
+                2,
+            )
         return path
 
     def section(self, name: str) -> dict[str, object]:
@@ -255,7 +268,9 @@ class Config:
         out: list[str] = []
         for pattern in self.test_globs():
             self.inside(pattern.split("*")[0].split("?")[0].split("[")[0] or ".", "tests")
-            out += sorted(f for f in glob.glob(self.file(pattern)) if self.inside(os.path.relpath(f, self.dir), "tests"))
+            out += sorted(
+                f for f in glob.glob(self.file(pattern)) if self.inside(os.path.relpath(f, self.dir), "tests")
+            )
         return list(dict.fromkeys(out))
 
     @property
@@ -287,6 +302,7 @@ class Config:
             try:
                 with open(os.path.join(d, "package.json"), encoding="utf-8") as fh:
                     import stack
+
                     deps = stack.dependencies(json.load(fh))
                 return any(name.startswith("@rowstile/") for name in deps)
             except (OSError, ValueError):
@@ -302,7 +318,7 @@ class Config:
         if db and db.startswith("env:"):
             value = os.environ.get(db[4:])
             if value is None:
-                fail(f"{self.path}: database = \"{db}\", but {db[4:]} is not set", 2)
+                fail(f'{self.path}: database = "{db}", but {db[4:]} is not set', 2)
             return value
         return db
 
@@ -318,6 +334,7 @@ SETTINGS: dict[str, dict[str, str]] = {
 
 def check_settings(path: str, data: Mapping[str, object]) -> None:
     """Refuses a setting rowstile doesn't know, or one of the wrong type: left alone, `tests = "..."` runs no test."""
+
     def right(value: object, kind: str) -> bool:
         if kind == "text":
             return isinstance(value, str)
@@ -333,11 +350,14 @@ def check_settings(path: str, data: Mapping[str, object]) -> None:
                     fail(f"{path}: [{key}] is a table of settings", 2)
                 check(key, {str(k): v for k, v in value.items()})
             elif key not in SETTINGS[table]:
-                known = ", ".join(SETTINGS[table]) + (", and the tables [clients], [migrations], [review]" if not table else "")
+                known = ", ".join(SETTINGS[table]) + (
+                    ", and the tables [clients], [migrations], [review]" if not table else ""
+                )
                 fail(f"{path}: {name} is not a setting rowstile knows ({known})", 2)
             elif not right(value, SETTINGS[table][key]):
                 example = 'tests = ["db/tests/*.authz"]' if key == "tests" else f"{key} = ..."
                 fail(f"{path}: {name} is {SETTINGS[table][key]}: {example}", 2)
+
     check("", data)
 
 
@@ -346,7 +366,9 @@ def load_config() -> Config:
     while True:
         path = os.path.join(d, CONFIG)
         if not os.path.exists(path) and os.path.exists(old := os.path.join(d, OLD_CONFIG)):
-            print(f"{old}: rowstile was called rowfence; rename this file {CONFIG} (it is read for now)", file=sys.stderr)
+            print(
+                f"{old}: rowstile was called rowfence; rename this file {CONFIG} (it is read for now)", file=sys.stderr
+            )
             path = old
         if os.path.exists(path):
             try:
@@ -355,7 +377,7 @@ def load_config() -> Config:
                 fail(f"{path}: reading it needs Python 3.11 or newer (tomllib)", 2)
             try:
                 with open(path, "rb") as fh:
-                    data = tomllib.loads(fh.read().decode("utf-8-sig"))     # a byte order mark is skipped
+                    data = tomllib.loads(fh.read().decode("utf-8-sig"))  # a byte order mark is skipped
             except (OSError, ValueError) as e:
                 fail(f"{path}: {e}", 2)
             check_settings(path, data)
@@ -393,9 +415,11 @@ def sign_in(q: Query, who: str) -> None:
 
 
 def app_role(q: Query) -> str:
-    rows = q("SELECT DISTINCT r.rolname FROM pg_catalog.pg_policy p JOIN pg_catalog.pg_description d ON d.objoid = p.oid "
-             f"AND d.classoid = 'pg_catalog.pg_policy'::regclass AND d.description IN {POLICY_MARKS} "
-             "CROSS JOIN unnest(p.polroles) ro JOIN pg_catalog.pg_roles r ON r.oid = ro")
+    rows = q(
+        "SELECT DISTINCT r.rolname FROM pg_catalog.pg_policy p JOIN pg_catalog.pg_description d ON d.objoid = p.oid "
+        f"AND d.classoid = 'pg_catalog.pg_policy'::regclass AND d.description IN {POLICY_MARKS} "
+        "CROSS JOIN unnest(p.polroles) ro JOIN pg_catalog.pg_roles r ON r.oid = ro"
+    )
     if not rows:
         fail("no policy with rules is applied, so there is no app role to run as", 1)
     return str(rows[0][0])
@@ -486,7 +510,7 @@ class Dev:
         self.conn: pgwire.Connection | None = None
         self.notices: list[pgwire.Fields] = []
         self.lint: set[str] | None = None
-        self.studio_port: int | None = None     # rowstile dev starts Studio on it (None: not)
+        self.studio_port: int | None = None  # rowstile dev starts Studio on it (None: not)
 
     def connect(self) -> pgwire.Connection:
         if self.conn is None:
@@ -499,9 +523,13 @@ class Dev:
     def index_warnings(self) -> None:
         """The lookups the policy makes into the app's tables that no index serves (rowstile indexes), once."""
         from authzlib import perf
+
         try:
-            missing = transaction(self.connect(), lambda db: perf.missing_indexes(
-                db, database.policy_compiler(*database.applied(db))), keep=False)
+            missing = transaction(
+                self.connect(),
+                lambda db: perf.missing_indexes(db, database.policy_compiler(*database.applied(db))),
+                keep=False,
+            )
         except (database.Error, pgwire.PgError, OSError):
             return
         if missing:
@@ -533,7 +561,10 @@ class Dev:
                 n = int(line.group(2))
                 if 0 < n <= len(lines):
                     source = "\n  " + lines[n - 1].strip()
-            self.say("x", f"{relative(self.policy)}: {where}{source}\nnothing applied: the database keeps the policy in force")
+            self.say(
+                "x",
+                f"{relative(self.policy)}: {where}{source}\nnothing applied: the database keeps the policy in force",
+            )
             return False
         self.say("ok", "compiles")
         try:
@@ -548,10 +579,16 @@ class Dev:
             started = time.monotonic()
             state = transaction(conn, lambda db: database.push(db, text, files))
             took = time.monotonic() - started
-            self.say("ok", "unchanged: already in force" if state == "unchanged" else
-                     f"applied in {took:.2f} s" + (" (the whole policy)" if state == "applied" else ""))
-            warnings = [n.get("M", "") + (f"\n{n['D']}" if n.get("D") else "") + (f"\n{n['H']}" if n.get("H") else "")
-                        for n in self.notices]
+            self.say(
+                "ok",
+                "unchanged: already in force"
+                if state == "unchanged"
+                else f"applied in {took:.2f} s" + (" (the whole policy)" if state == "applied" else ""),
+            )
+            warnings = [
+                n.get("M", "") + (f"\n{n['D']}" if n.get("D") else "") + (f"\n{n['H']}" if n.get("H") else "")
+                for n in self.notices
+            ]
             for w in warnings:
                 if w not in (self.lint or ()):
                     self.say("!", w)
@@ -582,6 +619,7 @@ class Dev:
     def diff(self, conn: pgwire.Connection, text: str, files: dict[str, str]) -> None:
         def changes(db: Db) -> list[database.DiffRow] | None:
             return database.diff(db, text, files) if in_force(db) else None
+
         found = transaction(conn, changes, keep=False)
         if found is None:
             return
@@ -594,18 +632,21 @@ class Dev:
         if not rows:
             self.say("~", "access: nobody gains or loses anything")
             return
-        parts = [f"{users} user(s) {change.rstrip('s')} {what} on {objs} of {type_}"
-                 for change, type_, what, users, objs in rows[:8]]
+        parts = [
+            f"{users} user(s) {change.rstrip('s')} {what} on {objs} of {type_}"
+            for change, type_, what, users, objs in rows[:8]
+        ]
         more = f"\n... and {len(rows) - 8} more (rowstile diff)" if len(rows) > 8 else ""
         self.say("~", "access:\n" + "\n".join(parts) + more)
 
     def tests(self, conn: pgwire.Connection) -> bool:
         from authzlib import coverage
+
         tests = read_tests(self.cfg.tests())
         rows, report = transaction(conn, lambda db: database.coverage(db, tests), keep=False)
         failed = report_tests(rows, out=lambda s: None)
         if not rows:
-            self.say("ok", "no tests yet (rowstile.toml: tests = [\"db/tests/*.authz\"])")
+            self.say("ok", 'no tests yet (rowstile.toml: tests = ["db/tests/*.authz"])')
             return True
         if not failed:
             missing = coverage.summary(report)
@@ -619,7 +660,7 @@ class Dev:
     def run(self, once: bool) -> bool:
         reconfigure = getattr(sys.stdout, "reconfigure", None)
         if reconfigure is not None:
-            reconfigure(line_buffering=True)     # a line as it happens, even into a pipe or a log
+            reconfigure(line_buffering=True)  # a line as it happens, even into a pipe or a log
         target = pgwire.parse_dsn(self.dsn)
         print(f"rowstile dev: {relative(self.policy)} -> {target['database']} on {target['host']}:{target['port']}")
         passed = self.cycle("start")
@@ -630,9 +671,11 @@ class Dev:
         if self.studio_port is not None:
             # Studio beside the loop, able to write: this is a development database
             import studio
+
             try:
-                url = studio.Studio(self.dsn, self.cfg, self.policy, writable=True, port=self.studio_port,
-                                    read_policy=read_policy).start(background=True)
+                url = studio.Studio(
+                    self.dsn, self.cfg, self.policy, writable=True, port=self.studio_port, read_policy=read_policy
+                ).start(background=True)
                 print(f"Studio on {url}")
             except OSError as e:
                 print(f"Studio didn't start ({e}): rowstile dev --studio-port N for another port")
@@ -650,7 +693,7 @@ class Dev:
                 now = stamp(files)
                 if now != seen:
                     changed = [relative(f) for f in files if now.get(f) != seen.get(f)]
-                    time.sleep(0.1)                     # editors write in steps
+                    time.sleep(0.1)  # editors write in steps
                     seen = stamp(files)
                     pending = time.monotonic() if self.cycle(", ".join(changed[:3]) + " saved") and after else None
                 if pending is not None and time.monotonic() - pending >= after:
@@ -675,29 +718,75 @@ class Dev:
 # --- main ----------------------------------------------------------------------------------------
 # each command, and how many arguments it takes at most (None: any number)
 ARGUMENTS: dict[str, int | None] = {
-    "dev": 1, "studio": 0, "migrate": 1, "review": 1, "fmt": None, "push": 1, "apply": 1, "check": 1, "prove": 1,
-    "diff": 1, "test": None, "graph": 1, "lint": 0, "indexes": 0, "plans": 0, "bench": 0, "snapshot": 0, "client": 2,
-    "init": 0, "lsp": 0, "mcp": 0, "can": 3, "explain": 3, "perms": 2, "list": 2, "who": 3, "why": 3,
-    "explain-rule": 3, "sql": 1, "reapply": 0, "remove": 0,
+    "dev": 1,
+    "studio": 0,
+    "migrate": 1,
+    "review": 1,
+    "fmt": None,
+    "push": 1,
+    "apply": 1,
+    "check": 1,
+    "prove": 1,
+    "diff": 1,
+    "test": None,
+    "graph": 1,
+    "lint": 0,
+    "indexes": 0,
+    "plans": 0,
+    "bench": 0,
+    "snapshot": 0,
+    "client": 2,
+    "init": 0,
+    "lsp": 0,
+    "mcp": 0,
+    "can": 3,
+    "explain": 3,
+    "perms": 2,
+    "list": 2,
+    "who": 3,
+    "why": 3,
+    "explain-rule": 3,
+    "sql": 1,
+    "reapply": 0,
+    "remove": 0,
 }
 
 
 def main(argv: list[str]) -> None:
     dsn: str | None = None
     opts: dict[str, str] = {}
+
     # options are read wherever they are on the line: `rowstile --db URL lint` and `rowstile lint --db URL`
     # (for `sql`, not in its last argument: that is the statement, which may hold anything)
     def options() -> list[str]:
         return argv[:-1] if "sql" in argv else argv
 
-    for flag in ("--db", "-d", "--users", "--limit", "--as", "--row", "--schema", "--role", "--out", "--name", "--tool",
-                 "--dir", "--base", "--port", "--studio-port", "--worlds", "--people", "--rounds"):
+    for flag in (
+        "--db",
+        "-d",
+        "--users",
+        "--limit",
+        "--as",
+        "--row",
+        "--schema",
+        "--role",
+        "--out",
+        "--name",
+        "--tool",
+        "--dir",
+        "--base",
+        "--port",
+        "--studio-port",
+        "--worlds",
+        "--people",
+        "--rounds",
+    ):
         if flag in options():
             i = argv.index(flag)
             if i + 1 >= len(argv):
                 fail(f"{flag} needs a value", 2)
             opts[flag] = argv[i + 1]
-            del argv[i:i + 2]
+            del argv[i : i + 2]
             if flag in options():
                 fail(f"{flag} is given twice", 2)
     if "--db" in opts or "-d" in opts:
@@ -705,11 +794,30 @@ def main(argv: list[str]) -> None:
     for flag in ("--limit", "--port", "--studio-port", "--worlds", "--people", "--rounds"):
         if flag in opts and not (opts[flag].isdigit() and int(opts[flag]) > 0):
             fail(f"{flag} needs a whole number above 0, not {opts[flag]!r}", 2)
-    flags = {a for a in argv if a in ("--yes", "--force", "--once", "--check", "--one-phase", "--markdown", "--json",
-                                      "--annotations", "--write", "--no-studio", "--coverage", "--development", "--downgrade")}
+    flags = {
+        a
+        for a in argv
+        if a
+        in (
+            "--yes",
+            "--force",
+            "--once",
+            "--check",
+            "--one-phase",
+            "--markdown",
+            "--json",
+            "--annotations",
+            "--write",
+            "--no-studio",
+            "--coverage",
+            "--development",
+            "--downgrade",
+        )
+    }
     argv = [a for a in argv if a not in flags]
     if argv[:1] == ["help"] and argv[1:]:
         from authzlib import errors
+
         code = argv[1].upper()
         if code in errors.CODES:
             print(errors.page(code))
@@ -722,6 +830,7 @@ def main(argv: list[str]) -> None:
         fail(__doc__, 0 if argv else 2)
     if argv[0] in ("--version", "version"):
         from authzlib import __version__
+
         print(f"rowstile {__version__} (Python {sys.version.split()[0]})")
         return
     cmd, args = argv[0], argv[1:]
@@ -732,23 +841,28 @@ def main(argv: list[str]) -> None:
     if unknown:
         fail(f"rowstile {cmd}: {unknown[0]} is not an option it has (rowstile --help)", 2)
     if most is not None and len(args) > most:
-        fail(f"rowstile {cmd} takes {most or 'no'} argument{'' if most == 1 else 's'}: what is "
-             f"{' '.join(args[most:])}? (rowstile --help)", 2)
+        fail(
+            f"rowstile {cmd} takes {most or 'no'} argument{'' if most == 1 else 's'}: what is "
+            f"{' '.join(args[most:])}? (rowstile --help)",
+            2,
+        )
     cfg = load_config()
 
     if cmd == "lsp":
         from lsp import serve
+
         serve(cfg)
         return
     if cmd == "mcp":
         import mcp
+
         mcp.serve(dsn)
         return
 
     def policy_arg() -> tuple[str, str, dict[str, str]]:
         path = args[-1] if args else cfg.policy
         if not path:
-            fail(f"rowstile {cmd}: which policy file? (or name it in {CONFIG}: policy = \"db/policy.authz\")", 2)
+            fail(f'rowstile {cmd}: which policy file? (or name it in {CONFIG}: policy = "db/policy.authz")', 2)
         try:
             text, files = read_policy(path)
         except OSError as e:
@@ -776,6 +890,7 @@ def main(argv: list[str]) -> None:
             return
         if cmd == "prove":
             from authzlib import parse_policy, prove
+
             path, text, files = policy_arg()
             # the policy as `rowstile check` sees it: one the compiler refuses has nothing to prove
             msg = database.check(text, files)
@@ -797,7 +912,11 @@ def main(argv: list[str]) -> None:
             sys.exit(review_cmd(cfg, args, opts, flags, dsn))
         if cmd == "migrate":
             path, text, files = policy_arg()
-            sys.exit(migrate_cmd(cfg, path, text, files, opts, "--check" in flags, "--one-phase" in flags, "--downgrade" in flags))
+            sys.exit(
+                migrate_cmd(
+                    cfg, path, text, files, opts, "--check" in flags, "--one-phase" in flags, "--downgrade" in flags
+                )
+            )
         if cmd == "client" and not args and cfg.clients and cfg.policy:
             _, text, files = policy_arg()
             write_clients(cfg, text, files)
@@ -815,12 +934,13 @@ def main(argv: list[str]) -> None:
     if cmd == "dev":
         path = args[0] if args else cfg.policy
         if not path:
-            fail(f"rowstile dev: which policy file? (or name it in {CONFIG}: policy = \"db/policy.authz\")", 2)
+            fail(f'rowstile dev: which policy file? (or name it in {CONFIG}: policy = "db/policy.authz")', 2)
         dev = Dev(cfg, dsn, path)
         dev.studio_port = None if "--no-studio" in flags else int(opts.get("--studio-port", "4983"))
         sys.exit(0 if dev.run("--once" in flags) else 1)
     if cmd == "studio":
         import studio
+
         target = dsn if dsn is not None else (cfg.database or os.environ.get("DATABASE_URL") or "")
         studio.serve(target, cfg, cfg.policy, "--write" in flags, int(opts.get("--port", "4983")), read_policy)
         return
@@ -829,34 +949,57 @@ def main(argv: list[str]) -> None:
         conn = pgwire.connect(**pgwire.parse_dsn(dsn))
     except (ValueError, OSError, pgwire.PgError, pgwire.ProtocolError) as e:
         fail(f"can't connect: {e}", 2)
-    conn.on_notice = lambda f: print(f"{f.get('V', f.get('S', 'NOTICE'))}: {f.get('M', '')}"
-                                     + (f"\nDETAIL: {f['D']}" if f.get("D") else "")
-                                     + (f"\nHINT: {f['H']}" if f.get("H") else ""), file=sys.stderr)
+    conn.on_notice = lambda f: print(
+        f"{f.get('V', f.get('S', 'NOTICE'))}: {f.get('M', '')}"
+        + (f"\nDETAIL: {f['D']}" if f.get("D") else "")
+        + (f"\nHINT: {f['H']}" if f.get("H") else ""),
+        file=sys.stderr,
+    )
     q = conn.query
     q("SELECT set_config('client_min_messages', 'warning', false)")
     try:
         if cmd == "apply":
             path, text, files = policy_arg()
-            state = transaction(conn, lambda db: database.apply(db, text, files, "--force" not in flags, "--downgrade" in flags,
-                                                                   rebuild="--force" in flags))
+            state = transaction(
+                conn,
+                lambda db: database.apply(
+                    db, text, files, "--force" not in flags, "--downgrade" in flags, rebuild="--force" in flags
+                ),
+            )
             print(f"{path}: {state}")
         elif cmd == "push":
             path, text, files = policy_arg()
-            state = transaction(conn, lambda db: database.push(db, text, files, mark="--development" in flags,
-                                                                  downgrade="--downgrade" in flags))
+            state = transaction(
+                conn,
+                lambda db: database.push(
+                    db, text, files, mark="--development" in flags, downgrade="--downgrade" in flags
+                ),
+            )
             print(f"{path}: {state}" + (" (the whole policy)" if state == "applied" else ""))
         elif cmd == "diff":
             path, text, files = policy_arg()
             users = [u for u in opts.get("--users", "").split(",") if u] or None
             cols = ["change", "user_id", "type", "what", "id"]
-            rows = [(r["change"], r["user_id"] if r["user_id"] is not None else "(nobody signed in)", r["type"], r["what"], r["id"])
-                    for r in transaction(conn, lambda db: database.diff(db, text, files, users), keep=False)]
+            rows = [
+                (
+                    r["change"],
+                    r["user_id"] if r["user_id"] is not None else "(nobody signed in)",
+                    r["type"],
+                    r["what"],
+                    r["id"],
+                )
+                for r in transaction(conn, lambda db: database.diff(db, text, files, users), keep=False)
+            ]
             counts: dict[tuple[str, str, str], int] = {}
             for change, _, type_, what, _ in rows:
                 counts[(type_, what, change)] = counts.get((type_, what, change), 0) + 1
             print(f"{path}: {len(rows)} changes" + ("" if rows else " (nobody gains or loses anything)"))
             if rows:
-                print(table([(t, w, c, n) for (t, w, c), n in sorted(counts.items())], ["type", "what", "change", "pairs"]))
+                print(
+                    table(
+                        [(t, w, c, n) for (t, w, c), n in sorted(counts.items())], ["type", "what", "change", "pairs"]
+                    )
+                )
                 limit = int(opts.get("--limit", 200))
                 print()
                 print(table(rows[:limit], cols))
@@ -864,6 +1007,7 @@ def main(argv: list[str]) -> None:
                     print(f"... and {len(rows) - limit} more (--limit)")
         elif cmd == "test":
             from authzlib import coverage
+
             if not args and cfg.test_globs() and not cfg.tests():
                 print(f"{cfg.path}: tests = {cfg.test_globs()} matches no file", file=sys.stderr)
             tests = read_tests(args or cfg.tests())
@@ -874,7 +1018,7 @@ def main(argv: list[str]) -> None:
                 rows = transaction(conn, lambda db: database.test(db, tests), keep=False)
             failed = report_tests(rows)
             if failed:
-                print(f"{failed} policy test(s) failed")      # after the results, on the same stream
+                print(f"{failed} policy test(s) failed")  # after the results, on the same stream
                 sys.exit(1)
             print(f"policy tests passed ({len(rows)} checks)")
             if report is not None:
@@ -886,7 +1030,11 @@ def main(argv: list[str]) -> None:
             if not found:
                 print("authz.lint(): nothing found")
             else:
-                print(table([(r["severity"], r["object"], r["problem"]) for r in found], ["severity", "object", "problem"]))
+                print(
+                    table(
+                        [(r["severity"], r["object"], r["problem"]) for r in found], ["severity", "object", "problem"]
+                    )
+                )
             if any(r["severity"] in ("error", "warning") for r in found):
                 sys.exit(1)
         elif cmd in ("indexes", "plans", "bench"):
@@ -908,8 +1056,13 @@ def main(argv: list[str]) -> None:
                 print(perf.describe_plans(transaction(conn, lambda db: perf.plans(db, compiled(db), who), keep=False)))
             else:
                 people, rounds = int(opts.get("--people", "10")), int(opts.get("--rounds", "20"))
-                print(perf.describe_bench(transaction(
-                    conn, lambda db: perf.bench(db, compiled(db), people=people, rounds=rounds), keep=False)))
+                print(
+                    perf.describe_bench(
+                        transaction(
+                            conn, lambda db: perf.bench(db, compiled(db), people=people, rounds=rounds), keep=False
+                        )
+                    )
+                )
         elif cmd == "graph":
             text, files = transaction(conn, database.applied, keep=False)
             sys.stdout.write(database.graph(text, files))
@@ -927,6 +1080,7 @@ def main(argv: list[str]) -> None:
             if len(args) != 3 or not opts.get("--as"):
                 fail("rowstile why --as user:42 TYPE ID PERM", 2)
             from authzlib import grant
+
             kind, ident = principal(opts["--as"])
             type_name, oid, perm = args
             answer = transaction(conn, lambda db: database.why(db, kind, ident, type_name, oid, perm), keep=False)
@@ -935,17 +1089,24 @@ def main(argv: list[str]) -> None:
             ask(conn, cmd, args, opts)
         elif cmd == "init":
             from init import init
+
             schemas = [s for s in opts.get("--schema", "").split(",") if s] or None
-            policy = transaction(conn, lambda db: database.draft(db, schemas, opts.get("--users"),
-                                                                 opts.get("--role", "app_user")), keep=False)
+            policy = transaction(
+                conn,
+                lambda db: database.draft(db, schemas, opts.get("--users"), opts.get("--role", "app_user")),
+                keep=False,
+            )
             init(policy, opts, cfg)
         elif cmd == "reapply":
             transaction(conn, lambda db: database.reapply(db, rebuild="--force" in flags))
             print("applied again")
         elif cmd == "remove":
             if "--yes" not in flags:
-                fail("rowstile remove drops every view, trigger and row-level security policy the current policy made "
-                     "(shares and history stay). Run it again with --yes.", 2)
+                fail(
+                    "rowstile remove drops every view, trigger and row-level security policy the current policy made "
+                    "(shares and history stay). Run it again with --yes.",
+                    2,
+                )
             transaction(conn, database.remove)
             print("removed")
         else:
@@ -953,8 +1114,10 @@ def main(argv: list[str]) -> None:
     except database.Error as e:
         fail(str(e) + (f"\nHINT: {e.hint}" if e.hint else ""))
     except pgwire.PgError as e:
-        if (e.code == "3F000" and 'schema "authz"' in e.message) or (e.code == "42883" and "function authz." in e.message):
-            fail("no policy is applied [AZ609]\nHINT: rowstile apply db/policy.authz")     # as the other commands say it
+        if (e.code == "3F000" and 'schema "authz"' in e.message) or (
+            e.code == "42883" and "function authz." in e.message
+        ):
+            fail("no policy is applied [AZ609]\nHINT: rowstile apply db/policy.authz")  # as the other commands say it
         if e.fields.get("S") in ("FATAL", "PANIC"):
             fail(f"lost the database: {e.message}", 2)
         detail = e.fields.get("D")
@@ -975,6 +1138,7 @@ def main(argv: list[str]) -> None:
 # --- review and fmt ------------------------------------------------------------------------------
 def git(*args: str) -> str | None:
     import subprocess
+
     try:
         p = subprocess.run(["git", *args], capture_output=True, text=True, encoding="utf-8")
     except FileNotFoundError:
@@ -1000,8 +1164,9 @@ def base_policy(ref: str, path: str) -> tuple[str | None, dict[str, str]]:
 def base_tests(cfg: Config, ref: str) -> dict[str, str]:
     """The test files rowstile.toml names, as they were at a commit."""
     import fnmatch
+
     root = git("rev-parse", "--show-toplevel")
-    listed = git("ls-tree", "-r", "--name-only", "--full-tree", ref)   # from the top folder, wherever this runs
+    listed = git("ls-tree", "-r", "--name-only", "--full-tree", ref)  # from the top folder, wherever this runs
     if root is None or listed is None:
         return {}
     root = root.strip()
@@ -1029,14 +1194,18 @@ def review_cmd(cfg: Config, args: list[str], opts: dict[str, str], flags: set[st
     or --annotations (GitHub workflow commands). Access and the tests' results need --db: a database at the
     base's state (its migrations, then the review data), which the review changes nothing in."""
     from authzlib import review
+
     path = args[-1] if args else cfg.policy
     if not path:
-        fail(f"rowstile review: which policy file? (or name it in {CONFIG}: policy = \"db/policy.authz\")", 2)
+        fail(f'rowstile review: which policy file? (or name it in {CONFIG}: policy = "db/policy.authz")', 2)
     ref = opts.get("--base") or default_base()
     # a commit git doesn't know would read as "no policy there": the whole policy reviewed as new
     if ref.startswith("-") or git("rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}") is None:
-        fail(f"rowstile review: git doesn't know the commit to compare with, {ref} (a shallow checkout? fetch the "
-             "base branch: fetch-depth: 0 with actions/checkout)", 2)
+        fail(
+            f"rowstile review: git doesn't know the commit to compare with, {ref} (a shallow checkout? fetch the "
+            "base branch: fetch-depth: 0 with actions/checkout)",
+            2,
+        )
     try:
         head_text, head_files = read_policy(path)
     except OSError as e:
@@ -1063,8 +1232,9 @@ def review_cmd(cfg: Config, args: list[str], opts: dict[str, str], flags: set[st
         conn.execute("BEGIN")
         db = Db(conn)
     try:
-        r = review.review((base_text, base_files, base_tests(cfg, ref)), (head_text, head_files, head_tests),
-                          base_lock, head_lock, db)
+        r = review.review(
+            (base_text, base_files, base_tests(cfg, ref)), (head_text, head_files, head_tests), base_lock, head_lock, db
+        )
     except database.Error as e:
         fail(str(e))
     except review.PolicyError as e:
@@ -1101,13 +1271,14 @@ def fmt_cmd(cfg: Config, args: list[str], check: bool) -> int:
     """Formats the policy and its test files (or the files named) one way; --check: only says which aren't.
     Line endings are the file's own: read either way, written back as found."""
     from authzlib.fmt import FormatError, format
+
     paths = args or ([cfg.policy] if cfg.policy else []) + cfg.tests()
     if not paths:
         fail(f"rowstile fmt: which files? (or name the policy in {CONFIG})", 2)
     bad = 0
     for path in paths:
         try:
-            text, files = read_policy(path)         # with the files it includes: the format must say the same
+            text, files = read_policy(path)  # with the files it includes: the format must say the same
         except OSError as e:
             fail(f"{path}: {e.strerror}", 2)
         try:
@@ -1143,12 +1314,21 @@ def migration_name(summary: list[str]) -> str:
     return "policy"
 
 
-def migrate_cmd(cfg: Config, path: str, text: str, files: dict[str, str], opts: dict[str, str], check: bool,
-                one_phase: bool = False, downgrade: bool = False) -> int:
+def migrate_cmd(
+    cfg: Config,
+    path: str,
+    text: str,
+    files: dict[str, str],
+    opts: dict[str, str],
+    check: bool,
+    one_phase: bool = False,
+    downgrade: bool = False,
+) -> int:
     """Writes the migration from the lock file to this policy, for the tool rowstile.toml names (two, when
     inheritance trees are built beside the ones in use first); with --check, only says whether there is one
     to write (exit 1 if so). Needs no database."""
     import migrations
+
     tool = opts.get("--tool") or cfg.tool or "sql"
     if tool not in migrations.TOOLS:
         fail(f"rowstile migrate: unknown tool '{tool}' (use one of {', '.join(migrations.TOOLS)})", 2)
@@ -1178,8 +1358,9 @@ def migrate_cmd(cfg: Config, path: str, text: str, files: dict[str, str], opts: 
     now = time.time()
     try:
         for i, m in enumerate(ms):
-            written += migrations.write_migration(tool, folder, f"build_{name}" if i < len(ms) - 1 else name, m.sql,
-                                                  now=now + i)
+            written += migrations.write_migration(
+                tool, folder, f"build_{name}" if i < len(ms) - 1 else name, m.sql, now=now + i
+            )
     except migrations.Error as e:
         fail(f"rowstile migrate: {e}", 2)
     os.makedirs(os.path.dirname(lock) or ".", exist_ok=True)
@@ -1190,8 +1371,10 @@ def migrate_cmd(cfg: Config, path: str, text: str, files: dict[str, str], opts: 
     if len(summary) > 20:
         print(f"  ... and {len(summary) - 20} more")
     if len(ms) == 2:
-        print(f"builds {', '.join(ms[0].rebuilt)} beside the ones in use (the app keeps working), then swaps "
-              f"{'them' if len(ms[0].rebuilt) > 1 else 'it'} in: two migrations")
+        print(
+            f"builds {', '.join(ms[0].rebuilt)} beside the ones in use (the app keeps working), then swaps "
+            f"{'them' if len(ms[0].rebuilt) > 1 else 'it'} in: two migrations"
+        )
     rebuilt = [t for t in ms[-1].rebuilt if len(ms) == 1 or t not in ms[0].rebuilt]
     if rebuilt:
         print(f"rebuilds {', '.join(rebuilt)} (the app's tables they follow are locked while it runs)")
@@ -1199,8 +1382,11 @@ def migrate_cmd(cfg: Config, path: str, text: str, files: dict[str, str], opts: 
         print(f"wrote {relative(f)}")
     print(f"wrote {relative(lock)}")
     rel: Callable[[str], str] = lambda p: os.path.relpath(p, cfg.dir).replace(os.sep, "/")
-    marked = migrations.mark_generated(cfg.dir, migrations.generated_patterns(tool, rel(folder), rel(lock))) \
-        if cfg.path else None
+    marked = (
+        migrations.mark_generated(cfg.dir, migrations.generated_patterns(tool, rel(folder), rel(lock)))
+        if cfg.path
+        else None
+    )
     if marked:
         print(f"wrote {relative(marked)} (reviews show the generated files collapsed)")
     return 0
@@ -1230,13 +1416,13 @@ def ask(conn: pgwire.Connection, cmd: str, args: list[str], opts: dict[str, str]
         if who is not None:
             sign_in(q, who)
         if cmd == "can":
-            (ok,), = q("SELECT authz.can($1, $2, $3)", args)
+            ((ok,),) = q("SELECT authz.can($1, $2, $3)", args)
             print("yes" if ok else "no")
         elif cmd == "explain":
             for (line,) in q("SELECT l FROM authz.explain($1, $2, $3) l", args):
                 print(line)
         elif cmd == "perms":
-            (perms,), = q("SELECT authz.perms($1, $2)", args)
+            ((perms,),) = q("SELECT authz.perms($1, $2)", args)
             print("\n".join(str(p) for p in perms) if isinstance(perms, list) and perms else "(none)")
         elif cmd == "list":
             for (x,) in q("SELECT x FROM authz.list($1, $2) x", args):
@@ -1251,14 +1437,19 @@ def ask(conn: pgwire.Connection, cmd: str, args: list[str], opts: dict[str, str]
             if row is not None:
                 try:
                     if not isinstance(json.loads(row), dict):
-                        fail("--row: the row as a JSON object, {\"column\": value}", 2)
+                        fail('--row: the row as a JSON object, {"column": value}', 2)
                 except ValueError as e:
                     fail(f"--row: {e}", 2)
             take_app_role(conn)
-            (lines,), = q("SELECT authz.explain_rule($1, $2, $3, $4::jsonb)",
-                          [args[0], args[1], args[2] if len(args) > 2 else None, row])
-            print("\n".join(str(x) for x in lines) if isinstance(lines, list) else f"not found: {args[0]} {args[2] if len(args) > 2 else ''} "
-                                                              f"isn't there, or {who} can't see it")
+            ((lines,),) = q(
+                "SELECT authz.explain_rule($1, $2, $3, $4::jsonb)",
+                [args[0], args[1], args[2] if len(args) > 2 else None, row],
+            )
+            print(
+                "\n".join(str(x) for x in lines)
+                if isinstance(lines, list)
+                else f"not found: {args[0]} {args[2] if len(args) > 2 else ''} isn't there, or {who} can't see it"
+            )
         elif cmd == "sql":
             take_app_role(conn)
             rows, cols = conn.query_described(args[0])
@@ -1300,8 +1491,11 @@ def snapshot_cmd(conn: pgwire.Connection, cfg: Config, opts: dict[str, str], che
             return
         before = {x for x in (old or "").split("\n") if x and not x.startswith("#")}
         after = set(lines)
-        print(f"{relative(path)} is out of date: rowstile snapshot writes it" if old is not None
-              else f"{relative(path)} is missing: rowstile snapshot writes it")
+        print(
+            f"{relative(path)} is out of date: rowstile snapshot writes it"
+            if old is not None
+            else f"{relative(path)} is missing: rowstile snapshot writes it"
+        )
         for x in sorted(after - before)[:20]:
             print(f"  + {x}")
         for x in sorted(before - after)[:20]:

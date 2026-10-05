@@ -11,6 +11,7 @@
 format() refuses (raises FormatError) rather than change what the policy says: the result must parse
 to the same declarations.
 """
+
 from __future__ import annotations
 
 import re
@@ -27,7 +28,7 @@ class FormatError(Exception):
 
 
 class Line(NamedTuple):
-    kind: str                   # 'blank', 'comment', 'top', 'scope', 'cont', or a body kind (kind_of)
+    kind: str  # 'blank', 'comment', 'top', 'scope', 'cont', or a body kind (kind_of)
     code: str
     comment: str
     indent: int
@@ -67,7 +68,7 @@ def scan(text: str) -> list[tuple[str, bool, int]]:
 def split_comment(line: str) -> tuple[str, str]:
     """(code, comment): a trailing -- comment, outside {} and quotes."""
     for i, (c, quoted, depth) in enumerate(scan(line)):
-        if c == "-" and not quoted and depth == 0 and line[i:i + 2] == "--":
+        if c == "-" and not quoted and depth == 0 and line[i : i + 2] == "--":
             return line[:i].rstrip(), line[i:].rstrip()
     return line.rstrip(), ""
 
@@ -91,7 +92,7 @@ def top_split(code: str, sep: str) -> tuple[str, str] | None:
     """code split at the first `sep` outside {} and quotes: (before, after) or None."""
     for i, (_, quoted, depth) in enumerate(scan(code)):
         if not quoted and depth == 0 and code.startswith(sep, i):
-            return code[:i], code[i + len(sep):]
+            return code[:i], code[i + len(sep) :]
     return None
 
 
@@ -129,16 +130,17 @@ def format_policy(text: str) -> str:
         code, comment = split_comment(raw)
         indent = len(raw) - len(raw.lstrip())
         s = squeeze(code) if open_braces == 0 else code.strip()
-        if open_braces > 0 or (indent > 0 and CONT.match(code.strip()) and items and any(
-                it[0] not in ("blank", "comment") for it in items)):
+        if open_braces > 0 or (
+            indent > 0 and CONT.match(code.strip()) and items and any(it[0] not in ("blank", "comment") for it in items)
+        ):
             items.append(Line("cont", code.strip() if open_braces else squeeze(code), comment, indent))
-        elif indent == 0:           # an indented line is never a top-level one: `role : user = ...` is a relation
+        elif indent == 0:  # an indented line is never a top-level one: `role : user = ...` is a relation
             m = TOP.match(stripped)
             block = m.group(1) if m else None
             items.append(Line("scope" if block == "scope" and top_split(s, "=") else "top", s, comment, 0))
         else:
             items.append(Line(kind_of(s, block), s, comment, 2))
-        open_braces = max(0, open_braces + parse_open_braces(code))      # as the parser counts them: not in quotes
+        open_braces = max(0, open_braces + parse_open_braces(code))  # as the parser counts them: not in quotes
 
     # blank lines: one before each block that follows another (with its comments), none doubled, none at the ends
     out_items: list[Line] = []
@@ -157,8 +159,14 @@ def format_policy(text: str) -> str:
         if it[0] in ("top", "scope") and final and final[-1][0] not in ("blank", "comment"):
             if not (final[-1][0] in ("top", "scope") and _single(final[-1][1]) and _single(it[1])):
                 final.append(Line("blank", "", "", 0))
-        elif it[0] == "comment" and it[3] == 0 and final and final[-1][0] not in ("blank", "comment") \
-                and i + 1 < len(out_items) and out_items[i + 1][0] in ("top", "comment"):
+        elif (
+            it[0] == "comment"
+            and it[3] == 0
+            and final
+            and final[-1][0] not in ("blank", "comment")
+            and i + 1 < len(out_items)
+            and out_items[i + 1][0] in ("top", "comment")
+        ):
             final.append(Line("blank", "", "", 0))
         final.append(it)
 
@@ -273,8 +281,10 @@ def _align(final: list[Line], run: list[int], kind: str, rendered: list[Rendered
     # trailing comments line up after the longest line that has one
     width = max((len(line) for _, line, comment in lines if comment), default=0)
     for (k, line, comment), h in zip(lines, heads, strict=True):
-        rendered[k] = ((line.ljust(width) + "  " + comment) if comment else line, col if h is None else
-                       _col_after(line, kind, h))
+        rendered[k] = (
+            (line.ljust(width) + "  " + comment) if comment else line,
+            col if h is None else _col_after(line, kind, h),
+        )
 
 
 def _col_after(line: str, kind: str, h: Head) -> int:
@@ -295,19 +305,26 @@ def tests_of(text: str, files: dict[str, str]) -> list[object]:
     """What the tests of a policy or test file say: each check and each named test's lines, as the parser reads
     them. meaning_lines leaves the tests out (they make nothing in the database); formatting must not change them."""
     from .parse import parse_policy
+
     pol = parse_policy(text, None, files=files)
-    return [*[(t.ptype, t.who, t.expect, t.perm, t.type, t.obj) for t in pol.tests],
-            *[(sc.name, [(st.kind, st.var, st.sql, st.who, st.expect, st.perm, st.type, st.obj) for st in sc.steps])
-              for sc in pol.scenarios]]
+    return [
+        *[(t.ptype, t.who, t.expect, t.perm, t.type, t.obj) for t in pol.tests],
+        *[
+            (sc.name, [(st.kind, st.var, st.sql, st.who, st.expect, st.perm, st.type, st.obj) for st in sc.steps])
+            for sc in pol.scenarios
+        ],
+    ]
 
 
 def format(text: str, files: dict[str, str] | None = None) -> str:
     """The policy as rowstile fmt writes it; FormatError if that would change what it says."""
     from .migrate import meaning_lines
+
     out = format_policy(text)
     try:
-        same = [tight(x) for x in meaning_lines(text, files or {})] == [tight(x) for x in meaning_lines(out, files or {})] \
-            and tests_of(text, files or {}) == tests_of(out, files or {})
+        same = [tight(x) for x in meaning_lines(text, files or {})] == [
+            tight(x) for x in meaning_lines(out, files or {})
+        ] and tests_of(text, files or {}) == tests_of(out, files or {})
     except Exception as e:
         raise FormatError(f"can't format a policy that doesn't parse: {e}") from None
     if not same:

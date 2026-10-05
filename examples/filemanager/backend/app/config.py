@@ -1,22 +1,23 @@
 """Settings, from the environment."""
+
 import os
 from dataclasses import dataclass
 
 
 @dataclass(frozen=True)
 class Settings:
-    database_url: str          # as fm_app: row-level security applies
-    s3_endpoint: str           # where the backend reaches RustFS
-    s3_public_endpoint: str    # where browsers reach it (signed download links point here)
+    database_url: str  # as fm_app: row-level security applies
+    s3_endpoint: str  # where the backend reaches RustFS
+    s3_public_endpoint: str  # where browsers reach it (signed download links point here)
     s3_bucket: str
     s3_access_key: str
     s3_secret_key: str
     s3_region: str
     session_days: int
     cookie_secure: bool
-    open_signup: bool          # anyone may create an account (development, demos)
+    open_signup: bool  # anyone may create an account (development, demos)
     max_upload_bytes: int
-    link_minutes: int          # how long a signed download or upload link works
+    link_minutes: int  # how long a signed download or upload link works
     web_origins: tuple[str, ...]  # where the web app runs: browsers there may upload straight to RustFS
 
 

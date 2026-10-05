@@ -3,6 +3,7 @@
 The command is standard library only. In an installed package it is in rowstile/_command; in a checkout of the
 repository (an editable install), it is core/cli beside sdk/python.
 """
+
 import importlib
 import os
 import sys
@@ -22,7 +23,7 @@ def command_dir() -> str:
 
 def main(argv: Sequence[str] | None = None) -> None:
     sys.path.insert(0, command_dir())
-    rowstile_cli = importlib.import_module("rowstile_cli")    # it puts authzlib, beside it, on the path too
+    rowstile_cli = importlib.import_module("rowstile_cli")  # it puts authzlib, beside it, on the path too
     rowstile_cli.main(list(sys.argv[1:] if argv is None else argv))
 
 

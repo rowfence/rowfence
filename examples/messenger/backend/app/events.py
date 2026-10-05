@@ -3,6 +3,7 @@ connected person the backend asks the database whether they may read chat N, as 
 passes the chat's number on. The browser fetches what changed through the API, which row-level
 security filters like any other read. So a WebSocket never carries a message, and can't leak one.
 """
+
 import asyncio
 import json
 import logging
@@ -28,7 +29,7 @@ class Hub:
         self.sockets.pop(ws, None)
 
     async def announce(self, payload: str) -> None:
-        chat_id, _, about = payload.partition(":")    # "N", or "N:user" for a membership change
+        chat_id, _, about = payload.partition(":")  # "N", or "N:user" for a membership change
         people = {user_id for user_id, _ in self.sockets.values()}
         readers = await asyncio.to_thread(self.who_may_read, int(chat_id), people)
         text = json.dumps({"chat": int(chat_id)})
@@ -37,7 +38,7 @@ class Hub:
             if user_id in readers or user_id == about:
                 try:
                     await asyncio.wrap_future(asyncio.run_coroutine_threadsafe(ws.send_text(text), loop))
-                except Exception:      # a socket that closed meanwhile
+                except Exception:  # a socket that closed meanwhile
                     self.remove(ws)
 
     @staticmethod
@@ -60,6 +61,6 @@ def listen(database_url: str, loop: asyncio.AbstractEventLoop, stop: threading.E
                 while not stop.is_set():
                     for note in conn.notifies(timeout=1):
                         asyncio.run_coroutine_threadsafe(hub.announce(note.payload), loop)
-        except Exception as e:                        # the database restarted, say
+        except Exception as e:  # the database restarted, say
             log.warning("event listener: %s; reconnecting", e)
             stop.wait(2)

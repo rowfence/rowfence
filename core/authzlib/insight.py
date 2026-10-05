@@ -1,4 +1,5 @@
 """Answers about access: who holds a permission, and why (or why not)."""
+
 from __future__ import annotations
 
 import re
@@ -10,8 +11,9 @@ from .sqlutil import lit, q, qt, row_cond, union
 DEFINER_FROM_CURRENT = "SECURITY DEFINER SET search_path FROM CURRENT"
 # a condition the policy wrote as a word (signed_in, anyone, nobody), said as that word
 WORD_OF = {sql: word for word, sql in KEYWORDS.items()}
-USER_DEPENDENT = re.compile(r"\bauthz\s*\.\s*(uid|me|ctx)\b|\bcurrent_setting\b|\bcurrent_user\b|\bsession_user\b",
-                            re.IGNORECASE)
+USER_DEPENDENT = re.compile(
+    r"\bauthz\s*\.\s*(uid|me|ctx)\b|\bcurrent_setting\b|\bcurrent_user\b|\bsession_user\b", re.IGNORECASE
+)
 
 
 def expr_text(node: Expr) -> str:
@@ -86,24 +88,31 @@ class InsightMixin(Core):
         if src.kind == "table":
             sid = self.subject_id(src, "s", st)
             where = f" AND coalesce(({row_cond(src.where, 's')}), false)" if src.where else ""
-            return [f"SELECT {sid} AS id FROM {qt(self.source_table(src))} s WHERE {self.key_is(t, 's', obj, src.obj_col)} "
-                    f"AND {sid} IS NOT NULL{where}"]
+            return [
+                f"SELECT {sid} AS id FROM {qt(self.source_table(src))} s WHERE {self.key_is(t, 's', obj, src.obj_col)} "
+                f"AND {sid} IS NOT NULL{where}"
+            ]
         if src.kind == "shared":
-            return [f"SELECT g.subject_id::{s.pktype} AS id FROM authz.shares g WHERE g.object_type = {lit(t.name)} "
-                    f"AND g.object_id = ({obj})::text AND g.relation = {lit(r.name)} AND g.subject_type = {lit(st)} "
-                    f"AND g.subject_relation = ''"]
+            return [
+                f"SELECT g.subject_id::{s.pktype} AS id FROM authz.shares g WHERE g.object_type = {lit(t.name)} "
+                f"AND g.object_id = ({obj})::text AND g.relation = {lit(r.name)} AND g.subject_type = {lit(st)} "
+                f"AND g.subject_relation = ''"
+            ]
         return []
 
     def rel_who_sql(self, t: Type, r: Relation, obj: str) -> str:
         """Users that may hold relation r on object obj (nested groups expanded)."""
-        loops = [src for src in r.sources for st, sr in src.subjects
-                 if sr and sr != "*" and self.is_group_loop(t, r, st, sr)]
+        loops = [
+            src for src in r.sources for st, sr in src.subjects if sr and sr != "*" and self.is_group_loop(t, r, st, sr)
+        ]
         if not loops:
             return self.rel_who_direct(t, r, obj)
         # nested groups: every sub-group, to any depth, then their members
         pairs = union([self.pair_sql(t, r, src, t.name, r.name, "obj", "subj") for src in loops])
-        return (f"WITH RECURSIVE gs(id) AS (SELECT {obj} UNION SELECT e.subj FROM ({pairs}) e JOIN gs ON e.obj = gs.id)\n"
-                f"  SELECT x FROM gs, LATERAL ({self.rel_who_direct(t, r, 'gs.id')}) w(x)")
+        return (
+            f"WITH RECURSIVE gs(id) AS (SELECT {obj} UNION SELECT e.subj FROM ({pairs}) e JOIN gs ON e.obj = gs.id)\n"
+            f"  SELECT x FROM gs, LATERAL ({self.rel_who_direct(t, r, 'gs.id')}) w(x)"
+        )
 
     def rel_who_direct(self, t: Type, r: Relation, obj: str) -> str:
         u = self.T("user")
@@ -115,34 +124,48 @@ class InsightMixin(Core):
                 if src.kind == "column":
                     col = self.subject_id(src, "r", st)
                     if (st, sr) == ("user", None):
-                        parts.append(f"SELECT {col} FROM {qt(t.table)} r WHERE {self.key_is(t, 'r', obj)} AND {col} IS NOT NULL")
+                        parts.append(
+                            f"SELECT {col} FROM {qt(t.table)} r WHERE {self.key_is(t, 'r', obj)} AND {col} IS NOT NULL"
+                        )
                     elif sr:
-                        parts.append(f"SELECT x FROM {qt(t.table)} r, LATERAL {self.who_fn(self.T(st), sr)}({col}) x "
-                                     f"WHERE {self.key_is(t, 'r', obj)}")
+                        parts.append(
+                            f"SELECT x FROM {qt(t.table)} r, LATERAL {self.who_fn(self.T(st), sr)}({col}) x "
+                            f"WHERE {self.key_is(t, 'r', obj)}"
+                        )
                 elif src.kind == "table":
                     col = self.subject_id(src, "s", st)
                     where = f" AND coalesce(({row_cond(src.where, 's')}), false)" if src.where else ""
                     if (st, sr) == ("user", None):
-                        parts.append(f"SELECT {col} FROM {qt(self.source_table(src))} s WHERE {self.key_is(t, 's', obj, src.obj_col)}{where}")
+                        parts.append(
+                            f"SELECT {col} FROM {qt(self.source_table(src))} s WHERE {self.key_is(t, 's', obj, src.obj_col)}{where}"
+                        )
                     elif sr:
-                        parts.append(f"SELECT x FROM {qt(self.source_table(src))} s, LATERAL {self.who_fn(self.T(st), sr)}({col}) x "
-                                     f"WHERE {self.key_is(t, 's', obj, src.obj_col)}{where}")
+                        parts.append(
+                            f"SELECT x FROM {qt(self.source_table(src))} s, LATERAL {self.who_fn(self.T(st), sr)}({col}) x "
+                            f"WHERE {self.key_is(t, 's', obj, src.obj_col)}{where}"
+                        )
                 else:
-                    rel = (self.role_rel_sql(t, src, obj) if src.kind == "roles" else f"g.relation = {lit(r.name)}")
+                    rel = self.role_rel_sql(t, src, obj) if src.kind == "roles" else f"g.relation = {lit(r.name)}"
                     gw = f"g.object_type = {lit(t.name)} AND g.object_id = ({obj})::text AND {rel}"
                     if (st, sr) == ("user", None):
-                        parts.append(f"SELECT g.subject_id::{u.pktype} FROM authz.shares g WHERE {gw} "
-                                     f"AND g.subject_type = 'user' AND g.subject_relation = '' AND g.subject_id <> '*'")
+                        parts.append(
+                            f"SELECT g.subject_id::{u.pktype} FROM authz.shares g WHERE {gw} "
+                            f"AND g.subject_type = 'user' AND g.subject_relation = '' AND g.subject_id <> '*'"
+                        )
                     elif (st, sr) == ("user", "*") or st == "anyone":
                         stype = "user" if st == "user" else "anyone"
-                        parts.append(f"SELECT u.{q(self.pk(u))} FROM {qt(u.table)} u WHERE EXISTS (SELECT 1 FROM authz.shares g "
-                                     f"WHERE {gw} AND g.subject_type = {lit(stype)} AND g.subject_id = '*')")
+                        parts.append(
+                            f"SELECT u.{q(self.pk(u))} FROM {qt(u.table)} u WHERE EXISTS (SELECT 1 FROM authz.shares g "
+                            f"WHERE {gw} AND g.subject_type = {lit(stype)} AND g.subject_id = '*')"
+                        )
                     elif sr == "*":
-                        continue           # every signed-in service: no users (authz.who lists users)
+                        continue  # every signed-in service: no users (authz.who lists users)
                     elif sr:
-                        parts.append(f"SELECT x FROM authz.shares g, LATERAL {self.who_fn(self.T(st), sr)}"
-                                     f"(g.subject_id::{self.T(st).pktype}) x WHERE {gw} AND g.subject_type = {lit(st)} "
-                                     f"AND g.subject_relation = {lit(sr)}")
+                        parts.append(
+                            f"SELECT x FROM authz.shares g, LATERAL {self.who_fn(self.T(st), sr)}"
+                            f"(g.subject_id::{self.T(st).pktype}) x WHERE {gw} AND g.subject_type = {lit(st)} "
+                            f"AND g.subject_relation = {lit(sr)}"
+                        )
         return union(parts) if parts else f"SELECT NULL::{u.pktype} WHERE false"
 
     def who_sql(self) -> list[str]:
@@ -153,39 +176,55 @@ class InsightMixin(Core):
         for t in self.types.values():
             for r in t.relations.values():
                 if all(sr is None and st in self.types and not self.T(st).principal for st, sr in r.subjects()):
-                    continue       # links to objects: nobody holds them
-                out.append(f"CREATE FUNCTION {self.who_fn(t, r.name)}(p_id {t.pktype}) RETURNS SETOF {u.pktype}\n"
-                           f"LANGUAGE sql STABLE STRICT {DEFINER_FROM_CURRENT} ROWS 50 AS $f$\n"
-                           f"  {self.rel_who_sql(t, r, 'p_id')}\n$f$;")
+                    continue  # links to objects: nobody holds them
+                out.append(
+                    f"CREATE FUNCTION {self.who_fn(t, r.name)}(p_id {t.pktype}) RETURNS SETOF {u.pktype}\n"
+                    f"LANGUAGE sql STABLE STRICT {DEFINER_FROM_CURRENT} ROWS 50 AS $f$\n"
+                    f"  {self.rel_who_sql(t, r, 'p_id')}\n$f$;"
+                )
         for t in self.types.values():
             for p in t.perms.values():
                 key = self.recursive.get((t.name, p.name))
                 if key is None:
                     sql = self.who_items(t, p.expr, "p_id")
                     body = self.all_users() if sql is None else sql
-                    out.append(f"CREATE FUNCTION {self.who_fn(t, p.name)}(p_id {t.pktype}) RETURNS SETOF {u.pktype}\n"
-                               f"LANGUAGE sql STABLE STRICT {DEFINER_FROM_CURRENT} ROWS 50 AS $f$\n  {body}\n$f$;")
+                    out.append(
+                        f"CREATE FUNCTION {self.who_fn(t, p.name)}(p_id {t.pktype}) RETURNS SETOF {u.pktype}\n"
+                        f"LANGUAGE sql STABLE STRICT {DEFINER_FROM_CURRENT} ROWS 50 AS $f$\n  {body}\n$f$;"
+                    )
                     continue
                 items = self.base_items(t, p)
                 parts = [self.who_items(t, i, "p_id") for i in items]
-                base = (self.all_users() if any(s is None for s in parts)
-                        else union([s for s in parts if s is not None]) if parts
-                        else f"SELECT NULL::{u.pktype} WHERE false")       # a loop's member that only inherits
-                out.append(f"CREATE FUNCTION {self.who_base_fn(t, p.name)}(p_id {t.pktype}) RETURNS SETOF {u.pktype}\n"
-                           f"LANGUAGE sql STABLE STRICT {DEFINER_FROM_CURRENT} ROWS 50 AS $f$\n  {base}\n$f$;")
+                base = (
+                    self.all_users()
+                    if any(s is None for s in parts)
+                    else union([s for s in parts if s is not None])
+                    if parts
+                    else f"SELECT NULL::{u.pktype} WHERE false"
+                )  # a loop's member that only inherits
+                out.append(
+                    f"CREATE FUNCTION {self.who_base_fn(t, p.name)}(p_id {t.pktype}) RETURNS SETOF {u.pktype}\n"
+                    f"LANGUAGE sql STABLE STRICT {DEFINER_FROM_CURRENT} ROWS 50 AS $f$\n  {base}\n$f$;"
+                )
                 members = self.scc_members[key]
                 if len(members) == 1:
                     tree = self.trees[(t.name, self.scc_edges(key))]
-                    body = (f"SELECT x FROM authz_int.{q(tree)} c, LATERAL {self.who_base_fn(t, p.name)}(c.ancestor) x "
-                            f"WHERE c.descendant = p_id")
+                    body = (
+                        f"SELECT x FROM authz_int.{q(tree)} c, LATERAL {self.who_base_fn(t, p.name)}(c.ancestor) x "
+                        f"WHERE c.descendant = p_id"
+                    )
                 else:
                     tree = self.trees[key]
                     body = "\n  UNION ALL\n  ".join(
                         f"SELECT x FROM authz_int.{q(tree)} c, LATERAL {self.who_base_fn(self.T(mt), mp)}"
                         f"((CASE WHEN c.atype = {lit(mt)} THEN c.aid END)::{self.T(mt).pktype}) x "
-                        f"WHERE c.dtype = {lit(t.name)} AND c.did = p_id::text" for mt, mp in members)
-                out.append(f"CREATE FUNCTION {self.who_fn(t, p.name)}(p_id {t.pktype}) RETURNS SETOF {u.pktype}\n"
-                           f"LANGUAGE sql STABLE STRICT {DEFINER_FROM_CURRENT} ROWS 50 AS $f$\n  {body}\n$f$;")
+                        f"WHERE c.dtype = {lit(t.name)} AND c.did = p_id::text"
+                        for mt, mp in members
+                    )
+                out.append(
+                    f"CREATE FUNCTION {self.who_fn(t, p.name)}(p_id {t.pktype}) RETURNS SETOF {u.pktype}\n"
+                    f"LANGUAGE sql STABLE STRICT {DEFINER_FROM_CURRENT} ROWS 50 AS $f$\n  {body}\n$f$;"
+                )
         return out
 
     # ------------------------------------------------------------------
@@ -201,15 +240,19 @@ class InsightMixin(Core):
             rules = [r for r in self.rules if r.table == t.table]
             sel = next((r for r in rules if r.command == "select" and not r.columns), None)
             if rules and sel is None:
-                cond = "false"          # row-level security on, and no select rule: nobody sees a row
+                cond = "false"  # row-level security on, and no select rule: nobody sees a row
             elif sel is not None:
-                cond = (f"(SELECT authz_int.scope_cmd({lit(t.table)}, 'select')) AND "
-                        f"{self.rule_sql(t, alias, sel, point=True)}")
+                cond = (
+                    f"(SELECT authz_int.scope_cmd({lit(t.table)}, 'select')) AND "
+                    f"{self.rule_sql(t, alias, sel, point=True)}"
+                )
             else:
                 cond = f"coalesce(({row_cond(t.where, alias)}), false)" if t.where else "true"
             find = self.key_is(t, alias, "p_id" if t.composite else f"p_id::{t.pktype}")
-            cases.append(f"    WHEN {lit(t.name)} THEN\n      RETURN EXISTS (SELECT 1 FROM {qt(t.table)} {alias} "
-                         f"WHERE {find}\n        AND {cond});")
+            cases.append(
+                f"    WHEN {lit(t.name)} THEN\n      RETURN EXISTS (SELECT 1 FROM {qt(t.table)} {alias} "
+                f"WHERE {find}\n        AND {cond});"
+            )
         return f"""-- May the signed-in user see this object (select it)? A hidden object reads as a missing one
 CREATE FUNCTION authz_int.visible(p_type text, p_id text) RETURNS boolean
 LANGUAGE plpgsql STABLE {DEFINER_FROM_CURRENT} AS $f$
@@ -232,25 +275,30 @@ END $f$;"""
     def why_item_sql(self, t: Type, node: Expr, obj: str, nested: bool = False) -> str:
         """plpgsql statements explaining one item: 'yes'/'no' and, when it holds, how.
         At the top level only the first item that holds is explained in depth."""
-        text = lit(expr_text(node).replace("__base", " (before the deny)"))     # split_denies' hidden permission
+        text = lit(expr_text(node).replace("__base", " (before the deny)"))  # split_denies' hidden permission
         pad = "pad || '  '" if nested else "pad"
         depth = "p_depth + 2" if nested else "p_depth + 1"
         go = "v_ok AND v_holds" if nested else "v_ok AND NOT v_done"
         mark = "" if nested else "v_done := true; "
-        code = (f"    v_ok := {self.holds_sql(t, node, obj)};\n"
-                f"    RETURN NEXT {pad} || CASE WHEN v_ok THEN 'yes  ' ELSE 'no   ' END || {text};\n")
+        code = (
+            f"    v_ok := {self.holds_sql(t, node, obj)};\n"
+            f"    RETURN NEXT {pad} || CASE WHEN v_ok THEN 'yes  ' ELSE 'no   ' END || {text};\n"
+        )
         match node:
             case ("ref", name):
-                return code + (f"    IF {go} THEN {mark}RETURN QUERY SELECT * FROM {self.why_fn(t, name)}"
-                               f"({obj}, {depth}, p_seen); END IF;\n")
+                return code + (
+                    f"    IF {go} THEN {mark}RETURN QUERY SELECT * FROM {self.why_fn(t, name)}"
+                    f"({obj}, {depth}, p_seen); END IF;\n"
+                )
             case ("arrow", rel, perm) | ("arrow_on", rel, perm, _):
                 return code + self.why_arrow_sql(t, node, rel, perm, obj, pad, go, mark, depth)
             case ("and", items) | ("or", items) if not nested:
                 return code + "".join(self.why_item_sql(t, x, obj, nested=True) for x in items)
         return code
 
-    def why_arrow_sql(self, t: Type, node: Expr, rel: str, perm: str, obj: str, pad: str, go: str, mark: str,
-                      depth: str) -> str:
+    def why_arrow_sql(
+        self, t: Type, node: Expr, rel: str, perm: str, obj: str, pad: str, go: str, mark: str, depth: str
+    ) -> str:
         """why_item_sql for rel.perm: the objects rel links to, whether each has perm, and why."""
         r, targets = self.targets(t, rel, t.loc)
         on = only_on(node)
@@ -268,11 +316,11 @@ END $f$;"""
                FROM ({tsql}) tg ORDER BY 2 DESC, 1 LIMIT 5 LOOP
       -- the walk stops at an object the user can't see: nothing about it, or above it
       IF NOT authz_int.visible({lit(st)}, v_t.id) THEN
-        RETURN NEXT {pad} || '       ' || {lit(rel + (' is an ' if st[0] in 'aeiou' else ' is a ') + st + ' you can' + chr(39) + 't see')};
+        RETURN NEXT {pad} || '       ' || {lit(rel + (" is an " if st[0] in "aeiou" else " is a ") + st + " you can" + chr(39) + "t see")};
         CONTINUE;
       END IF;
-      RETURN NEXT {pad} || '  ' || CASE WHEN v_t.ok THEN 'yes  ' ELSE 'no   ' END || {lit(rel + ' is ' + st + ' ')}
-                  || v_t.id || CASE WHEN v_t.ok THEN {lit(', which has ' + perm)} ELSE {lit(', without ' + perm)} END;
+      RETURN NEXT {pad} || '  ' || CASE WHEN v_t.ok THEN 'yes  ' ELSE 'no   ' END || {lit(rel + " is " + st + " ")}
+                  || v_t.id || CASE WHEN v_t.ok THEN {lit(", which has " + perm)} ELSE {lit(", without " + perm)} END;
       IF NOT ({tag} || v_t.id = ANY (p_seen)) AND ((v_t.ok AND {go}) OR (NOT v_ok AND NOT v_t.ok AND p_depth < 5)) THEN
         {mark}RETURN QUERY SELECT * FROM {self.why_fn(s, perm)}(v_t.id::{s.pktype}, {depth} + 1, p_seen || ({tag} || v_t.id));
       END IF;
@@ -284,10 +332,16 @@ END $f$;"""
         """One function per relation and permission explaining it for the current user."""
         out: list[str] = []
         for t in self.types.values():
-            where = (f"  IF NOT EXISTS (SELECT 1 FROM {qt(t.table)} w WHERE {self.key_is(t, 'w', 'p_id')} "
-                     f"AND coalesce(({row_cond(t.where, 'w')}), false)) THEN\n"
-                     f"    RETURN NEXT pad || 'no   {t.name} ' || p_id || ' fails the type''s where {{' || "
-                     f"{lit(t.where)} || '}}';\n    RETURN;\n  END IF;\n") if t.where else ""
+            where = (
+                (
+                    f"  IF NOT EXISTS (SELECT 1 FROM {qt(t.table)} w WHERE {self.key_is(t, 'w', 'p_id')} "
+                    f"AND coalesce(({row_cond(t.where, 'w')}), false)) THEN\n"
+                    f"    RETURN NEXT pad || 'no   {t.name} ' || p_id || ' fails the type''s where {{' || "
+                    f"{lit(t.where)} || '}}';\n    RETURN;\n  END IF;\n"
+                )
+                if t.where
+                else ""
+            )
             for r in t.relations.values():
                 out.append(self.rel_why_sql(t, r, where))
             for p in t.perms.values():
@@ -296,10 +350,10 @@ END $f$;"""
                 out.append(f"""CREATE FUNCTION {self.why_fn(t, p.name)}(p_id {t.pktype}, p_depth int, p_seen text[])
 RETURNS SETOF text LANGUAGE plpgsql STABLE {DEFINER_FROM_CURRENT} AS $f$
 DECLARE pad text := repeat('  ', p_depth); v_ok boolean; v_done boolean := false; v_t record;
-        v_holds boolean := p_id IN (SELECT id FROM authz_int.{q(t.name + '__' + p.name)});
+        v_holds boolean := p_id IN (SELECT id FROM authz_int.{q(t.name + "__" + p.name)});
 BEGIN
   IF p_depth > 60 THEN RETURN NEXT pad || '...'; RETURN; END IF;
-{where}  RETURN NEXT pad || {lit(t.name + '.' + p.name + ' = ' + p.src.replace('  (or a custom role)', ' or a custom role'))};
+{where}  RETURN NEXT pad || {lit(t.name + "." + p.name + " = " + p.src.replace("  (or a custom role)", " or a custom role"))};
   BEGIN
 {body}  END;
 END $f$;""")
@@ -315,10 +369,10 @@ END $f$;""")
                     view = f"{t.name}__{r.name}"
                     lines.append(f"""  FOR v_t IN SELECT e.subj::text AS id FROM ({pairs}) e
              WHERE e.obj = p_id AND EXISTS (SELECT 1 FROM authz_int.{q(view)} v WHERE v.id = e.subj) LIMIT 1 LOOP
-    IF NOT ({lit(t.name + ':' + r.name + ':')} || v_t.id = ANY (p_seen)) THEN
+    IF NOT ({lit(t.name + ":" + r.name + ":")} || v_t.id = ANY (p_seen)) THEN
       RETURN NEXT pad || 'yes  through {t.name} ' || v_t.id || ', whose {r.name} count here too';
       RETURN QUERY SELECT * FROM {self.why_fn(t, r.name)}(v_t.id::{t.pktype}, p_depth + 1,
-                                 p_seen || ({lit(t.name + ':' + r.name + ':')} || v_t.id));
+                                 p_seen || ({lit(t.name + ":" + r.name + ":")} || v_t.id));
       RETURN;
     END IF;
   END LOOP;""")
@@ -357,17 +411,23 @@ END $f$;"""
         view = self.view_ref(self.T(st), sr, self.T(st).loc)
         if src.kind == "column":
             col = self.subject_id(src, "r", st)
-            return (f"SELECT {col} AS gid FROM {qt(t.table)} r WHERE {self.key_is(t, 'r', 'p_id')} "
-                    f"AND {col} IN (SELECT id FROM authz_int.{q(view)})")
+            return (
+                f"SELECT {col} AS gid FROM {qt(t.table)} r WHERE {self.key_is(t, 'r', 'p_id')} "
+                f"AND {col} IN (SELECT id FROM authz_int.{q(view)})"
+            )
         if src.kind == "table":
             col = self.subject_id(src, "s", st)
             assert src.table is not None
-            return (f"SELECT {col} AS gid FROM {qt(self.source_table(src))} s WHERE {self.key_is(t, 's', 'p_id', src.obj_col)} "
-                    f"AND {col} IN (SELECT id FROM authz_int.{q(view)})")
-        rel = (self.role_rel_sql(t, src, "p_id") if src.kind == "roles" else f"g.relation = {lit(r.name)}")
-        return (f"SELECT g.subject_id AS gid FROM authz.shares g WHERE g.object_type = {lit(t.name)} "
-                f"AND g.object_id = p_id::text AND {rel} AND g.subject_type = {lit(st)} AND g.subject_relation = {lit(sr)} "
-                f"AND g.subject_id IN (SELECT id::text FROM authz_int.{q(view)}) AND {self.live()}")
+            return (
+                f"SELECT {col} AS gid FROM {qt(self.source_table(src))} s WHERE {self.key_is(t, 's', 'p_id', src.obj_col)} "
+                f"AND {col} IN (SELECT id FROM authz_int.{q(view)})"
+            )
+        rel = self.role_rel_sql(t, src, "p_id") if src.kind == "roles" else f"g.relation = {lit(r.name)}"
+        return (
+            f"SELECT g.subject_id AS gid FROM authz.shares g WHERE g.object_type = {lit(t.name)} "
+            f"AND g.object_id = p_id::text AND {rel} AND g.subject_type = {lit(st)} AND g.subject_relation = {lit(sr)} "
+            f"AND g.subject_id IN (SELECT id::text FROM authz_int.{q(view)}) AND {self.live()}"
+        )
 
     def source_text(self, t: Type, r: Relation, src: Source, st: str, sr: str | None) -> str:
         name = r.name if not r.synthetic else "a custom role"
@@ -391,14 +451,19 @@ END $f$;"""
 
     def share_detail_sql(self, t: Type, r: Relation, src: Source, st: str) -> str:
         """' (by X, until Y, caveat Z)' for the share that applies."""
-        rel = (self.role_rel_sql(t, src, "p_id") if src.kind == "roles" else f"g.relation = {lit(r.name)}")
-        role = (" || coalesce(' (role ' || (SELECT ro.name FROM authz.roles ro WHERE 'role:' || ro.id = g.relation) || ')', '')"
-                if src.kind == "roles" else "")
-        return (f"coalesce((SELECT concat(' (by ', coalesce(g.created_by, 'an admin'), coalesce(', until ' || g.expires_at, ''), "
-                f"coalesce(', from ' || g.starts_at, ''), coalesce(', caveat ' || g.caveat, ''), ')'){role} "
-                f"FROM authz.shares g WHERE g.object_type = {lit(t.name)} AND g.object_id = p_id::text AND {rel} "
-                f"AND g.subject_type = {lit('user' if st in ('user',) else st)} AND {self.live()} "
-                f"ORDER BY g.created_at LIMIT 1), '')")
+        rel = self.role_rel_sql(t, src, "p_id") if src.kind == "roles" else f"g.relation = {lit(r.name)}"
+        role = (
+            " || coalesce(' (role ' || (SELECT ro.name FROM authz.roles ro WHERE 'role:' || ro.id = g.relation) || ')', '')"
+            if src.kind == "roles"
+            else ""
+        )
+        return (
+            f"coalesce((SELECT concat(' (by ', coalesce(g.created_by, 'an admin'), coalesce(', until ' || g.expires_at, ''), "
+            f"coalesce(', from ' || g.starts_at, ''), coalesce(', caveat ' || g.caveat, ''), ')'){role} "
+            f"FROM authz.shares g WHERE g.object_type = {lit(t.name)} AND g.object_id = p_id::text AND {rel} "
+            f"AND g.subject_type = {lit('user' if st in ('user',) else st)} AND {self.live()} "
+            f"ORDER BY g.created_at LIMIT 1), '')"
+        )
 
     # ------------------------------------------------------------------
     # the API
@@ -417,7 +482,9 @@ END $f$;"""
                 f"            PERFORM set_config('authz.user_id', v_c, true);\n"
                 f"            PERFORM authz_int.sign();\n"
                 f"            IF authz.can(p_type, p_id, p_perm) THEN RETURN NEXT v_c; END IF;\n"
-                f"          END LOOP;" for p in self.public_perms(t))
+                f"          END LOOP;"
+                for p in self.public_perms(t)
+            )
             return f"      CASE p_perm\n{cases}\n        ELSE RAISE EXCEPTION 'no permission %.% in the policy', p_type, p_perm USING HINT = 'rowstile help AZ707';\n      END CASE;"
 
         def why_branch(t: Type) -> str | None:
@@ -425,7 +492,8 @@ END $f$;"""
                 return None
             cases = "\n".join(
                 f"        WHEN {lit(p)} THEN RETURN QUERY SELECT * FROM {self.why_fn(t, p)}(v_{t.pktype}, 1, '{{}}');"
-                for p in self.public_perms(t))
+                for p in self.public_perms(t)
+            )
             return f"      CASE p_perm\n{cases}\n        ELSE RAISE EXCEPTION 'no permission %.% in the policy', p_type, p_perm USING HINT = 'rowstile help AZ707';\n      END CASE;"
 
         self._invalid = "NULL"
@@ -532,6 +600,13 @@ END $f$;
             for fn, extra, args, ret in (
                 ("who", ", p_perm text", ", p_perm", "SETOF text"),
                 ("explain", ", p_perm text, p_user text DEFAULT NULL", ", p_perm, p_user", "SETOF text"),
-                ("list_shares", "", "", "TABLE (relation text, role text, subject_type text, subject_id text, "
-                                   "subject_relation text, expires_at timestamptz, starts_at timestamptz, caveat text, "
-                                   "created_by text, created_at timestamptz)")))
+                (
+                    "list_shares",
+                    "",
+                    "",
+                    "TABLE (relation text, role text, subject_type text, subject_id text, "
+                    "subject_relation text, expires_at timestamptz, starts_at timestamptz, caveat text, "
+                    "created_by text, created_at timestamptz)",
+                ),
+            )
+        )

@@ -1,5 +1,6 @@
 """authzlib: compile a .authz policy file into PostgreSQL (views, closure tables,
 triggers, row-level security policies and an API for app code)."""
+
 from .devtools import DevMixin
 from .output import OutputMixin
 from .parse import Loc, PolicyError, parse_policy
@@ -21,6 +22,7 @@ def _build() -> str:
         return __version__
     import hashlib
     import os
+
     here, h = os.path.dirname(os.path.abspath(__file__)), hashlib.sha256()
     for name in sorted(os.listdir(here)):
         if name.endswith(".py"):

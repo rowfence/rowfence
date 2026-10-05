@@ -6,6 +6,7 @@ a savepoint, as the policy's owner, then checked with authz.can as the person, a
 that grant it are kept, with what else they would grant (more objects for the person, more people on the
 object). A preview that writes and rolls back belongs to the command, not to the runtime.
 """
+
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
@@ -19,36 +20,36 @@ from .sqlutil import lit, q, qt
 if TYPE_CHECKING:
     from . import Compiler
 
-DEPTH = 3            # how far up inheritance (rel.perm) and into groups it looks
-LINKED = 3           # how many current parents or groups of an object it follows
-TRIES = 40           # how many candidate changes (or combinations) it tries
+DEPTH = 3  # how far up inheritance (rel.perm) and into groups it looks
+LINKED = 3  # how many current parents or groups of an object it follows
+TRIES = 40  # how many candidate changes (or combinations) it tries
 SHOWN = 5
 
 
 @dataclass
 class Held:
-    objects: int                # how many objects of the type the person holds the permission on
-    people: set[str]            # who holds it on the object
-    perms: set[str]             # every permission the person holds on the object
+    objects: int  # how many objects of the type the person holds the permission on
+    people: set[str]  # who holds it on the object
+    perms: set[str]  # every permission the person holds on the object
 
 
 @dataclass
 class Change:
-    kind: str                   # share | link | column
-    text: str                   # in words: "share viewer on project 1 with user 2"
-    sql: str                    # what makes it, run as the owner
-    loc: Loc                    # the policy line of the relation it adds to
-    cost: int                   # shares first, then rows in link tables, then changed columns
+    kind: str  # share | link | column
+    text: str  # in words: "share viewer on project 1 with user 2"
+    sql: str  # what makes it, run as the owner
+    loc: Loc  # the policy line of the relation it adds to
+    cost: int  # shares first, then rows in link tables, then changed columns
 
 
 @dataclass
 class Way:
     changes: list[Change]
     grants: bool = False
-    more_objects: int = 0       # other objects of the type the person gains the permission on
-    more_people: int = 0        # other people who gain it on this object
-    fewer_people: int = 0       # people who lose it on this object (a column that changes hands)
-    also: list[str] = field(default_factory=list)      # the other permissions the person gains on this object
+    more_objects: int = 0  # other objects of the type the person gains the permission on
+    more_people: int = 0  # other people who gain it on this object
+    fewer_people: int = 0  # people who lose it on this object (a column that changes hands)
+    also: list[str] = field(default_factory=list)  # the other permissions the person gains on this object
     error: str | None = None
 
     @property
@@ -59,11 +60,11 @@ class Way:
 @dataclass
 class Answer:
     holds: bool
-    explain: list[str]          # authz.explain's lines
-    needs: str                  # the permission's definition, and its line
-    ways: list[Way] = field(default_factory=list)      # Ways that grant it, best first
-    untried: list[Way] = field(default_factory=list)   # Ways the database refused to try (their error says why)
-    notes: list[str] = field(default_factory=list)     # what no change to the data would do (conditions, denies)
+    explain: list[str]  # authz.explain's lines
+    needs: str  # the permission's definition, and its line
+    ways: list[Way] = field(default_factory=list)  # Ways that grant it, best first
+    untried: list[Way] = field(default_factory=list)  # Ways the database refused to try (their error says why)
+    notes: list[str] = field(default_factory=list)  # what no change to the data would do (conditions, denies)
 
 
 class Grants:
@@ -76,6 +77,7 @@ class Grants:
     def probe(self, sql: str, args: Sequence[Value] = ()) -> list[dict[str, Value]]:
         """Rows of a read that may fail (a relation authz.list doesn't know), in a savepoint of its own."""
         from .database import savepoint
+
         try:
             with savepoint(self.db, "authz_grant_probe"):
                 return self.db.rows(sql, list(args))
@@ -97,7 +99,7 @@ class Grants:
             return [text(x, "x") for x in self.probe(f"SELECT x FROM authz.list($1, $2) x LIMIT {LINKED}", [st, sr])]
         out: list[str] = []
         r = g.relations.get(sr)
-        for src in (r.sources if r else []):
+        for src in r.sources if r else []:
             if r and (self.ptype, None) in src.subjects and src.kind != "roles":
                 sql = self.c.pair_sql(g, r, src, self.ptype, "", "o", "s", match=("subj", lit(self.pid)))
                 out += [str(x["o"]) for x in self.probe(f"SELECT DISTINCT o::text AS o FROM ({sql}) p LIMIT {LINKED}")]
@@ -110,36 +112,58 @@ class Grants:
             self.db.rows("SELECT authz.act_as(NULL, NULL)")
 
     # --- the candidate changes ----------------------------------------------------------------------
-    def direct(self, t: Type, r: Relation, src: Source, st: str, sid: str,
-               sr: str = "") -> Callable[[str], Change | None]:
+    def direct(
+        self, t: Type, r: Relation, src: Source, st: str, sid: str, sr: str = ""
+    ) -> Callable[[str], Change | None]:
         """The change that links oid to subject sid through this source (None if there is no simple one)."""
+
         def make(oid: str) -> Change | None:
             if src.kind == "shared":
                 who = f"{st}#{sr} {sid}" if sr else f"{st} {sid}"
                 # the row authz.share would make (it needs someone signed in who may share; this is the owner)
-                return Change("share", f"share {r.name} on {t.name} {oid} with {who}",
-                              "INSERT INTO authz.shares (object_type, object_id, relation, subject_type, subject_id, "
-                              f"subject_relation) VALUES ({lit(t.name)}, authz_int.canon({lit(t.name)}, {lit(oid)}), "
-                              f"{lit(r.name)}, {lit(st)}, authz_int.canon({lit(st)}, {lit(sid)}), {lit(sr)}) ON CONFLICT DO NOTHING",
-                              src.loc, 1)
-            if (src.kind == "table" and src.table and isinstance(src.obj_col, str) and isinstance(src.subj_col, str)
-                    and not src.where):
+                return Change(
+                    "share",
+                    f"share {r.name} on {t.name} {oid} with {who}",
+                    "INSERT INTO authz.shares (object_type, object_id, relation, subject_type, subject_id, "
+                    f"subject_relation) VALUES ({lit(t.name)}, authz_int.canon({lit(t.name)}, {lit(oid)}), "
+                    f"{lit(r.name)}, {lit(st)}, authz_int.canon({lit(st)}, {lit(sid)}), {lit(sr)}) ON CONFLICT DO NOTHING",
+                    src.loc,
+                    1,
+                )
+            if (
+                src.kind == "table"
+                and src.table
+                and isinstance(src.obj_col, str)
+                and isinstance(src.subj_col, str)
+                and not src.where
+            ):
                 cols, vals = [src.obj_col, src.subj_col], [lit(oid), lit(sid)]
                 if src.type_col:
                     cols.append(src.type_col)
                     vals.append(lit(st))
-                return Change("link", f"add {st} {sid} to {src.table} for {t.name} {oid}",
-                              f"INSERT INTO {qt(src.table)} ({', '.join(q(x) for x in cols)}) VALUES ({', '.join(vals)})",
-                              src.loc, 2)
+                return Change(
+                    "link",
+                    f"add {st} {sid} to {src.table} for {t.name} {oid}",
+                    f"INSERT INTO {qt(src.table)} ({', '.join(q(x) for x in cols)}) VALUES ({', '.join(vals)})",
+                    src.loc,
+                    2,
+                )
             if src.kind == "column" and isinstance(src.column, str) and not t.composite:
                 sets = [f"{q(src.column)} = {lit(sid)}"] + ([f"{q(src.type_col)} = {lit(st)}"] if src.type_col else [])
-                return Change("column", f"set {src.column} of {t.name} {oid} to {sid}",
-                              f"UPDATE {qt(t.table)} r SET {', '.join(sets)} WHERE {self.c.key_is(t, 'r', lit(oid))}",
-                              src.loc, 3)
+                return Change(
+                    "column",
+                    f"set {src.column} of {t.name} {oid} to {sid}",
+                    f"UPDATE {qt(t.table)} r SET {', '.join(sets)} WHERE {self.c.key_is(t, 'r', lit(oid))}",
+                    src.loc,
+                    3,
+                )
             return None
+
         return make
 
-    def ways(self, t: Type, oid: str, node: Expr, depth: int, seen: frozenset[tuple[str, str, str]]) -> list[list[Change]]:
+    def ways(
+        self, t: Type, oid: str, node: Expr, depth: int, seen: frozenset[tuple[str, str, str]]
+    ) -> list[list[Change]]:
         """Candidate ways (lists of changes, all needed) that could make node hold on t oid for the person."""
         match node:
             case ("ref", name):
@@ -164,7 +188,9 @@ class Grants:
                 self.notes.append(f"{t.name} {oid} must meet {{{sql}}}: no share or link changes that")
                 return []
             case ("not", _):
-                self.notes.append(f"a deny on {t.name} {oid} (not ...) may be what stops it: no share or link removes it")
+                self.notes.append(
+                    f"a deny on {t.name} {oid} (not ...) may be what stops it: no share or link removes it"
+                )
                 return []
             case ("or", items):
                 return [w for x in items for w in self.ways(t, oid, x, depth, seen)]
@@ -177,8 +203,9 @@ class Grants:
                 return [c for c in combos if c]
         return []
 
-    def relation(self, t: Type, oid: str, r: Relation, depth: int,
-                 seen: frozenset[tuple[str, str, str]]) -> list[list[Change]]:
+    def relation(
+        self, t: Type, oid: str, r: Relation, depth: int, seen: frozenset[tuple[str, str, str]]
+    ) -> list[list[Change]]:
         out: list[list[Change]] = []
         for src in r.sources:
             if src.kind == "roles":
@@ -213,17 +240,19 @@ class Grants:
 
     def attempt(self, way: Way, t: Type, oid: str, perm: str, before: Held) -> Way:
         from .database import Undo, savepoint
+
         try:
             with savepoint(self.db, "authz_grant"):
                 self.sign_in(False)
                 for ch in way.changes:
                     self.db.script(ch.sql)
                 self.sign_in()
-                way.grants = flag(self.db.rows("SELECT coalesce(authz.can($1, $2, $3), false) AS ok",
-                                               [t.name, oid, perm])[0], "ok")
+                way.grants = flag(
+                    self.db.rows("SELECT coalesce(authz.can($1, $2, $3), false) AS ok", [t.name, oid, perm])[0], "ok"
+                )
                 if way.grants:
                     after = self.counts(t, oid, perm)
-                    me = {self.pid} if self.ptype == "user" else set()        # authz.who lists users
+                    me = {self.pid} if self.ptype == "user" else set()  # authz.who lists users
                     way.more_objects = max(0, after.objects - before.objects - 1)
                     way.more_people = len(after.people - before.people - me)
                     way.fewer_people = len(before.people - after.people)
@@ -248,8 +277,11 @@ def how_to_grant(c: Compiler, db: Db, ptype: str, pid: str, type_name: str, oid:
     g = Grants(c, db, ptype, pid)
     g.sign_in(False)
     who = pid if ptype == "user" else f"{ptype}:{pid}"
-    explain = [text(x, "l") for x in db.rows("SELECT l FROM authz.explain($1, $2, $3, $4) l", [type_name, oid, perm, who])] \
-        if ptype == "user" else []
+    explain = (
+        [text(x, "l") for x in db.rows("SELECT l FROM authz.explain($1, $2, $3, $4) l", [type_name, oid, perm, who])]
+        if ptype == "user"
+        else []
+    )
     g.sign_in()
     holds = flag(db.rows("SELECT coalesce(authz.can($1, $2, $3), false) AS ok", [type_name, oid, perm])[0], "ok")
     if ptype != "user":
@@ -271,9 +303,15 @@ def how_to_grant(c: Compiler, db: Db, ptype: str, pid: str, type_name: str, oid:
     for way in candidates[:TRIES]:
         g.attempt(way, t, oid, perm, before)
     # the way that gives the least beside what was asked comes first
-    answer.ways = sorted([w for w in candidates if w.grants],
-                         key=lambda w: (len(w.changes), len(w.also) + w.fewer_people, w.more_people + w.more_objects,
-                                        sum(ch.cost for ch in w.changes)))[:SHOWN]
+    answer.ways = sorted(
+        [w for w in candidates if w.grants],
+        key=lambda w: (
+            len(w.changes),
+            len(w.also) + w.fewer_people,
+            w.more_people + w.more_objects,
+            sum(ch.cost for ch in w.changes),
+        ),
+    )[:SHOWN]
     answer.notes = [] if answer.ways else list(dict.fromkeys(g.notes))
     # a change that couldn't be made (the link table has another column that must be given, say) is no answer
     # either way: said, so "nothing grants it" isn't read where one change would
@@ -298,13 +336,23 @@ def describe(answer: Answer, who: str, type_name: str, oid: str, perm: str) -> s
             if w.also:
                 also.append(f"{', '.join(w.also)} on it")
             if w.more_objects:
-                also.append(f"{perm} on {w.more_objects} more {type_name}{'s' if w.more_objects != 1 else ''} for {who}")
+                also.append(
+                    f"{perm} on {w.more_objects} more {type_name}{'s' if w.more_objects != 1 else ''} for {who}"
+                )
             if w.more_people:
                 also.append(f"{perm} on it to {w.more_people} more {'people' if w.more_people != 1 else 'person'}")
             lines = sorted({str(ch.loc) for ch in w.changes})
-            takes = (f" (takes {perm} on it from {w.fewer_people} {'person' if w.fewer_people == 1 else 'people'})"
-                     if w.fewer_people else "")
-            out.append(f"  {w.text}" + (f" (also gives {', and '.join(also)})" if also else "") + takes + f"  [{', '.join(lines)}]")
+            takes = (
+                f" (takes {perm} on it from {w.fewer_people} {'person' if w.fewer_people == 1 else 'people'})"
+                if w.fewer_people
+                else ""
+            )
+            out.append(
+                f"  {w.text}"
+                + (f" (also gives {', and '.join(also)})" if also else "")
+                + takes
+                + f"  [{', '.join(lines)}]"
+            )
     elif answer.untried:
         out.append("no single change that could be tried grants it")
     else:

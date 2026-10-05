@@ -1,4 +1,5 @@
 """authz.lint(): the ways around row-level security this database leaves open."""
+
 from __future__ import annotations
 
 from .compiler import MANY_EXPANSIONS, Core
@@ -68,10 +69,19 @@ SELECT p.oid::regprocedure::text, gw.who, a.privilege_type,
         """The authz.* functions the app role may execute (the policy grants them): everything else there is
         for administrators."""
         typed = [t for t in self.types.values() if t.pktype != "text"]
-        executes = ["authz.uid()", "authz.principal()", "authz.ctx(text)", "authz.link_hashes()", "authz.act_as(text, text)",
-                    "authz.connection_check()"] + [
-            f"{fn}" for fn in (
-                "authz.can(text, text, text)", "authz.list(text, text, text, integer)", "authz.perms(text, text)",
+        executes = [
+            "authz.uid()",
+            "authz.principal()",
+            "authz.ctx(text)",
+            "authz.link_hashes()",
+            "authz.act_as(text, text)",
+            "authz.connection_check()",
+        ] + [
+            f"{fn}"
+            for fn in (
+                "authz.can(text, text, text)",
+                "authz.list(text, text, text, integer)",
+                "authz.perms(text, text)",
                 "authz.perms_of(text, text[])",
                 "authz.share(text, text, text, text, text, text, timestamptz, timestamptz, text, jsonb)",
                 "authz.share(text, bigint, text, text, bigint, text, timestamptz, timestamptz, text, jsonb)",
@@ -79,27 +89,54 @@ SELECT p.oid::regprocedure::text, gw.who, a.privilege_type,
                 "authz.unshare(text, text, text, text, text, text)",
                 "authz.unshare(text, bigint, text, text, bigint, text)",
                 "authz.unshare(text, bigint, text, text, text, text)",
-                "authz.create_link(text, text, text, timestamptz)", "authz.create_link(text, bigint, text, timestamptz)",
-                "authz.list_links(text, text)", "authz.revoke_link(text, text, text)",
-                "authz.create_role(text, text, text, text, text[])", "authz.create_role(text, bigint, text, text, text[])",
-                "authz.set_role_permissions(bigint, text[])", "authz.delete_role(bigint)", "authz.roles_of(text, text)",
+                "authz.create_link(text, text, text, timestamptz)",
+                "authz.create_link(text, bigint, text, timestamptz)",
+                "authz.list_links(text, text)",
+                "authz.revoke_link(text, text, text)",
+                "authz.create_role(text, text, text, text, text[])",
+                "authz.create_role(text, bigint, text, text, text[])",
+                "authz.set_role_permissions(bigint, text[])",
+                "authz.delete_role(bigint)",
+                "authz.roles_of(text, text)",
                 "authz.roles_of(text, bigint)",
-                "authz.who(text, text, text)", "authz.explain(text, text, text, text)", "authz.list_shares(text, text)",
-                "authz.explain_rule(text, text, text, jsonb)", "authz.who_among(text, text, text, text[], text)")]
-        executes += ["authz.create_api_key(text, text, timestamptz, text, text)", "authz.list_api_keys(text, text)",
-                     "authz.revoke_api_key(bigint)", "authz.login_key(text)", "authz.login_jwt(text)",
-                     "authz.view_as(text, text)",
-                     "authz.request_access(text, text, text, text, interval)",
-                     "authz.request_access(text, bigint, text, text, interval)",
-                     "authz.pending_requests()", "authz.decide_request(bigint, boolean, text)",
-                     "authz.cancel_request(bigint)", "authz.break_glass(text, text, text, text, interval)",
-                     "authz.break_glass(text, bigint, text, text, interval)",
-                     "authz.start_review(text, text, timestamptz)", "authz.start_review(text, bigint, timestamptz)",
-                     "authz.review_items(bigint)",
-                     "authz.review_decide(bigint, integer, boolean)", "authz.close_review(bigint, boolean)"]
-        executes += [f"authz.{fn}(text, {pt}{args})" for pt in sorted({t.pktype for t in typed})
-                     for fn, args in (("who", ", text"), ("explain", ", text, text"), ("list_shares", ""), ("list_links", ""),
-                                      ("revoke_link", ", text"))]
+                "authz.who(text, text, text)",
+                "authz.explain(text, text, text, text)",
+                "authz.list_shares(text, text)",
+                "authz.explain_rule(text, text, text, jsonb)",
+                "authz.who_among(text, text, text, text[], text)",
+            )
+        ]
+        executes += [
+            "authz.create_api_key(text, text, timestamptz, text, text)",
+            "authz.list_api_keys(text, text)",
+            "authz.revoke_api_key(bigint)",
+            "authz.login_key(text)",
+            "authz.login_jwt(text)",
+            "authz.view_as(text, text)",
+            "authz.request_access(text, text, text, text, interval)",
+            "authz.request_access(text, bigint, text, text, interval)",
+            "authz.pending_requests()",
+            "authz.decide_request(bigint, boolean, text)",
+            "authz.cancel_request(bigint)",
+            "authz.break_glass(text, text, text, text, interval)",
+            "authz.break_glass(text, bigint, text, text, interval)",
+            "authz.start_review(text, text, timestamptz)",
+            "authz.start_review(text, bigint, timestamptz)",
+            "authz.review_items(bigint)",
+            "authz.review_decide(bigint, integer, boolean)",
+            "authz.close_review(bigint, boolean)",
+        ]
+        executes += [
+            f"authz.{fn}(text, {pt}{args})"
+            for pt in sorted({t.pktype for t in typed})
+            for fn, args in (
+                ("who", ", text"),
+                ("explain", ", text, text"),
+                ("list_shares", ""),
+                ("list_links", ""),
+                ("revoke_link", ", text"),
+            )
+        ]
         executes += [f"authz.can(text, {pt}, text)" for pt in sorted({t.pktype for t in typed})]
         executes += [f"authz.who_among(text, {pt}, text, text[], text)" for pt in sorted({t.pktype for t in typed})]
         executes += [f"authz.perms(text, {pt})" for pt in sorted({t.pktype for t in typed})]
@@ -109,21 +146,31 @@ SELECT p.oid::regprocedure::text, gw.who, a.privilege_type,
         role = self.role
         governed = sorted({r.table for r in self.rules})
         typed_tables = sorted({t.table for t in self.types.values()})
-        link_tables: set[str] = set()       # tables that hold relationships (who is in what)
-        link_cols: list[tuple[str, str, str, Loc]] = []   # (table, column, what it grants, loc) for column sources
+        link_tables: set[str] = set()  # tables that hold relationships (who is in what)
+        link_cols: list[tuple[str, str, str, Loc]] = []  # (table, column, what it grants, loc) for column sources
         # (table, columns, relation, loc): a column placing a row under another of its type
         move_cols: list[tuple[str, tuple[str, ...], str, Loc]] = []
-        index_cols: list[tuple[str, str, str]] = []       # (table, column, why) that lookups go through
+        index_cols: list[tuple[str, str, str]] = []  # (table, column, why) that lookups go through
         for t in self.types.values():
             for r in t.relations.values():
                 for src in r.sources:
                     if src.kind == "table":
                         table = self.source_table(src)
                         link_tables.add(table)
-                        index_cols.append((table, ", ".join(cols(self.source_obj_columns(src))),
-                                           f"{t.name}.{r.name}: find the members of an object"))
-                        index_cols.append((table, ", ".join(cols(self.source_columns(src))),
-                                           f"{t.name}.{r.name}: find what a subject is in"))
+                        index_cols.append(
+                            (
+                                table,
+                                ", ".join(cols(self.source_obj_columns(src))),
+                                f"{t.name}.{r.name}: find the members of an object",
+                            )
+                        )
+                        index_cols.append(
+                            (
+                                table,
+                                ", ".join(cols(self.source_columns(src))),
+                                f"{t.name}.{r.name}: find what a subject is in",
+                            )
+                        )
                     elif src.kind == "column":
                         column = cols(self.source_columns(src))
                         for c in column + ((src.type_col,) if src.type_col else ()):
@@ -136,32 +183,46 @@ SELECT p.oid::regprocedure::text, gw.who, a.privilege_type,
         # columns that grant something, on tables whose updates only need the plain 'update' rule
         guarded = {(r.table, c) for r in self.rules if r.columns and r.command != "mask" for c in r.columns}
         has_update = {r.table for r in self.rules if r.command == "update" and not r.columns}
-        unguarded = [(tb, c, what, loc) for tb, c, what, loc in link_cols
-                     if tb in has_update and (tb, c) not in guarded]
+        unguarded = [
+            (tb, c, what, loc) for tb, c, what, loc in link_cols if tb in has_update and (tb, c) not in guarded
+        ]
         # ...and those that move a row within its tree with nothing checking where it goes (an 'after' rule)
         after = {(r.table, c) for r in self.rules if r.command == "update check" for c in r.columns}
         after_all = {r.table for r in self.rules if r.command == "update check" and not r.columns}
         # a composite link ([org_id, parent_id]) is checked when one of its columns has an 'after' rule
-        unchecked_moves = [(tb, ", ".join(cs), rel, loc) for tb, cs, rel, loc in move_cols
-                           if tb in has_update and not any((tb, c) in after for c in cs) and tb not in after_all]
+        unchecked_moves = [
+            (tb, ", ".join(cs), rel, loc)
+            for tb, cs, rel, loc in move_cols
+            if tb in has_update and not any((tb, c) in after for c in cs) and tb not in after_all
+        ]
         arr = lambda xs: "ARRAY[" + ", ".join(lit(x) for x in xs) + "]::text[]"
         link_only = sorted(link_tables - set(governed))
         whys = {}
         for tb, c, why in index_cols:
             whys.setdefault((tb, c), []).append(why)
-        idx_rows = ", ".join(f"({lit(qt(tb))}, {lit(c)}, {lit('; '.join(dict.fromkeys(w)))})" for (tb, c), w in whys.items())
-        unguarded_rows = ", ".join(f"({lit(qt(tb))}, {lit(c)}, {lit(what)}, {lit(self.line_key(f'relation {what} {c}', loc))})"
-                                   for tb, c, what, loc in unguarded)
+        idx_rows = ", ".join(
+            f"({lit(qt(tb))}, {lit(c)}, {lit('; '.join(dict.fromkeys(w)))})" for (tb, c), w in whys.items()
+        )
+        unguarded_rows = ", ".join(
+            f"({lit(qt(tb))}, {lit(c)}, {lit(what)}, {lit(self.line_key(f'relation {what} {c}', loc))})"
+            for tb, c, what, loc in unguarded
+        )
         # relations named like a type read, in a rule, like the type ("delete : user")
-        shadows = [(t.name, r.name, str(r.loc)) for t in self.types.values() for r in t.relations.values()
-                   if r.name in self.types and not r.synthetic]
+        shadows = [
+            (t.name, r.name, str(r.loc))
+            for t in self.types.values()
+            for r in t.relations.values()
+            if r.name in self.types and not r.synthetic
+        ]
         # principal types nobody can make keys for (they sign in only through a backend or JWTs)
         keyless = "".join(
             f"  severity := 'info'; object := {lit(t.name)};\n"
             f"  problem := {lit('signs in, but has no manage_keys permission, so nobody can make API keys for it: add can manage_keys = ... (')}"
             f" || {self.line_sql(f'type {t.name}', t.loc)} || ')';\n"
             f"  RETURN NEXT;\n"
-            for t in self.types.values() if t.principal and t.name != "user" and "manage_keys" not in t.perms)
+            for t in self.types.values()
+            if t.principal and t.name != "user" and "manage_keys" not in t.perms
+        )
         # tables whose select rule makes Postgres write out many view definitions to plan one read: a
         # permission named more than once on the way is written out again each time (Core.expansions)
         heavy = ""
@@ -171,16 +232,23 @@ SELECT p.oid::regprocedure::text, gw.who, a.privilege_type,
             t = next(t for t in self.types.values() if t.table == rule.table)
             n = self.expansions(self.rule_sql(t, q(rule.table.split(".")[1]), rule))
             if n > MANY_EXPANSIONS:
-                said = (f"its select rule (' || {self.line_sql(f'rule {rule.table} select', rule.loc)} || ') names "
-                        f"permissions that name others more than once, and Postgres writes each one out again every "
-                        f"time: {n} view definitions to plan before a row is read, which can take a tenth of a "
-                        f"second and more for every query. Name each permission once on the way")
-                heavy += (f"  severity := 'warning'; object := to_regclass({lit(qt(rule.table))})::text;\n"
-                          f"  problem := '{said}';\n  RETURN NEXT;\n")
-        shadow_rows = ", ".join(f"({lit(tn)}, {lit(rn)}, {lit(self.line_key(f'relation {tn}.{rn}', loc))})"
-                                for tn, rn, loc in shadows)
-        move_rows = ", ".join(f"({lit(qt(tb))}, {lit(c)}, {lit(rel)}, {lit(self.line_key(f'relation {tb} {rel} {c}', loc))})"
-                              for tb, c, rel, loc in unchecked_moves)
+                said = (
+                    f"its select rule (' || {self.line_sql(f'rule {rule.table} select', rule.loc)} || ') names "
+                    f"permissions that name others more than once, and Postgres writes each one out again every "
+                    f"time: {n} view definitions to plan before a row is read, which can take a tenth of a "
+                    f"second and more for every query. Name each permission once on the way"
+                )
+                heavy += (
+                    f"  severity := 'warning'; object := to_regclass({lit(qt(rule.table))})::text;\n"
+                    f"  problem := '{said}';\n  RETURN NEXT;\n"
+                )
+        shadow_rows = ", ".join(
+            f"({lit(tn)}, {lit(rn)}, {lit(self.line_key(f'relation {tn}.{rn}', loc))})" for tn, rn, loc in shadows
+        )
+        move_rows = ", ".join(
+            f"({lit(qt(tb))}, {lit(c)}, {lit(rel)}, {lit(self.line_key(f'relation {tb} {rel} {c}', loc))})"
+            for tb, c, rel, loc in unchecked_moves
+        )
         return f"""-- The search path the functions that evaluate the policy's own SQL run with (SET search_path FROM CURRENT)
 CREATE FUNCTION authz_int.policy_path() RETURNS name[]
 LANGUAGE sql STABLE SET search_path FROM CURRENT AS $f$ SELECT pg_catalog.current_schemas(false) $f$;
@@ -353,7 +421,7 @@ BEGIN
                AND a.attnum > 0 AND NOT a.attisdropped)
        AND has_column_privilege(v_role, r.tbl, r.col, 'UPDATE') THEN
       severity := 'warning'; object := to_regclass(r.tbl)::text || '.' || r.col;
-      problem := format('grants %s (%s), and anyone who may update the row may change it: add a rule such as "update %s : share"', r.what, {self.line_sql(None, None, 'r.loc')}, r.col);
+      problem := format('grants %s (%s), and anyone who may update the row may change it: add a rule such as "update %s : share"', r.what, {self.line_sql(None, None, "r.loc")}, r.col);
       RETURN NEXT;
     END IF;
   END LOOP;
@@ -370,7 +438,7 @@ BEGIN
   FOR r IN SELECT * FROM (VALUES {shadow_rows or "(NULL::text, NULL::text, NULL::text)"}) v(type, rel, loc)
            WHERE type IS NOT NULL LOOP
     severity := 'info'; object := r.type || '.' || r.rel;
-    problem := format('is named like the type %s (%s), so in rules it reads like the type: a name that says what the relation is (author, member) reads better', r.rel, {self.line_sql(None, None, 'r.loc')});
+    problem := format('is named like the type %s (%s), so in rules it reads like the type: a name that says what the relation is (author, member) reads better', r.rel, {self.line_sql(None, None, "r.loc")});
     RETURN NEXT;
   END LOOP;
 {keyless}{heavy}  -- columns that move a row under another, with nothing checking where it moves to
@@ -378,7 +446,7 @@ BEGIN
            WHERE tbl IS NOT NULL LOOP
     IF has_column_privilege(v_role, r.tbl, r.col, 'UPDATE') THEN
       severity := 'warning'; object := to_regclass(r.tbl)::text || '.' || r.col;
-      problem := format('moves a row under another (%s, %s), and nothing checks where it moves to, so anyone who may update a row may put it inside something they may not change: add a rule such as "update %s after : %s.edit"', r.rel, {self.line_sql(None, None, 'r.loc')}, r.col, r.rel);
+      problem := format('moves a row under another (%s, %s), and nothing checks where it moves to, so anyone who may update a row may put it inside something they may not change: add a rule such as "update %s after : %s.edit"', r.rel, {self.line_sql(None, None, "r.loc")}, r.col, r.rel);
       RETURN NEXT;
     END IF;
   END LOOP;

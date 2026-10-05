@@ -12,6 +12,7 @@ copy it: the TypeScript SDK's packages and their dependencies on each other, the
 the review for CI, which installs the release its tag names. The editor extension keeps its own version (the
 Marketplace takes no alphas or release candidates). Standard library only.
 """
+
 from __future__ import annotations
 
 import glob
@@ -72,7 +73,7 @@ def set_version(new: str) -> None:
     texts: dict[str, str] = {}
     for path, rx in places():
         text = texts.get(path, read(path))
-        texts[path] = rx.sub(lambda m: m.string[m.start(0):m.start(1)] + new + m.string[m.end(1):m.end(0)], text)
+        texts[path] = rx.sub(lambda m: m.string[m.start(0) : m.start(1)] + new + m.string[m.end(1) : m.end(0)], text)
     for path, text in texts.items():
         with open(os.path.join(ROOT, path), "w", encoding="utf-8", newline="") as fh:
             fh.write(text)

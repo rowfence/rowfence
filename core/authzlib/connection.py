@@ -4,6 +4,7 @@ The command gives authzlib.database a Db over its own connection (cli/pgwire.py)
 of text, integers, booleans, arrays of those, and JSON. The accessors below read one value as the type the
 query gives it, and fail loudly if it isn't: the types come from the SQL, which no checker sees.
 """
+
 from __future__ import annotations
 
 from collections.abc import Sequence

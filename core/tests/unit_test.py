@@ -6,6 +6,7 @@ files, what the rowstile command runs against a database, its file reading, and 
     python3 tests/unit_test.py --update   # after an intended change to the generated SQL: rewrite
                                           # tests/golden/*.sql, then read the diff before committing
 """
+
 import glob
 import itertools
 import json
@@ -37,8 +38,13 @@ from authzlib.review import Review  # noqa: E402
 
 GOLDEN = os.path.join(ROOT, "tests", "golden")
 UPDATE = "--update" in sys.argv
-POLICIES = {"docs": "example/docs.authz", "alt": "tests/alt.authz", "multi": "tests/multi.authz",
-            "composite": "tests/composite.authz", "loop": "tests/loop.authz"}
+POLICIES = {
+    "docs": "example/docs.authz",
+    "alt": "tests/alt.authz",
+    "multi": "tests/multi.authz",
+    "composite": "tests/composite.authz",
+    "loop": "tests/loop.authz",
+}
 
 
 def read(rel: str) -> str:
@@ -49,6 +55,7 @@ def read(rel: str) -> str:
 def errors_prelude() -> str:
     """`app role` and the user type: what a small policy in a test starts with."""
     from authzlib.errors import PRELUDE
+
     return PRELUDE
 
 
@@ -80,8 +87,8 @@ class ThisRow(unittest.TestCase):
                 i = n if j < 0 else j + 2
             elif sql[i] == "'":
                 escapes, j = i > 0 and sql[i - 1] in "eE", i + 1
-                while j < n and not (sql[j] == "'" and sql[j + 1:j + 2] != "'"):
-                    j += 2 if (escapes and sql[j] == "\\") or sql[j:j + 2] == "''" else 1
+                while j < n and not (sql[j] == "'" and sql[j + 1 : j + 2] != "'"):
+                    j += 2 if (escapes and sql[j] == "\\") or sql[j : j + 2] == "''" else 1
                 out.append(" ")
                 i = j + 1
             elif sql[i] == '"':
@@ -95,8 +102,9 @@ class ThisRow(unittest.TestCase):
 
     def left(self, sql: str) -> list[str]:
         from authzlib.sqlutil import THIS
+
         text = self.code(sql)
-        return [text[max(0, m.start() - 60):m.end() + 20] for m in THIS.finditer(text)]
+        return [text[max(0, m.start() - 60) : m.end() + 20] for m in THIS.finditer(text)]
 
     def test_no_this_is_left_in_the_sql(self) -> None:
         for name in ("alt", "multi", "composite"):
@@ -109,10 +117,15 @@ class ThisRow(unittest.TestCase):
 
     def test_the_rewrite(self) -> None:
         from authzlib.sqlutil import names_this, on_row, this_alone
-        self.assertEqual(on_row("exists (select 1 from app.m m where m.p = this.id and 'this.x' = m.y)", "r"),
-                         "exists (select 1 from app.m m where m.p = r.id and 'this.x' = m.y)")
-        self.assertEqual(on_row('this."Name" = $$this.x$$ /* this.y */ and E\'a\\\'s this.z\' = THIS . w', '"files"'),
-                         '"files"."Name" = $$this.x$$ /* this.y */ and E\'a\\\'s this.z\' = "files".w')
+
+        self.assertEqual(
+            on_row("exists (select 1 from app.m m where m.p = this.id and 'this.x' = m.y)", "r"),
+            "exists (select 1 from app.m m where m.p = r.id and 'this.x' = m.y)",
+        )
+        self.assertEqual(
+            on_row("this.\"Name\" = $$this.x$$ /* this.y */ and E'a\\'s this.z' = THIS . w", '"files"'),
+            '"files"."Name" = $$this.x$$ /* this.y */ and E\'a\\\'s this.z\' = "files".w',
+        )
         self.assertEqual(on_row("t.this.x = xthis.y", "r"), "t.this.x = xthis.y")
         self.assertTrue(names_this("this.a = 1") and not names_this("'this.a' = x"))
         self.assertTrue(this_alone("exists (select 1 from app.t this where this.x)") and not this_alone("this.x"))
@@ -121,13 +134,34 @@ class ThisRow(unittest.TestCase):
         """A condition that may read other rows runs with the policy's rights where the app role checks it: a
         function of the app's, however its name is written or as an operator, reads more; built-ins don't."""
         from authzlib.sqlutil import operators, reads_more
-        for sql in ("app.member(this.id)", 'app."Member"(this.id)', '"app".member(this.id)', '"member"(this.id)',
-                    'app . "Member" /* c */ (this.id)', "member /* c */ (id)", "exists (select 1 from app.t)",
-                    "lower(name) = app.f('x')", "=!= this.id", "id OPERATOR(app.===) 3", "a <=> b", "a ||- 1"):
+
+        for sql in (
+            "app.member(this.id)",
+            'app."Member"(this.id)',
+            '"app".member(this.id)',
+            '"member"(this.id)',
+            'app . "Member" /* c */ (this.id)',
+            "member /* c */ (id)",
+            "exists (select 1 from app.t)",
+            "lower(name) = app.f('x')",
+            "=!= this.id",
+            "id OPERATOR(app.===) 3",
+            "a <=> b",
+            "a ||- 1",
+        ):
             self.assertTrue(reads_more(sql), sql)
-        for sql in ("not archived", "lower(name) = 'f(x)'", "authz.uid() = owner_id", '"Owner" = authz.uid()',
-                    "coalesce(n, 0) > 1 /* f(x) */", "id in (1, 2)", "$$g(x)$$ = name", "n<>-1 and n*-2<=+3",
-                    "tags @> array['a'] and data->>'k' ~* '^x' and name || 'a' !~~ 'b%'", "'=!=' = name"):
+        for sql in (
+            "not archived",
+            "lower(name) = 'f(x)'",
+            "authz.uid() = owner_id",
+            '"Owner" = authz.uid()',
+            "coalesce(n, 0) > 1 /* f(x) */",
+            "id in (1, 2)",
+            "$$g(x)$$ = name",
+            "n<>-1 and n*-2<=+3",
+            "tags @> array['a'] and data->>'k' ~* '^x' and name || 'a' !~~ 'b%'",
+            "'=!=' = name",
+        ):
             self.assertFalse(reads_more(sql), sql)
         self.assertEqual(operators("a=-1 and b<=+-2 and c@-3"), ["=", "-", "<=", "+", "-", "@-"])
 
@@ -147,8 +181,10 @@ class Golden(unittest.TestCase):
         if sql != want:
             a, b = sql.split("\n"), want.split("\n")
             line = next((i for i, (x, y) in enumerate(zip(a, b, strict=False)) if x != y), min(len(a), len(b)))
-            self.fail(f"{name} differs from line {line + 1}:\n  now:    {a[line] if line < len(a) else '(end)'}\n"
-                      f"  golden: {b[line] if line < len(b) else '(end)'}\n(intended? python3 tests/unit_test.py --update)")
+            self.fail(
+                f"{name} differs from line {line + 1}:\n  now:    {a[line] if line < len(a) else '(end)'}\n"
+                f"  golden: {b[line] if line < len(b) else '(end)'}\n(intended? python3 tests/unit_test.py --update)"
+            )
 
     def test_psql_scripts(self) -> None:
         for name in POLICIES:
@@ -170,10 +206,12 @@ class Walks(unittest.TestCase):
 
 
 class Loops(unittest.TestCase):
-    LOOP = ("type org = app.orgs\n  owner : user = owner_id\n  settings : setting = settings_id\n  can edit = {start}settings.edit\n"
-            "type setting = app.settings\n  email : email = email_id\n  can edit = email.edit\n"
-            "type email = app.emails\n  domain : domain = domain_id\n  can edit = domain.edit\n"
-            "type domain = app.domains\n  org : org = org_id\n  can edit = org.edit\n")
+    LOOP = (
+        "type org = app.orgs\n  owner : user = owner_id\n  settings : setting = settings_id\n  can edit = {start}settings.edit\n"
+        "type setting = app.settings\n  email : email = email_id\n  can edit = email.edit\n"
+        "type email = app.emails\n  domain : domain = domain_id\n  can edit = domain.edit\n"
+        "type domain = app.domains\n  org : org = org_id\n  can edit = org.edit\n"
+    )
 
     def test_a_loop_through_types_needs_one_starting_point(self) -> None:
         """Inheritance round a loop of types: one starting point anywhere in it is enough (an org's owner edits its
@@ -181,10 +219,13 @@ class Loops(unittest.TestCase):
         reference evaluator by difftest --gen loop."""
         sql = Compiler(parse_policy(errors_prelude() + self.LOOP.format(start="owner or "))).compile("the policy")
         self.assertIn('authz_int."domain__edit__start"', sql)
-        self.assertIn("SELECT NULL::bigint AS id WHERE false", sql)         # domain's own start: none
-        with self.assertRaisesRegex(PolicyError, r"line \d+: \w+\.edit needs a starting point besides inheritance \[AZ303\]"):
-            Compiler(parse_policy(errors_prelude() + self.LOOP.format(start="").replace("  owner : user = owner_id\n", ""))
-                     ).compile("the policy")
+        self.assertIn("SELECT NULL::bigint AS id WHERE false", sql)  # domain's own start: none
+        with self.assertRaisesRegex(
+            PolicyError, r"line \d+: \w+\.edit needs a starting point besides inheritance \[AZ303\]"
+        ):
+            Compiler(
+                parse_policy(errors_prelude() + self.LOOP.format(start="").replace("  owner : user = owner_id\n", ""))
+            ).compile("the policy")
 
 
 class LockRoom(unittest.TestCase):
@@ -193,6 +234,7 @@ class LockRoom(unittest.TestCase):
 
     class Small:
         """A database whose lock table holds 10 locks (1 per connection, 10 connections)."""
+
         def __init__(self) -> None:
             self.warnings: list[tuple[str, str | None]] = []
 
@@ -214,7 +256,9 @@ class LockRoom(unittest.TestCase):
         database.lock_room(db, "".join(f"CREATE VIEW v{i} AS SELECT 1;\n" for i in range(20)))
         self.assertEqual(len(db.warnings), 1)
         self.assertIn("about 20 objects in one transaction", db.warnings[0][0])
-        self.assertEqual(db.warnings[0][1], "raise max_locks_per_transaction to 4 (a restart; on managed Postgres, a parameter)")
+        self.assertEqual(
+            db.warnings[0][1], "raise max_locks_per_transaction to 4 (a restart; on managed Postgres, a parameter)"
+        )
         db = self.Small()
         database.lock_room(db, "CREATE VIEW v AS SELECT 1;\n")
         self.assertEqual(db.warnings, [])
@@ -222,7 +266,9 @@ class LockRoom(unittest.TestCase):
 
 class PointChecks(unittest.TestCase):
     def policy(self, sql: str, table: str, command: str) -> str:
-        return search(rf'CREATE POLICY "authz_{command}" ON {re.escape(table)} FOR {command.upper()}.*?;\n', sql, re.S).group(0)
+        return search(
+            rf'CREATE POLICY "authz_{command}" ON {re.escape(table)} FOR {command.upper()}.*?;\n', sql, re.S
+        ).group(0)
 
     def test_writes_check_one_object_and_selects_keep_the_views(self) -> None:
         """Write rules and authz.can check one object at a time (__has functions); select rules may read many
@@ -231,18 +277,20 @@ class PointChecks(unittest.TestCase):
         self.assertIn('authz_gen."folder__edit__has"', self.policy(sql, '"app"."folders"', "insert"))
         self.assertNotIn("__has", self.policy(sql, '"app"."folders"', "select"))
         self.assertNotIn("__has", self.policy(sql, '"app"."files"', "select"))
-        can = sql[sql.index("CREATE OR REPLACE FUNCTION authz.can(p_type text, p_id text"):]
-        self.assertIn("__has", can[:can.index("END $f$;")])
-        lst = sql[sql.index("CREATE OR REPLACE FUNCTION authz.list(p_type text"):]
-        self.assertNotIn("__has", lst[:lst.index("END $f$;")])
+        can = sql[sql.index("CREATE OR REPLACE FUNCTION authz.can(p_type text, p_id text") :]
+        self.assertIn("__has", can[: can.index("END $f$;")])
+        lst = sql[sql.index("CREATE OR REPLACE FUNCTION authz.list(p_type text") :]
+        self.assertNotIn("__has", lst[: lst.index("END $f$;")])
 
     def test_own_columns_first(self) -> None:
         """Reads check a recursive permission against what the object's own columns give (owner, org admin)
         before its view, and each check lists its cheapest items first."""
         sql = compiled("docs")
         files = self.policy(sql, '"app"."files"', "select")
-        self.assertLess(files.index('"folder__share__direct" v WHERE v.id = "files"."folder_id"'),
-                        files.index('"folder__edit" v WHERE v.id = "files"."folder_id"'))
+        self.assertLess(
+            files.index('"folder__share__direct" v WHERE v.id = "files"."folder_id"'),
+            files.index('"folder__edit" v WHERE v.id = "files"."folder_id"'),
+        )
         self.assertLess(files.index('"file__viewer"'), files.index('"folder__edit"'))
         folders = self.policy(sql, '"app"."folders"', "select")
         self.assertLess(folders.index("coalesce((inherit), false)"), folders.index('"folder__view" v'))
@@ -262,8 +310,11 @@ class ColumnRules(unittest.TestCase):
 class SlowPlans(unittest.TestCase):
     """Each time a permission is named, Postgres writes its view out again when it plans a read. An operand
     named twice is written once; a select rule that still makes it write out many is a lint warning."""
-    TEAMS = ("app role app_user\ntype user = app.users\ntype team = app.teams\n"
-             "  member : user = app.team_members(team_id -> user_id)\n")
+
+    TEAMS = (
+        "app role app_user\ntype user = app.users\ntype team = app.teams\n"
+        "  member : user = app.team_members(team_id -> user_id)\n"
+    )
     DOCS = "type doc = app.docs\n  team : team = team_id\n  can view = team.p{n}\nrules app.docs\n  select : view\n"
 
     def test_an_operand_named_twice_is_written_once(self) -> None:
@@ -272,23 +323,28 @@ class SlowPlans(unittest.TestCase):
             text = self.TEAMS + f"  can p0 = member\n  can p1 = {twice}\n" + self.DOCS.format(n=1)
             sql = Compiler(parse_policy(text)).compile("x")
             body = search(r'CREATE VIEW authz_int\."?team__p1"? AS\n(.*?);\n', sql, re.S).group(1)
-            self.assertEqual((len(re.findall(r"team__p0\b", body)), len(re.findall(r"team__member\b", body))),
-                             (p0, member), twice)
+            self.assertEqual(
+                (len(re.findall(r"team__p0\b", body)), len(re.findall(r"team__member\b", body))), (p0, member), twice
+            )
 
     def heavy(self, levels: int) -> str:
         perms = "  can p0 = member\n" + "".join(
-            f"  can p{n} = (p{n - 1} and {{a}}) or (p{n - 1} and {{b}})\n" for n in range(1, levels + 1))
+            f"  can p{n} = (p{n - 1} and {{a}}) or (p{n - 1} and {{b}})\n" for n in range(1, levels + 1)
+        )
         return self.TEAMS + perms + self.DOCS.format(n=levels)
 
     def test_many_expansions_are_a_lint_warning(self) -> None:
         # p6 names p5 twice, which names p4 twice, ... down to p0 and its relation: 191 views for one read of app.docs
         c = Compiler(parse_policy(self.heavy(6)))
         sql = c.compile("x")
-        self.assertRegex(sql, r"object := to_regclass\('\"app\".\"docs\"'\)::text;\n  problem := 'its select rule .* "
-                              r"\d+ view definitions to plan before a row is read")
+        self.assertRegex(
+            sql,
+            r"object := to_regclass\('\"app\".\"docs\"'\)::text;\n  problem := 'its select rule .* "
+            r"\d+ view definitions to plan before a row is read",
+        )
         doc = c.types["doc"]
         rule = next(r for r in c.rules if r.command == "select")
-        self.assertEqual(c.expansions(c.rule_sql(doc, "t", rule)), 3 * 2 ** 6 - 1)
+        self.assertEqual(c.expansions(c.rule_sql(doc, "t", rule)), 3 * 2**6 - 1)
         # two levels are few, and the policies here say nothing
         for text in (self.heavy(2), read(POLICIES["docs"]), read(POLICIES["multi"])):
             self.assertNotIn("view definitions to plan", Compiler(parse_policy(text)).compile("x"))
@@ -297,16 +353,20 @@ class SlowPlans(unittest.TestCase):
     def chain(levels: int) -> str:
         """Types in a chain (an org, its workspaces, their projects, ...): each row is inside one of the type
         above, and manage, edit and view each include the one before and inherit from the row above."""
-        text = ("app role app_user\ntype user = app.users\ntype t0 = app.t0\n"
-                "  member : user = app.t0_members(t0_id -> user_id)\n"
-                "  admin  : user = app.t0_admins(t0_id -> user_id)\n"
-                "  can manage = admin\n  can edit = manage\n  can view = edit or member\n")
+        text = (
+            "app role app_user\ntype user = app.users\ntype t0 = app.t0\n"
+            "  member : user = app.t0_members(t0_id -> user_id)\n"
+            "  admin  : user = app.t0_admins(t0_id -> user_id)\n"
+            "  can manage = admin\n  can edit = manage\n  can view = edit or member\n"
+        )
         for n in range(1, levels + 1):
-            text += (f"type t{n} = app.t{n}\n  parent : t{n - 1} = parent_id\n  owner  : user = owner_id\n"
-                     f"  editor : user = app.t{n}_editors(t{n}_id -> user_id)\n"
-                     f"  viewer : user = app.t{n}_viewers(t{n}_id -> user_id)\n"
-                     "  can manage = owner or parent.manage\n  can edit = manage or editor or parent.edit\n"
-                     "  can view = edit or viewer or parent.view\n")
+            text += (
+                f"type t{n} = app.t{n}\n  parent : t{n - 1} = parent_id\n  owner  : user = owner_id\n"
+                f"  editor : user = app.t{n}_editors(t{n}_id -> user_id)\n"
+                f"  viewer : user = app.t{n}_viewers(t{n}_id -> user_id)\n"
+                "  can manage = owner or parent.manage\n  can edit = manage or editor or parent.edit\n"
+                "  can view = edit or viewer or parent.view\n"
+            )
         return text + f"rules app.t{levels}\n  select : view\n"
 
     def test_tiers_that_include_each_other_are_looked_up_once(self) -> None:
@@ -341,15 +401,21 @@ class LanguageForms(unittest.TestCase):
         self.assertEqual(compile_(text), compile_(named))
 
     def test_words_for_conditions(self) -> None:
-        text = read(POLICIES["docs"]).replace("  can break_glass = org.member", "  can break_glass = org.member and signed_in")
+        text = read(POLICIES["docs"]).replace(
+            "  can break_glass = org.member", "  can break_glass = org.member and signed_in"
+        )
         sql = Compiler(parse_policy(text)).compile("x")
         self.assertIn("authz.uid()) IS NOT NULL", sql)
         for word, written in (("anyone", "true"), ("nobody", "false")):
-            pol = parse_policy(read(POLICIES["docs"]).replace("  can break_glass = org.member", f"  can break_glass = {word}"))
+            pol = parse_policy(
+                read(POLICIES["docs"]).replace("  can break_glass = org.member", f"  can break_glass = {word}")
+            )
             self.assertEqual(pol.types["folder"].perms["break_glass"].expr, authzlib.parse.Cond("cond", written))
         # the word `anyone` replaced: refused, saying which to write
         with self.assertRaises(PolicyError) as e:
-            parse_policy(read(POLICIES["docs"]).replace("  can break_glass = org.member", "  can break_glass = everyone"))
+            parse_policy(
+                read(POLICIES["docs"]).replace("  can break_glass = org.member", "  can break_glass = everyone")
+            )
         self.assertIn("write `anyone` instead of `everyone`", str(e.exception))
         self.assertEqual(e.exception.code, "AZ102")
 
@@ -368,25 +434,34 @@ class LanguageForms(unittest.TestCase):
         self.assertEqual((pol.tests[-1].who, pol.tests[-1].obj), ("it's", "o'k"))
 
     def test_the_test_section_signs_in_as_the_principal_it_names(self) -> None:
-        text = (errors_prelude() + "type service = app.services principal\n  owner : user = owner_id\n"
-                "  can manage_keys = owner\ntest\n  service 1 can manage_keys service 1\n  anyone cannot manage_keys service 1\n")
+        text = (
+            errors_prelude() + "type service = app.services principal\n  owner : user = owner_id\n"
+            "  can manage_keys = owner\ntest\n  service 1 can manage_keys service 1\n  anyone cannot manage_keys service 1\n"
+        )
         sql = Compiler(parse_policy(text)).tests_function_sql()
-        self.assertIn("set_config('authz.user_id', coalesce('1', ''), true), set_config('authz.principal_type', "
-                      "'service', true)", sql)
-        self.assertIn("set_config('authz.user_id', coalesce('', ''), true), set_config('authz.principal_type', '', true)",
-                      sql)
+        self.assertIn(
+            "set_config('authz.user_id', coalesce('1', ''), true), set_config('authz.principal_type', 'service', true)",
+            sql,
+        )
+        self.assertIn(
+            "set_config('authz.user_id', coalesce('', ''), true), set_config('authz.principal_type', '', true)", sql
+        )
 
     def test_lint_notes_relations_named_like_types(self) -> None:
-        text = (read(POLICIES["docs"])
-                .replace("  owner  : user   = owner_id\n", "  owner  : user   = owner_id\n  user   : user   = owner_id\n")
-                .replace("  can share = owner or folder.share", "  can share = owner or user or folder.share"))
+        text = (
+            read(POLICIES["docs"])
+            .replace("  owner  : user   = owner_id\n", "  owner  : user   = owner_id\n  user   : user   = owner_id\n")
+            .replace("  can share = owner or folder.share", "  can share = owner or user or folder.share")
+        )
         self.assertIn("('file', 'user',", Compiler(parse_policy(text)).compile("x"))
 
     def test_your_own_row_is_not_a_move(self) -> None:
         # a relation from the row's own key to its type (`self : user = id`) is "this row": lint doesn't ask for an
         # 'after' rule on the key, as it does for a parent's column
-        text = errors_prelude() + ("  self : user = id\n  boss : user = boss_id\n  can edit = self or boss\n"
-                                   "rules app.users\n  select : edit\n  update : edit\n")
+        text = errors_prelude() + (
+            "  self : user = id\n  boss : user = boss_id\n  can edit = self or boss\n"
+            "rules app.users\n  select : edit\n  update : edit\n"
+        )
         sql = Compiler(parse_policy(text)).compile("x")
         self.assertNotIn("('\"app\".\"users\"', 'id', 'self',", sql)
         self.assertIn("('\"app\".\"users\"', 'boss_id', 'boss',", sql)
@@ -398,7 +473,7 @@ class Denies(unittest.TestCase):
         sql = c.compile("x")
         self.assertIn('CREATE VIEW authz_int."doc__view__base"', sql)
         self.assertRegex(sql, r"\('doc', 'view'\)[,;]")
-        self.assertNotIn("'view__base'", sql)      # not in the catalog, authz.can/list/perms, who or explain
+        self.assertNotIn("'view__base'", sql)  # not in the catalog, authz.can/list/perms, who or explain
         self.assertNotIn("view__base", c.client("py", "x") + c.client("ts", "x"))
         # sharing into a deny takes away: it needs the share permission, not the deny itself
         self.assertIn("('doc', 'banned', 'user', 'share', ARRAY[]::text[]", sql)
@@ -407,7 +482,9 @@ class Denies(unittest.TestCase):
         text = read(POLICIES["docs"])
         line = "  can share = owner or org.admin or (parent.share and {inherit})"
         joined = text.replace(line, "  can share = (owner or org.admin or parent.share) and {inherit}")
-        spread = text.replace(line, "  can share = (owner and {inherit}) or (org.admin and {inherit}) or (parent.share and {inherit})")
+        spread = text.replace(
+            line, "  can share = (owner and {inherit}) or (org.admin and {inherit}) or (parent.share and {inherit})"
+        )
         self.assertNotEqual(joined, text)
         strip = lambda t: [ln for ln in Compiler(parse_policy(t)).compile("x").splitlines() if "{inherit}" not in ln]
         self.assertEqual(strip(joined), strip(spread))
@@ -452,8 +529,11 @@ class Principals(unittest.TestCase):
 
     def test_holding_compares_with_the_signed_in_principal(self) -> None:
         sql = compiled("composite")
-        self.assertIn("g.subject_type = 'bot' AND g.subject_relation = '' AND g.subject_id = (SELECT authz_int.\"bot__me\"()::text)", sql)
-        self.assertIn("coalesce(\"files\".\"uploaded_by\" = (SELECT authz_int.\"bot__me\"()), false)", sql)
+        self.assertIn(
+            "g.subject_type = 'bot' AND g.subject_relation = '' AND g.subject_id = (SELECT authz_int.\"bot__me\"()::text)",
+            sql,
+        )
+        self.assertIn('coalesce("files"."uploaded_by" = (SELECT authz_int."bot__me"()), false)', sql)
 
     def test_lint_notes_principals_without_keys(self) -> None:
         text = read(POLICIES["composite"]).replace("  can manage_keys = owner\n", "  can see = owner\n")
@@ -493,16 +573,24 @@ class CommandMode(unittest.TestCase):
 
     def test_check_needs_no_database(self) -> None:
         self.assertIsNone(database.check(read(POLICIES["docs"])))
-        self.assertRegex(database.check("app role app_user\ntype x = app.x") or "", r"^policy line 1: declare the user type")
+        self.assertRegex(
+            database.check("app role app_user\ntype x = app.x") or "", r"^policy line 1: declare the user type"
+        )
 
     def test_remove_drops_what_apply_makes(self) -> None:
-        for text in ("DROP SCHEMA IF EXISTS authz_gen, authz_int CASCADE", "DROP POLICY", "GRANT SELECT ON %s TO %I",
-                     "shares\\_obj\\_%", "NOT IN ('ctx', 'link_hashes')"):
+        for text in (
+            "DROP SCHEMA IF EXISTS authz_gen, authz_int CASCADE",
+            "DROP POLICY",
+            "GRANT SELECT ON %s TO %I",
+            "shares\\_obj\\_%",
+            "NOT IN ('ctx', 'link_hashes')",
+        ):
             self.assertIn(text, database.REMOVE_SQL)
 
 
 def repr_json(s: object) -> str:
     import json
+
     return json.dumps(s)
 
 
@@ -510,8 +598,9 @@ class Includes(unittest.TestCase):
     """Included files passed as a map (tests/policy_errors.py has the mistakes)."""
 
     def test_nested_include_is_relative(self) -> None:
-        pol = parse_policy('include "sub/a.authz"', files={"sub/a.authz": 'include "b.authz"',
-                                                          "sub/b.authz": read(POLICIES["docs"])})
+        pol = parse_policy(
+            'include "sub/a.authz"', files={"sub/a.authz": 'include "b.authz"', "sub/b.authz": read(POLICIES["docs"])}
+        )
         self.assertIn("file", pol.types)
 
     def test_locations_name_the_included_file(self) -> None:
@@ -539,17 +628,24 @@ class Includes(unittest.TestCase):
     def test_a_byte_order_mark_is_not_part_of_the_policy(self) -> None:
         pol = parse_policy("﻿" + read(POLICIES["docs"]), files={"sub/a.authz": "﻿app role app_user\n"})
         self.assertIn("folder", pol.types)
-        self.assertIn("folder", parse_policy('include "sub/a.authz"\n' + read(POLICIES["docs"]),
-                                             files={"sub/a.authz": "﻿caveat mfa = {authz.ctx('mfa') = 'yes'}\n"}).types)
+        self.assertIn(
+            "folder",
+            parse_policy(
+                'include "sub/a.authz"\n' + read(POLICIES["docs"]),
+                files={"sub/a.authz": "﻿caveat mfa = {authz.ctx('mfa') = 'yes'}\n"},
+            ).types,
+        )
 
 
 class Command(unittest.TestCase):
     def test_reads_included_files(self) -> None:
         with tempfile.TemporaryDirectory() as d:
             os.makedirs(os.path.join(d, "sub"))
-            files = {"main.authz": 'include "sub/a.authz"  -- the rest\n',
-                     "sub/a.authz": 'include "b.authz"\n  include "not-an-include.authz"\n-- include "commented.authz"\n',
-                     "sub/b.authz": "app role app_user\n"}
+            files = {
+                "main.authz": 'include "sub/a.authz"  -- the rest\n',
+                "sub/a.authz": 'include "b.authz"\n  include "not-an-include.authz"\n-- include "commented.authz"\n',
+                "sub/b.authz": "app role app_user\n",
+            }
             for name, body in files.items():
                 with open(os.path.join(d, *name.split("/")), "w", encoding="utf-8") as fh:
                     fh.write(body)
@@ -569,20 +665,26 @@ class Command(unittest.TestCase):
             os.makedirs(os.path.join(d, "p", "sub"))
             with open(os.path.join(d, "outside.authz"), "w", encoding="utf-8") as fh:
                 fh.write("SECRET=1\n")
-            names = ["../outside.authz", "sub/../../outside.authz", os.path.join(d, "outside.authz").replace(os.sep, "/"),
-                     "sub\\..\\..\\outside.authz"]
+            names = [
+                "../outside.authz",
+                "sub/../../outside.authz",
+                os.path.join(d, "outside.authz").replace(os.sep, "/"),
+                "sub\\..\\..\\outside.authz",
+            ]
             try:
                 os.symlink(os.path.join(d, "outside.authz"), os.path.join(d, "p", "sub", "link.authz"))
                 names.append("sub/link.authz")
             except OSError:
-                pass                # Windows without the right to make links
+                pass  # Windows without the right to make links
             with open(os.path.join(d, "p", "main.authz"), "w", encoding="utf-8") as fh:
                 fh.write("".join(f'include "{n}"\n' for n in names))
             self.assertEqual(rowstile_cli.read_policy(os.path.join(d, "p", "main.authz"))[1], {})
 
     def test_a_link_to_another_drive_is_outside(self) -> None:
         # on Windows, commonpath raises for paths on two drives (a link or a junction to D:): outside, not a traceback
-        other_drive = mock.patch.object(os.path, "commonpath", side_effect=ValueError("Paths don't have the same drive"))
+        other_drive = mock.patch.object(
+            os.path, "commonpath", side_effect=ValueError("Paths don't have the same drive")
+        )
         with tempfile.TemporaryDirectory() as d:
             for name, text in (("main.authz", 'include "x.authz"\n'), ("x.authz", "")):
                 with open(os.path.join(d, name), "w", encoding="utf-8") as fh:
@@ -601,14 +703,16 @@ class Command(unittest.TestCase):
             with open(os.path.join(d, "package.json"), "w", encoding="utf-8") as fh:
                 fh.write('{"dependencies": {"next": "16", "@rowstile/prisma": "0.1.0"}}')
             self.assertEqual(sorted(cfg.clients), ["py", "ts-sdk"])
-        names = Compiler(parse_policy(read(POLICIES["docs"]))).compile("x") and \
-            database.client("ts-sdk", read(POLICIES["docs"]))
+        names = Compiler(parse_policy(read(POLICIES["docs"]))).compile("x") and database.client(
+            "ts-sdk", read(POLICIES["docs"])
+        )
         self.assertIn('declare module "@rowstile/client"', names)
         self.assertIn("permissions: typeof permissions;", names)
-        self.assertNotIn("class Refused", names)        # the SDK's own errors, or instanceof would fail
+        self.assertNotIn("class Refused", names)  # the SDK's own errors, or instanceof would fail
 
     def test_stack(self) -> None:
         import stack
+
         def at(files: dict[str, str]) -> str:
             d = tempfile.mkdtemp()
             for name, body in files.items():
@@ -616,14 +720,39 @@ class Command(unittest.TestCase):
                 with open(os.path.join(d, name), "w", encoding="utf-8") as fh:
                     fh.write(body)
             return d
-        s = stack.detect(at({"package.json": '{"dependencies": {"drizzle-orm": "1", "pg": "8"}}',
-                             "drizzle.config.ts": 'export default { out: "./db/drizzle" }', "src/db.ts": "drizzle(pool)"}))
-        self.assertEqual((s.tool, s.migrations_dir, s.clients, s.npm, s.setup_file),
-                         ("drizzle", "db/drizzle", {"ts": "src/authz.gen.ts"}, ["@rowstile/drizzle"], "src/db.ts"))
-        s = stack.detect(at({"requirements.txt": "fastapi>=0.110\nsqlmodel\n",
-                             "alembic.ini": "script_location = %(here)s/alembic\n", "app/main.py": "app = FastAPI()\n"}))
-        self.assertEqual((s.found, s.tool, s.migrations_dir, s.pip, s.setup_file),
-                         (["FastAPI", "SQLModel", "Alembic"], "alembic", "alembic/versions", "rowstile[fastapi,sqlalchemy]", "app/main.py"))
+
+        s = stack.detect(
+            at(
+                {
+                    "package.json": '{"dependencies": {"drizzle-orm": "1", "pg": "8"}}',
+                    "drizzle.config.ts": 'export default { out: "./db/drizzle" }',
+                    "src/db.ts": "drizzle(pool)",
+                }
+            )
+        )
+        self.assertEqual(
+            (s.tool, s.migrations_dir, s.clients, s.npm, s.setup_file),
+            ("drizzle", "db/drizzle", {"ts": "src/authz.gen.ts"}, ["@rowstile/drizzle"], "src/db.ts"),
+        )
+        s = stack.detect(
+            at(
+                {
+                    "requirements.txt": "fastapi>=0.110\nsqlmodel\n",
+                    "alembic.ini": "script_location = %(here)s/alembic\n",
+                    "app/main.py": "app = FastAPI()\n",
+                }
+            )
+        )
+        self.assertEqual(
+            (s.found, s.tool, s.migrations_dir, s.pip, s.setup_file),
+            (
+                ["FastAPI", "SQLModel", "Alembic"],
+                "alembic",
+                "alembic/versions",
+                "rowstile[fastapi,sqlalchemy]",
+                "app/main.py",
+            ),
+        )
         # a release's name is bare; an alpha, a candidate or main's build asks for at least itself, which lets pip
         # take a pre-release (a bare name got the 0.0.0 placeholder while only an alpha was published)
         self.assertEqual(stack.pip_requirement("rowstile[fastapi]", "0.2.0"), "rowstile[fastapi]")
@@ -648,8 +777,13 @@ class Command(unittest.TestCase):
             with open(os.path.join(d, "policy.authz"), "w", encoding="utf-8") as fh:
                 fh.write(read(POLICIES["docs"]))
             env = dict(os.environ, PATH=d)
-            run = lambda *a: subprocess.run([sys.executable, os.path.join(ROOT, "cli", "rowstile_cli.py"), *a],
-                                            cwd=d, env=env, capture_output=True, text=True)
+            run = lambda *a: subprocess.run(
+                [sys.executable, os.path.join(ROOT, "cli", "rowstile_cli.py"), *a],
+                cwd=d,
+                env=env,
+                capture_output=True,
+                text=True,
+            )
             p = run("review", "--base", "main")
             self.assertEqual(p.returncode, 2, p.stderr)
             self.assertIn("git is not installed", p.stderr)
@@ -667,10 +801,13 @@ class Statements(unittest.TestCase):
 
     def test_quotes_comments_and_atomic_bodies(self) -> None:
         from authzlib.statements import split
-        sql = ("-- a comment; not a statement\nSELECT 'a;b', E'it\\'s; fine', \"x;y\";\n"
-               "CREATE FUNCTION f() RETURNS int LANGUAGE plpgsql AS $f$ BEGIN RETURN 1; END $f$;\n"
-               "CREATE FUNCTION g(p int) RETURNS int LANGUAGE sql BEGIN ATOMIC\n"
-               "  SELECT CASE WHEN p > 0 THEN 1 ELSE 2 END; SELECT 3;\nEND;\n/* a; block */ DO $$ BEGIN NULL; END $$")
+
+        sql = (
+            "-- a comment; not a statement\nSELECT 'a;b', E'it\\'s; fine', \"x;y\";\n"
+            "CREATE FUNCTION f() RETURNS int LANGUAGE plpgsql AS $f$ BEGIN RETURN 1; END $f$;\n"
+            "CREATE FUNCTION g(p int) RETURNS int LANGUAGE sql BEGIN ATOMIC\n"
+            "  SELECT CASE WHEN p > 0 THEN 1 ELSE 2 END; SELECT 3;\nEND;\n/* a; block */ DO $$ BEGIN NULL; END $$"
+        )
         got = split(sql)
         self.assertEqual([c for c, _ in got], ["-- a comment; not a statement", "", "", "/* a; block */"])
         self.assertEqual(len(got), 4)
@@ -678,11 +815,18 @@ class Statements(unittest.TestCase):
 
     def test_what_each_makes(self) -> None:
         from authzlib.statements import made
-        self.assertEqual(made("CREATE FUNCTION authz.list(p_type text, p_after text DEFAULT NULL, p_limit int DEFAULT NULL) "
-                              "RETURNS SETOF text AS $$ $$"),
-                         ("function", "authz.list(p_type text, p_after text, p_limit int)"))
-        self.assertEqual(made('CREATE TRIGGER "t" AFTER INSERT ON "app"."x" FOR EACH ROW EXECUTE FUNCTION f()'),
-                         ("trigger", '"t" ON "app"."x"'))
+
+        self.assertEqual(
+            made(
+                "CREATE FUNCTION authz.list(p_type text, p_after text DEFAULT NULL, p_limit int DEFAULT NULL) "
+                "RETURNS SETOF text AS $$ $$"
+            ),
+            ("function", "authz.list(p_type text, p_after text, p_limit int)"),
+        )
+        self.assertEqual(
+            made('CREATE TRIGGER "t" AFTER INSERT ON "app"."x" FOR EACH ROW EXECUTE FUNCTION f()'),
+            ("trigger", '"t" ON "app"."x"'),
+        )
         self.assertEqual(made("DO $mv$ BEGIN END $mv$", '-- @object view "mt"."v"'), ("view", '"mt"."v"'))
         self.assertIsNone(made("INSERT INTO authz_int.x VALUES (1)"))
 
@@ -699,24 +843,43 @@ class Migrations(unittest.TestCase):
 
     def setUp(self) -> None:
         from authzlib import migrate
+
         self.migrate = migrate
         self.text = read(POLICIES["docs"])
 
     def test_which_version_is_older(self) -> None:
         older = database.older_than
-        for mine, theirs in (("0.1.0-rc.1", "0.1.0-rc.2"), ("0.1.0-rc.2", "0.1.0"), ("0.9.0", "0.10.0"),
-                             ("0.1.0-dev+abc", "0.2.0-dev+def"), ("0.1.0", "1.0.0-rc.1"),
-                             # an alpha comes before its version's candidates, whatever their numbers
-                             ("0.1.0-alpha.1", "0.1.0-alpha.2"), ("0.1.0-alpha.9", "0.1.0-rc.1"),
-                             ("0.1.0-alpha.2", "0.1.0"), ("0.1.0", "0.2.0-alpha.1"), ("0.1.0-alpha.2", "0.1.0-alpha.10")):
+        for mine, theirs in (
+            ("0.1.0-rc.1", "0.1.0-rc.2"),
+            ("0.1.0-rc.2", "0.1.0"),
+            ("0.9.0", "0.10.0"),
+            ("0.1.0-dev+abc", "0.2.0-dev+def"),
+            ("0.1.0", "1.0.0-rc.1"),
+            # an alpha comes before its version's candidates, whatever their numbers
+            ("0.1.0-alpha.1", "0.1.0-alpha.2"),
+            ("0.1.0-alpha.9", "0.1.0-rc.1"),
+            ("0.1.0-alpha.2", "0.1.0"),
+            ("0.1.0", "0.2.0-alpha.1"),
+            ("0.1.0-alpha.2", "0.1.0-alpha.10"),
+        ):
             self.assertTrue(older(mine, theirs), (mine, theirs))
             self.assertFalse(older(theirs, mine), (theirs, mine))
         # a development build can't be placed among its own version's candidates; nothing recorded, or not a version
-        for mine, theirs in (("0.1.0-dev+abc", "0.1.0-rc.2"), ("0.1.0-rc.1", "0.1.0-dev+abc"), ("0.1.0-dev+a", "0.1.0-dev+b"),
-                             ("0.1.0-dev+abc", "0.1.0-alpha.1"), ("0.1.0-alpha.1", "0.1.0-dev+abc"), ("0.1.0-beta.1", "0.1.0"),
-                             ("0.1.0", "0.1.0"), ("0.1.0", None), ("0.1.0", "what")):
+        for mine, theirs in (
+            ("0.1.0-dev+abc", "0.1.0-rc.2"),
+            ("0.1.0-rc.1", "0.1.0-dev+abc"),
+            ("0.1.0-dev+a", "0.1.0-dev+b"),
+            ("0.1.0-dev+abc", "0.1.0-alpha.1"),
+            ("0.1.0-alpha.1", "0.1.0-dev+abc"),
+            ("0.1.0-beta.1", "0.1.0"),
+            ("0.1.0", "0.1.0"),
+            ("0.1.0", None),
+            ("0.1.0", "what"),
+        ):
             self.assertFalse(older(mine, theirs), (mine, theirs))
-        lock = self.migrate.lock_of(database.migratable(self.text, {})[1]).replace(f"# rowstile {authzlib.__version__}:", "# rowstile 99.0.0:", 1)
+        lock = self.migrate.lock_of(database.migratable(self.text, {})[1]).replace(
+            f"# rowstile {authzlib.__version__}:", "# rowstile 99.0.0:", 1
+        )
         with self.assertRaisesRegex(database.Error, r"the lock file was last written by rowstile 99\.0\.0.*\[AZ616\]"):
             database.migrations(self.text, {}, lock)
         self.assertTrue(all(m.empty for m in database.migrations(self.text, {}, lock, downgrade=True)))
@@ -736,11 +899,15 @@ class Migrations(unittest.TestCase):
         self.assertNotIn("$authz_guard$", m.sql)
 
     def test_a_new_permission_is_a_small_migration(self) -> None:
-        new = replaced(self.text, "  can share = owner or folder.share\n", "  can share = owner or folder.share\n  can comment = folder.view\n")
+        new = replaced(
+            self.text,
+            "  can share = owner or folder.share\n",
+            "  can share = owner or folder.share\n  can comment = folder.view\n",
+        )
         m = database.migration(new, {}, self.lock(self.text))
         self.assertIn('CREATE VIEW authz_gen."file__comment"', m.sql)
         self.assertIn("CREATE OR REPLACE FUNCTION authz.can(p_type text, p_id text, p_perm text)", m.sql)
-        self.assertNotIn("CREATE TABLE authz_int.\"folder__parent__tree\"", m.sql)
+        self.assertNotIn('CREATE TABLE authz_int."folder__parent__tree"', m.sql)
         self.assertNotIn("CREATE POLICY", m.sql)
         self.assertIn("$authz_guard$", m.sql)
         self.assertEqual(m.summary, ["+ type file: can comment = folder.view"])
@@ -776,7 +943,9 @@ class Migrations(unittest.TestCase):
         older = re.sub(r"^# rowstile \S+:", "# rowstile 0.0.1:", lock, count=1, flags=re.M)
         m = database.migration(self.text, {}, older)
         self.assertRegex(m.lock, r"(?m)^always \| [0-9a-f]{12}$")
-        self.assertEqual(m.summary, [f"rowstile 0.0.1 -> {authzlib.__version__}: what the new version makes differently"])
+        self.assertEqual(
+            m.summary, [f"rowstile 0.0.1 -> {authzlib.__version__}: what the new version makes differently"]
+        )
 
     def test_a_lock_rowfence_wrote_goes_by_its_version(self) -> None:
         # rowstile was called rowfence (and authzc): their lock files' headers still give the version
@@ -785,11 +954,15 @@ class Migrations(unittest.TestCase):
             renamed = re.sub(r"^# rowstile ", f"# {old} ", lock, count=1, flags=re.M)
             self.assertEqual(self.migrate.parse_lock(renamed).version, authzlib.__version__, old)
         newer = re.sub(r"^# rowstile \S+:", "# rowfence 99.0.0:", lock, count=1, flags=re.M)
-        with self.assertRaises(database.Error):                     # still refused when a newer one wrote it
+        with self.assertRaises(database.Error):  # still refused when a newer one wrote it
             database.migrations(self.text, {}, newer)
 
     def test_a_tree_that_changes_is_built_beside_first(self) -> None:
-        new = replaced(self.text, "can view  = edit or viewer or (parent.view and {inherit})", "can view  = edit or viewer or parent.view")
+        new = replaced(
+            self.text,
+            "can view  = edit or viewer or (parent.view and {inherit})",
+            "can view  = edit or viewer or parent.view",
+        )
         ms = database.migrations(new, {}, self.lock(self.text))
         self.assertEqual(len(ms), 2)
         self.assertIn('INSERT INTO authz_int."folder__linked_into_parent__tree__next"', ms[0].sql)
@@ -799,6 +972,7 @@ class Migrations(unittest.TestCase):
 
     def test_file_names(self) -> None:
         import migrations
+
         self.assertEqual(migrations.slug("File comment!"), "authz_file_comment")
         with tempfile.TemporaryDirectory() as d:
             self.assertRegex(migrations.sql_file_name(d, "authz_x", "20260101000000"), r"^20260101000000_authz_x\.sql$")
@@ -811,15 +985,23 @@ class Review(unittest.TestCase):
 
     def setUp(self) -> None:
         from authzlib import review
+
         self.review = review
         self.text = read(POLICIES["docs"])
 
-    def run_review(self, new: str, tests_before: dict[str, str] | None = None, tests_after: dict[str, str] | None = None,
-                   lock: bool = True) -> Review:
+    def run_review(
+        self,
+        new: str,
+        tests_before: dict[str, str] | None = None,
+        tests_after: dict[str, str] | None = None,
+        lock: bool = True,
+    ) -> Review:
         from authzlib import migrate
+
         base_lock = migrate.lock_of(database.migratable(self.text, {})[1]) if lock else None
-        return self.review.review((self.text, {}, tests_before or {}), (new, {}, tests_after or {}), base_lock, None, None,
-                                  worlds=120)
+        return self.review.review(
+            (self.text, {}, tests_before or {}), (new, {}, tests_after or {}), base_lock, None, None, worlds=120
+        )
 
     def test_comments_only(self) -> None:
         r = self.run_review(replaced(self.text, "app role app_user\n", "app role app_user   -- the app's role\n\n"))
@@ -828,31 +1010,45 @@ class Review(unittest.TestCase):
         self.assertIn("**Meaning**: unchanged", self.review.markdown(r))
 
     def test_a_refactor_is_checked_in_small_worlds(self) -> None:
-        r = self.run_review(replaced(self.text, "can edit  = share or editor or (parent.edit and {inherit})",
-                                              "can edit  = editor or share or ({inherit} and parent.edit)"))
+        r = self.run_review(
+            replaced(
+                self.text,
+                "can edit  = share or editor or (parent.edit and {inherit})",
+                "can edit  = editor or share or ({inherit} and parent.edit)",
+            )
+        )
         self.assertEqual(r["meaning"]["equivalent"], "120 small worlds")
         md = self.review.markdown(r)
         self.assertIn("unchanged: every permission and rule grants the same", md)
         self.assertNotIn("<details>", md)
 
     def test_what_changes_through_it(self) -> None:
-        r = self.run_review(replaced(self.text, "can view  = edit or viewer or (parent.view and {inherit})",
-                                              "can view  = edit or viewer or parent.view"))
+        r = self.run_review(
+            replaced(
+                self.text,
+                "can view  = edit or viewer or (parent.view and {inherit})",
+                "can view  = edit or viewer or parent.view",
+            )
+        )
         m = r["meaning"]
         self.assertEqual([c["what"] for c in m["changed"]], ["folder.view"])
         self.assertIn({"what": "file.view", "via": ["folder.view"], "line": "line 63"}, m["through"])
         self.assertIn("a permission widened", [f["why"] for f in r["risk"]])
-        self.assertEqual(len(r["deploy"]["migrations"]), 2)          # built beside, then swapped in
+        self.assertEqual(len(r["deploy"]["migrations"]), 2)  # built beside, then swapped in
         self.assertTrue(r["deploy"]["migrations"][0]["builds_beside"])
 
     def test_risk_flags(self) -> None:
-        widened = replaced(self.text, "  viewer : user, team#member shared\n", "  viewer : user, team#member, anyone shared\n")
+        widened = replaced(
+            self.text, "  viewer : user, team#member shared\n", "  viewer : user, team#member, anyone shared\n"
+        )
         flags = {f["why"] for f in self.run_review(widened)["risk"]}
         self.assertIn("access widened", flags)
         no_deny = replaced(self.text, "           or (folder.view and not {confidential})", "           or folder.view")
         flags = {f["why"] for f in self.run_review(no_deny)["risk"]}
         self.assertIn("a deny removed", flags)
-        looser = replaced(self.text, "  delete                            : edit", "  delete                            : view")
+        looser = replaced(
+            self.text, "  delete                            : edit", "  delete                            : view"
+        )
         risk = self.run_review(looser)["risk"]
         self.assertIn("a write rule loosened", {f["why"] for f in risk})
         self.assertTrue(all(f["line"] for f in risk))
@@ -872,14 +1068,18 @@ class Review(unittest.TestCase):
         self.assertIn("read both, it can't tell more from less", r["risk"][0]["flag"])
         self.assertIn("can't tell: user.impersonate", self.review.text(r))
         # a condition it reads still says what widened
-        r = self.run_review(replaced(self.text, "can share = owner or org.admin", "can share = owner or org.admin or {true}"))
+        r = self.run_review(
+            replaced(self.text, "can share = owner or org.admin", "can share = owner or org.admin or {true}")
+        )
         self.assertIn("a permission widened", [f["why"] for f in r["risk"]])
         self.assertNotIn("unreadable", r["meaning"])
 
     def test_no_lock_file_is_no_migration(self) -> None:
         """A project that applies its policy keeps no lock file: Deploy said every change was the whole policy, a
         migration that locks every table and rebuilds every tree."""
-        r = self.run_review(replaced(self.text, "app role app_user\n", "app role app_user   -- the app's role\n"), lock=False)
+        r = self.run_review(
+            replaced(self.text, "app role app_user\n", "app role app_user   -- the app's role\n"), lock=False
+        )
         self.assertEqual(r["deploy"]["migrations"], [])
         self.assertIn("no lock file, so no migrations: `rowstile apply`", self.review.summary(r)["Deploy"])
 
@@ -887,17 +1087,22 @@ class Review(unittest.TestCase):
         before = {"t.authz": 'test "carol"\n  user 3 can view file 11\n  user 3 cannot view file 12\n'}
         after = {"t.authz": 'test "carol"\n  user 3 cannot view file 11\n'}
         t = self.run_review(self.text, before, after)["tests"]
-        self.assertEqual([(x["before"], x["after"]) for x in t["flipped"]],
-                         [("user 3 can view file 11", "user 3 cannot view file 11")])
+        self.assertEqual(
+            [(x["before"], x["after"]) for x in t["flipped"]],
+            [("user 3 can view file 11", "user 3 cannot view file 11")],
+        )
         self.assertEqual([x["check"] for x in t["removed"]], ["user 3 cannot view file 12"])
 
     def test_a_new_permission_no_test_names(self) -> None:
-        new = replaced(self.text, "  can share = owner or folder.share\n", "  can share = owner or folder.share\n  can comment = folder.view\n")
+        new = replaced(
+            self.text,
+            "  can share = owner or folder.share\n",
+            "  can share = owner or folder.share\n  can comment = folder.view\n",
+        )
         r = self.run_review(new)
         self.assertEqual([x["what"] for x in r["tests"]["untested"]], ["file.comment"])
         self.assertEqual(r["deploy"]["migrations"][0]["locks"], {})
         self.assertIn("No table locks", self.review.markdown(r))
-
 
     # a small policy for the changes Risk must see: each line of it is one a pull request may loosen
     SMALL = """app role app_user
@@ -922,13 +1127,15 @@ rules app.folders
 
     def small(self, old: str, new: str, files: dict[str, str] | None = None) -> Review:
         self.assertIn(old, self.SMALL)
-        return self.review.review((self.SMALL, files or {}, {}), (self.SMALL.replace(old, new), files or {}, {}), worlds=120)
+        return self.review.review(
+            (self.SMALL, files or {}, {}), (self.SMALL.replace(old, new), files or {}, {}), worlds=120
+        )
 
     def test_a_widening_is_flagged_however_it_is_made(self) -> None:
         cases = {
             "a select rule loosened": ("  select : view\n", "  select : view or signed_in\n"),
             "a rule added": ("  update : edit\n", "  update : edit\n  delete : view\n"),
-            "a permission widened through what it uses": (" where {role = 'admin'}", ""),      # every member an admin
+            "a permission widened through what it uses": (" where {role = 'admin'}", ""),  # every member an admin
             "a rule loosened through what it uses": ("owner  : user = owner_id", "owner  : user = created_by"),
             "a type's where loosened": (" where {not archived}", ""),
         }
@@ -936,13 +1143,17 @@ rules app.folders
             risk = self.small(old, new)["risk"]
             self.assertIn(why, {f["why"] for f in risk}, why)
             self.assertTrue(all(f["line"] for f in risk), why)
-        self.assertIn("a type's where loosened", {f["why"] for f in self.small(" where {active}", "")["risk"]})    # the user type's
+        self.assertIn(
+            "a type's where loosened", {f["why"] for f in self.small(" where {active}", "")["risk"]}
+        )  # the user type's
 
     def test_a_tightening_is_not_flagged(self) -> None:
-        for old, new in (("  select : view\n", "  select : edit\n"),
-                         ("rules app.folders\n  select : view\n  update : edit\n", ""),     # no rules: the table stays closed
-                         ("  update : edit\n", "  update : edit\n  update owner_id : edit\n"),    # a column rule narrows
-                         ("can view = edit or viewer", "can view = viewer or edit")):
+        for old, new in (
+            ("  select : view\n", "  select : edit\n"),
+            ("rules app.folders\n  select : view\n  update : edit\n", ""),  # no rules: the table stays closed
+            ("  update : edit\n", "  update : edit\n  update owner_id : edit\n"),  # a column rule narrows
+            ("can view = edit or viewer", "can view = viewer or edit"),
+        ):
             self.assertEqual(self.small(old, new)["risk"], [], new)
 
     def test_text_in_quotes_is_compared_as_written(self) -> None:
@@ -950,7 +1161,10 @@ rules app.folders
         self.assertIsNone(r["meaning"]["equivalent"])
         self.assertEqual([c["what"] for c in r["meaning"]["changed"]], ["folder.remove"])
         # spaces outside quotes are still only spacing
-        self.assertEqual(self.small("can edit = owner or org.admin", "can edit  =  owner   or org.admin")["meaning"]["equivalent"], "text")
+        self.assertEqual(
+            self.small("can edit = owner or org.admin", "can edit  =  owner   or org.admin")["meaning"]["equivalent"],
+            "text",
+        )
 
     def test_a_widening_behind_many_conditions(self) -> None:
         r = self.small("can deep = owner and", "can deep = (owner or viewer) and")
@@ -961,8 +1175,12 @@ rules app.folders
         with self.assertRaises(PolicyError) as e:
             self.small("can view = edit or viewer", "can view = edit or viewer or nosuch.view")
         self.assertEqual(e.exception.code, "AZ203")
-        with self.assertRaisesRegex(self.review.BaseMistake, r"the policy at the base has a mistake: line \d+: .*\[AZ\d+\]"):
-            self.review.review((self.SMALL.replace("can see = member", "can see = nosuch"), {}, {}), (self.SMALL, {}, {}))
+        with self.assertRaisesRegex(
+            self.review.BaseMistake, r"the policy at the base has a mistake: line \d+: .*\[AZ\d+\]"
+        ):
+            self.review.review(
+                (self.SMALL.replace("can see = member", "can see = nosuch"), {}, {}), (self.SMALL, {}, {})
+            )
 
     def test_the_details_are_written_when_the_meaning_is_unchanged(self) -> None:
         before = {"t.authz": 'test "carol"\n  user 3 can view file 11\n  user 3 cannot view file 12\n'}
@@ -998,53 +1216,75 @@ rules app.folders
 test
   service 1 can view folder 2
 """
-    NEW = (OLD.replace("role app_user", "app role app_user").replace("grant view, edit from org", "from org")
-           .replace("owner or org.admin and {not locked}", "owner or (org.admin and {not locked}) or roles")
-           .replace("(edit or viewer) and", "(edit or viewer or roles) and").replace("everyone", "anyone")
-           .replace("service 1 can", "user 1 can"))
+    NEW = (
+        OLD.replace("role app_user", "app role app_user")
+        .replace("grant view, edit from org", "from org")
+        .replace("owner or org.admin and {not locked}", "owner or (org.admin and {not locked}) or roles")
+        .replace("(edit or viewer) and", "(edit or viewer or roles) and")
+        .replace("everyone", "anyone")
+        .replace("service 1 can", "user 1 can")
+    )
 
     def test_a_base_in_the_language_before_is_read_as_it_meant(self) -> None:
         r = self.review.review((self.OLD, {}, {}), (self.NEW, {}, {}), worlds=120)
         self.assertEqual(r["meaning"]["equivalent"], "120 small worlds")
         self.assertEqual(r["risk"], [])
-        self.assertEqual(r.get("base_previous"), [
-            "line 1: `role app_user`, now `app role app_user`",
-            "line 11: `grant view, edit`, now `roles` in view, edit",
-            "line 12: `and` and `or` without parentheses, now `owner or (org.admin and {not locked})`",
-            "line 14: `everyone`, now `anyone`",
-            "line 19: `service 1 can view folder 2` in the test section checked user 1"])
-        self.assertIn("The policy at the base is written in the language before this version of rowstile, and was "
-                      "read as that version meant it: line 1: `role app_user`", self.review.markdown(r))
+        self.assertEqual(
+            r.get("base_previous"),
+            [
+                "line 1: `role app_user`, now `app role app_user`",
+                "line 11: `grant view, edit`, now `roles` in view, edit",
+                "line 12: `and` and `or` without parentheses, now `owner or (org.admin and {not locked})`",
+                "line 14: `everyone`, now `anyone`",
+                "line 19: `service 1 can view folder 2` in the test section checked user 1",
+            ],
+        )
+        self.assertIn(
+            "The policy at the base is written in the language before this version of rowstile, and was "
+            "read as that version meant it: line 1: `role app_user`",
+            self.review.markdown(r),
+        )
         self.assertTrue(self.review.text(r).startswith("Base     The policy at the base is written in the language"))
         # the same policy in this language is read as it is, with nothing to say
         self.assertNotIn("base_previous", self.review.review((self.NEW, {}, {}), (self.NEW, {}, {}), worlds=40))
 
     def test_a_rewrite_that_moves_a_role_out_of_its_and_is_flagged(self) -> None:
         # `roles` outside the `and`: role holders would see archived folders, which `grant` never gave them
-        head = self.NEW.replace("(edit or viewer or roles) and {not archived}", "((edit or viewer) and {not archived}) or roles")
+        head = self.NEW.replace(
+            "(edit or viewer or roles) and {not archived}", "((edit or viewer) and {not archived}) or roles"
+        )
         r = self.review.review((self.OLD, {}, {}), (head, {}, {}), worlds=120)
         self.assertIsNone(r["meaning"]["equivalent"])
         self.assertIn("a permission widened", {f["why"] for f in r["risk"]})
 
     def test_what_the_language_before_didnt_check_is_said(self) -> None:
         # no app role line (the rules applied to PUBLIC), and a permission the runtime never asked for there
-        base = self.OLD.replace("role app_user\n", "").replace("  can open = everyone\n",
-                                                               "  can open = everyone\n  can impersonate = owner\n")
+        base = self.OLD.replace("role app_user\n", "").replace(
+            "  can open = everyone\n", "  can open = everyone\n  can impersonate = owner\n"
+        )
         r = self.review.review((base, {}, {}), (self.NEW, {}, {}), worlds=40)
         old = r.get("base_previous") or []
         self.assertIn("no app role line: the rules applied to PUBLIC", old)
         self.assertTrue(any("[AZ307] (the language before this one didn't check it)" in x for x in old), old)
 
     def test_a_flag_in_an_included_file_is_annotated_there(self) -> None:
-        main = self.SMALL.replace("type org = app.orgs\n  member : user = app.org_members(org_id -> user_id)\n"
-                                  "  admin  : user = app.org_members(org_id -> user_id) where {role = 'admin'}\n"
-                                  "  can manage = admin\n  can see = member\n", 'include "org.authz"\n')
-        org = ("type org = app.orgs\n  member : user = app.org_members(org_id -> user_id)\n"
-               "  admin  : user = app.org_members(org_id -> user_id) where {role = 'admin'}\n"
-               "  can manage = admin\n  can see = member\n")
+        main = self.SMALL.replace(
+            "type org = app.orgs\n  member : user = app.org_members(org_id -> user_id)\n"
+            "  admin  : user = app.org_members(org_id -> user_id) where {role = 'admin'}\n"
+            "  can manage = admin\n  can see = member\n",
+            'include "org.authz"\n',
+        )
+        org = (
+            "type org = app.orgs\n  member : user = app.org_members(org_id -> user_id)\n"
+            "  admin  : user = app.org_members(org_id -> user_id) where {role = 'admin'}\n"
+            "  can manage = admin\n  can see = member\n"
+        )
         self.assertNotEqual(main, self.SMALL)
-        r = self.review.review((main, {"org.authz": org}, {}),
-                               (main, {"org.authz": org.replace("can manage = admin", "can manage = admin or member")}, {}), worlds=120)
+        r = self.review.review(
+            (main, {"org.authz": org}, {}),
+            (main, {"org.authz": org.replace("can manage = admin", "can manage = admin or member")}, {}),
+            worlds=120,
+        )
         notes = self.review.annotations(r, "db/policy.authz")
         self.assertRegex(notes, r"^::warning file=db/org.authz,line=4,title=rowstile review::a permission widened")
 
@@ -1058,7 +1298,9 @@ class Graph(unittest.TestCase):
         c = Compiler(parse_policy(policy, None, files={}))
         c.compile("the policy")
         g = c.graph()
-        declared = re.findall(r"^\s+([A-Za-z0-9_]+)(?:\[|\(|\(\()", g, re.M) + re.findall(r"^\s+subgraph ([A-Za-z0-9_]+)\[", g, re.M)
+        declared = re.findall(r"^\s+([A-Za-z0-9_]+)(?:\[|\(|\(\()", g, re.M) + re.findall(
+            r"^\s+subgraph ([A-Za-z0-9_]+)\[", g, re.M
+        )
         used: set[str] = set()
         for a, b in re.findall(r"^\s+([A-Za-z0-9_]+) [-=.]+>(?:\|[^|]*\|)? ([A-Za-z0-9_]+)$", g, re.M):
             used |= {a, b}
@@ -1067,9 +1309,11 @@ class Graph(unittest.TestCase):
     def test_two_things_never_share_a_node(self) -> None:
         base = "app role app_user\ntype user = app.users\n"
         declared, used = self.nodes(
-            base + "type team = app.teams\n  owner : user = owner_id\n  can member_view = owner\nrules app.teams\n  select : member_view\n"
+            base
+            + "type team = app.teams\n  owner : user = owner_id\n  can member_view = owner\nrules app.teams\n  select : member_view\n"
             "type team_member = app.team_members\n  owner : user = owner_id\n  can view = owner\nrules app.team_members\n  select : view\n"
-            "type t = app.t\n  user : user = user_id\n  can view = user\nrules app.t\n  select : view\n")
+            "type t = app.t\n  user : user = user_id\n  can view = user\nrules app.t\n  select : view\n"
+        )
         self.assertEqual(len(declared), len(set(declared)), sorted(x for x in declared if declared.count(x) > 1))
         self.assertLessEqual(used, set(declared))
 
@@ -1077,7 +1321,8 @@ class Graph(unittest.TestCase):
         declared, used = self.nodes(
             "app role app_user\ntype user = app.users\ntype service = app.services principal\ntype doc = app.docs\n"
             "  owner : user = owner_id\n  viewer : user, service, service:*, anyone shared by view\n  can view = owner or viewer\n"
-            "rules app.docs\n  select : view\n")
+            "rules app.docs\n  select : view\n"
+        )
         self.assertLessEqual(used, set(declared), sorted(used - set(declared)))
         self.assertEqual(len(declared), len(set(declared)))
 
@@ -1086,43 +1331,81 @@ class Draft(unittest.TestCase):
     """rowstile init: the first policy, from tables whose names are not the tidy ones (tests/devx.sh applies one)."""
 
     @staticmethod
-    def table(name: str, columns: dict[str, str], pk: list[str], fks: tuple[tuple[list[str], str, list[str]], ...] = (),
-              uniques: list[list[str]] | None = None) -> draft.Table:
-        return {"name": name, "columns": list(columns.items()), "pk": pk,
-                "fks": [{"cols": c, "ref": r, "ref_cols": rc} for c, r, rc in fks], "uniques": uniques or []}
+    def table(
+        name: str,
+        columns: dict[str, str],
+        pk: list[str],
+        fks: tuple[tuple[list[str], str, list[str]], ...] = (),
+        uniques: list[list[str]] | None = None,
+    ) -> draft.Table:
+        return {
+            "name": name,
+            "columns": list(columns.items()),
+            "pk": pk,
+            "fks": [{"cols": c, "ref": r, "ref_cols": rc} for c, r, rc in fks],
+            "uniques": uniques or [],
+        }
 
     def compiled(self, tables: list[draft.Table]) -> str:
         text = draft.draft(tables, schemas=("app",))
-        Compiler(parse_policy(text, None, files={})).compile("the policy")       # what the guide promises: it compiles
+        Compiler(parse_policy(text, None, files={})).compile("the policy")  # what the guide promises: it compiles
         return text
 
     def test_names_the_language_or_sql_reads_another_way(self) -> None:
         users = self.table("app.users", {"id": "bigint"}, ["id"])
         to_user = lambda col: ([col], "app.users", ["id"])
-        text = self.compiled([
-            self.table("app.User", {"id": "integer"}, ["id"]),
-            self.table("app.Post", {"id": "integer", "authorId": "integer", "order": "integer"}, ["id"],
-                       ((["authorId"], "app.User", ["id"]), (["order"], "app.User", ["id"]))),
-            self.table("app._prisma_migrations", {"id": "character varying(36)"}, ["id"])])
+        text = self.compiled(
+            [
+                self.table("app.User", {"id": "integer"}, ["id"]),
+                self.table(
+                    "app.Post",
+                    {"id": "integer", "authorId": "integer", "order": "integer"},
+                    ["id"],
+                    ((["authorId"], "app.User", ["id"]), (["order"], "app.User", ["id"])),
+                ),
+                self.table("app._prisma_migrations", {"id": "character varying(36)"}, ["id"]),
+            ]
+        )
         self.assertIn("  author : user = authorId\n", text)
-        self.assertIn('{"authorId" = authz.uid()}', text)             # a {condition} is SQL: the capital needs its quotes
+        self.assertIn('{"authorId" = authz.uid()}', text)  # a {condition} is SQL: the capital needs its quotes
         self.assertIn("app._prisma_migrations: the migration tool's own table", text)
         self.assertNotIn("type _prisma_migration", text)
         # a column named like a word of the language, a link table and a column named like a permission
-        text = self.compiled([users,
-                              self.table("app.docs", {"id": "bigint", "if": "bigint", "after": "bigint", "view_id": "bigint"}, ["id"],
-                                         (to_user("if"), to_user("after"), to_user("view_id"))),
-                              self.table("app.doc_edits", {"doc_id": "bigint", "user_id": "bigint"}, ["doc_id", "user_id"],
-                                         ((["doc_id"], "app.docs", ["id"]), to_user("user_id")))])
+        text = self.compiled(
+            [
+                users,
+                self.table(
+                    "app.docs",
+                    {"id": "bigint", "if": "bigint", "after": "bigint", "view_id": "bigint"},
+                    ["id"],
+                    (to_user("if"), to_user("after"), to_user("view_id")),
+                ),
+                self.table(
+                    "app.doc_edits",
+                    {"doc_id": "bigint", "user_id": "bigint"},
+                    ["doc_id", "user_id"],
+                    ((["doc_id"], "app.docs", ["id"]), to_user("user_id")),
+                ),
+            ]
+        )
         self.assertIn("  viewer : user = view_id\n", text)
         self.assertIn("  editor : user = app.doc_edits(doc_id -> user_id)\n", text)
         self.assertIn("-- left out: if (to app.users)", text)
         # names the language can't write, and a link through a unique column that isn't the key
-        text = self.compiled([users, self.table("app.teams", {"id": "bigint", "slug": "text"}, ["id"]),
-                              self.table("app.team_members", {"team_slug": "text", "user_id": "bigint"}, ["team_slug", "user_id"],
-                                         ((["team_slug"], "app.teams", ["slug"]), to_user("user_id"))),
-                              self.table("app.owner list", {"id": "bigint"}, ["id"]),
-                              self.table("app.docs", {"id": "bigint", "owner id": "bigint"}, ["id"], (to_user("owner id"),))])
+        text = self.compiled(
+            [
+                users,
+                self.table("app.teams", {"id": "bigint", "slug": "text"}, ["id"]),
+                self.table(
+                    "app.team_members",
+                    {"team_slug": "text", "user_id": "bigint"},
+                    ["team_slug", "user_id"],
+                    ((["team_slug"], "app.teams", ["slug"]), to_user("user_id")),
+                ),
+                self.table("app.owner list", {"id": "bigint"}, ["id"]),
+                self.table("app.docs", {"id": "bigint", "owner id": "bigint"}, ["id"], (to_user("owner id"),)),
+            ]
+        )
         self.assertNotIn("app.team_members(team_slug", text)
         self.assertIn("-- app.owner list: a name the policy language can't write", text)
         self.assertIn("-- left out: owner id (to app.users)", text)
@@ -1130,42 +1413,80 @@ class Draft(unittest.TestCase):
     def test_the_user_table_is_users_before_accounts(self) -> None:
         """Chatwoot's accounts (its tenants) and GitLab's members (a link table) were taken over their users."""
         to_user = lambda col: ([col], "app.users", ["id"])
-        text = self.compiled([self.table("app.accounts", {"id": "bigint"}, ["id"]),
-                              self.table("app.members", {"id": "bigint", "user_id": "bigint", "account_id": "bigint"}, ["id"],
-                                         (to_user("user_id"), (["account_id"], "app.accounts", ["id"]))),
-                              self.table("app.users", {"id": "bigint"}, ["id"])])
+        text = self.compiled(
+            [
+                self.table("app.accounts", {"id": "bigint"}, ["id"]),
+                self.table(
+                    "app.members",
+                    {"id": "bigint", "user_id": "bigint", "account_id": "bigint"},
+                    ["id"],
+                    (to_user("user_id"), (["account_id"], "app.accounts", ["id"])),
+                ),
+                self.table("app.users", {"id": "bigint"}, ["id"]),
+            ]
+        )
         self.assertIn("type user = app.users\n", text)
-        text = self.compiled([self.table("app.User", {"id": "integer"}, ["id"]), self.table("app.accounts", {"id": "bigint"}, ["id"])])
-        self.assertIn("type user = app.User (id int)\n", text)         # Prisma's model User, before accounts
+        text = self.compiled(
+            [self.table("app.User", {"id": "integer"}, ["id"]), self.table("app.accounts", {"id": "bigint"}, ["id"])]
+        )
+        self.assertIn("type user = app.User (id int)\n", text)  # Prisma's model User, before accounts
 
     def test_a_foreign_key_declared_twice_is_one_relation(self) -> None:
         """GitLab's project_saved_replies: the same key twice gave two relations and two `after` rules (AZ109)."""
         fk = (["project_id"], "app.projects", ["id"])
-        text = self.compiled([self.table("app.users", {"id": "bigint"}, ["id"]),
-                              self.table("app.projects", {"id": "bigint", "owner_id": "bigint"}, ["id"], ((["owner_id"], "app.users", ["id"]),)),
-                              self.table("app.replies", {"id": "bigint", "project_id": "bigint"}, ["id"], (fk, fk))])
+        text = self.compiled(
+            [
+                self.table("app.users", {"id": "bigint"}, ["id"]),
+                self.table(
+                    "app.projects",
+                    {"id": "bigint", "owner_id": "bigint"},
+                    ["id"],
+                    ((["owner_id"], "app.users", ["id"]),),
+                ),
+                self.table("app.replies", {"id": "bigint", "project_id": "bigint"}, ["id"], (fk, fk)),
+            ]
+        )
         self.assertEqual(text.count("update project_id after"), 1)
         self.assertNotIn("project2", text)
 
     def test_a_loop_of_foreign_keys_with_an_owner_compiles(self) -> None:
         """Documenso, Cal.com, Mastodon and GitLab: org -> settings -> email -> domain -> org; only orgs have owners."""
         to = lambda col, table: ([col], table, ["id"])
-        text = self.compiled([
-            self.table("app.users", {"id": "bigint"}, ["id"]),
-            self.table("app.orgs", {"id": "bigint", "owner_id": "bigint", "settings_id": "bigint"}, ["id"],
-                       (to("owner_id", "app.users"), to("settings_id", "app.settings"))),
-            self.table("app.settings", {"id": "bigint", "email_id": "bigint"}, ["id"], (to("email_id", "app.emails"),)),
-            self.table("app.emails", {"id": "bigint", "domain_id": "bigint"}, ["id"], (to("domain_id", "app.domains"),)),
-            self.table("app.domains", {"id": "bigint", "org_id": "bigint"}, ["id"], (to("org_id", "app.orgs"),))])
+        text = self.compiled(
+            [
+                self.table("app.users", {"id": "bigint"}, ["id"]),
+                self.table(
+                    "app.orgs",
+                    {"id": "bigint", "owner_id": "bigint", "settings_id": "bigint"},
+                    ["id"],
+                    (to("owner_id", "app.users"), to("settings_id", "app.settings")),
+                ),
+                self.table(
+                    "app.settings", {"id": "bigint", "email_id": "bigint"}, ["id"], (to("email_id", "app.emails"),)
+                ),
+                self.table(
+                    "app.emails", {"id": "bigint", "domain_id": "bigint"}, ["id"], (to("domain_id", "app.domains"),)
+                ),
+                self.table("app.domains", {"id": "bigint", "org_id": "bigint"}, ["id"], (to("org_id", "app.orgs"),)),
+            ]
+        )
         self.assertIn("type domain = app.domains\n  org : org = org_id\n  can edit = org.edit", text)
         # the same loop with no owner anywhere in it (Cal.com's, Mastodon's, GitLab's): inheriting round it gives
         # nobody anything, so the draft doesn't write it, and says why
-        text = self.compiled([
-            self.table("app.users", {"id": "bigint"}, ["id"]),
-            self.table("app.orgs", {"id": "bigint", "settings_id": "bigint"}, ["id"], (to("settings_id", "app.settings"),)),
-            self.table("app.settings", {"id": "bigint", "org_id": "bigint"}, ["id"], (to("org_id", "app.orgs"),))])
-        self.assertIn("type org = app.orgs\n  settings : setting = settings_id\n  can edit = nobody   -- decide: the loop "
-                      "of foreign keys it is in has no owner anywhere; who edits these?\n  can view = signed_in", text)
+        text = self.compiled(
+            [
+                self.table("app.users", {"id": "bigint"}, ["id"]),
+                self.table(
+                    "app.orgs", {"id": "bigint", "settings_id": "bigint"}, ["id"], (to("settings_id", "app.settings"),)
+                ),
+                self.table("app.settings", {"id": "bigint", "org_id": "bigint"}, ["id"], (to("org_id", "app.orgs"),)),
+            ]
+        )
+        self.assertIn(
+            "type org = app.orgs\n  settings : setting = settings_id\n  can edit = nobody   -- decide: the loop "
+            "of foreign keys it is in has no owner anywhere; who edits these?\n  can view = signed_in",
+            text,
+        )
 
     def test_a_membership_with_an_id_of_its_own_is_a_link(self) -> None:
         """Plausible's site_memberships (id, site_id, user_id, role): read as a type, so a site was everyone's."""
@@ -1173,11 +1494,17 @@ class Draft(unittest.TestCase):
         users = self.table("app.users", {"id": "bigint"}, ["id"])
         sites = self.table("app.sites", {"id": "bigint", "domain": "text"}, ["id"])
         member = lambda extra, uniques: self.table(
-            "app.site_memberships", {"id": "bigint", "site_id": "bigint", "user_id": "bigint", **extra}, ["id"],
-            ((["site_id"], "app.sites", ["id"]), to_user("user_id")), uniques)
+            "app.site_memberships",
+            {"id": "bigint", "site_id": "bigint", "user_id": "bigint", **extra},
+            ["id"],
+            ((["site_id"], "app.sites", ["id"]), to_user("user_id")),
+            uniques,
+        )
         link = "  membership : user = app.site_memberships(site_id -> user_id)\n"
-        for extra, uniques in (({"role": "text", "inserted_at": "timestamp"}, []),     # a role and timestamps only
-                               ({"note": "text"}, [["site_id", "user_id"]])):           # anything, with the pair unique
+        for extra, uniques in (
+            ({"role": "text", "inserted_at": "timestamp"}, []),  # a role and timestamps only
+            ({"note": "text"}, [["site_id", "user_id"]]),
+        ):  # anything, with the pair unique
             text = self.compiled([users, sites, member(extra, uniques)])
             self.assertIn(link, text)
             self.assertIn("-- decide: app.site_memberships is read as a membership", text)
@@ -1190,20 +1517,33 @@ class Draft(unittest.TestCase):
         """`view = edit or parent.view` with `edit = ... or parent.edit` named each parent twice per level: lint's
         warning on six of nine apps' drafts."""
         to = lambda col, table: ([col], table, ["id"])
-        text = self.compiled([
-            self.table("app.users", {"id": "bigint"}, ["id"]),
-            self.table("app.sites", {"id": "bigint", "owner_id": "bigint"}, ["id"], (to("owner_id", "app.users"),)),
-            self.table("app.goals", {"id": "bigint", "site_id": "bigint", "creator_id": "bigint"}, ["id"],
-                       (to("site_id", "app.sites"), to("creator_id", "app.users")))])
+        text = self.compiled(
+            [
+                self.table("app.users", {"id": "bigint"}, ["id"]),
+                self.table("app.sites", {"id": "bigint", "owner_id": "bigint"}, ["id"], (to("owner_id", "app.users"),)),
+                self.table(
+                    "app.goals",
+                    {"id": "bigint", "site_id": "bigint", "creator_id": "bigint"},
+                    ["id"],
+                    (to("site_id", "app.sites"), to("creator_id", "app.users")),
+                ),
+            ]
+        )
         self.assertIn("  can edit = creator or site.edit   -- decide: owners", text)
         self.assertIn("  can view = creator or site.view\n", text)
 
     def test_a_user_table_whose_key_it_cannot_use_is_said(self) -> None:
         with self.assertRaisesRegex(draft.DraftError, "its key is character\\(8\\).*--users"):
-            draft.draft([self.table("app.users", {"id": "character(8)"}, ["id"]), self.table("app.docs", {"id": "bigint"}, ["id"])])
+            draft.draft(
+                [
+                    self.table("app.users", {"id": "character(8)"}, ["id"]),
+                    self.table("app.docs", {"id": "bigint"}, ["id"]),
+                ]
+            )
 
     def test_where_prisma_keeps_its_migrations(self) -> None:
         import stack
+
         with tempfile.TemporaryDirectory() as d:
             os.makedirs(os.path.join(d, "db"))
             with open(os.path.join(d, "package.json"), "w", encoding="utf-8") as fh:
@@ -1220,6 +1560,7 @@ class Wire(unittest.TestCase):
 
     def setUp(self) -> None:
         import pgwire
+
         self.pgwire = pgwire
         self.env = {k: os.environ.pop(k) for k in list(os.environ) if k.startswith("PG")}
 
@@ -1229,11 +1570,15 @@ class Wire(unittest.TestCase):
     def test_a_url_and_its_options(self) -> None:
         parse = self.pgwire.parse_dsn
         got = parse("postgresql://ann:p%23w@db.example.com:6543/app?sslmode=require&connect_timeout=3")
-        self.assertEqual((got["host"], got["port"], got["user"], got["password"], got["database"], got["sslmode"], got["timeout"]),
-                         ("db.example.com", 6543, "ann", "p#w", "app", "require", 3.0))
-        got = parse("postgresql:///app?host=/tmp/sock&port=5499&user=bo")        # how a URL names a socket
+        self.assertEqual(
+            (got["host"], got["port"], got["user"], got["password"], got["database"], got["sslmode"], got["timeout"]),
+            ("db.example.com", 6543, "ann", "p#w", "app", "require", 3.0),
+        )
+        got = parse("postgresql:///app?host=/tmp/sock&port=5499&user=bo")  # how a URL names a socket
         self.assertEqual((got["host"], got["port"], got["user"], got["database"]), ("/tmp/sock", 5499, "bo", "app"))
-        self.assertEqual(parse("postgresql://h/app?schema=public&pgbouncer=true")["host"], "h")     # an ORM's own: left alone
+        self.assertEqual(
+            parse("postgresql://h/app?schema=public&pgbouncer=true")["host"], "h"
+        )  # an ORM's own: left alone
         self.assertEqual(parse("host=h sslmode=verify-full sslrootcert=ca.pem")["sslrootcert"], "ca.pem")
         self.assertEqual(parse("host=h")["sslmode"], "prefer")
         # as Neon's dashboard gives it
@@ -1245,13 +1590,15 @@ class Wire(unittest.TestCase):
         del os.environ["PGSSLMODE"]
 
     def test_what_it_cannot_honour_is_refused_not_dropped(self) -> None:
-        for dsn, said in (("postgresql://h/app?sslmode=maybe", "sslmode=maybe"),
-                          ("postgresql://h/app?sslcert=client.crt", "client certificates"),
-                          ("postgresql://h/app?channel_binding=maybe", "channel_binding=maybe"),
-                          ("host=h colour=blue", "unknown connection setting 'colour'"),
-                          ("postgresql://u:pa#ss@h/app", "must be written %23"),
-                          ('host=h password=p"w', "single quotes"),
-                          ("host=h port=abc", "numbers")):
+        for dsn, said in (
+            ("postgresql://h/app?sslmode=maybe", "sslmode=maybe"),
+            ("postgresql://h/app?sslcert=client.crt", "client certificates"),
+            ("postgresql://h/app?channel_binding=maybe", "channel_binding=maybe"),
+            ("host=h colour=blue", "unknown connection setting 'colour'"),
+            ("postgresql://u:pa#ss@h/app", "must be written %23"),
+            ('host=h password=p"w', "single quotes"),
+            ("host=h port=abc", "numbers"),
+        ):
             with self.assertRaisesRegex(ValueError, re.escape(said), msg=dsn):
                 self.pgwire.parse_dsn(dsn)
 
@@ -1268,6 +1615,7 @@ class Wire(unittest.TestCase):
         import ssl
         import struct
         import threading
+
         fixtures = os.path.join(ROOT, "tests", "fixtures")
         listener = socket.socket()
         listener.bind(("127.0.0.1", 0))
@@ -1290,7 +1638,7 @@ class Wire(unittest.TestCase):
             body = exactly(conn, struct.unpack("!i", exactly(conn, 5)[1:])[0] - 4)
             mechanism, rest = body.split(b"\0", 1)
             first = rest[4:].decode()
-            header, bare = first[:first.index(",,") + 2], first[first.index(",,") + 2:]
+            header, bare = first[: first.index(",,") + 2], first[first.index(",,") + 2 :]
             seen["mechanism"], seen["header"] = mechanism.decode(), header
             nonce = dict(kv.split("=", 1) for kv in bare.split(","))["r"] + "server"
             server_first = f"r={nonce},s={base64.b64encode(salt).decode()},i={rounds}"
@@ -1304,11 +1652,14 @@ class Wire(unittest.TestCase):
             bound = hashlib.sha256(certificate).digest() if header.startswith("p=") else b""
             salted = hashlib.pbkdf2_hmac("sha256", b"secret", salt, rounds)
             stored = hashlib.sha256(hmac.new(salted, b"Client Key", hashlib.sha256).digest()).digest()
-            message = f"{bare},{server_first},{final[:final.rindex(',p=')]}".encode()
+            message = f"{bare},{server_first},{final[: final.rindex(',p=')]}".encode()
             signature = hmac.new(stored, message, hashlib.sha256).digest()
             key = bytes(a ^ b for a, b in zip(base64.b64decode(attrs["p"]), signature, strict=True))
             seen["bound"] = header.startswith("p=") and attrs["c"] == base64.b64encode(header.encode() + bound).decode()
-            if hashlib.sha256(key).digest() != stored or attrs["c"] != base64.b64encode(header.encode() + bound).decode():
+            if (
+                hashlib.sha256(key).digest() != stored
+                or attrs["c"] != base64.b64encode(header.encode() + bound).decode()
+            ):
                 refused = b"SFATAL\0C28P01\0Mpassword authentication failed\0\0"
                 conn.sendall(b"E" + struct.pack("!i", 4 + len(refused)) + refused)
                 return False
@@ -1328,7 +1679,9 @@ class Wire(unittest.TestCase):
                     if tls:
                         context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
                         context.minimum_version = ssl.TLSVersion.TLSv1_2
-                        context.load_cert_chain(os.path.join(fixtures, "wire_test.crt"), os.path.join(fixtures, "wire_test.key"))
+                        context.load_cert_chain(
+                            os.path.join(fixtures, "wire_test.crt"), os.path.join(fixtures, "wire_test.key")
+                        )
                         conn = context.wrap_socket(conn, server_side=True)
                         seen["tls"] = True
                     length, code = struct.unpack("!ii", exactly(conn, 8))
@@ -1342,6 +1695,7 @@ class Wire(unittest.TestCase):
             finally:
                 conn.close()
                 listener.close()
+
         threading.Thread(target=serve, daemon=True).start()
         return listener.getsockname()[1], seen
 
@@ -1353,12 +1707,12 @@ class Wire(unittest.TestCase):
         self.assertTrue(seen["tls"])
         start = seen["start"]
         assert isinstance(start, list)
-        self.assertIn(b"rowstile", start)                   # application_name
+        self.assertIn(b"rowstile", start)  # application_name
         port, seen = self.server(tls=True)
-        connect(host="127.0.0.1", port=port, timeout=5).close()                   # prefer: taken when the server has it
+        connect(host="127.0.0.1", port=port, timeout=5).close()  # prefer: taken when the server has it
         self.assertTrue(seen["tls"])
         port, seen = self.server(tls=False)
-        connect(host="127.0.0.1", port=port, timeout=5).close()                   # ... and done without when it doesn't
+        connect(host="127.0.0.1", port=port, timeout=5).close()  # ... and done without when it doesn't
         self.assertEqual((seen["asked"], seen["tls"]), (True, False))
         port, seen = self.server(tls=False)
         with self.assertRaisesRegex(self.pgwire.ProtocolError, "doesn't do TLS, and sslmode=require asks for it"):
@@ -1372,20 +1726,29 @@ class Wire(unittest.TestCase):
         self.assertTrue(seen["tls"])
         port, seen = self.server(tls=True)
         with self.assertRaisesRegex(self.pgwire.ProtocolError, "TLS with the server failed"):
-            connect(host="127.0.0.1", port=port, sslmode="verify-full", timeout=5)      # not signed by anyone the system trusts
+            connect(
+                host="127.0.0.1", port=port, sslmode="verify-full", timeout=5
+            )  # not signed by anyone the system trusts
 
     def test_scram_is_bound_to_the_tls_channel(self) -> None:
         wrong = self.pgwire.ProtocolError
 
         def connect(port: int, channel_binding: str = "prefer", sslmode: str = "prefer") -> None:
-            self.pgwire.connect(host="127.0.0.1", port=port, password="secret", timeout=5, sslmode=sslmode,
-                                channel_binding=channel_binding).close()
+            self.pgwire.connect(
+                host="127.0.0.1",
+                port=port,
+                password="secret",
+                timeout=5,
+                sslmode=sslmode,
+                channel_binding=channel_binding,
+            ).close()
+
         # offered over TLS: taken, without being asked for (as libpq does)
         port, seen = self.server(tls=True, scram="plus")
         connect(port)
         self.assertEqual((seen["mechanism"], seen["bound"]), ("SCRAM-SHA-256-PLUS", True))
         port, seen = self.server(tls=True, scram="plus")
-        connect(port, "require", "require")      # Neon's string
+        connect(port, "require", "require")  # Neon's string
         self.assertEqual((seen["mechanism"], seen["bound"]), ("SCRAM-SHA-256-PLUS", True))
         port, seen = self.server(tls=True, scram="plus")
         connect(port, "disable")
@@ -1401,9 +1764,9 @@ class Wire(unittest.TestCase):
         with self.assertRaisesRegex(wrong, "channel_binding=require needs TLS"):
             connect(port, "require")
         port, seen = self.server(tls=False, scram="plus")
-        connect(port)                                        # no TLS: nothing to bind to
+        connect(port)  # no TLS: nothing to bind to
         self.assertEqual((seen["mechanism"], seen["header"]), ("SCRAM-SHA-256", "n,,"))
-        port, seen = self.server(tls=True)                                        # signs in without asking anything
+        port, seen = self.server(tls=True)  # signs in without asking anything
         with self.assertRaisesRegex(wrong, "without channel binding"):
             connect(port, "require")
         # a server in the middle holds another certificate than the one the client was shown: the exchange fails
@@ -1412,6 +1775,7 @@ class Wire(unittest.TestCase):
             connect(port)
         with open(os.path.join(ROOT, "tests", "fixtures", "wire_test.crt"), encoding="ascii") as fh:
             import ssl
+
             certificate = ssl.PEM_cert_to_DER_cert(fh.read())
         self.assertEqual(self.pgwire._signature_hash(certificate), "sha256")
         self.assertIsNone(self.pgwire._signature_hash(b"not a certificate"))
@@ -1419,9 +1783,9 @@ class Wire(unittest.TestCase):
     def test_values_it_reads(self) -> None:
         convert = self.pgwire._convert
         self.assertEqual(convert(1007, b"{1,2,NULL}"), [1, 2, None])
-        self.assertEqual(convert(1007, b"{{1,2},{3,4}}"), "{{1,2},{3,4}}")       # two dimensions: as Postgres writes it
+        self.assertEqual(convert(1007, b"{{1,2},{3,4}}"), "{{1,2},{3,4}}")  # two dimensions: as Postgres writes it
         self.assertEqual(convert(1009, b"[0:1]={a,b}"), "[0:1]={a,b}")
-        self.assertEqual(self.pgwire._saslprep("pa\u00adss\u2168"), "passIX")     # as psql prepares a password for SCRAM
+        self.assertEqual(self.pgwire._saslprep("pa\u00adss\u2168"), "passIX")  # as psql prepares a password for SCRAM
         self.assertEqual(self.pgwire._saslprep("caf\u00e9"), "caf\u00e9")
 
 
@@ -1429,8 +1793,13 @@ class Fmt(unittest.TestCase):
     def test_every_policy_formats_the_same_twice_and_says_the_same(self) -> None:
         from authzlib.fmt import format
         from authzlib.migrate import meaning_lines
-        for rel in list(POLICIES.values()) + ["example/docs.test.authz", "../docs/cookbook/policy.authz",
-                                               "../examples/filemanager/db/policy.authz", "../examples/messenger/db/policy.authz"]:
+
+        for rel in list(POLICIES.values()) + [
+            "example/docs.test.authz",
+            "../docs/cookbook/policy.authz",
+            "../examples/filemanager/db/policy.authz",
+            "../examples/messenger/db/policy.authz",
+        ]:
             text = read(rel)
             once = format(text)
             self.assertEqual(format(once), once, rel)
@@ -1438,23 +1807,31 @@ class Fmt(unittest.TestCase):
 
     def test_the_format(self) -> None:
         from authzlib.fmt import format
-        got = format("app role app_user\ntype user = app.users\n\n\n\ntype doc = app.docs\n  owner : user = owner_id  -- who\n"
-                     "  editor:user   shared\n  can edit = owner or editor\n  can  view=   edit\n     or owner\n"
-                     "rules app.docs\n  select : view\n  update after : edit\n")
-        self.assertEqual(got, "app role app_user\n\ntype user = app.users\n\ntype doc = app.docs\n"
-                              "  owner  : user = owner_id  -- who\n  editor : user shared\n"
-                              "  can edit = owner or editor\n  can view = edit\n          or owner\n\n"
-                              "rules app.docs\n  select       : view\n  update after : edit\n")
 
+        got = format(
+            "app role app_user\ntype user = app.users\n\n\n\ntype doc = app.docs\n  owner : user = owner_id  -- who\n"
+            "  editor:user   shared\n  can edit = owner or editor\n  can  view=   edit\n     or owner\n"
+            "rules app.docs\n  select : view\n  update after : edit\n"
+        )
+        self.assertEqual(
+            got,
+            "app role app_user\n\ntype user = app.users\n\ntype doc = app.docs\n"
+            "  owner  : user = owner_id  -- who\n  editor : user shared\n"
+            "  can edit = owner or editor\n  can view = edit\n          or owner\n\n"
+            "rules app.docs\n  select       : view\n  update after : edit\n",
+        )
 
-    BASE = ("app role app_user\n\ntype user = app.users\n\ntype doc = app.docs\n  owner : user = owner_id\n"
-            "  can view = owner\n\nrules app.docs\n  select : view\n")
+    BASE = (
+        "app role app_user\n\ntype user = app.users\n\ntype doc = app.docs\n  owner : user = owner_id\n"
+        "  can view = owner\n\nrules app.docs\n  select : view\n"
+    )
 
     def test_tests_come_out_saying_the_same(self) -> None:
         from authzlib.fmt import format, tests_of
+
         for name, tests in {
             "a brace in a string": "\ntest \"one\"\n  as user 1 allowed {UPDATE app.docs SET name = '{' WHERE id = 1}\n"
-                                   "\ntest \"two\"\n  user 1 can view doc 1\n",
+            '\ntest "two"\n  user 1 can view doc 1\n',
             "names that differ by their spaces": '\ntest "a  b"\n  user 1 can view doc 1\n\ntest "a b"\n  user 1 cannot view doc 1\n',
             "a name with --": '\ntest "before -- after"  -- a comment\n  user 1 can view doc 1\n',
         }.items():
@@ -1462,18 +1839,21 @@ class Fmt(unittest.TestCase):
             done = format(text)
             self.assertEqual(tests_of(done, {}), tests_of(text, {}), name)
             self.assertEqual(format(done), done, name)
-            Compiler(parse_policy(done, None, files={})).compile("the policy")       # it still compiles
+            Compiler(parse_policy(done, None, files={})).compile("the policy")  # it still compiles
         self.assertIn('test "a  b"', format(self.BASE + '\ntest "a  b"\n  user 1 can view doc 1\n'))
-        self.assertIn("{name <> '{'}", format(self.BASE.replace("can view = owner", "can view = owner and {name <> '{'}")))
+        self.assertIn(
+            "{name <> '{'}", format(self.BASE.replace("can view = owner", "can view = owner and {name <> '{'}"))
+        )
 
     def test_what_compiles_formats(self) -> None:
         from authzlib.fmt import FormatError, format
-        for word in ("role", "type", "scope", "test"):          # relations may have these names
+
+        for word in ("role", "type", "scope", "test"):  # relations may have these names
             text = self.BASE.replace("owner", word)
             self.assertEqual(format(text), text, word)
         with_include = 'include "roles.authz"\n\n' + self.BASE
         self.assertEqual(format(with_include, {"roles.authz": "-- nothing here\n"}), with_include)
-        with self.assertRaisesRegex(FormatError, "AZ104"):          # a mistake: its message, not an assertion
+        with self.assertRaisesRegex(FormatError, "AZ104"):  # a mistake: its message, not an assertion
             format(self.BASE.replace("can view = owner", "can view"))
 
 
@@ -1482,6 +1862,7 @@ class Confidence(unittest.TestCase):
 
     def test_prove_finds_the_smallest_counterexample(self) -> None:
         from authzlib import prove
+
         pol = parse_policy(read(POLICIES["docs"]), "docs.authz")
         [r] = prove.prove(pol)
         # a folder's owner may share it even if they aren't in its org: the data never has that, the policy allows it
@@ -1492,7 +1873,10 @@ class Confidence(unittest.TestCase):
 
     def test_prove_says_when_none_is_found(self) -> None:
         from authzlib import prove
-        text = read(POLICIES["docs"]).replace("never folder: share and not org.member", "never folder: edit and not view")
+
+        text = read(POLICIES["docs"]).replace(
+            "never folder: share and not org.member", "never folder: edit and not view"
+        )
         [r] = prove.prove(parse_policy(text, "docs.authz"), worlds=80)
         self.assertTrue(r["holds"])
         self.assertEqual(r["worlds"], 80)
@@ -1501,75 +1885,130 @@ class Confidence(unittest.TestCase):
 
     def proofs(self, text: str) -> list[bool]:
         from authzlib import prove
+
         return [r["holds"] for r in prove.prove(parse_policy(self.HEAD + text, "p.authz"))]
 
     def same(self, before: str, after: str) -> bool:
         from authzlib import evaluate
-        return evaluate.compare(parse_policy(self.HEAD + before, "a.authz"), parse_policy(self.HEAD + after, "b.authz")) is None
+
+        return (
+            evaluate.compare(parse_policy(self.HEAD + before, "a.authz"), parse_policy(self.HEAD + after, "b.authz"))
+            is None
+        )
 
     def test_anyone_nobody_and_signed_in_are_the_same_on_every_row(self) -> None:
         folder = "type folder = app.folders\n  owner : user = owner_id\n  viewer : user = viewer_id\n"
         self.assertEqual(self.proofs(folder + "  can view = anyone\ninvariants\n  never folder: not view\n"), [True])
         self.assertEqual(self.proofs(folder + "  can view = nobody\ninvariants\n  never folder: view\n"), [True])
-        self.assertEqual(self.proofs(folder + "  can view = signed_in\ninvariants\n  never folder: owner and not view\n"), [True])
-        self.assertEqual(self.proofs(folder + "  can view = signed_in\ninvariants\n  never folder: view and not owner\n"), [False])
+        self.assertEqual(
+            self.proofs(folder + "  can view = signed_in\ninvariants\n  never folder: owner and not view\n"), [True]
+        )
+        self.assertEqual(
+            self.proofs(folder + "  can view = signed_in\ninvariants\n  never folder: view and not owner\n"), [False]
+        )
         for word in ("anyone", "signed_in"):
-            self.assertTrue(self.same(folder + f"  can view = viewer or {word}\n", folder + f"  can view = {word}\n"), word)
+            self.assertTrue(
+                self.same(folder + f"  can view = viewer or {word}\n", folder + f"  can view = {word}\n"), word
+            )
         self.assertTrue(self.same(folder + "  can view = viewer or nobody\n", folder + "  can view = viewer\n"))
-        self.assertFalse(self.same(folder + "  can view = signed_in\n", folder + "  can view = anyone\n"))   # nobody signed in
+        self.assertFalse(
+            self.same(folder + "  can view = signed_in\n", folder + "  can view = anyone\n")
+        )  # nobody signed in
 
     def test_simple_conditions_are_facts_about_the_row(self) -> None:
         folder = "type folder = app.folders\n  owner : user = owner_id\n  parent : folder = parent_id\n"
         # two spellings of one condition, and a condition that says what a relation says
-        self.assertTrue(self.same(folder + "  can view = owner and {not archived}\n",
-                                  folder + "  can view = owner and {archived = false}\n"))
-        self.assertTrue(self.same(folder + "  can view = owner and {kind in ('a', 'b')}\n",
-                                  folder + "  can view = owner and ({kind = 'a'} or {kind = 'b'})\n"))
-        self.assertTrue(self.same(folder + "  can view = owner\nrules app.folders\n  insert : {owner_id = authz.uid()}\n",
-                                  folder + "  can view = owner\nrules app.folders\n  insert : owner\n"))
-        self.assertTrue(self.same(folder + "  can top = owner and {parent_id is null}\n",
-                                  folder + "  can top = owner and {this.parent_id is null}\n"))
+        self.assertTrue(
+            self.same(
+                folder + "  can view = owner and {not archived}\n",
+                folder + "  can view = owner and {archived = false}\n",
+            )
+        )
+        self.assertTrue(
+            self.same(
+                folder + "  can view = owner and {kind in ('a', 'b')}\n",
+                folder + "  can view = owner and ({kind = 'a'} or {kind = 'b'})\n",
+            )
+        )
+        self.assertTrue(
+            self.same(
+                folder + "  can view = owner\nrules app.folders\n  insert : {owner_id = authz.uid()}\n",
+                folder + "  can view = owner\nrules app.folders\n  insert : owner\n",
+            )
+        )
+        self.assertTrue(
+            self.same(
+                folder + "  can top = owner and {parent_id is null}\n",
+                folder + "  can top = owner and {this.parent_id is null}\n",
+            )
+        )
         # NULL: {not archived} is false where archived is NULL, not {archived} is true there
-        self.assertFalse(self.same(folder + "  can view = owner and {not archived}\n",
-                                   folder + "  can view = owner and not {archived}\n"))
-        self.assertFalse(self.same(folder + "  can view = owner and {size > 10}\n", folder + "  can view = owner and {size >= 10}\n"))
+        self.assertFalse(
+            self.same(
+                folder + "  can view = owner and {not archived}\n", folder + "  can view = owner and not {archived}\n"
+            )
+        )
+        self.assertFalse(
+            self.same(folder + "  can view = owner and {size > 10}\n", folder + "  can view = owner and {size >= 10}\n")
+        )
 
     def test_a_counterexample_shows_the_columns_it_needs(self) -> None:
         from authzlib import prove
+
         folder = "type folder = app.folders\n  owner : user = owner_id\n  can view = owner\n"
-        [r] = prove.prove(parse_policy(self.HEAD + folder + "invariants\n  never folder: view and {status = 'gone'}\n",
-                                       "p.authz"))
+        [r] = prove.prove(
+            parse_policy(self.HEAD + folder + "invariants\n  never folder: view and {status = 'gone'}\n", "p.authz")
+        )
         self.assertFalse(r["holds"])
         self.assertIn("folder 1: status = 'gone'", r["world"])
         self.assertIn("folder.owner: folder 1 -> user 1", r["world"])
 
     def test_a_polymorphic_row_has_one_parent(self) -> None:
         both = "  owner : user = owner_id\n  can x = owner\n  can y = not owner\n"
-        text = ("type project = app.projects\n" + both
-                + "type folder = app.folders\n  parent : folder, project = (parent_type, parent_id)\n" + both
-                + "  can a = parent.x\n  can b = parent.y\ninvariants\n  never folder: a and b\n  never folder: a and not b\n")
+        text = (
+            "type project = app.projects\n"
+            + both
+            + "type folder = app.folders\n  parent : folder, project = (parent_type, parent_id)\n"
+            + both
+            + "  can a = parent.x\n  can b = parent.y\ninvariants\n  never folder: a and b\n  never folder: a and not b\n"
+        )
         self.assertEqual(self.proofs(text), [True, False])
 
     def test_a_rule_gives_no_row_the_type_leaves_out(self) -> None:
         head = "type folder = app.folders where {not archived}\n  owner : user = owner_id\n  can view = owner\nrules app.folders\n"
-        self.assertTrue(self.same(head + "  select : {shared_flag}\n", head + "  select : {shared_flag} and {not archived}\n"))
-        self.assertTrue(self.same(head + "  select : view or {public}\n", head + "  select : view or ({public} and {not archived})\n"))
+        self.assertTrue(
+            self.same(head + "  select : {shared_flag}\n", head + "  select : {shared_flag} and {not archived}\n")
+        )
+        self.assertTrue(
+            self.same(
+                head + "  select : view or {public}\n", head + "  select : view or ({public} and {not archived})\n"
+            )
+        )
         self.assertFalse(self.same(head + "  select : view or {public}\n", head + "  select : view\n"))
 
     def test_coverage_reads_explain(self) -> None:
         from authzlib import coverage
-        explain = "\n".join([
-            "yes  user 1 holds edit on folder 3",
-            "  folder.edit = share or editor or (parent.edit and {inherit})",
-            "  yes  share",
-            "    folder.share = owner or org.admin or (parent.share and {inherit})",
-            "    yes  owner",
-            "    no   org.admin",
-            "  no   editor",
-            "  yes  (parent.edit and {inherit})",
-        ])
-        self.assertEqual(coverage.covered([explain]), {("folder", "edit", "share"), ("folder", "share", "owner"),
-                                                       ("folder", "edit", "(parent.edit and {inherit})")})
+
+        explain = "\n".join(
+            [
+                "yes  user 1 holds edit on folder 3",
+                "  folder.edit = share or editor or (parent.edit and {inherit})",
+                "  yes  share",
+                "    folder.share = owner or org.admin or (parent.share and {inherit})",
+                "    yes  owner",
+                "    no   org.admin",
+                "  no   editor",
+                "  yes  (parent.edit and {inherit})",
+            ]
+        )
+        self.assertEqual(
+            coverage.covered([explain]),
+            {
+                ("folder", "edit", "share"),
+                ("folder", "share", "owner"),
+                ("folder", "edit", "(parent.edit and {inherit})"),
+            },
+        )
         c = Compiler(parse_policy(read(POLICIES["docs"])))
         c.compile("x")
         r = coverage.report(c, [explain])
@@ -1579,30 +2018,52 @@ class Confidence(unittest.TestCase):
 
     def test_coverage_of_a_deny_inside_inheritance(self) -> None:
         from authzlib import coverage
-        c = Compiler(parse_policy(self.HEAD + "type folder = app.folders\n  parent : folder = parent_id\n  owner : user = owner_id\n"
-                                  "  viewer : user = viewer_id\n  can hidden = {blocked} or parent.hidden\n"
-                                  "  can view = (owner or viewer or parent.view) and not hidden\n  can see = signed_in\n"))
+
+        c = Compiler(
+            parse_policy(
+                self.HEAD + "type folder = app.folders\n  parent : folder = parent_id\n  owner : user = owner_id\n"
+                "  viewer : user = viewer_id\n  can hidden = {blocked} or parent.hidden\n"
+                "  can view = (owner or viewer or parent.view) and not hidden\n  can see = signed_in\n"
+            )
+        )
         c.compile("x")
-        self.assertEqual([(p, i) for _, p, i, _, _ in coverage.branches(c)], [
-            ("hidden", "{blocked}"), ("hidden", "parent.hidden"), ("see", "signed_in"),
-            ("view", "owner"), ("view", "viewer"), ("view", "parent.view (before the deny)")])
-        explain = "\n".join([
-            "yes  user 1 holds view on folder 1",
-            "  folder.view = (owner or viewer or parent.view) and not hidden",
-            "  yes  (view (before the deny) and not hidden)",
-            "    yes  view (before the deny)",
-            "      folder.view__base = (owner or viewer or parent.view) and not hidden  (its inheritance, before the deny)",
-            "      yes  owner",
-            "      no   viewer",
-            "      no   parent.view (before the deny)",
-            "    yes  not hidden",
-        ])
+        self.assertEqual(
+            [(p, i) for _, p, i, _, _ in coverage.branches(c)],
+            [
+                ("hidden", "{blocked}"),
+                ("hidden", "parent.hidden"),
+                ("see", "signed_in"),
+                ("view", "owner"),
+                ("view", "viewer"),
+                ("view", "parent.view (before the deny)"),
+            ],
+        )
+        explain = "\n".join(
+            [
+                "yes  user 1 holds view on folder 1",
+                "  folder.view = (owner or viewer or parent.view) and not hidden",
+                "  yes  (view (before the deny) and not hidden)",
+                "    yes  view (before the deny)",
+                "      folder.view__base = (owner or viewer or parent.view) and not hidden  (its inheritance, before the deny)",
+                "      yes  owner",
+                "      no   viewer",
+                "      no   parent.view (before the deny)",
+                "    yes  not hidden",
+            ]
+        )
         r = coverage.report(c, [explain])
         self.assertEqual((r["covered"], r["total"]), (1, 6))
         # the branches are the ones the policy writes, in its words
-        self.assertEqual([(name, item) for _, name, item in r["missing"]], [
-            ("folder.hidden", "{blocked}"), ("folder.hidden", "parent.hidden"), ("folder.see", "signed_in"),
-            ("folder.view", "viewer"), ("folder.view", "parent.view")])
+        self.assertEqual(
+            [(name, item) for _, name, item in r["missing"]],
+            [
+                ("folder.hidden", "{blocked}"),
+                ("folder.hidden", "parent.hidden"),
+                ("folder.see", "signed_in"),
+                ("folder.view", "viewer"),
+                ("folder.view", "parent.view"),
+            ],
+        )
 
 
 class Encodings(unittest.TestCase):
@@ -1611,6 +2072,7 @@ class Encodings(unittest.TestCase):
     def test_every_text_open_names_an_encoding(self) -> None:
         import ast
         import subprocess
+
         top = os.path.dirname(ROOT)
         try:
             listed = subprocess.run(["git", "ls-files", "*.py"], cwd=top, capture_output=True, text=True, check=True)
@@ -1623,11 +2085,15 @@ class Encodings(unittest.TestCase):
             for node in ast.walk(tree):
                 if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "open"):
                     continue
-                mode = node.args[1] if len(node.args) > 1 else next((k.value for k in node.keywords if k.arg == "mode"), None)
+                mode = (
+                    node.args[1]
+                    if len(node.args) > 1
+                    else next((k.value for k in node.keywords if k.arg == "mode"), None)
+                )
                 binary = isinstance(mode, ast.Constant) and "b" in str(mode.value)
                 if not binary and not any(k.arg == "encoding" for k in node.keywords):
                     missing.append(f"{rel} line {node.lineno}")
-        self.assertEqual(missing, [], "open() without encoding=\"utf-8\"")
+        self.assertEqual(missing, [], 'open() without encoding="utf-8"')
 
 
 class SearchPath(unittest.TestCase):
@@ -1636,9 +2102,12 @@ class SearchPath(unittest.TestCase):
         # the rules and views resolve it when applying, so every function running one resolves it on the path
         # applying vetted (SET search_path FROM CURRENT), never on pg_catalog alone, where it fails at run time
         for name, path in POLICIES.items():
-            lines = [ln if re.match(r"\s*(given|as|test)\b", ln) else
-                     re.sub(r"\{([^{}]*)\}", lambda m: "{zz_marked((" + m.group(1) + "))}", ln)
-                     for ln in read(path).split("\n")]
+            lines = [
+                ln
+                if re.match(r"\s*(given|as|test)\b", ln)
+                else re.sub(r"\{([^{}]*)\}", lambda m: "{zz_marked((" + m.group(1) + "))}", ln)
+                for ln in read(path).split("\n")
+            ]
             sql = Compiler(parse_policy("\n".join(lines))).compile("x")
             running = [st for _, st in statements.split(sql) if "FUNCTION" in st[:40] and "zz_marked" in st]
             self.assertGreater(len(running), 5, name)
@@ -1653,6 +2122,7 @@ class ErrorCodes(unittest.TestCase):
         import ast
 
         from authzlib.errors import CODES
+
         used = set()
         for name in sorted(os.listdir(os.path.join(ROOT, "authzlib"))):
             if not name.endswith(".py") or name == "errors.py":
@@ -1663,18 +2133,25 @@ class ErrorCodes(unittest.TestCase):
                     continue
                 kind = node.func.id if isinstance(node.func, ast.Name) else None
                 if kind not in ("fail", "PolicyError") or (kind == "PolicyError" and name == "parse.py"):
-                    continue                                # fail() itself raises the PolicyError
+                    continue  # fail() itself raises the PolicyError
                 code = node.args[-1] if kind == "fail" or len(node.args) == 2 else None
                 value = code.value if isinstance(code, ast.Constant) else None
-                self.assertTrue(isinstance(value, str) and value in CODES,
-                                f"authzlib/{name} line {node.lineno}: a mistake without a known code")
+                self.assertTrue(
+                    isinstance(value, str) and value in CODES,
+                    f"authzlib/{name} line {node.lineno}: a mistake without a known code",
+                )
                 used.add(str(value))
             used |= {a or b for a, b in re.findall(r"\[(AZ\d{3})\]|rowstile help (AZ\d{3})", src)}
         self.assertEqual(sorted(set(CODES) - used), [], "codes nothing raises (retire them in errors.py instead)")
 
     # raised and caught inside rowstile, or wrapping lines that carry their own code
-    UNCODED = ("'bad'", "'the policy does not match this database:%'", "USING ERRCODE = 'AZT00'",
-               "'given ", "'% policy test(s) failed'")
+    UNCODED = (
+        "'bad'",
+        "'the policy does not match this database:%'",
+        "USING ERRCODE = 'AZT00'",
+        "'given ",
+        "'% policy test(s) failed'",
+    )
 
     def test_every_raise_has_a_code(self) -> None:
         """What the generated SQL raises carries a code: in its message ([AZ601], applying) or its HINT
@@ -1684,15 +2161,20 @@ class ErrorCodes(unittest.TestCase):
                 continue
             src = read(f"authzlib/{name}")
             for m in re.finditer(r"RAISE EXCEPTION", src):
-                end = re.compile(r";(?=\n|\"|')").search(src, m.start())    # the statement's end, in SQL or a string
-                stmt = src[m.start():end.end() if end else len(src)]
-                if re.search(r"\[AZ\d{3}\]|rowstile help AZ\d{3}|HINT = \{lit\(hint\)\}", stmt) or any(u in stmt for u in self.UNCODED):
+                end = re.compile(r";(?=\n|\"|')").search(src, m.start())  # the statement's end, in SQL or a string
+                stmt = src[m.start() : end.end() if end else len(src)]
+                if re.search(r"\[AZ\d{3}\]|rowstile help AZ\d{3}|HINT = \{lit\(hint\)\}", stmt) or any(
+                    u in stmt for u in self.UNCODED
+                ):
                     continue
-                self.fail(f"authzlib/{name} line {src.count(chr(10), 0, m.start()) + 1}: a RAISE without a code: {stmt[:120]}")
+                self.fail(
+                    f"authzlib/{name} line {src.count(chr(10), 0, m.start()) + 1}: a RAISE without a code: {stmt[:120]}"
+                )
 
     def test_examples(self) -> None:
         """Each page's mistake gives its code; its fix compiles."""
         from authzlib import errors
+
         for code, c in errors.CODES.items():
             for kind, text in (("mistake", c.wrong), ("fix", c.right)):
                 if not text:
@@ -1713,6 +2195,7 @@ class ErrorCodes(unittest.TestCase):
 
     def test_pages(self) -> None:
         from authzlib import errors
+
         folder = os.path.join(os.path.dirname(ROOT), "docs", "errors")
         pages = {f"{code}.md": errors.page(code) for code in errors.CODES}
         pages["README.md"] = errors.index()
@@ -1725,16 +2208,22 @@ class ErrorCodes(unittest.TestCase):
                 with open(os.path.join(folder, name), "w", encoding="utf-8", newline="\n") as fh:
                     fh.write(text)
             return
-        self.assertEqual(sorted(os.listdir(folder)), sorted(pages), "docs/errors/ (python3 tests/unit_test.py --update)")
+        self.assertEqual(
+            sorted(os.listdir(folder)), sorted(pages), "docs/errors/ (python3 tests/unit_test.py --update)"
+        )
         for name, text in pages.items():
             with open(os.path.join(folder, name), encoding="utf-8") as fh:
                 self.assertEqual(fh.read(), text, f"docs/errors/{name} (python3 tests/unit_test.py --update)")
 
     def test_message_and_code(self) -> None:
         from authzlib import errors
+
         with self.assertRaises(PolicyError) as e:
-            Compiler(parse_policy(errors.PRELUDE + "type folder = app.folders\n  owner : person = owner_id\n"
-                                                    "  can view = owner\n")).compile("x")
+            Compiler(
+                parse_policy(
+                    errors.PRELUDE + "type folder = app.folders\n  owner : person = owner_id\n  can view = owner\n"
+                )
+            ).compile("x")
         self.assertEqual(str(e.exception), "line 4: folder.owner: unknown type 'person' [AZ201]")
         self.assertEqual(e.exception.code, "AZ201")
         self.assertEqual(errors.split(str(e.exception)), ("line 4: folder.owner: unknown type 'person'", "AZ201"))
@@ -1743,18 +2232,30 @@ class ErrorCodes(unittest.TestCase):
 
 class StackPages(unittest.TestCase):
     """docs/stacks/: every line of code a page shows is in the tested app it comes from, so it can't drift."""
+
     REPO = os.path.dirname(ROOT)
-    SOURCES: ClassVar[dict[str, list[str]]] = {"fastapi.md": ["integrations/fastapi"], "python.md": ["integrations/fastapi"],
-               "nextjs.md": ["integrations/nextjs"], "node.md": ["integrations/nextjs"],
-               "sql.md": ["docs/getting-started.md", "sdk/python/rowstile", "sdk/typescript"]}
+    SOURCES: ClassVar[dict[str, list[str]]] = {
+        "fastapi.md": ["integrations/fastapi"],
+        "python.md": ["integrations/fastapi"],
+        "nextjs.md": ["integrations/nextjs"],
+        "node.md": ["integrations/nextjs"],
+        "sql.md": ["docs/getting-started.md", "sdk/python/rowstile", "sdk/typescript"],
+    }
     SKIP: ClassVar[set[str]] = {"node_modules", ".venv", ".next", ".work", "generated", "__pycache__", "dist"}
-    CHECKED = ("python", "ts", "tsx", "toml", "authz", "sql")        # sh blocks are commands to type
+    CHECKED = ("python", "ts", "tsx", "toml", "authz", "sql")  # sh blocks are commands to type
 
     def lines(self, rel: str) -> set[str]:
         path = os.path.join(self.REPO, *rel.split("/"))
-        files = [path] if os.path.isfile(path) else [
-            os.path.join(d, f) for d, dirs, fs in os.walk(path) if not dirs.__setitem__(slice(None), [
-                x for x in dirs if x not in self.SKIP]) for f in fs]
+        files = (
+            [path]
+            if os.path.isfile(path)
+            else [
+                os.path.join(d, f)
+                for d, dirs, fs in os.walk(path)
+                if not dirs.__setitem__(slice(None), [x for x in dirs if x not in self.SKIP])
+                for f in fs
+            ]
+        )
         out: set[str] = set()
         for f in files:
             if f.endswith((".py", ".ts", ".tsx", ".toml", ".authz", ".md", ".sql")):
@@ -1771,18 +2272,29 @@ class StackPages(unittest.TestCase):
                 text = fh.read()
             have = set().union(*(self.lines(s) for s in self.SOURCES[page]))
             anywhere = "\n".join(have)
-            shown = [(lang, " ".join(line.split())) for lang, block in re.findall(r"```(\w+)\n(.*?)```", text, re.S)
-                     if lang in self.CHECKED for line in block.split("\n") if line.strip()]
+            shown = [
+                (lang, " ".join(line.split()))
+                for lang, block in re.findall(r"```(\w+)\n(.*?)```", text, re.S)
+                if lang in self.CHECKED
+                for line in block.split("\n")
+                if line.strip()
+            ]
             self.assertTrue(shown, page)
-            missing = [line for lang, line in shown if line not in have and not self.caption(page, line)
-                       and not (lang == "sql" and line in anywhere)]     # SQL the SDKs send, inside their strings
-            self.assertEqual(missing, [], f"docs/stacks/{page}: lines in no tested app ({', '.join(self.SOURCES[page])})")
+            missing = [
+                line
+                for lang, line in shown
+                if line not in have and not self.caption(page, line) and not (lang == "sql" and line in anywhere)
+            ]  # SQL the SDKs send, inside their strings
+            self.assertEqual(
+                missing, [], f"docs/stacks/{page}: lines in no tested app ({', '.join(self.SOURCES[page])})"
+            )
 
     def caption(self, page: str, line: str) -> bool:
         """A comment naming the file a snippet is from ("// src/db.ts"), which the app has."""
         m = re.fullmatch(r"(?://|#|--) (\S+\.\w+)", line)
-        return m is not None and any(os.path.exists(os.path.join(self.REPO, *s.split("/"), *m.group(1).split("/")))
-                                     for s in self.SOURCES[page])
+        return m is not None and any(
+            os.path.exists(os.path.join(self.REPO, *s.split("/"), *m.group(1).split("/"))) for s in self.SOURCES[page]
+        )
 
 
 def calls(text: str, opener: str) -> list[tuple[str, list[str]]]:
@@ -1813,14 +2325,17 @@ def calls(text: str, opener: str) -> list[tuple[str, list[str]]]:
 class DocPages(unittest.TestCase):
     """What the pages show that no suite runs: the language page's example compiles, the guide's files are laid
     out as `rowstile fmt` writes them, and each authz.* call a page writes is one the functions take."""
+
     REPO = os.path.dirname(ROOT)
     # the types the language page's example names and leaves to its include
-    REST = ("type org = app.orgs\n  member : user = app.org_members(org_id -> user_id)\n"
-            "  admin  : user = app.org_members(org_id -> user_id) where {role = 'admin'}\n  can manage_roles = admin\n"
-            "type project = app.projects\n  owner : user = owner_id\n  can share = owner\n  can edit = share\n"
-            "  can view = edit\n"
-            "type file = app.files\n  folder : folder = folder_id\n  owner : user = owner_id\n"
-            "  can share = owner or folder.share\n  can edit = share or folder.edit\n  can view = edit or folder.view\n")
+    REST = (
+        "type org = app.orgs\n  member : user = app.org_members(org_id -> user_id)\n"
+        "  admin  : user = app.org_members(org_id -> user_id) where {role = 'admin'}\n  can manage_roles = admin\n"
+        "type project = app.projects\n  owner : user = owner_id\n  can share = owner\n  can edit = share\n"
+        "  can view = edit\n"
+        "type file = app.files\n  folder : folder = folder_id\n  owner : user = owner_id\n"
+        "  can share = owner or folder.share\n  can edit = share or folder.edit\n  can view = edit or folder.view\n"
+    )
 
     def page(self, *rel: str) -> str:
         with open(os.path.join(self.REPO, *rel), encoding="utf-8") as fh:
@@ -1836,46 +2351,64 @@ class DocPages(unittest.TestCase):
 
     def test_the_guides_files_are_laid_out_as_fmt_writes_them(self) -> None:
         from authzlib import fmt
+
         guide = self.page("docs", "getting-started.md")
         blocks = re.findall(r"```authz[ \t]+(\S+)\n(.*?)```", guide, re.S)
         self.assertEqual([name for name, _ in blocks], ["db/policy.authz", "db/tests/first.authz"])
         for name, body in blocks:
-            self.assertEqual(fmt.format(body), body, f"docs/getting-started.md: {name} isn't as rowstile fmt writes it "
-                                                     "(the reference tells readers to run fmt --check in CI)")
+            self.assertEqual(
+                fmt.format(body),
+                body,
+                f"docs/getting-started.md: {name} isn't as rowstile fmt writes it "
+                "(the reference tells readers to run fmt --check in CI)",
+            )
 
     def test_the_repositorys_policies_are_laid_out_as_fmt_writes_them(self) -> None:
         # what readers copy (the docs app, the cookbook, the example apps, the conformance apps): run through
         # `rowstile fmt --check` in their CI, as the reference says, they must pass. The suites' own fixtures are
         # left as they are (some are wrong on purpose)
         from authzlib import fmt
+
         # walked, not asked of git: CI's container doesn't own the mounted checkout, and git refuses it
         skip = {".git", "node_modules", ".venv", ".next", ".work", "dist", "tests", "editor"}
         files = []
         for top in ("core", "docs", "examples", "integrations"):
             for root, dirs, names in os.walk(os.path.join(self.REPO, top)):
                 dirs[:] = [d for d in dirs if d not in skip or (d == "tests" and not root.endswith("core"))]
-                files += [os.path.relpath(os.path.join(root, n), self.REPO).replace(os.sep, "/")
-                          for n in names if n.endswith(".authz")]
+                files += [
+                    os.path.relpath(os.path.join(root, n), self.REPO).replace(os.sep, "/")
+                    for n in names
+                    if n.endswith(".authz")
+                ]
         self.assertGreater(len(files), 10, "the policies aren't found")
         loose = [f for f in files if fmt.format_policy(self.page(f)) != self.page(f)]
         self.assertEqual(loose, [], "not as rowstile fmt writes them: run rowstile fmt on each")
 
     def test_the_guides_path_is_the_commands_folder(self) -> None:
         folder = search(r'export PATH="\$PWD/([\w/]+):\$PATH"', self.page("docs", "getting-started.md")).group(1)
-        self.assertTrue(os.path.exists(os.path.join(self.REPO, *folder.split("/"), "rowstile")),
-                        f"docs/getting-started.md puts {folder} on the PATH: the command isn't there")
+        self.assertTrue(
+            os.path.exists(os.path.join(self.REPO, *folder.split("/"), "rowstile")),
+            f"docs/getting-started.md puts {folder} on the PATH: the command isn't there",
+        )
 
     def test_the_installing_page_holds_the_readmes_lines(self) -> None:
         import tomllib
+
         section = search(r"\n## Installing\n(.*?)\n## ", self.page("README.md"), re.S).group(1)
         page = self.page("docs", "installing.md")
         lines = [x for x in section.split("\n") if x.startswith("    ")]
         self.assertEqual(len(lines), 3, "README.md's Installing: npm, pip and the image")
         for line in lines:
-            self.assertIn(line + "\n", page, "docs/installing.md (the site's page) doesn't have this line of README.md's Installing")
+            self.assertIn(
+                line + "\n",
+                page,
+                "docs/installing.md (the site's page) doesn't have this line of README.md's Installing",
+            )
         with open(os.path.join(self.REPO, "sdk", "python", "pyproject.toml"), "rb") as fh:
             extras = set(tomllib.load(fh)["project"]["optional-dependencies"])
-        self.assertEqual(set(re.findall(r"`rowstile\[(\w+)\]`", page)), extras, "docs/installing.md: the Python package's extras")
+        self.assertEqual(
+            set(re.findall(r"`rowstile\[(\w+)\]`", page)), extras, "docs/installing.md: the Python package's extras"
+        )
 
     def test_the_install_lines_ask_for_what_is_published(self) -> None:
         # While the version is an alpha or a candidate, a plain install gets an older release (or the 0.0.0
@@ -1885,15 +2418,24 @@ class DocPages(unittest.TestCase):
         if version.endswith("-dev"):
             self.skipTest("main between releases: the release pull request sets the install lines")
         pre = "-" in version
-        pages = ["README.md", "llms.txt", "sdk/python/README.md", "editor/README.md",
-                 *[os.path.relpath(p, self.REPO).replace(os.sep, "/") for p in
-                   glob.glob(os.path.join(self.REPO, "docs", "**", "*.md"), recursive=True)],
-                 *[os.path.relpath(p, self.REPO).replace(os.sep, "/") for p in
-                   glob.glob(os.path.join(self.REPO, "sdk", "typescript", "*", "README.md"))]]
+        pages = [
+            "README.md",
+            "llms.txt",
+            "sdk/python/README.md",
+            "editor/README.md",
+            *[
+                os.path.relpath(p, self.REPO).replace(os.sep, "/")
+                for p in glob.glob(os.path.join(self.REPO, "docs", "**", "*.md"), recursive=True)
+            ],
+            *[
+                os.path.relpath(p, self.REPO).replace(os.sep, "/")
+                for p in glob.glob(os.path.join(self.REPO, "sdk", "typescript", "*", "README.md"))
+            ],
+        ]
         wrong: list[str] = []
         for rel in pages:
             text = self.page(rel)
-            if rel == "docs/installing.md":    # its section on alphas and candidates shows how to ask for one
+            if rel == "docs/installing.md":  # its section on alphas and candidates shows how to ask for one
                 text = re.sub(r"\n## Alphas and release candidates\n.*?(?=\n## )", "\n", text, flags=re.S)
             fenced = False
             for line in text.split("\n"):
@@ -1907,35 +2449,62 @@ class DocPages(unittest.TestCase):
                 uv = re.search(r"\buv add\b.*\browstile\b", line)
                 image = re.search(r"ghcr\.io/rowstile/rowstile(:[\w.-]+)?", line)
                 if pre:
-                    bad = ((npm and npm.group(1) != "@next") or (pip and "--pre" not in line)
-                           or (uv and "--prerelease=allow" not in line)
-                           or (image and image.group(1) != f":{version}"))
+                    bad = (
+                        (npm and npm.group(1) != "@next")
+                        or (pip and "--pre" not in line)
+                        or (uv and "--prerelease=allow" not in line)
+                        or (image and image.group(1) != f":{version}")
+                    )
                 else:
-                    bad = ((npm and npm.group(1) == "@next") or (pip and "--pre" in line)
-                           or (uv and "--prerelease" in line) or (image and "-" in (image.group(1) or "")))
+                    bad = (
+                        (npm and npm.group(1) == "@next")
+                        or (pip and "--pre" in line)
+                        or (uv and "--prerelease" in line)
+                        or (image and "-" in (image.group(1) or ""))
+                    )
                 if bad:
                     wrong.append(f"{rel}: {line.strip()}")
-        self.assertEqual(wrong, [], f"install lines that don't get {version} ({'ask for the pre-release' if pre else 'plain installs, no pre-release'})")
+        self.assertEqual(
+            wrong,
+            [],
+            f"install lines that don't get {version} ({'ask for the pre-release' if pre else 'plain installs, no pre-release'})",
+        )
 
     def test_each_call_a_page_writes_is_one_the_functions_take(self) -> None:
         sql = Compiler(parse_policy(read("example/docs.authz"))).compile("x")
-        made: dict[str, list[list[tuple[str, bool]]]] = {}       # name -> each form's (type, has a default)
+        made: dict[str, list[list[tuple[str, bool]]]] = {}  # name -> each form's (type, has a default)
         for name, params in calls(sql, "FUNCTION authz."):
             form = [(p.split()[1], "DEFAULT" in p.split()) for p in params if p.split()[0] != "OUT"]
             made.setdefault(name, []).append(form)
-        pages = [("README.md",), ("llms.txt",), ("core", "CONTEXT.md"), ("sdk", "python", "README.md"),
-                 ("sdk", "typescript", "README.md")]
+        pages = [
+            ("README.md",),
+            ("llms.txt",),
+            ("core", "CONTEXT.md"),
+            ("sdk", "python", "README.md"),
+            ("sdk", "typescript", "README.md"),
+        ]
         for folder, _, files in os.walk(os.path.join(self.REPO, "docs")):
-            pages += [(*os.path.relpath(folder, self.REPO).split(os.sep), f) for f in sorted(files) if f.endswith(".md")]
+            pages += [
+                (*os.path.relpath(folder, self.REPO).split(os.sep), f) for f in sorted(files) if f.endswith(".md")
+            ]
         wrong: list[str] = []
         for page in pages:
             for name, args in calls(self.page(*page), "authz."):
                 if name not in made:
                     wrong.append(f"{'/'.join(page)}: authz.{name}() is not a function")
-                elif args and not any("..." in a for a in args) and not any(
+                elif (
+                    args
+                    and not any("..." in a for a in args)
+                    and not any(
                         sum(not d for _, d in form) <= len(args) <= len(form)
-                        and all(form[i][0] in ("bigint", "int", "integer") for i, a in enumerate(args) if re.fullmatch(r"\d+", a))
-                        for form in made[name]):
+                        and all(
+                            form[i][0] in ("bigint", "int", "integer")
+                            for i, a in enumerate(args)
+                            if re.fullmatch(r"\d+", a)
+                        )
+                        for form in made[name]
+                    )
+                ):
                     wrong.append(f"{'/'.join(page)}: authz.{name}({', '.join(args)}): no form of it takes these")
         self.assertEqual(wrong, [], "calls the pages write that the functions don't take")
 
@@ -1947,13 +2516,21 @@ class Why(unittest.TestCase):
     def test_a_way_that_could_not_be_tried_is_said(self) -> None:
         from authzlib import grant
         from authzlib.parse import Loc
-        way = grant.Way([grant.Change("link", "add user 2 to app.team_members for team 10", "INSERT ...", Loc(None, 4), 2)],
-                        error='null value in column "added_by" of relation "team_members" violates not-null constraint\nDETAIL: ...')
+
+        way = grant.Way(
+            [grant.Change("link", "add user 2 to app.team_members for team 10", "INSERT ...", Loc(None, 4), 2)],
+            error='null value in column "added_by" of relation "team_members" violates not-null constraint\nDETAIL: ...',
+        )
         answer = grant.Answer(False, ["no   team.member"], "view = team.member  (line 7)", untried=[way])
         said = grant.describe(answer, "user:2", "doc", "1", "view").split("\n")
-        self.assertEqual(said[-2:], ["no single change that could be tried grants it",
-                                     'could not be tried: add user 2 to app.team_members for team 10 (null value in column '
-                                     '"added_by" of relation "team_members" violates not-null constraint)'])
+        self.assertEqual(
+            said[-2:],
+            [
+                "no single change that could be tried grants it",
+                "could not be tried: add user 2 to app.team_members for team 10 (null value in column "
+                '"added_by" of relation "team_members" violates not-null constraint)',
+            ],
+        )
         nothing = grant.describe(grant.Answer(False, [], "view = owner  (line 3)"), "user:2", "doc", "1", "view")
         self.assertTrue(nothing.endswith("no single change to shares or links grants it"))
 
@@ -1961,11 +2538,13 @@ class Why(unittest.TestCase):
 class LlmsTxt(unittest.TestCase):
     """llms.txt links only files that exist and its policy compiles; docs/llms_full.py (run when the docs are
     published) puts the files it links, and every error page, in one."""
+
     REPO = os.path.dirname(ROOT)
 
     def test_links_and_policy(self) -> None:
         sys.path.insert(0, os.path.join(self.REPO, "docs"))
         import llms_full
+
         text = read("../llms.txt")
         for link in llms_full.links(text):
             self.assertTrue(os.path.exists(os.path.join(self.REPO, *link.split("/"))), f"llms.txt links {link}")
@@ -1979,20 +2558,28 @@ class LlmsTxt(unittest.TestCase):
 class Licence(unittest.TestCase):
     """The Python package and the Zed extension ship the licence: their copies (sdk/python/LICENSE, what the build
     takes; editor/zed/LICENSE, what Zed's registry reads) are the repository's."""
+
     REPO = os.path.dirname(ROOT)
 
     def test_the_python_package_has_the_repositorys_licence(self) -> None:
-        with open(os.path.join(self.REPO, "LICENSE"), encoding="utf-8") as a,                 open(os.path.join(self.REPO, "sdk", "python", "LICENSE"), encoding="utf-8") as b:
+        with (
+            open(os.path.join(self.REPO, "LICENSE"), encoding="utf-8") as a,
+            open(os.path.join(self.REPO, "sdk", "python", "LICENSE"), encoding="utf-8") as b,
+        ):
             self.assertEqual(a.read(), b.read(), "sdk/python/LICENSE: copy the repository's LICENSE")
 
     def test_the_zed_extension_has_the_repositorys_licence(self) -> None:
         # Zed's registry reads the licence in the extension's own folder: one at the repository's root doesn't count
-        with open(os.path.join(self.REPO, "LICENSE"), encoding="utf-8") as a, open(os.path.join(self.REPO, "editor", "zed", "LICENSE"), encoding="utf-8") as b:
+        with (
+            open(os.path.join(self.REPO, "LICENSE"), encoding="utf-8") as a,
+            open(os.path.join(self.REPO, "editor", "zed", "LICENSE"), encoding="utf-8") as b,
+        ):
             self.assertEqual(a.read(), b.read(), "editor/zed/LICENSE: copy the repository's LICENSE")
 
 
 class Delivery(unittest.TestCase):
     """What the workflows run, what the packages are built from, and what this folder's README says is tested."""
+
     REPO = os.path.dirname(ROOT)
 
     def workflows(self) -> dict[str, list[str]]:
@@ -2039,7 +2626,9 @@ class Delivery(unittest.TestCase):
     def test_the_launcher_knows_the_platforms_built(self) -> None:
         build = read("../packaging/npm/build.mjs")
         targets = dict(re.findall(r'^  "([a-z0-9-]+)": \{ triple: [^\n]*\n\s+sha256: "([0-9a-f]*)" \}', build, re.M))
-        launcher = search(r"const PLATFORMS = \[(.*?)\];", read("../packaging/npm/rowstile/bin/rowstile.js"), re.S).group(1)
+        launcher = search(
+            r"const PLATFORMS = \[(.*?)\];", read("../packaging/npm/rowstile/bin/rowstile.js"), re.S
+        ).group(1)
         self.assertEqual(sorted(targets), sorted(re.findall(r'"([a-z0-9-]+)"', launcher)))
         # each Python is the bytes its release published
         self.assertEqual([k for k, sha in targets.items() if not re.fullmatch(r"[0-9a-f]{64}", sha)], [])
@@ -2048,6 +2637,7 @@ class Delivery(unittest.TestCase):
     def test_the_readme_lists_every_suite(self) -> None:
         def suites(text: str) -> set[str]:
             return set(re.findall(r"tests/[a-z_0-9]+\.(?:sh|py|sql)", text))
+
         missing = suites(read("run_tests.sh")) - {"tests/make_owner.sh"} - suites(read("README.md"))
         self.assertEqual(sorted(missing), [], "core/README.md's table: a suite run_tests.sh runs isn't in it")
 
@@ -2092,6 +2682,7 @@ class Delivery(unittest.TestCase):
 class Editors(unittest.TestCase):
     """Zed reads its queries from the extension's folder: they are the grammar's (editor/tree-sitter-authz),
     copied. The grammar itself is tested by editor/test.sh (it needs the Tree-sitter CLI)."""
+
     REPO = os.path.dirname(ROOT)
 
     def test_zed_has_the_grammars_queries(self) -> None:
@@ -2100,43 +2691,67 @@ class Editors(unittest.TestCase):
         names = sorted(f for f in os.listdir(grammar) if f.endswith(".scm"))
         self.assertEqual(names, sorted(f for f in os.listdir(zed) if f.endswith(".scm")))
         for name in names:
-            with open(os.path.join(grammar, name), encoding="utf-8") as a, open(os.path.join(zed, name), encoding="utf-8") as b:
-                self.assertEqual(a.read(), b.read(), f"editor/zed/languages/authz/{name}: copy it from the grammar's queries")
+            with (
+                open(os.path.join(grammar, name), encoding="utf-8") as a,
+                open(os.path.join(zed, name), encoding="utf-8") as b,
+            ):
+                self.assertEqual(
+                    a.read(), b.read(), f"editor/zed/languages/authz/{name}: copy it from the grammar's queries"
+                )
 
     def test_zed_builds_this_grammar(self) -> None:
         # extension.toml names the commit Zed fetches the grammar from: its grammar must be this one
         with open(os.path.join(self.REPO, "editor", "zed", "extension.toml"), encoding="utf-8") as fh:
             rev = search(r'^rev = "([0-9a-f]{40})"', fh.read(), re.M).group(1)
         try:
-            known = subprocess.run(["git", "cat-file", "-e", f"{rev}^{{commit}}"], cwd=self.REPO,
-                                   capture_output=True).returncode == 0
+            known = (
+                subprocess.run(
+                    ["git", "cat-file", "-e", f"{rev}^{{commit}}"], cwd=self.REPO, capture_output=True
+                ).returncode
+                == 0
+            )
         except OSError:
             known = False
         if not known:
-            shallow = subprocess.run(["git", "rev-parse", "--is-shallow-repository"], cwd=self.REPO,
-                                     capture_output=True, text=True).stdout.strip()
+            shallow = subprocess.run(
+                ["git", "rev-parse", "--is-shallow-repository"], cwd=self.REPO, capture_output=True, text=True
+            ).stdout.strip()
             if shallow != "false":
                 self.skipTest(f"commit {rev[:7]} isn't in this shallow checkout")
         # an ancestor: a rebase or squash merge would leave it out of main, and Zed couldn't fetch it
-        self.assertEqual(subprocess.run(["git", "merge-base", "--is-ancestor", rev, "HEAD"], cwd=self.REPO).returncode, 0,
-                         f"commit {rev[:7]} (editor/zed/extension.toml) isn't in this branch's history: merge the "
-                         "grammar's commit with a merge commit, or set rev to a commit that is")
+        self.assertEqual(
+            subprocess.run(["git", "merge-base", "--is-ancestor", rev, "HEAD"], cwd=self.REPO).returncode,
+            0,
+            f"commit {rev[:7]} (editor/zed/extension.toml) isn't in this branch's history: merge the "
+            "grammar's commit with a merge commit, or set rev to a commit that is",
+        )
         # Zed builds the parser from src/ (editor/test.sh checks src/ is what grammar.js generates): a change to
         # grammar.js that generates the same src/, a comment, needs no new rev
-        diff = subprocess.run(["git", "diff", "--stat", rev, "--", "editor/tree-sitter-authz/src"],
-                              cwd=self.REPO, capture_output=True, text=True).stdout
-        self.assertEqual(diff, "", "the grammar changed since the commit editor/zed/extension.toml names: "
-                                   "commit it, then set rev to that commit")
+        diff = subprocess.run(
+            ["git", "diff", "--stat", rev, "--", "editor/tree-sitter-authz/src"],
+            cwd=self.REPO,
+            capture_output=True,
+            text=True,
+        ).stdout
+        self.assertEqual(
+            diff,
+            "",
+            "the grammar changed since the commit editor/zed/extension.toml names: "
+            "commit it, then set rev to that commit",
+        )
 
 
 class Executable(unittest.TestCase):
     """A script that starts with #! is executable in git: on Windows (core.fileMode off) nothing shows it
     isn't, and on Linux the suite that runs it directly fails (`git update-index --chmod=+x`)."""
+
     REPO = os.path.dirname(ROOT)
 
     def test_scripts_are_executable(self) -> None:
         try:
-            out = subprocess.run(["git", "ls-files", "-s"], cwd=self.REPO, capture_output=True, text=True, check=True).stdout
+            out = subprocess.run(
+                ["git", "ls-files", "-s"], cwd=self.REPO, capture_output=True, text=True, check=True
+            ).stdout
         except (OSError, subprocess.CalledProcessError):
             self.skipTest("not a git checkout")
         missing = []
@@ -2152,17 +2767,21 @@ class Executable(unittest.TestCase):
 class Private(unittest.TestCase):
     """Decisions and plans are kept out of this repository: no file points at them, so no reader meets a link
     they can't follow. (The patterns are split so this file doesn't match itself.)"""
+
     REPO = os.path.dirname(ROOT)
     SKIP: ClassVar[set[str]] = {"node_modules", "generated", "__pycache__", "dist", "out", "grammars"}
     # folders whose name starts with a dot are a tool's own (git's, an editor's, a cache), but for these two
     DOTTED: ClassVar[set[str]] = {".github", ".vitepress"}
     # (two names that stay out of the repository too, in a file or a pull request; the conventions file keeps its own)
-    WORDS = re.compile(r"\bADRs?" + r" ?\d{4}|docs/" + r"adr\b|\b(roadmap|v1-design|developer-experience|"
-                       r"language-review)" + r"\.md\b|rowstile-" + r"internal|(?i:cl" + r"aude(?!\.md\b)|anth" + r"ropic)")
+    WORDS = re.compile(
+        r"\bADRs?" + r" ?\d{4}|docs/" + r"adr\b|\b(roadmap|v1-design|developer-experience|"
+        r"language-review)" + r"\.md\b|rowstile-" + r"internal|(?i:cl" + r"aude(?!\.md\b)|anth" + r"ropic)"
+    )
 
     def test_nothing_points_at_them(self) -> None:
-        self.assertFalse(os.path.isdir(os.path.join(self.REPO, "docs", "adr")),
-                         "decisions are kept outside this repository")
+        self.assertFalse(
+            os.path.isdir(os.path.join(self.REPO, "docs", "adr")), "decisions are kept outside this repository"
+        )
         found = []
         for d, dirs, files in os.walk(self.REPO):
             dirs[:] = [x for x in dirs if x not in self.SKIP and (not x.startswith(".") or x in self.DOTTED)]
@@ -2217,13 +2836,17 @@ class Version(unittest.TestCase):
         # the extension's is its Marketplace page's link
         url = "git+https://github.com/rowstile/rowstile.git"
         sdks = sorted(glob.glob(os.path.join(self.REPO, "sdk", "typescript", "*", "")))
-        self.assertLessEqual({"client", "pg", "postgres", "prisma", "drizzle", "next", "react", "vitest"},
-                             {os.path.basename(os.path.dirname(d)) for d in sdks}, "the SDK's packages aren't found")
+        self.assertLessEqual(
+            {"client", "pg", "postgres", "prisma", "drizzle", "next", "react", "vitest"},
+            {os.path.basename(os.path.dirname(d)) for d in sdks},
+            "the SDK's packages aren't found",
+        )
         for d in sdks + [os.path.join(self.REPO, "packaging", "npm", "rowstile"), os.path.join(self.REPO, "editor")]:
             with open(os.path.join(d, "package.json"), encoding="utf-8") as fh:
                 repo = json.load(fh).get("repository", {})
-            self.assertEqual((repo.get("url"), repo.get("directory")),
-                             (url, os.path.relpath(d, self.REPO).replace(os.sep, "/")), d)
+            self.assertEqual(
+                (repo.get("url"), repo.get("directory")), (url, os.path.relpath(d, self.REPO).replace(os.sep, "/")), d
+            )
         with open(os.path.join(self.REPO, "packaging", "npm", "build.mjs"), encoding="utf-8") as fh:
             self.assertIn(f'url: "{url}"', fh.read())
 

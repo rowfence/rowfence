@@ -10,6 +10,7 @@ A permission with a deny inside inheritance (`(owner or parent.view) and not hid
 permission, its `or` part, and the deny on it (split_denies). Its branches are that part's (`owner`,
 `parent.view`), which explain lists under the hidden permission.
 """
+
 from __future__ import annotations
 
 import re
@@ -27,8 +28,8 @@ ITEM = re.compile(r"^( *)(yes|no) +(.*)$")
 
 
 class Report(TypedDict):
-    total: int                          # branches of the public permissions
-    covered: int                        # of those, the ones a passing check made true
+    total: int  # branches of the public permissions
+    covered: int  # of those, the ones a passing check made true
     missing: list[tuple[str, str, str]]  # the others: (line, "type.perm", item)
 
 
@@ -89,15 +90,21 @@ def describe(r: Report, limit: int | None = None) -> str:
         return head + " (all of them)"
     shown = r["missing"] if limit is None else r["missing"][:limit]
     more = len(r["missing"]) - len(shown)
-    return head + "; no test reaches:\n" + "\n".join(f"  {line}: {name}: {item}" for line, name, item in shown) + \
-        (f"\n  ... and {more} more" if more > 0 else "")
+    return (
+        head
+        + "; no test reaches:\n"
+        + "\n".join(f"  {line}: {name}: {item}" for line, name, item in shown)
+        + (f"\n  ... and {more} more" if more > 0 else "")
+    )
 
 
 def summary(r: Report, limit: int = 2) -> str:
     """For rowstile dev's line: '2 branches no test reaches (line 18: org.admin, line 40: {not locked})'."""
     if not r["missing"]:
         return ""
-    short: Callable[[str], str] = lambda item: item if len(item) <= 32 else item[:29] + "..." + ("}" if item.startswith("{") else "")
+    short: Callable[[str], str] = lambda item: (
+        item if len(item) <= 32 else item[:29] + "..." + ("}" if item.startswith("{") else "")
+    )
     shown = ", ".join(f"{line}: {short(item)}" for line, _, item in r["missing"][:limit])
     n = len(r["missing"])
     return f"{n} branch{'es' if n != 1 else ''} no test reaches ({shown}{', ...' if n > limit else ''})"
