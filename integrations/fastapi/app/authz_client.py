@@ -212,6 +212,15 @@ class Authz:
             raise ValueError(f"{type_}.{relation} is not shared in the policy")
         return str(self._one("SELECT authz.create_link(%s, %s::text, %s, %s)", (type_, _id(id_), relation, expires_at)))
 
+    def list_links(self, type_: ObjectType, id_: Id) -> Sequence[Row]:
+        """The links on an object (id, relation, created_by, created_at, expires_at), for those who can share it
+        or may make such links."""
+        return self._rows("SELECT * FROM authz.list_links(%s, %s::text)", (type_, _id(id_)))
+
+    def revoke_link(self, type_: ObjectType, id_: Id, link_id: str) -> None:
+        """Turns a link off, by its id in list_links (not its token)."""
+        self._one("SELECT authz.revoke_link(%s, %s::text, %s)", (type_, _id(id_), link_id))
+
     def use_links(self, tokens: Sequence[str]) -> None:
         """Link tokens the request presents, for this transaction (SET LOCAL authz_ctx.links)."""
         self._one("SELECT set_config('authz_ctx.links', %s, true)", (",".join(tokens),))

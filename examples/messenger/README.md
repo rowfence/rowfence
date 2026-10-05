@@ -38,7 +38,7 @@ database once first: `rowstile push --development`.
 | Nobody demotes or removes the owner, nor makes another | `update role : chat.manage and {role <> 'owner'}`, `update role after : {role <> 'owner'}` |
 | Edit your own messages for 15 minutes | `can edit = sender and {not deleted and created_at > now() - interval '15 minutes'}` |
 | Delete for everyone: yours, or anyone's if you're an admin; no undelete | `can remove = sender or chat.manage`, `update deleted after : {deleted}` |
-| Invite links anyone can use for a week | `invitee : link shared by invite`, `can join = invitee and {kind = 'group'}`; the backend calls `authz.create_link` |
+| Invite links anyone can use for a week | `invitee : link shared by invite`, `can join = invitee and {kind = 'group'}`; the backend calls `authz.create_link`, and `authz.list_links` and `authz.revoke_link` so admins see the links and turn one off |
 | Bots post as themselves, only where an admin added them | `type bot = ms.bots principal where {active}`, `bot : bot = ms.chat_bots(...)`, `from_bot` in the insert rule |
 | Only a bot's owner makes its keys | `can manage_keys = owner` on the bot type; the backend calls `authz.create_api_key(..., 'bot', id)` |
 | Messages are numbered per chat | `type message = ms.messages (chat_id, seq)`: a composite key; the API asks `authz.can('message', '(7,42)', 'edit')` |

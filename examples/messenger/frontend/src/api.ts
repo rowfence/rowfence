@@ -26,6 +26,9 @@ export type Message = {
 
 export type Bot = { id: number; name: string; active: boolean; created_at: string; key?: string };
 
+/** An invite link as the database lists it: its id names it to turn it off, and is not the link. */
+export type Invite = { id: string; created_by: string | null; created_at: string; expires_at: string | null };
+
 /** An error from the API: its message, and when the database refused something, its explanation. */
 export class ApiError extends Error {
   constructor(message: string, public status: number, public why: string[] = []) { super(message); }
@@ -78,6 +81,8 @@ export const api = {
   removeMember: (id: number, userId: string) => del(`/api/chats/${id}/members/${userId}`),
 
   invite: (id: number) => post<{ token: string; expires_at: string }>(`/api/chats/${id}/invite`),
+  invites: (id: number) => get<Invite[]>(`/api/chats/${id}/invites`),
+  turnOffInvite: (id: number, linkId: string) => del(`/api/chats/${id}/invites/${linkId}`),
   joinPreview: (token: string) => get<{ id: number; title: string; about: string; member: boolean }>(`/api/join/${token}`),
   join: (token: string) => post<{ id: number }>(`/api/join/${token}`),
 
