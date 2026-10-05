@@ -182,4 +182,5 @@ GENERATED_FUNCTIONS = ("act_as", "can", "list", "perms", "perms_of", "share", "u
                        "create_api_key", "list_api_keys", "revoke_api_key", "login_key", "login_jwt", "view_as",
                        "sync_members", "changes_since", "trim_changes", "trim_audit", "request_access", "pending_requests", "decide_request",
                        "cancel_request", "break_glass", "start_review", "review_items", "review_decide",
-                       "close_review", "check_invariants", "lint", "connection_check", "explain_rule", "who_among")
+                       "close_review", "check_invariants", "lint", "connection_check", "explain_rule", "who_among",
+                       "list_links", "revoke_link")

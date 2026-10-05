@@ -108,7 +108,7 @@ DO $g$
 DECLARE f record; kept text := '';
 BEGIN
   FOR f IN SELECT p.oid, p.ctid, p.oid::regprocedure AS name FROM pg_proc p WHERE p.pronamespace = to_regnamespace('authz')
-           AND p.proname = ANY (ARRAY['act_as', 'can', 'list', 'perms', 'perms_of', 'share', 'unshare', 'verify', 'create_link', 'principal', 'create_role', 'set_role_permissions', 'delete_role', 'roles_of', 'who', 'explain', 'list_shares', 'shares', 'create_api_key', 'list_api_keys', 'revoke_api_key', 'login_key', 'login_jwt', 'view_as', 'sync_members', 'changes_since', 'trim_changes', 'trim_audit', 'request_access', 'pending_requests', 'decide_request', 'cancel_request', 'break_glass', 'start_review', 'review_items', 'review_decide', 'close_review', 'check_invariants', 'lint', 'connection_check', 'explain_rule', 'who_among']) LOOP
+           AND p.proname = ANY (ARRAY['act_as', 'can', 'list', 'perms', 'perms_of', 'share', 'unshare', 'verify', 'create_link', 'principal', 'create_role', 'set_role_permissions', 'delete_role', 'roles_of', 'who', 'explain', 'list_shares', 'shares', 'create_api_key', 'list_api_keys', 'revoke_api_key', 'login_key', 'login_jwt', 'view_as', 'sync_members', 'changes_since', 'trim_changes', 'trim_audit', 'request_access', 'pending_requests', 'decide_request', 'cancel_request', 'break_glass', 'start_review', 'review_items', 'review_decide', 'close_review', 'check_invariants', 'lint', 'connection_check', 'explain_rule', 'who_among', 'list_links', 'revoke_link']) LOOP
     BEGIN
       EXECUTE format('DROP FUNCTION %s', f.name);
     EXCEPTION WHEN dependent_objects_still_exist THEN
@@ -3538,6 +3538,66 @@ END $f$;
 CREATE OR REPLACE FUNCTION authz.create_link(p_type text, p_id bigint, p_relation text, p_expires_at timestamptz DEFAULT NULL)
 RETURNS text LANGUAGE sql AS $$ SELECT authz.create_link(p_type, p_id::text, p_relation, p_expires_at) $$;
 
+-- The relations whose links on an object the caller may see: every one it has links of if they may inspect it
+-- (they can share it, or are an administrator), else those they may share with a link. NULL: none
+CREATE FUNCTION authz_int.link_relations(p_type text, p_id text) RETURNS text[]
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $f$
+BEGIN
+  IF authz_int.may_inspect(p_type, p_id) THEN
+    RETURN coalesce((SELECT array_agg(DISTINCT g.relation) FROM authz.shares g
+                     WHERE g.object_type = p_type AND g.object_id = p_id AND g.subject_type = 'link'), '{}');
+  END IF;
+  RETURN (SELECT array_agg(s.relation) FROM authz_int.shared_relations s
+          WHERE s.object_type = p_type AND s.subject = 'link'
+            AND authz_int.may_manage(p_type, p_id, s.relation, 'link'));
+END $f$;
+-- The links on an object: SELECT * FROM authz.list_links('folder', 3). For those who can share it, or may make
+-- such links. A link's id names it for authz.revoke_link: it is not the token, and opens nothing.
+CREATE OR REPLACE FUNCTION authz.list_links(p_type text, p_id text)
+RETURNS TABLE (id text, relation text, created_by text, created_at timestamptz, expires_at timestamptz)
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $f$
+DECLARE v_relations text[];
+BEGIN
+  p_id := authz_int.canon(p_type, p_id);
+  v_relations := authz_int.link_relations(p_type, p_id);
+  IF v_relations IS NULL THEN
+    RAISE EXCEPTION 'you cannot see the links of % %', p_type, p_id USING ERRCODE = 'insufficient_privilege', HINT = 'rowstile help AZ705';
+  END IF;
+  RETURN QUERY SELECT left(g.subject_id, 16), g.relation, g.created_by, g.created_at, g.expires_at
+  FROM authz.shares g WHERE g.object_type = p_type AND g.object_id = p_id AND g.subject_type = 'link'
+    AND g.relation = ANY (v_relations) ORDER BY g.created_at, g.subject_id;
+END $f$;
+-- Turn a link off, by its id in authz.list_links: needs what unsharing it needs
+CREATE OR REPLACE FUNCTION authz.revoke_link(p_type text, p_id text, p_link text) RETURNS void
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $f$
+DECLARE v_relations text[]; v record; v_found boolean := false;
+BEGIN
+  PERFORM authz_int.check_writable();
+  p_id := authz_int.canon(p_type, p_id);
+  v_relations := authz_int.link_relations(p_type, p_id);
+  IF v_relations IS NULL THEN
+    RAISE EXCEPTION 'you cannot turn off the links of % %', p_type, p_id USING ERRCODE = 'insufficient_privilege', HINT = 'rowstile help AZ705';
+  END IF;
+  FOR v IN SELECT g.relation, g.subject_id FROM authz.shares g
+           WHERE g.object_type = p_type AND g.object_id = p_id AND g.subject_type = 'link'
+             AND g.relation = ANY (v_relations) AND left(g.subject_id, 16) = p_link LOOP
+    IF NOT authz_int.may_manage(p_type, p_id, v.relation, 'link') THEN
+      RAISE EXCEPTION 'you cannot turn off link % of % % (you could not unshare it)', p_link, p_type, p_id
+        USING ERRCODE = 'insufficient_privilege', HINT = 'rowstile help AZ705';
+    END IF;
+    DELETE FROM authz.shares g WHERE g.object_type = p_type AND g.object_id = p_id AND g.relation = v.relation
+      AND g.subject_type = 'link' AND g.subject_id = v.subject_id;
+    v_found := true;
+  END LOOP;
+  IF NOT v_found THEN
+    RAISE EXCEPTION 'no link % on % %', p_link, p_type, p_id USING HINT = 'rowstile help AZ708';
+  END IF;
+END $f$;
+CREATE OR REPLACE FUNCTION authz.list_links(p_type text, p_id bigint) RETURNS TABLE (id text, relation text, created_by text, created_at timestamptz, expires_at timestamptz) LANGUAGE sql STABLE AS
+  $$ SELECT * FROM authz.list_links(p_type, p_id::text) $$;
+CREATE OR REPLACE FUNCTION authz.revoke_link(p_type text, p_id bigint, p_link text) RETURNS void LANGUAGE sql AS
+  $$ SELECT authz.revoke_link(p_type, p_id::text, p_link) $$;
+
 -- Custom roles: defined per owner (e.g. an org) by people with 'manage_roles' there
 CREATE OR REPLACE FUNCTION authz.create_role(p_owner_type text, p_owner_id text, p_object_type text, p_name text,
   p_permissions text[]) RETURNS bigint LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $f$
@@ -5062,7 +5122,7 @@ SELECT p.oid::regprocedure::text, gw.who, a.privilege_type,
   WHERE p.pronamespace IN (SELECT oid FROM pg_namespace WHERE nspname IN ('authz', 'authz_gen', 'authz_int')) AND a.grantee <> p.proowner
     AND NOT (p.pronamespace = 'authz_int'::regnamespace AND a.grantee IN (0, 'app_user'::regrole))
     AND NOT (p.pronamespace = 'authz_gen'::regnamespace AND a.grantee = 'app_user'::regrole)
-    AND NOT (p.pronamespace = 'authz'::regnamespace AND a.grantee = 'app_user'::regrole AND p.oid = ANY (ARRAY['authz.uid()', 'authz.principal()', 'authz.ctx(text)', 'authz.link_hashes()', 'authz.act_as(text, text)', 'authz.connection_check()', 'authz.can(text, text, text)', 'authz.list(text, text, text, integer)', 'authz.perms(text, text)', 'authz.perms_of(text, text[])', 'authz.share(text, text, text, text, text, text, timestamptz, timestamptz, text, jsonb)', 'authz.share(text, bigint, text, text, bigint, text, timestamptz, timestamptz, text, jsonb)', 'authz.share(text, bigint, text, text, text, text, timestamptz, timestamptz, text, jsonb)', 'authz.unshare(text, text, text, text, text, text)', 'authz.unshare(text, bigint, text, text, bigint, text)', 'authz.unshare(text, bigint, text, text, text, text)', 'authz.create_link(text, text, text, timestamptz)', 'authz.create_link(text, bigint, text, timestamptz)', 'authz.create_role(text, text, text, text, text[])', 'authz.create_role(text, bigint, text, text, text[])', 'authz.set_role_permissions(bigint, text[])', 'authz.delete_role(bigint)', 'authz.roles_of(text, text)', 'authz.roles_of(text, bigint)', 'authz.who(text, text, text)', 'authz.explain(text, text, text, text)', 'authz.list_shares(text, text)', 'authz.explain_rule(text, text, text, jsonb)', 'authz.who_among(text, text, text, text[], text)', 'authz.create_api_key(text, text, timestamptz, text, text)', 'authz.list_api_keys(text, text)', 'authz.revoke_api_key(bigint)', 'authz.login_key(text)', 'authz.login_jwt(text)', 'authz.view_as(text, text)', 'authz.request_access(text, text, text, text, interval)', 'authz.request_access(text, bigint, text, text, interval)', 'authz.pending_requests()', 'authz.decide_request(bigint, boolean, text)', 'authz.cancel_request(bigint)', 'authz.break_glass(text, text, text, text, interval)', 'authz.break_glass(text, bigint, text, text, interval)', 'authz.start_review(text, text, timestamptz)', 'authz.start_review(text, bigint, timestamptz)', 'authz.review_items(bigint)', 'authz.review_decide(bigint, integer, boolean)', 'authz.close_review(bigint, boolean)', 'authz.who(text, bigint, text)', 'authz.explain(text, bigint, text, text)', 'authz.list_shares(text, bigint)', 'authz.can(text, bigint, text)', 'authz.who_among(text, bigint, text, text[], text)', 'authz.perms(text, bigint)']::regprocedure[])) LOOP
+    AND NOT (p.pronamespace = 'authz'::regnamespace AND a.grantee = 'app_user'::regrole AND p.oid = ANY (ARRAY['authz.uid()', 'authz.principal()', 'authz.ctx(text)', 'authz.link_hashes()', 'authz.act_as(text, text)', 'authz.connection_check()', 'authz.can(text, text, text)', 'authz.list(text, text, text, integer)', 'authz.perms(text, text)', 'authz.perms_of(text, text[])', 'authz.share(text, text, text, text, text, text, timestamptz, timestamptz, text, jsonb)', 'authz.share(text, bigint, text, text, bigint, text, timestamptz, timestamptz, text, jsonb)', 'authz.share(text, bigint, text, text, text, text, timestamptz, timestamptz, text, jsonb)', 'authz.unshare(text, text, text, text, text, text)', 'authz.unshare(text, bigint, text, text, bigint, text)', 'authz.unshare(text, bigint, text, text, text, text)', 'authz.create_link(text, text, text, timestamptz)', 'authz.create_link(text, bigint, text, timestamptz)', 'authz.list_links(text, text)', 'authz.revoke_link(text, text, text)', 'authz.create_role(text, text, text, text, text[])', 'authz.create_role(text, bigint, text, text, text[])', 'authz.set_role_permissions(bigint, text[])', 'authz.delete_role(bigint)', 'authz.roles_of(text, text)', 'authz.roles_of(text, bigint)', 'authz.who(text, text, text)', 'authz.explain(text, text, text, text)', 'authz.list_shares(text, text)', 'authz.explain_rule(text, text, text, jsonb)', 'authz.who_among(text, text, text, text[], text)', 'authz.create_api_key(text, text, timestamptz, text, text)', 'authz.list_api_keys(text, text)', 'authz.revoke_api_key(bigint)', 'authz.login_key(text)', 'authz.login_jwt(text)', 'authz.view_as(text, text)', 'authz.request_access(text, text, text, text, interval)', 'authz.request_access(text, bigint, text, text, interval)', 'authz.pending_requests()', 'authz.decide_request(bigint, boolean, text)', 'authz.cancel_request(bigint)', 'authz.break_glass(text, text, text, text, interval)', 'authz.break_glass(text, bigint, text, text, interval)', 'authz.start_review(text, text, timestamptz)', 'authz.start_review(text, bigint, timestamptz)', 'authz.review_items(bigint)', 'authz.review_decide(bigint, integer, boolean)', 'authz.close_review(bigint, boolean)', 'authz.who(text, bigint, text)', 'authz.explain(text, bigint, text, text)', 'authz.list_shares(text, bigint)', 'authz.list_links(text, bigint)', 'authz.revoke_link(text, bigint, text)', 'authz.can(text, bigint, text)', 'authz.who_among(text, bigint, text, text[], text)', 'authz.perms(text, bigint)']::regprocedure[])) LOOP
     severity := 'error'; object := r.object;
     problem := format('%s holds %s on it, which the policy doesn''t give (a default privilege of the owner, or a grant made since the last apply): the next apply takes it back, or %s', r.who, r.privilege, r.stmt);
     RETURN NEXT;
@@ -5449,7 +5509,7 @@ SELECT p.oid::regprocedure::text, gw.who, a.privilege_type,
   WHERE p.pronamespace IN (SELECT oid FROM pg_namespace WHERE nspname IN ('authz', 'authz_gen', 'authz_int')) AND a.grantee <> p.proowner
     AND NOT (p.pronamespace = 'authz_int'::regnamespace AND a.grantee IN (0, 'app_user'::regrole))
     AND NOT (p.pronamespace = 'authz_gen'::regnamespace AND a.grantee = 'app_user'::regrole)
-    AND NOT (p.pronamespace = 'authz'::regnamespace AND a.grantee = 'app_user'::regrole AND p.oid = ANY (ARRAY['authz.uid()', 'authz.principal()', 'authz.ctx(text)', 'authz.link_hashes()', 'authz.act_as(text, text)', 'authz.connection_check()', 'authz.can(text, text, text)', 'authz.list(text, text, text, integer)', 'authz.perms(text, text)', 'authz.perms_of(text, text[])', 'authz.share(text, text, text, text, text, text, timestamptz, timestamptz, text, jsonb)', 'authz.share(text, bigint, text, text, bigint, text, timestamptz, timestamptz, text, jsonb)', 'authz.share(text, bigint, text, text, text, text, timestamptz, timestamptz, text, jsonb)', 'authz.unshare(text, text, text, text, text, text)', 'authz.unshare(text, bigint, text, text, bigint, text)', 'authz.unshare(text, bigint, text, text, text, text)', 'authz.create_link(text, text, text, timestamptz)', 'authz.create_link(text, bigint, text, timestamptz)', 'authz.create_role(text, text, text, text, text[])', 'authz.create_role(text, bigint, text, text, text[])', 'authz.set_role_permissions(bigint, text[])', 'authz.delete_role(bigint)', 'authz.roles_of(text, text)', 'authz.roles_of(text, bigint)', 'authz.who(text, text, text)', 'authz.explain(text, text, text, text)', 'authz.list_shares(text, text)', 'authz.explain_rule(text, text, text, jsonb)', 'authz.who_among(text, text, text, text[], text)', 'authz.create_api_key(text, text, timestamptz, text, text)', 'authz.list_api_keys(text, text)', 'authz.revoke_api_key(bigint)', 'authz.login_key(text)', 'authz.login_jwt(text)', 'authz.view_as(text, text)', 'authz.request_access(text, text, text, text, interval)', 'authz.request_access(text, bigint, text, text, interval)', 'authz.pending_requests()', 'authz.decide_request(bigint, boolean, text)', 'authz.cancel_request(bigint)', 'authz.break_glass(text, text, text, text, interval)', 'authz.break_glass(text, bigint, text, text, interval)', 'authz.start_review(text, text, timestamptz)', 'authz.start_review(text, bigint, timestamptz)', 'authz.review_items(bigint)', 'authz.review_decide(bigint, integer, boolean)', 'authz.close_review(bigint, boolean)', 'authz.who(text, bigint, text)', 'authz.explain(text, bigint, text, text)', 'authz.list_shares(text, bigint)', 'authz.can(text, bigint, text)', 'authz.who_among(text, bigint, text, text[], text)', 'authz.perms(text, bigint)']::regprocedure[])) LOOP
+    AND NOT (p.pronamespace = 'authz'::regnamespace AND a.grantee = 'app_user'::regrole AND p.oid = ANY (ARRAY['authz.uid()', 'authz.principal()', 'authz.ctx(text)', 'authz.link_hashes()', 'authz.act_as(text, text)', 'authz.connection_check()', 'authz.can(text, text, text)', 'authz.list(text, text, text, integer)', 'authz.perms(text, text)', 'authz.perms_of(text, text[])', 'authz.share(text, text, text, text, text, text, timestamptz, timestamptz, text, jsonb)', 'authz.share(text, bigint, text, text, bigint, text, timestamptz, timestamptz, text, jsonb)', 'authz.share(text, bigint, text, text, text, text, timestamptz, timestamptz, text, jsonb)', 'authz.unshare(text, text, text, text, text, text)', 'authz.unshare(text, bigint, text, text, bigint, text)', 'authz.unshare(text, bigint, text, text, text, text)', 'authz.create_link(text, text, text, timestamptz)', 'authz.create_link(text, bigint, text, timestamptz)', 'authz.list_links(text, text)', 'authz.revoke_link(text, text, text)', 'authz.create_role(text, text, text, text, text[])', 'authz.create_role(text, bigint, text, text, text[])', 'authz.set_role_permissions(bigint, text[])', 'authz.delete_role(bigint)', 'authz.roles_of(text, text)', 'authz.roles_of(text, bigint)', 'authz.who(text, text, text)', 'authz.explain(text, text, text, text)', 'authz.list_shares(text, text)', 'authz.explain_rule(text, text, text, jsonb)', 'authz.who_among(text, text, text, text[], text)', 'authz.create_api_key(text, text, timestamptz, text, text)', 'authz.list_api_keys(text, text)', 'authz.revoke_api_key(bigint)', 'authz.login_key(text)', 'authz.login_jwt(text)', 'authz.view_as(text, text)', 'authz.request_access(text, text, text, text, interval)', 'authz.request_access(text, bigint, text, text, interval)', 'authz.pending_requests()', 'authz.decide_request(bigint, boolean, text)', 'authz.cancel_request(bigint)', 'authz.break_glass(text, text, text, text, interval)', 'authz.break_glass(text, bigint, text, text, interval)', 'authz.start_review(text, text, timestamptz)', 'authz.start_review(text, bigint, timestamptz)', 'authz.review_items(bigint)', 'authz.review_decide(bigint, integer, boolean)', 'authz.close_review(bigint, boolean)', 'authz.who(text, bigint, text)', 'authz.explain(text, bigint, text, text)', 'authz.list_shares(text, bigint)', 'authz.list_links(text, bigint)', 'authz.revoke_link(text, bigint, text)', 'authz.can(text, bigint, text)', 'authz.who_among(text, bigint, text, text[], text)', 'authz.perms(text, bigint)']::regprocedure[])) LOOP
     EXECUTE g.stmt;
     v_taken := v_taken + 1;
   END LOOP;
@@ -5487,6 +5547,8 @@ GRANT EXECUTE ON FUNCTION
   authz.unshare(text, bigint, text, text, text, text),
   authz.create_link(text, text, text, timestamptz),
   authz.create_link(text, bigint, text, timestamptz),
+  authz.list_links(text, text),
+  authz.revoke_link(text, text, text),
   authz.create_role(text, text, text, text, text[]),
   authz.create_role(text, bigint, text, text, text[]),
   authz.set_role_permissions(bigint, text[]),
@@ -5519,6 +5581,8 @@ GRANT EXECUTE ON FUNCTION
   authz.who(text, bigint, text),
   authz.explain(text, bigint, text, text),
   authz.list_shares(text, bigint),
+  authz.list_links(text, bigint),
+  authz.revoke_link(text, bigint, text),
   authz.can(text, bigint, text),
   authz.who_among(text, bigint, text, text[], text),
   authz.perms(text, bigint)

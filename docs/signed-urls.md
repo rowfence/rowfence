@@ -65,5 +65,6 @@ the other order could leave a row pointing at nothing.
 `authz.create_link()` returns a token once and stores only its hash. A request presenting it
 (`SET LOCAL authz_ctx.links = '<token>'`, or `Authz.use_links()` in the Python client) can read what the
 link shares, signed in or not, so downloads for link holders follow the same pattern. Send the token
-in a header rather than the URL your server logs, and keep your own record of which links exist
-(their hashes) so people can list and revoke them.
+in a header rather than the URL your server logs. `authz.list_links()` lists an object's links for the
+people who may turn them off, each with an id, and `authz.revoke_link()` turns one off by that id: the
+token is never shown again, and the id opens nothing.

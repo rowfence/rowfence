@@ -56,7 +56,7 @@ do depends on identity:
 | update, delete or upsert onto a hidden row | row-level security (`UPDATE 0`, `DELETE 0`, an error for the upsert) | adversarial.sh |
 | take ownership, move a row where the user may not write, stop inheritance above a folder | column rules (`update owner_id : share`, `update parent_id after : parent.edit`) | adversarial.sh, scenario.sql |
 | share what the user can't share, a relation that isn't shared, or to widen their own access | `authz.share()` checks the relation is shared and the sharer holds what the policy asks | adversarial.sh, multi_scenario.sql |
-| learn who has access, or the shares on, an object they can't share | `authz.who` and `authz.list_shares` refuse, the same way for missing objects | adversarial.sh |
+| learn who has access, or the shares or links on, an object they can't share | `authz.who`, `authz.list_shares` and `authz.list_links` refuse, the same way for missing objects; so does `authz.revoke_link`, whether or not the id names a link | adversarial.sh |
 | approve their own access request, decide one they can't share | `authz.decide_request()` checks the decider | governance.sh, adversarial.sh |
 | act as another user; widen a key's scopes; write during "view as" | signed sessions (above); scoped and view-as sessions are read-only where they must be | sessions.sh, identity.sh |
 | a stale closure table granting access after a move | the type-wide tree lock; serialization errors in stricter isolation levels | races.sh, stress.sh, concurrency.sh |

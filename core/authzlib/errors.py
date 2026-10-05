@@ -553,8 +553,9 @@ CODES = {
     "AZ705": Code(
         "Not allowed",
         "The signed-in person asked an `authz.*` function for something the policy doesn't let them do: share or "
-        "unshare this object, give a role, manage roles or keys, see who has access or the shares, decide a request "
-        "or a review, break the glass. The message says what; `authz.explain(type, id, perm)` says why. Answer 403.",
+        "unshare this object, give a role, manage roles or keys, see who has access, the shares or the links, turn "
+        "a link off, decide a request or a review, break the glass. The message says what; "
+        "`authz.explain(type, id, perm)` says why. Answer 403.",
         when="runtime"),
     "AZ706": Code(
         "The policy doesn't allow this share",
@@ -571,7 +572,7 @@ CODES = {
     "AZ708": Code(
         "No such thing",
         "The call names something that isn't there: the subject to share with, an active user to view as, a "
-        "pending request, an item of a review, an API key of yours. Answer 404.",
+        "pending request, an item of a review, an API key of yours, a link on the object. Answer 404.",
         when="runtime"),
     "AZ709": Code(
         "A write refused by a rule",
