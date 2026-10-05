@@ -546,14 +546,14 @@ view authz_gen."user__self" | ed8be2f1eb50
 view authz_int."bot__manage" | 962874600141
 view authz_int."bot__manage_keys" | 741de196bbb0
 view authz_int."bot__owner" | 6e030187e305
-view authz_int."chat__add_members" | 38d56eb15e06
+view authz_int."chat__add_members" | 19c7549beee3
 view authz_int."chat__admin" | 22edb6bee746
 view authz_int."chat__blocked" | cd0fa923f2c2
 view authz_int."chat__bot" | f0979a4bc720
 view authz_int."chat__creator" | 06a50c4a8387
-view authz_int."chat__invite" | 242ff53db826
+view authz_int."chat__invite" | 6a5ef5402410
 view authz_int."chat__invitee" | a5597103dfb4
-view authz_int."chat__join" | edbc0a08bf9b
+view authz_int."chat__join" | 6bf86a4aac6a
 view authz_int."chat__manage" | 3bb4bca195d5
 view authz_int."chat__member" | 88bb354bde76
 view authz_int."chat__owner" | a1a3761aca88

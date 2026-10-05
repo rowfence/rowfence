@@ -2382,7 +2382,7 @@ CREATE VIEW authz_gen."file__folder__edit" WITH (security_barrier) AS SELECT id 
 
 -- file.edit (line 62): share or folder.edit
 CREATE VIEW authz_int."file__edit" AS
-  (SELECT id FROM authz_int."file__share")
+  (SELECT id FROM authz_int."file__owner")
   UNION ALL
   (SELECT id FROM authz_int."file__folder__edit");
 CREATE VIEW authz_gen."file__edit" WITH (security_barrier) AS SELECT id FROM authz_int."file__edit";
@@ -2401,7 +2401,9 @@ CREATE VIEW authz_gen."file__folder__view" WITH (security_barrier) AS SELECT id 
 
 -- file.view (line 63): edit or viewer or (folder.view and not {confidential})
 CREATE VIEW authz_int."file__view" AS
-  (SELECT id FROM authz_int."file__edit")
+  (SELECT id FROM authz_int."file__owner")
+  UNION ALL
+  (SELECT id FROM authz_int."file__folder__edit")
   UNION ALL
   (SELECT id FROM authz_int."file__viewer")
   UNION ALL

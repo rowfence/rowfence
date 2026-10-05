@@ -7,6 +7,7 @@ files, what the rowstile command runs against a database, its file reading, and 
                                           # tests/golden/*.sql, then read the diff before committing
 """
 import glob
+import itertools
 import json
 import os
 import re
@@ -266,12 +267,13 @@ class SlowPlans(unittest.TestCase):
     DOCS = "type doc = app.docs\n  team : team = team_id\n  can view = team.p{n}\nrules app.docs\n  select : view\n"
 
     def test_an_operand_named_twice_is_written_once(self) -> None:
-        once = Compiler(parse_policy(self.TEAMS + "  can p0 = member\n  can p1 = p0\n" + self.DOCS.format(n=1))).compile("x")
-        for twice in ("p0 and p0", "p0 or p0", "p0 and p0 and p0"):
+        # in an or, p0 is written out in place (its relation, once); in an and, it is named, once
+        for twice, p0, member in (("p0", 0, 1), ("p0 or p0", 0, 1), ("p0 and p0", 1, 0), ("p0 and p0 and p0", 1, 0)):
             text = self.TEAMS + f"  can p0 = member\n  can p1 = {twice}\n" + self.DOCS.format(n=1)
             sql = Compiler(parse_policy(text)).compile("x")
-            body = lambda s: search(r'CREATE VIEW authz_int\."?team__p1"? AS\n(.*?);\n', s, re.S).group(1)
-            self.assertEqual(len(re.findall(r"team__p0", body(sql))), len(re.findall(r"team__p0", body(once))), twice)
+            body = search(r'CREATE VIEW authz_int\."?team__p1"? AS\n(.*?);\n', sql, re.S).group(1)
+            self.assertEqual((len(re.findall(r"team__p0\b", body)), len(re.findall(r"team__member\b", body))),
+                             (p0, member), twice)
 
     def heavy(self, levels: int) -> str:
         perms = "  can p0 = member\n" + "".join(
@@ -290,6 +292,44 @@ class SlowPlans(unittest.TestCase):
         # two levels are few, and the policies here say nothing
         for text in (self.heavy(2), read(POLICIES["docs"]), read(POLICIES["multi"])):
             self.assertNotIn("view definitions to plan", Compiler(parse_policy(text)).compile("x"))
+
+    @staticmethod
+    def chain(levels: int) -> str:
+        """Types in a chain (an org, its workspaces, their projects, ...): each row is inside one of the type
+        above, and manage, edit and view each include the one before and inherit from the row above."""
+        text = ("app role app_user\ntype user = app.users\ntype t0 = app.t0\n"
+                "  member : user = app.t0_members(t0_id -> user_id)\n"
+                "  admin  : user = app.t0_admins(t0_id -> user_id)\n"
+                "  can manage = admin\n  can edit = manage\n  can view = edit or member\n")
+        for n in range(1, levels + 1):
+            text += (f"type t{n} = app.t{n}\n  parent : t{n - 1} = parent_id\n  owner  : user = owner_id\n"
+                     f"  editor : user = app.t{n}_editors(t{n}_id -> user_id)\n"
+                     f"  viewer : user = app.t{n}_viewers(t{n}_id -> user_id)\n"
+                     "  can manage = owner or parent.manage\n  can edit = manage or editor or parent.edit\n"
+                     "  can view = edit or viewer or parent.view\n")
+        return text + f"rules app.t{levels}\n  select : view\n"
+
+    def test_tiers_that_include_each_other_are_looked_up_once(self) -> None:
+        # view names parent.view, and through edit and manage parent.edit and parent.manage, which parent.view
+        # includes: only parent.view is looked up, so each level adds the same few views (it was 7, 21, 46, 85, 141)
+        counts = []
+        for levels in range(1, 6):
+            c = Compiler(parse_policy(self.chain(levels)))
+            sql = c.compile("x")
+            rule = next(r for r in c.rules if r.command == "select")
+            counts.append(c.expansions(c.rule_sql(c.types[f"t{levels}"], "t", rule)))
+        self.assertEqual(len({b - a for a, b in itertools.pairwise(counts[1:])}), 1, counts)
+        self.assertLess(counts[3], 30, counts)
+        self.assertNotIn("view definitions to plan", sql)
+        # the view of view: what its own relations give and the parent's view, not the parent's edit or manage
+        body = search(r'CREATE VIEW authz_int\."?t5__view"? AS\n(.*?);\n', sql, re.S).group(1)
+        self.assertIn("parent__view", body)
+        self.assertNotRegex(body, r"parent__(edit|manage)\b|t5__(edit|manage)\b")
+        # edit still includes manage's people, written out: the owner, and the parent's edit alone
+        body = search(r'CREATE VIEW authz_int\."?t5__edit"? AS\n(.*?);\n', sql, re.S).group(1)
+        self.assertIn("parent__edit", body)
+        self.assertIn("owner", body)
+        self.assertNotRegex(body, r"parent__manage\b|t5__manage\b")
 
 
 class LanguageForms(unittest.TestCase):

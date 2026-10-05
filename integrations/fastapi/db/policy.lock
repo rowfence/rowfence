@@ -270,4 +270,4 @@ view authz_int."project__edit" | 89945f807ea0
 view authz_int."project__member" | 3d97709a57f2
 view authz_int."project__owner" | a8b17adcb96f
 view authz_int."project__service" | 52331b48eca0
-view authz_int."project__view" | 4cb10edae6fc
+view authz_int."project__view" | 5381d665cb01

@@ -2189,7 +2189,7 @@ CREATE VIEW authz_gen."doc__container__view" WITH (security_barrier) AS SELECT i
 
 -- doc.view (line 43): edit or container.view
 CREATE VIEW authz_int."doc__view" AS
-  (SELECT id FROM authz_int."doc__edit")
+  (SELECT id FROM authz_int."doc__author")
   UNION ALL
   (SELECT id FROM authz_int."doc__container__view");
 CREATE VIEW authz_gen."doc__view" WITH (security_barrier) AS SELECT id FROM authz_int."doc__view";
@@ -2303,8 +2303,6 @@ END $f$;
 -- mt.docs select (line 49): view
 CREATE POLICY "authz_select" ON "mt"."docs" FOR SELECT TO app_user
   USING (((SELECT authz_int.scope_cmd('mt.docs', 'select')) AND (coalesce("docs"."author_id" = (SELECT authz.uid()), false)
-    OR (EXISTS (SELECT 1 FROM authz_gen."folder__edit" v WHERE v.id = (CASE WHEN "docs"."container_type" = 'folder' THEN "docs"."container_id" END)::bigint)
-    OR EXISTS (SELECT 1 FROM authz_gen."project__edit" v WHERE v.id = (CASE WHEN "docs"."container_type" = 'project' THEN "docs"."container_id" END)::bigint))
     OR (EXISTS (SELECT 1 FROM authz_gen."folder__view" v WHERE v.id = (CASE WHEN "docs"."container_type" = 'folder' THEN "docs"."container_id" END)::bigint)
     OR EXISTS (SELECT 1 FROM authz_gen."project__view" v WHERE v.id = (CASE WHEN "docs"."container_type" = 'project' THEN "docs"."container_id" END)::bigint)))));
 
@@ -2350,8 +2348,6 @@ BEGIN
   BEGIN
     EXECUTE format('CREATE OR REPLACE VIEW "mt"."docs_visible" WITH (security_barrier) AS SELECT %s FROM "mt"."docs" "docs" WHERE %s',
                    cols, '(SELECT authz_int.scope_cmd(''mt.docs'', ''select'')) AND (coalesce("docs"."author_id" = (SELECT authz.uid()), false)
-    OR (EXISTS (SELECT 1 FROM authz_gen."folder__edit" v WHERE v.id = (CASE WHEN "docs"."container_type" = ''folder'' THEN "docs"."container_id" END)::bigint)
-    OR EXISTS (SELECT 1 FROM authz_gen."project__edit" v WHERE v.id = (CASE WHEN "docs"."container_type" = ''project'' THEN "docs"."container_id" END)::bigint))
     OR (EXISTS (SELECT 1 FROM authz_gen."folder__view" v WHERE v.id = (CASE WHEN "docs"."container_type" = ''folder'' THEN "docs"."container_id" END)::bigint)
     OR EXISTS (SELECT 1 FROM authz_gen."project__view" v WHERE v.id = (CASE WHEN "docs"."container_type" = ''project'' THEN "docs"."container_id" END)::bigint)))');
   EXCEPTION WHEN invalid_table_definition THEN
@@ -2365,8 +2361,6 @@ BEGIN
     END;
     EXECUTE format('CREATE VIEW "mt"."docs_visible" WITH (security_barrier) AS SELECT %s FROM "mt"."docs" "docs" WHERE %s',
                    cols, '(SELECT authz_int.scope_cmd(''mt.docs'', ''select'')) AND (coalesce("docs"."author_id" = (SELECT authz.uid()), false)
-    OR (EXISTS (SELECT 1 FROM authz_gen."folder__edit" v WHERE v.id = (CASE WHEN "docs"."container_type" = ''folder'' THEN "docs"."container_id" END)::bigint)
-    OR EXISTS (SELECT 1 FROM authz_gen."project__edit" v WHERE v.id = (CASE WHEN "docs"."container_type" = ''project'' THEN "docs"."container_id" END)::bigint))
     OR (EXISTS (SELECT 1 FROM authz_gen."folder__view" v WHERE v.id = (CASE WHEN "docs"."container_type" = ''folder'' THEN "docs"."container_id" END)::bigint)
     OR EXISTS (SELECT 1 FROM authz_gen."project__view" v WHERE v.id = (CASE WHEN "docs"."container_type" = ''project'' THEN "docs"."container_id" END)::bigint)))');
   END;
@@ -2495,8 +2489,6 @@ BEGIN
     OR (EXISTS (SELECT 1 FROM authz_gen."folder__edit" v WHERE v.id = (CASE WHEN o."container_type" = 'folder' THEN o."container_id" END)::bigint)
     OR EXISTS (SELECT 1 FROM authz_gen."project__edit" v WHERE v.id = (CASE WHEN o."container_type" = 'project' THEN o."container_id" END)::bigint))) FROM "mt"."docs" o WHERE o."id" = v_uuid), false);
         WHEN 'view' THEN RETURN coalesce((SELECT (coalesce(o."author_id" = (SELECT authz.uid()), false)
-    OR (EXISTS (SELECT 1 FROM authz_gen."folder__edit" v WHERE v.id = (CASE WHEN o."container_type" = 'folder' THEN o."container_id" END)::bigint)
-    OR EXISTS (SELECT 1 FROM authz_gen."project__edit" v WHERE v.id = (CASE WHEN o."container_type" = 'project' THEN o."container_id" END)::bigint))
     OR (EXISTS (SELECT 1 FROM authz_gen."folder__view" v WHERE v.id = (CASE WHEN o."container_type" = 'folder' THEN o."container_id" END)::bigint)
     OR EXISTS (SELECT 1 FROM authz_gen."project__view" v WHERE v.id = (CASE WHEN o."container_type" = 'project' THEN o."container_id" END)::bigint))) FROM "mt"."docs" o WHERE o."id" = v_uuid), false);
         ELSE RAISE EXCEPTION 'no permission %.% in the policy', p_type, p_perm USING HINT = 'rowstile help AZ707';
@@ -2741,23 +2733,17 @@ BEGIN
       IF p_limit IS NULL AND p_after IS NULL THEN
         RETURN QUERY SELECT o."id"::text FROM "mt"."docs" o
         WHERE (coalesce(o."author_id" = (SELECT authz.uid()), false)
-    OR (EXISTS (SELECT 1 FROM authz_gen."folder__edit" v WHERE v.id = (CASE WHEN o."container_type" = 'folder' THEN o."container_id" END)::bigint)
-    OR EXISTS (SELECT 1 FROM authz_gen."project__edit" v WHERE v.id = (CASE WHEN o."container_type" = 'project' THEN o."container_id" END)::bigint))
     OR (EXISTS (SELECT 1 FROM authz_gen."folder__view" v WHERE v.id = (CASE WHEN o."container_type" = 'folder' THEN o."container_id" END)::bigint)
     OR EXISTS (SELECT 1 FROM authz_gen."project__view" v WHERE v.id = (CASE WHEN o."container_type" = 'project' THEN o."container_id" END)::bigint)));
       ELSIF p_after IS NULL THEN
         RETURN QUERY SELECT o."id"::text FROM "mt"."docs" o
         WHERE (coalesce(o."author_id" = (SELECT authz.uid()), false)
-    OR (EXISTS (SELECT 1 FROM authz_gen."folder__edit" v WHERE v.id = (CASE WHEN o."container_type" = 'folder' THEN o."container_id" END)::bigint)
-    OR EXISTS (SELECT 1 FROM authz_gen."project__edit" v WHERE v.id = (CASE WHEN o."container_type" = 'project' THEN o."container_id" END)::bigint))
     OR (EXISTS (SELECT 1 FROM authz_gen."folder__view" v WHERE v.id = (CASE WHEN o."container_type" = 'folder' THEN o."container_id" END)::bigint)
     OR EXISTS (SELECT 1 FROM authz_gen."project__view" v WHERE v.id = (CASE WHEN o."container_type" = 'project' THEN o."container_id" END)::bigint)))
         ORDER BY o."id" LIMIT p_limit;
       ELSE
         RETURN QUERY SELECT o."id"::text FROM "mt"."docs" o
         WHERE o."id" > p_after::uuid AND (coalesce(o."author_id" = (SELECT authz.uid()), false)
-    OR (EXISTS (SELECT 1 FROM authz_gen."folder__edit" v WHERE v.id = (CASE WHEN o."container_type" = 'folder' THEN o."container_id" END)::bigint)
-    OR EXISTS (SELECT 1 FROM authz_gen."project__edit" v WHERE v.id = (CASE WHEN o."container_type" = 'project' THEN o."container_id" END)::bigint))
     OR (EXISTS (SELECT 1 FROM authz_gen."folder__view" v WHERE v.id = (CASE WHEN o."container_type" = 'folder' THEN o."container_id" END)::bigint)
     OR EXISTS (SELECT 1 FROM authz_gen."project__view" v WHERE v.id = (CASE WHEN o."container_type" = 'project' THEN o."container_id" END)::bigint)))
         ORDER BY o."id" LIMIT p_limit;
@@ -3940,8 +3926,6 @@ BEGIN
     WHEN 'doc' THEN
       RETURN EXISTS (SELECT 1 FROM "mt"."docs" "docs" WHERE "docs"."id" = p_id::uuid
         AND (SELECT authz_int.scope_cmd('mt.docs', 'select')) AND (coalesce("docs"."author_id" = (SELECT authz.uid()), false)
-    OR (EXISTS (SELECT 1 FROM authz_gen."folder__edit" v WHERE v.id = (CASE WHEN "docs"."container_type" = 'folder' THEN "docs"."container_id" END)::bigint)
-    OR EXISTS (SELECT 1 FROM authz_gen."project__edit" v WHERE v.id = (CASE WHEN "docs"."container_type" = 'project' THEN "docs"."container_id" END)::bigint))
     OR (EXISTS (SELECT 1 FROM authz_gen."folder__view" v WHERE v.id = (CASE WHEN "docs"."container_type" = 'folder' THEN "docs"."container_id" END)::bigint)
     OR EXISTS (SELECT 1 FROM authz_gen."project__view" v WHERE v.id = (CASE WHEN "docs"."container_type" = 'project' THEN "docs"."container_id" END)::bigint))));
     ELSE RETURN false;

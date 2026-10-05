@@ -22,6 +22,21 @@ Each release upgrades from the one before it. How releases are numbered and made
   `perms_of_sync`, and a misspelled type or permission no longer type-checks. The functions that take any
   string stay.
 
+### Changed
+
+- Reads plan faster in policies with tiers that inherit. With `can edit = manage or editor or parent.edit` and
+  `can view = edit or viewer or parent.view`, the view of `view` looked up `parent.view`, `parent.edit` and
+  `parent.manage`, and each did the same one type up, so what Postgres planned for a read grew with the number
+  of ways down through the tiers. It now looks up `parent.view` alone, which includes the others. Five types
+  in a chain with three tiers: from 85 views and 13 ms of planning for each read to 20 views and 1.9 ms; seven
+  types with four tiers: from 519 views and 179 ms to 36 and 6.7 ms. Who holds what doesn't change, and no
+  policy has to.
+
+### Upgrading
+
+- The next `rowstile migrate` (or `apply`) replaces the views of permissions that name others of their type:
+  a migration with no change to the policy.
+
 ## 0.1.0 (alpha)
 
 **rowfence is now rowstile**, and 0.1.0-alpha.2 is its first release under the new name (0.1.0-alpha.1 was

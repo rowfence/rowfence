@@ -135,7 +135,7 @@ def once(items: Sequence[Expr]) -> list[Expr]:
 # for one read grows with every permission named more than once on the way (Core.expansions counts them).
 VIEW_BODY = re.compile(r'CREATE VIEW authz_int\.("(?:[^"]|"")+"|\w+) AS\n(.*?);(?=\nCREATE VIEW authz_gen|\Z)', re.S)
 VIEW_NAME = re.compile(r'authz_(?:int|gen)\.("(?:[^"]|"")+"|\w+)')
-# the policies here stay under 15; from about 70, planning a read takes a tenth of a second and more
+# the policies here stay under 25; from about 70, planning a read can take a tenth of a second and more
 MANY_EXPANSIONS = 50
 
 
@@ -1278,7 +1278,11 @@ class Core:
         header = f"-- {t.name}.{perm.name} ({perm.loc}): {perm.src}\n"
         key = self.recursive.get((t.name, perm.name))
         if key is None:
-            sql = self.set_sql(t, perm.expr, perm.loc)
+            # as the row checks do (row_sql): the permissions of its type written out in place, so a lookup
+            # another one covers is dropped. view names parent.view and, through edit, parent.edit, which
+            # parent.view includes: named as views, each would be written out again at every level above
+            items = self.prune(t, self.flat_items(t, perm, views=True))
+            sql = union([self.set_sql(t, i, perm.loc) for i in items])
         else:
             members = self.scc_members[key]
             edges = self.scc_edges(key)
@@ -1476,14 +1480,17 @@ class Core:
         return f"SELECT {rid} AS id FROM {tbl} r\n  WHERE " + "\n    AND ".join(where)
 
     # --- policies: flatten same-type permissions, drop redundant lookups ---
-    def flat_items(self, t: Type, perm: Perm, stack: tuple[Name, ...] = ()) -> list[Expr]:
+    def flat_items(self, t: Type, perm: Perm, stack: tuple[Name, ...] = (), views: bool = False) -> list[Expr]:
+        """t.perm's operands, with the permissions of its type it names written out in place. views: for the
+        permission's view, where one that inherits stays a name (its view walks a tree, which its operands
+        written out here would not)."""
         key = (t.name, perm.name)
         if key in stack:
             fail(perm.loc, f"{t.name}.{perm.name} depends on itself", "AZ302")
         out = []
         for item in self.top_items(perm):
-            if isinstance(item, Ref) and item.name in t.perms:
-                out += self.flat_items(t, t.perms[item.name], (*stack, key))
+            if isinstance(item, Ref) and item.name in t.perms and not (views and (t.name, item.name) in self.recursive):
+                out += self.flat_items(t, t.perms[item.name], (*stack, key), views)
             else:
                 out.append(item)
         return out
@@ -1507,11 +1514,14 @@ class Core:
             conds = [x for x in item.items if isinstance(x, Cond)]
             if len(arrows) == 1 and len(conds) == 1:
                 item, cond = arrows[0], conds[0].sql
-        if isinstance(item, Arrow) and item.rel in t.relations and len(t.relations[item.rel].subjects()) == 1:
+        if (isinstance(item, Arrow) and item.rel in t.relations
+                and all(not sr for _, sr in t.relations[item.rel].subjects())):
             return (item.rel, item.perm, cond)
         return None
 
     def prune(self, t: Type, items: list[Expr]) -> list[Expr]:
+        """items (the operands of an or) without those said twice, and without a lookup another one covers:
+        parent.edit beside parent.view, when view includes edit on every type parent points at (reach)."""
         keep = []
         for i, item in enumerate(items):
             if item in items[:i]:
@@ -1519,12 +1529,17 @@ class Core:
             ki = self.lookup_key(t, item)
             covered = False
             if ki:
-                target = self.T(t.relations[ki[0]].subjects()[0][0])
+                targets = [self.T(st) for st, _ in t.relations[ki[0]].subjects()]
+
+                def within(inner: str, outer: str, targets: list[Type] = targets) -> bool:
+                    return bool(targets) and all(inner in self.reach(target, outer) for target in targets)
+
                 for j, other in enumerate(items):
                     kj = self.lookup_key(t, other)
                     if j == i or not kj or kj[0] != ki[0] or kj[2] != ki[2]:
                         continue
-                    if ki[1] in self.reach(target, kj[1]) and not (kj[1] in self.reach(target, ki[1]) and j > i):
+                    # (two that include each other say the same: the first stays)
+                    if within(ki[1], kj[1]) and not (within(kj[1], ki[1]) and j > i):
                         covered = True
                         break
             if not covered:
