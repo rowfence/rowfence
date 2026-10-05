@@ -11,6 +11,7 @@ Inside a transaction already open (psycopg opens one at the first statement unle
 block is a savepoint: when it ends, the transaction acts again for whoever it acted for before the block
 (the block around it, else nobody).
 """
+
 from __future__ import annotations
 
 import contextlib
@@ -38,12 +39,13 @@ _Args = tuple[str | None, str | None]
 
 _ACT_AS = "SELECT authz.act_as(%s, %s)"
 _EXPLAIN = explain_rule_sql("%(t)s", "%(c)s", "%(k)s")
-_SIGNED = "_rowstile_signed_in"         # on the connection: who each open block of ours signed in, outermost first
+_SIGNED = "_rowstile_signed_in"  # on the connection: who each open block of ours signed in, outermost first
 
 
 def _open(conn: psycopg.Connection[Any] | psycopg.AsyncConnection[Any]) -> bool:
     """Whether a transaction is open on the connection: a block that begins now is a savepoint in it."""
     from psycopg import pq
+
     return conn.info.transaction_status != pq.TransactionStatus.IDLE
 
 
@@ -66,7 +68,7 @@ def transaction(conn: Conn, who: Who | _Unset = _UNSET) -> Iterator[Conn]:
             yield conn
         finally:
             blocks.pop()
-        if inside:      # a savepoint keeps what act_as set: back to who it was (an error undoes it by itself)
+        if inside:  # a savepoint keeps what act_as set: back to who it was (an error undoes it by itself)
             conn.execute(_ACT_AS, blocks[-1] if blocks else (None, None))
 
 

@@ -15,6 +15,7 @@ The data (Data; difftest reads it from a database, World makes it up):
     columns[type][id][column]                   a row's column values, for the simple conditions the evaluator
                                                 reads itself (conditions.py); a condition in cond is read from there
 """
+
 from __future__ import annotations
 
 import dataclasses
@@ -29,11 +30,11 @@ from .parse import KEYWORDS, ROLES, Expr, Policy, Relation, Rule, Source, Type
 # a relation or permission of a type, and the ids that hold it
 Name: TypeAlias = "tuple[str, str]"
 State: TypeAlias = "dict[Name, frozenset[str]]"
-Pair: TypeAlias = "tuple[str, str]"                 # (object id, subject id)
-RoleRow: TypeAlias = "tuple[str, str, str]"         # (object id, subject id, the role's owner id or '')
+Pair: TypeAlias = "tuple[str, str]"  # (object id, subject id)
+RoleRow: TypeAlias = "tuple[str, str, str]"  # (object id, subject id, the role's owner id or '')
 PairsKey: TypeAlias = "tuple[str, str, int, str, str]"  # (type, relation, source i, subject type, relation or '')
-RolePairsKey: TypeAlias = "tuple[str, str, str, str]"   # (type, permission, subject type, relation or '')
-CondKey: TypeAlias = "tuple[str, str]"              # (type, condition)
+RolePairsKey: TypeAlias = "tuple[str, str, str, str]"  # (type, permission, subject type, relation or '')
+CondKey: TypeAlias = "tuple[str, str]"  # (type, condition)
 K = TypeVar("K")
 V = TypeVar("V")
 
@@ -41,6 +42,7 @@ V = TypeVar("V")
 @dataclass
 class Data:
     """What the evaluator reads: ids, links and which rows pass each condition."""
+
     ids: dict[str, list[str]] = field(default_factory=dict)
     valid: dict[str, list[str]] = field(default_factory=dict)
     pairs: dict[PairsKey, list[Pair]] = field(default_factory=dict)
@@ -127,7 +129,7 @@ class Reference:
             found: set[Name] = set()
             match node:
                 case ("ref", name) if name == ROLES:
-                    pass                # the role holders' groups: the roles line's subjects, below
+                    pass  # the role holders' groups: the roles line's subjects, below
                 case ("ref", name):
                     found.add((t.name, name))
                 case ("arrow", rel, perm):
@@ -162,7 +164,7 @@ class Reference:
         on: set[Name] = set()
         order: list[list[Name]] = []
 
-        def visit(v: Name) -> None:     # Tarjan: a group comes out after every group it reaches
+        def visit(v: Name) -> None:  # Tarjan: a group comes out after every group it reaches
             index[v] = low[v] = len(index)
             stack.append(v)
             on.add(v)
@@ -181,6 +183,7 @@ class Reference:
                     if w == v:
                         break
                 order.append(comp)
+
         for v in graph:
             if v not in index:
                 visit(v)
@@ -202,6 +205,7 @@ class Reference:
                         walk(t, x)
                 case ("not", item):
                     walk(t, item)
+
         for t in self.types.values():
             for p in t.perms.values():
                 walk(t, p.expr)
@@ -219,12 +223,13 @@ class Reference:
         self.data, self.links = data, set(links)
         kind, pid = principal_of(user, self.types)
         self.principal = (kind, pid) if kind in self.types and pid in set(data.valid[kind]) else None
-        state: State = {(t.name, name): frozenset() for t in self.types.values()
-                        for name in list(t.relations) + list(t.perms)}
+        state: State = {
+            (t.name, name): frozenset() for t in self.types.values() for name in list(t.relations) + list(t.perms)
+        }
         for comp in self.order:
             for _ in range(1000):
                 changed = False
-                for (tname, name) in comp:
+                for tname, name in comp:
                     t = self.types[tname]
                     new = frozenset(self.eval_name(state, t, name) & self.valid(t))
                     if new != state[(tname, name)]:
@@ -304,8 +309,11 @@ class Reference:
         owners = self.role_owners(t)
         for st, sr in t.roles[0]:
             # with `from rel`, an assignment counts only if rel links its object to the role's owner
-            pairs = [(o, s) for o, s, w in self.data.rolepairs[(t.name, perm, st, sr or "")]
-                     if owners is None or w in owners.get(o, ())]
+            pairs = [
+                (o, s)
+                for o, s, w in self.data.rolepairs[(t.name, perm, st, sr or "")]
+                if owners is None or w in owners.get(o, ())
+            ]
             out |= self.held(state, pairs, st, sr)
         return out
 
@@ -338,7 +346,7 @@ class Reference:
                             out |= {o for o, s in self.pairs(t, r.name, i, target, None) if s in held}
                 return out
             case ("cond", sql) if sql == KEYWORDS["anyone"]:
-                return self.ids(t)                  # anyone at all, signed in or not
+                return self.ids(t)  # anyone at all, signed in or not
             case ("cond", sql) if sql == KEYWORDS["nobody"]:
                 return set()
             case ("cond", sql) if sql == KEYWORDS["signed_in"]:
@@ -376,13 +384,14 @@ def source_key(t: Type, rname: str, src: Source, st: str, sr: str | None) -> tup
 
 class Difference(TypedDict):
     """The first difference compare() found between two policies."""
-    what: str                   # 'type.perm', or 'rule schema.table command [columns]'
+
+    what: str  # 'type.perm', or 'rule schema.table command [columns]'
     user: str
     object: str
-    before: bool                # whether the first policy grants it
+    before: bool  # whether the first policy grants it
     after: bool
-    world: list[str]            # the world, as World.describe gives it
-    worlds: int                 # how many worlds were tried
+    world: list[str]  # the world, as World.describe gives it
+    worlds: int  # how many worlds were tried
 
 
 class World:
@@ -391,8 +400,9 @@ class World:
     and `{not archived}` read one column), and which rows pass each other {condition} (any yes or no per row,
     so policies that use the same condition text see the same answers)."""
 
-    def __init__(self, seed: str, size: int, conds: Mapping[str, bool] | None = None,
-                 pols: Sequence[Policy] = ()) -> None:
+    def __init__(
+        self, seed: str, size: int, conds: Mapping[str, bool] | None = None, pols: Sequence[Policy] = ()
+    ) -> None:
         self.rng_seed, self.size = seed, size
         self.made: dict[tuple[object, ...], object] = {}
         # a corner: the conditions (by their text) that hold on every row, or on none, instead of being drawn
@@ -444,14 +454,16 @@ class World:
             if any(how == "uid" for how, _ in used):
                 values += self.ids("user")
             if not values:
-                values.append("x")           # only tested for NULL
+                values.append("x")  # only tested for NULL
             out[key] = [*dict.fromkeys(values), None]
         return out
 
     def columns(self, pol: Policy) -> dict[str, dict[str, dict[str, Scalar]]]:
         """{type: {id: {column: value}}} for the columns the simple conditions read: drawn from the values the
         conditions name, or for a column a relation reads, the id its link names (the same draw as the link's)."""
-        out: dict[str, dict[str, dict[str, Scalar]]] = {t.name: {i: {} for i in self.ids(t.name)} for t in pol.types.values()}
+        out: dict[str, dict[str, dict[str, Scalar]]] = {
+            t.name: {i: {} for i in self.ids(t.name)} for t in pol.types.values()
+        }
         linked = self.linked(pol)
         for (tname, col), values in self.domains(pol).items():
             if tname not in pol.types:
@@ -460,11 +472,15 @@ class World:
             if (tname, col) in linked:
                 st = linked[(tname, col)]
                 subject_ids = self.ids(st) if st in pol.types else ["1"]
-                pairs = self.pick(("pairs", tname, "column", col, None, st, None),
-                                  lambda rng, ids=ids, s=subject_ids: [(o, rng.choice(s)) for o in ids if rng.random() < 0.6])
+                pairs = self.pick(
+                    ("pairs", tname, "column", col, None, st, None),
+                    lambda rng, ids=ids, s=subject_ids: [(o, rng.choice(s)) for o in ids if rng.random() < 0.6],
+                )
                 drawn: dict[str, Scalar] = {**dict.fromkeys(ids), **dict(pairs)}
             else:
-                drawn = self.pick(("column", tname, col), lambda rng, ids=ids, vs=values: {i: rng.choice(vs) for i in ids})
+                drawn = self.pick(
+                    ("column", tname, col), lambda rng, ids=ids, vs=values: {i: rng.choice(vs) for i in ids}
+                )
             for i in ids:
                 out[tname][i][col] = drawn[i]
         return out
@@ -487,7 +503,7 @@ class World:
         if key not in self.made:
             rng = random.Random(f"{self.rng_seed}/{key!r}")
             self.made[key] = make(rng)
-        return cast(V, self.made[key])          # what make gave for this key
+        return cast(V, self.made[key])  # what make gave for this key
 
     def ids(self, tname: str) -> list[str]:
         return self.pick(("ids", tname), lambda rng: [str(i) for i in range(1, rng.randint(1, self.size) + 1)])
@@ -528,8 +544,10 @@ class World:
                         sids = self.ids(st) if st in pol.types else ["1"]
                         out.rolepairs[(t.name, p, st, sr or "")] = self.pick(
                             ("roles", t.name, p, st, sr, owner_type),
-                            lambda rng, ids=ids, s=sids, w=owner_ids: [(o, x, rng.choice(w)) for o in ids for x in s
-                                                                       if rng.random() < 0.2])
+                            lambda rng, ids=ids, s=sids, w=owner_ids: [
+                                (o, x, rng.choice(w)) for o in ids for x in s if rng.random() < 0.2
+                            ],
+                        )
         ref = Reference(pol)
         for tname, cond in ref.conditions():
             # signed_in, anyone and nobody mean the same in every world (Reference.eval_expr): nothing to draw;
@@ -540,18 +558,29 @@ class World:
                 out.cond[(tname, cond)] = self.holds(tname, cond, self.ids(tname))
         return out
 
-    def links(self, pol: Policy, t: Type, r: Relation, src: Source, ids: list[str], st: str,
-              sr: str | None) -> list[Pair]:
+    def links(
+        self, pol: Policy, t: Type, r: Relation, src: Source, ids: list[str], st: str, sr: str | None
+    ) -> list[Pair]:
         """The links one source holds for subjects st#sr: at most one per row in a column."""
-        subject_ids = (["*"] if st == "anyone" else ["tok1", "tok2"] if st == "link" else
-                       self.ids(st) if st in pol.types else ["1"])
+        subject_ids = (
+            ["*"]
+            if st == "anyone"
+            else ["tok1", "tok2"]
+            if st == "link"
+            else self.ids(st)
+            if st in pol.types
+            else ["1"]
+        )
         key = ("pairs", *source_key(t, r.name, src, st, sr))
         if src.kind == "column" and src.type_col:
             # (type_col, id_col): a row names one object of one type at most, whatever the types
             types = [x for x, _ in src.subjects if x in pol.types]
-            rows = self.pick(("poly", t.name, src.column, src.type_col),
-                             lambda rng: [(o, x, rng.choice(self.ids(x))) for o in ids if rng.random() < 0.6
-                                          for x in [rng.choice(types)]])
+            rows = self.pick(
+                ("poly", t.name, src.column, src.type_col),
+                lambda rng: [
+                    (o, x, rng.choice(self.ids(x))) for o in ids if rng.random() < 0.6 for x in [rng.choice(types)]
+                ],
+            )
             return [(o, s) for o, x, s in rows if x == st]
         if src.kind == "column":
             return self.pick(key, lambda rng: [(o, rng.choice(subject_ids)) for o in ids if rng.random() < 0.6])
@@ -577,7 +606,9 @@ class World:
         """The world, as lines a reviewer can read."""
         lines = [f"{t.name}: {', '.join(data.ids[t.name])}" for t in pol.types.values()]
         # the columns simple conditions read (not NULL; a relation's column is its link, below)
-        linked = {(t.name, linked_column(src)) for t in pol.types.values() for r in t.relations.values() for src in r.sources}
+        linked = {
+            (t.name, linked_column(src)) for t in pol.types.values() for r in t.relations.values() for src in r.sources
+        }
         for tname, rows in sorted(data.columns.items()):
             for i, values in rows.items():
                 said = [(c, v) for c, v in sorted(values.items()) if v is not None and (tname, c) not in linked]
@@ -609,7 +640,7 @@ def without_each(entries: dict[K, list[V]], still: Callable[[dict[K, list[V]]], 
         i = 0
         while i < len(entries[key]):
             trial = dict(entries)
-            trial[key] = entries[key][:i] + entries[key][i + 1:]
+            trial[key] = entries[key][:i] + entries[key][i + 1 :]
             if still(trial):
                 entries, changed = trial, True
             else:
@@ -617,8 +648,9 @@ def without_each(entries: dict[K, list[V]], still: Callable[[dict[K, list[V]]], 
     return entries, changed
 
 
-def without_values(columns: dict[str, dict[str, dict[str, Scalar]]],
-                   still: Callable[[dict[str, dict[str, dict[str, Scalar]]]], bool]) -> tuple[dict[str, dict[str, dict[str, Scalar]]], bool]:
+def without_values(
+    columns: dict[str, dict[str, dict[str, Scalar]]], still: Callable[[dict[str, dict[str, dict[str, Scalar]]]], bool]
+) -> tuple[dict[str, dict[str, dict[str, Scalar]]], bool]:
     """Each column value made NULL, one at a time, where `still` holds with it NULL."""
     changed = False
     for tname in sorted(columns):
@@ -669,6 +701,7 @@ def corners(pols: Iterable[Policy]) -> list[dict[str, bool]]:
             case ("and", items) | ("or", items):
                 for x in items:
                     walk(x, negated)
+
     for pol in pols:
         for t in pol.types.values():
             if t.where:
@@ -704,8 +737,9 @@ def compare(pol_a: Policy, pol_b: Policy, worlds: int = 200, seed: int = 0, max_
     who signs in, and each rule), else the first difference found in the smallest world: what differs, for
     whom, on which object, before and after, and the world."""
     ref_a, ref_b = Reference(pol_a), Reference(pol_b)
-    perms = sorted({(t.name, p) for pol in (pol_a, pol_b) for t in pol.types.values() for p in t.perms
-                    if not t.perms[p].hidden})
+    perms = sorted(
+        {(t.name, p) for pol in (pol_a, pol_b) for t in pol.types.values() for p in t.perms if not t.perms[p].hidden}
+    )
     rules_a = {(r.table, r.command, r.columns): r for r in pol_a.rules if r.command != "mask"}
     rules_b = {(r.table, r.command, r.columns): r for r in pol_b.rules if r.command != "mask"}
     n = 0
@@ -719,17 +753,31 @@ def compare(pol_a: Policy, pol_b: Policy, worlds: int = 200, seed: int = 0, max_
                 ga = sa.get((tname, p))
                 gb = sb.get((tname, p))
                 if ga is None or gb is None:
-                    continue                    # added or removed: a change of meaning shown elsewhere
+                    continue  # added or removed: a change of meaning shown elsewhere
                 if ga != gb:
                     o = sorted(ga ^ gb)[0]
-                    return {"what": f"{tname}.{p}", "user": user or "(nobody signed in)", "object": o,
-                            "before": o in ga, "after": o in gb, "world": w.describe(pol_b, db), "worlds": n}
+                    return {
+                        "what": f"{tname}.{p}",
+                        "user": user or "(nobody signed in)",
+                        "object": o,
+                        "before": o in ga,
+                        "after": o in gb,
+                        "world": w.describe(pol_b, db),
+                        "worlds": n,
+                    }
             for key in sorted(set(rules_a) & set(rules_b), key=repr):
                 ra, rb = ref_a.rule(sa, rules_a[key]), ref_b.rule(sb, rules_b[key])
                 if ra != rb:
                     o = sorted(ra ^ rb)[0]
                     table, command, cols = key
                     name = f"rule {table} {command}" + (f" {', '.join(cols)}" if cols else "")
-                    return {"what": name, "user": user or "(nobody signed in)", "object": o,
-                            "before": o in ra, "after": o in rb, "world": w.describe(pol_b, db), "worlds": n}
+                    return {
+                        "what": name,
+                        "user": user or "(nobody signed in)",
+                        "object": o,
+                        "before": o in ra,
+                        "after": o in rb,
+                        "world": w.describe(pol_b, db),
+                        "worlds": n,
+                    }
     return None

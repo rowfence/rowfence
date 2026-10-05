@@ -1,5 +1,6 @@
 """Identities other than a logged-in person: scopes, API keys, JWT login,
 read-only impersonation, and syncing group members from an identity provider."""
+
 from .compiler import Core
 from .parse import cols
 from .sqlutil import lit, q, qt
@@ -8,14 +9,16 @@ DEF = "SECURITY DEFINER SET search_path = pg_catalog, pg_temp"
 
 # HMAC-SHA256 of who is signed in, this backend and this transaction, with k a row of
 # authz_int.session_key: only functions that run as the policy's owner can read it
-SESSION_SIG = ("pg_catalog.encode(pg_catalog.sha256(k.opad || pg_catalog.sha256(k.ipad || pg_catalog.convert_to("
-               "pg_catalog.concat_ws(pg_catalog.chr(31), "
-               "coalesce(pg_catalog.current_setting('authz.user_id', true), ''), "
-               "coalesce(pg_catalog.current_setting('authz.principal_type', true), ''), "
-               "coalesce(pg_catalog.current_setting('authz.scopes', true), ''), "
-               "coalesce(pg_catalog.current_setting('authz.acting_user', true), ''), "
-               "pg_catalog.pg_backend_pid()::text, "
-               "(EXTRACT(epoch FROM pg_catalog.transaction_timestamp()) * 1000000)::bigint::text), 'UTF8'))), 'hex')")
+SESSION_SIG = (
+    "pg_catalog.encode(pg_catalog.sha256(k.opad || pg_catalog.sha256(k.ipad || pg_catalog.convert_to("
+    "pg_catalog.concat_ws(pg_catalog.chr(31), "
+    "coalesce(pg_catalog.current_setting('authz.user_id', true), ''), "
+    "coalesce(pg_catalog.current_setting('authz.principal_type', true), ''), "
+    "coalesce(pg_catalog.current_setting('authz.scopes', true), ''), "
+    "coalesce(pg_catalog.current_setting('authz.acting_user', true), ''), "
+    "pg_catalog.pg_backend_pid()::text, "
+    "(EXTRACT(epoch FROM pg_catalog.transaction_timestamp()) * 1000000)::bigint::text), 'UTF8'))), 'hex')"
+)
 # Are the settings to be believed? true, or an error saying why not. Called by the functions that read them
 # (uid, the principals' __me, actor, scopes), which all run as the owner.
 SESSION_OK = "authz_int.session_ok()"
@@ -171,8 +174,11 @@ LANGUAGE sql {DEF} AS $f$
         sync_cases: list[str] = []
         for t in self.types.values():
             for r in t.relations.values():
-                srcs = [s for s in r.sources if s.kind == "table" and ("user", None) in s.subjects
-                        and not s.where and not s.type_col]
+                srcs = [
+                    s
+                    for s in r.sources
+                    if s.kind == "table" and ("user", None) in s.subjects and not s.where and not s.type_col
+                ]
                 if len(srcs) != 1:
                     continue
                 src = srcs[0]
@@ -180,10 +186,11 @@ LANGUAGE sql {DEF} AS $f$
                 obj = self.source_obj_columns(src)
                 tbl, sc = qt(self.source_table(src)), q(cols(self.source_columns(src))[0])
                 ocs = ", ".join(q(c) for c in cols(obj))
-                vals = (", ".join(f"(p_id::{t.keytype}).{q(c)}" for c, _ in t.key) if t.composite
-                        else f"p_id::{t.pktype}")
+                vals = (
+                    ", ".join(f"(p_id::{t.keytype}).{q(c)}" for c, _ in t.key) if t.composite else f"p_id::{t.pktype}"
+                )
                 this = self.key_is(t, "s", "p_id", obj) if t.composite else f"s.{q(cols(obj)[0])} = p_id::{t.pktype}"
-                sync_cases.append(f"""    WHEN {lit(t.name + '.' + r.name)} THEN
+                sync_cases.append(f"""    WHEN {lit(t.name + "." + r.name)} THEN
       WITH want AS (SELECT DISTINCT x::{u.pktype} AS m FROM unnest(p_members) x),
       del AS (DELETE FROM {tbl} s WHERE {this} AND s.{sc} NOT IN (SELECT m FROM want) RETURNING 1),
       ins AS (INSERT INTO {tbl} ({ocs}, {sc}) SELECT {vals}, w.m FROM want w
@@ -412,7 +419,7 @@ BEGIN
 END $f$;
 
 -- Support staff see what a user sees, read-only, for this transaction, with a reason on record:
--- SELECT authz.view_as('42', 'ticket 1234'){'' if imp else '  (the user type has no impersonate permission: administrators only)'}
+-- SELECT authz.view_as('42', 'ticket 1234'){"" if imp else "  (the user type has no impersonate permission: administrators only)"}
 CREATE FUNCTION authz.view_as(p_user text, p_reason text) RETURNS void
 LANGUAGE plpgsql {DEF} AS $f$
 DECLARE v_me text := nullif(current_setting('authz.user_id', true), '');
@@ -425,7 +432,7 @@ BEGIN
     RAISE EXCEPTION 'say why (the reason is kept in the audit trail)' USING HINT = 'rowstile help AZ710';
   END IF;
   IF NOT (authz_int.caller_is_admin()
-          {'OR (EXISTS (SELECT 1 FROM authz.principal()) AND authz.can(' + lit('user') + ', p_user, ' + lit('impersonate') + '))' if imp else ''}) THEN
+          {"OR (EXISTS (SELECT 1 FROM authz.principal()) AND authz.can(" + lit("user") + ", p_user, " + lit("impersonate") + "))" if imp else ""}) THEN
     RAISE EXCEPTION 'you cannot view as user %', p_user USING ERRCODE = 'insufficient_privilege', HINT = 'rowstile help AZ705';
   END IF;
   PERFORM set_config('authz.user_id', coalesce(authz_int.canon('user', p_user), ''), true);

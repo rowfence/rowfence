@@ -4,6 +4,7 @@
   role signed in as someone (`as`); each runs in a subtransaction that is always rolled back;
 - the invariants, once, over the data already there.
 """
+
 from __future__ import annotations
 
 import re
@@ -14,14 +15,14 @@ from .sqlutil import lit
 from .statements import WORD, split
 
 FN = "pg_temp.authz_policy_tests"
-VAR = re.compile(r"\$([A-Za-z_][A-Za-z0-9_]*)(?!\$)")       # $name, not a $tag$ dollar quote
+VAR = re.compile(r"\$([A-Za-z_][A-Za-z0-9_]*)(?!\$)")  # $name, not a $tag$ dollar quote
 WRITES = ("insert", "update", "delete", "merge")
-COVERAGE = "authz:coverage"      # the test name of coverage rows (tests_function_sql(coverage=True))
-SQL_NL = "E'\\n'"            # a newline in SQL (Python 3.11 allows no backslash inside an f-string's braces)
+COVERAGE = "authz:coverage"  # the test name of coverage rows (tests_function_sql(coverage=True))
+SQL_NL = "E'\\n'"  # a newline in SQL (Python 3.11 allows no backslash inside an f-string's braces)
 
 
 class TestMixin(Core):
-    coverage_rows = False           # tests_function_sql(coverage=True): rows for the coverage report
+    coverage_rows = False  # tests_function_sql(coverage=True): rows for the coverage report
 
     def add_test_files(self, files: dict[str, str]) -> None:
         """Named tests from separate files (name -> text), which hold nothing but tests."""
@@ -30,15 +31,24 @@ class TestMixin(Core):
                 pol = parse_policy(text, name, files={})
             except PolicyError as e:
                 if str(e).startswith("line "):
-                    e.args = (f"{name} {e}",)       # a mistake in a test file is named with its file, like an included one
+                    e.args = (f"{name} {e}",)  # a mistake in a test file is named with its file, like an included one
                 raise
             for sc in pol.scenarios:
                 for loc in [sc.loc] + [st.loc for st in sc.steps]:
                     if loc is not None:
                         loc.file = name
-            if pol.types or pol.rules or pol.tests or pol.invariants or pol.scopes or pol.caveats \
-                    or pol.role is not None:
-                raise PolicyError(f"{name}: a test file holds only named tests: test \"name\" followed by its lines", "AZ106")
+            if (
+                pol.types
+                or pol.rules
+                or pol.tests
+                or pol.invariants
+                or pol.scopes
+                or pol.caveats
+                or pol.role is not None
+            ):
+                raise PolicyError(
+                    f'{name}: a test file holds only named tests: test "name" followed by its lines', "AZ106"
+                )
             for sc in pol.scenarios:
                 if any(x.name == sc.name for x in self.pol.scenarios):
                     fail(sc.loc or 0, f"there is already a test named {sc.name!r}", "AZ109")
@@ -48,8 +58,12 @@ class TestMixin(Core):
         def known(text: str | None, loc: Loc, bound: set[str]) -> None:
             for m in VAR.finditer(text or ""):
                 if m.group(1) not in bound:
-                    fail(loc, f"${m.group(1)} is not named yet: name it first, with given {m.group(1)} = "
-                              f"{{INSERT ... RETURNING id}}", "AZ501")
+                    fail(
+                        loc,
+                        f"${m.group(1)} is not named yet: name it first, with given {m.group(1)} = "
+                        f"{{INSERT ... RETURNING id}}",
+                        "AZ501",
+                    )
 
         section = Scenario("test section", None, self.tests)
         for sc in ([section] if self.tests else []) + self.pol.scenarios:
@@ -64,8 +78,11 @@ class TestMixin(Core):
                 known(st.sql, st.loc, bound)
                 if st.ptype != "anyone" and not self.is_principal(st.ptype or ""):
                     signs_in = [t.name for t in self.types.values() if t.principal]
-                    fail(st.loc, f"'{st.ptype}' doesn't sign in: a test acts as anyone or as one of "
-                                 f"{', '.join(signs_in)}", "AZ502")
+                    fail(
+                        st.loc,
+                        f"'{st.ptype}' doesn't sign in: a test acts as anyone or as one of {', '.join(signs_in)}",
+                        "AZ502",
+                    )
                 if st.kind == "check":
                     known(st.obj, st.loc, bound)
                     self.check_test_perm(st.type or "", st.perm or "", st.loc)
@@ -104,15 +121,18 @@ class TestMixin(Core):
     WHEN SQLSTATE 'AZT00' THEN NULL;
     WHEN OTHERS THEN
       PERFORM set_config('role', v_role, true);
-      {self.add_result('v_line', 'false', "v_text || " + SQL_NL + " || 'error: ' || SQLERRM")}
+      {self.add_result("v_line", "false", "v_text || " + SQL_NL + " || 'error: ' || SQLERRM")}
   END;
 """)
         invariants = ""
         if self.pol.invariants:
             # who broke it: a user's id, or another principal as the check names it ('service:3')
-            others = "".join(f"WHEN starts_with(v_inv.user_id, {lit(t.name + ':')}) THEN {lit(t.name + ' ')} || "
-                             f"substr(v_inv.user_id, {len(t.name) + 2}) "
-                             for t in self.types.values() if t.principal and t.name != "user")
+            others = "".join(
+                f"WHEN starts_with(v_inv.user_id, {lit(t.name + ':')}) THEN {lit(t.name + ' ')} || "
+                f"substr(v_inv.user_id, {len(t.name) + 2}) "
+                for t in self.types.values()
+                if t.principal and t.name != "user"
+            )
             who = "'user ' || coalesce(v_inv.user_id, '(nobody)')"
             if others:
                 who = f"CASE {others}ELSE {who} END"
@@ -120,10 +140,10 @@ class TestMixin(Core):
   PERFORM set_config('authz.user_id', '', true), set_config('authz.principal_type', '', true);
   FOR v_inv IN SELECT * FROM authz.check_invariants() LOOP
     v_n := v_n + 1;
-    {self.add_result("''", 'false', "'invariant ' || v_inv.invariant || ': ' || " + who + " || ' can reach ' || v_inv.object_ids::text", "'invariant ' || v_inv.invariant")}
+    {self.add_result("''", "false", "'invariant ' || v_inv.invariant || ': ' || " + who + " || ' can reach ' || v_inv.object_ids::text", "'invariant ' || v_inv.invariant")}
   END LOOP;
   IF v_n = 0 THEN
-    {self.add_result("''", 'true', lit(f"{len(self.pol.invariants)} invariant(s) hold"))}
+    {self.add_result("''", "true", lit(f"{len(self.pol.invariants)} invariant(s) hold"))}
   END IF;
 """
         return f"""DROP FUNCTION IF EXISTS {FN}();
@@ -137,9 +157,9 @@ DECLARE
   v_role text := current_setting('role');
   v_me text := coalesce(current_setting('authz.user_id', true), '');
   v_pt text := coalesce(current_setting('authz.principal_type', true), '');
-  {' '.join(variables)}
+  {" ".join(variables)}
 BEGIN
-{''.join(blocks)}{invariants}  PERFORM set_config('authz.user_id', v_me, true), set_config('authz.principal_type', v_pt, true);
+{"".join(blocks)}{invariants}  PERFORM set_config('authz.user_id', v_me, true), set_config('authz.principal_type', v_pt, true);
   RETURN QUERY SELECT * FROM unnest(r_test, r_line, r_ok, r_detail);
 END $authz_tests$;
 """
@@ -152,8 +172,10 @@ END $authz_tests$;
 
     @staticmethod
     def add_result(line: str, ok: str, detail: str, test: str = "v_test") -> str:
-        return (f"r_test := r_test || ({test})::text; r_line := r_line || ({line})::text; "
-                f"r_ok := r_ok || {ok}; r_detail := r_detail || ({detail})::text;")
+        return (
+            f"r_test := r_test || ({test})::text; r_line := r_line || ({line})::text; "
+            f"r_ok := r_ok || {ok}; r_detail := r_detail || ({detail})::text;"
+        )
 
     @staticmethod
     def value_sql(v: str | None, names: dict[str, str]) -> str:
@@ -168,7 +190,7 @@ END $authz_tests$;
         parts: list[str] = []
         last = 0
         for m in VAR.finditer(sql):
-            parts += [lit(sql[last:m.start()]), f"quote_nullable({names[m.group(1)]})"]
+            parts += [lit(sql[last : m.start()]), f"quote_nullable({names[m.group(1)]})"]
             last = m.end()
         parts.append(lit(sql[last:]))
         return " || ".join(p for p in parts if p != "''") or "''"
@@ -182,18 +204,23 @@ END $authz_tests$;
     def sign_in_sql(self, st: Step, names: dict[str, str]) -> str:
         uid = "''" if st.ptype == "anyone" else self.value_sql(st.who, names)
         pt = "''" if st.ptype in ("anyone", "user") else lit(st.ptype)
-        return (f"    PERFORM set_config('authz.user_id', coalesce({uid}, ''), true), "
-                f"set_config('authz.principal_type', {pt}, true);\n")
+        return (
+            f"    PERFORM set_config('authz.user_id', coalesce({uid}, ''), true), "
+            f"set_config('authz.principal_type', {pt}, true);\n"
+        )
 
     def step_sql(self, st: Step, names: dict[str, str]) -> str:
         head = f"    v_line := {lit(str(st.loc))}; v_text := {lit(st.text)};\n"
         if st.kind == "given":
             stmt = self.statement_sql(self.one_statement(st.sql) if st.var else st.sql, names)
-            reset = ("    PERFORM set_config('authz.user_id', '', true), set_config('authz.principal_type', '', true);\n")
+            reset = "    PERFORM set_config('authz.user_id', '', true), set_config('authz.principal_type', '', true);\n"
             if not st.var:
                 return head + reset + f"    EXECUTE {stmt};\n"
             var = names[st.var]
-            return head + reset + f"""    EXECUTE 'WITH authz_q AS (' || {stmt} || {SQL_NL} || ') SELECT count(*), (array_agg(to_jsonb(authz_q)))[1], '
+            return (
+                head
+                + reset
+                + f"""    EXECUTE 'WITH authz_q AS (' || {stmt} || {SQL_NL} || ') SELECT count(*), (array_agg(to_jsonb(authz_q)))[1], '
          || '(array_agg(ROW(authz_q.*)::text))[1] FROM authz_q' INTO v_n, v_json, v_row;
     IF v_n <> 1 THEN
       RAISE EXCEPTION 'given {st.var} = {{...}} returned % rows: it must return one (RETURNING id)', v_n;
@@ -201,17 +228,22 @@ END $authz_tests$;
     {var} := CASE WHEN (SELECT count(*) FROM jsonb_object_keys(v_json)) = 1
                  THEN (SELECT e.value FROM jsonb_each_text(v_json) e) ELSE v_row END;
 """
+            )
         if st.kind == "check":
             obj = self.value_sql(st.obj, names)
             want = "true" if st.expect else "false"
-            return head + self.sign_in_sql(st, names) + f"""    v_ok := authz.can({lit(st.type)}, {obj}, {lit(st.perm)});
+            return (
+                head
+                + self.sign_in_sql(st, names)
+                + f"""    v_ok := authz.can({lit(st.type)}, {obj}, {lit(st.perm)});
     IF v_ok IS DISTINCT FROM {want} THEN
       v_msg := (SELECT string_agg(l, E'\\n') FROM authz.explain({lit(st.type)}, {obj}, {lit(st.perm)}) l);
-      {self.add_result('v_line', 'false', "v_text || " + SQL_NL + " || coalesce(v_msg, '')")}
+      {self.add_result("v_line", "false", "v_text || " + SQL_NL + " || coalesce(v_msg, '')")}
     ELSE
-      {self.add_result('v_line', 'true', 'v_text')}{self.coverage_sql(st, obj) if st.expect else ""}
+      {self.add_result("v_line", "true", "v_text")}{self.coverage_sql(st, obj) if st.expect else ""}
     END IF;
 """
+            )
         # as: the statement as the app role, signed in as someone; its own subtransaction
         counting = isinstance(st.expect, int)
         stmt = self.statement_sql(self.one_statement(st.sql) if counting else st.sql, names)
@@ -221,19 +253,37 @@ END $authz_tests$;
         m = WORD.match(parts[-1]) if parts else None
         verb = m.group(0).lower() if m else ""
         write = "true" if verb in WRITES else "v_write" if verb == "with" and len(parts) == 1 else "false"
-        plan = (f"      EXECUTE 'EXPLAIN (FORMAT JSON) ' || {stmt} INTO v_json;\n"
-                "      v_write := v_json->0->'Plan'->>'Node Type' = 'ModifyTable';\n" if write == "v_write" and not counting else "")
-        run = (f"      EXECUTE 'SELECT count(*) FROM (' || {stmt} || {SQL_NL} || ') authz_q' INTO v_n;\n" if counting else
-               f"{plan}      EXECUTE {stmt};\n      GET DIAGNOSTICS v_n = ROW_COUNT;\n")
-        outcome = ("'allowed'" if counting or write == "false"
-                   else f"CASE WHEN {write} AND v_n = 0 THEN 'refused' ELSE 'allowed' END")
+        plan = (
+            f"      EXECUTE 'EXPLAIN (FORMAT JSON) ' || {stmt} INTO v_json;\n"
+            "      v_write := v_json->0->'Plan'->>'Node Type' = 'ModifyTable';\n"
+            if write == "v_write" and not counting
+            else ""
+        )
+        run = (
+            f"      EXECUTE 'SELECT count(*) FROM (' || {stmt} || {SQL_NL} || ') authz_q' INTO v_n;\n"
+            if counting
+            else f"{plan}      EXECUTE {stmt};\n      GET DIAGNOSTICS v_n = ROW_COUNT;\n"
+        )
+        outcome = (
+            "'allowed'"
+            if counting or write == "false"
+            else f"CASE WHEN {write} AND v_n = 0 THEN 'refused' ELSE 'allowed' END"
+        )
         if counting:
-            passed, got = f"v_res = 'allowed' AND v_n = {st.expect}", "CASE WHEN v_res = 'allowed' THEN 'sees ' || v_n || ' row(s)' ELSE v_msg END"
+            passed, got = (
+                f"v_res = 'allowed' AND v_n = {st.expect}",
+                "CASE WHEN v_res = 'allowed' THEN 'sees ' || v_n || ' row(s)' ELSE v_msg END",
+            )
         else:
             passed = f"v_res = {lit(st.expect)}"
-            got = ("CASE v_res WHEN 'allowed' THEN 'allowed' || CASE WHEN v_n > 0 THEN ' (' || v_n || ' row(s))' ELSE '' END "
-                   "WHEN 'refused' THEN 'refused: ' || v_msg ELSE v_msg END")
-        return head + self.sign_in_sql(st, names) + f"""    BEGIN
+            got = (
+                "CASE v_res WHEN 'allowed' THEN 'allowed' || CASE WHEN v_n > 0 THEN ' (' || v_n || ' row(s))' ELSE '' END "
+                "WHEN 'refused' THEN 'refused: ' || v_msg ELSE v_msg END"
+            )
+        return (
+            head
+            + self.sign_in_sql(st, names)
+            + f"""    BEGIN
       EXECUTE format('SET LOCAL ROLE %I', {lit(self.role)});
 {run}      PERFORM set_config('role', v_role, true);
       v_res := {outcome};
@@ -247,16 +297,18 @@ END $authz_tests$;
         v_res := 'error'; v_msg := 'error: ' || v_msg;
     END;
     IF {passed} THEN
-      {self.add_result('v_line', 'true', 'v_text')}
+      {self.add_result("v_line", "true", "v_text")}
     ELSE
-      {self.add_result('v_line', 'false', "v_text || " + SQL_NL + " || " + got)}
+      {self.add_result("v_line", "false", "v_text || " + SQL_NL + " || " + got)}
     END IF;
 """
+        )
 
     def compile_tests(self, source_name: str) -> str:
         """For psql: the tests, then a report (NOTICE ok, WARNING FAIL) that fails if any test fails."""
-        return (f"-- Policy tests generated by rowstile from {source_name}\n{self.tests_function_sql()}\n"
-                f"""DO $t$
+        return (
+            f"-- Policy tests generated by rowstile from {source_name}\n{self.tests_function_sql()}\n"
+            f"""DO $t$
 DECLARE v record; failures int := 0;
 BEGIN
   FOR v IN SELECT * FROM {FN}() LOOP
@@ -270,4 +322,5 @@ BEGIN
   IF failures > 0 THEN RAISE EXCEPTION '% policy test(s) failed', failures; END IF;
 END $t$;
 DROP FUNCTION {FN}();
-""")
+"""
+        )

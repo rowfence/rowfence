@@ -1,5 +1,6 @@
 """Accounts and sessions. The backend is trusted to say who is signed in: it checks the password or the
 session cookie, then tells the database (authz.user_id). Bots bring their own API keys instead."""
+
 import hashlib
 import hmac
 import secrets
@@ -14,7 +15,7 @@ COOKIE = "ms_session"
 
 def hash_password(password: str) -> str:
     salt = secrets.token_bytes(16)
-    digest = hashlib.scrypt(password.encode(), salt=salt, n=2 ** 14, r=8, p=1)
+    digest = hashlib.scrypt(password.encode(), salt=salt, n=2**14, r=8, p=1)
     return f"scrypt${salt.hex()}${digest.hex()}"
 
 
@@ -23,7 +24,7 @@ def password_ok(password: str, stored: str) -> bool:
         _, salt, digest = stored.split("$")
     except ValueError:
         return False
-    got = hashlib.scrypt(password.encode(), salt=bytes.fromhex(salt), n=2 ** 14, r=8, p=1)
+    got = hashlib.scrypt(password.encode(), salt=bytes.fromhex(salt), n=2**14, r=8, p=1)
     return hmac.compare_digest(got.hex(), digest)
 
 
@@ -33,8 +34,10 @@ def token_hash(token: str) -> str:
 
 def new_session(tx: db.Tx, user_id: object, days: int) -> str:
     token = secrets.token_urlsafe(32)
-    tx.run("DELETE FROM ms.sessions WHERE expires_at < now()")       # the ones that ended: nothing else removes them
-    tx.run("INSERT INTO ms.sessions VALUES (%s, %s, now() + make_interval(days => %s))", (token_hash(token), user_id, days))
+    tx.run("DELETE FROM ms.sessions WHERE expires_at < now()")  # the ones that ended: nothing else removes them
+    tx.run(
+        "INSERT INTO ms.sessions VALUES (%s, %s, now() + make_interval(days => %s))", (token_hash(token), user_id, days)
+    )
     return token
 
 

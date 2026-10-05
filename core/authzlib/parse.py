@@ -1,4 +1,5 @@
 """Parsing .authz policy files into a small model."""
+
 from __future__ import annotations
 
 import os
@@ -76,18 +77,21 @@ class Not(NamedTuple):
 
 class Cond(NamedTuple):
     """{sql}: a condition on the row, or a keyword standing for one (signed_in, anyone, nobody)."""
+
     kind: Literal["cond"]
     sql: str
 
 
 class Ref(NamedTuple):
     """A relation or permission of the same object."""
+
     kind: Literal["ref"]
     name: str
 
 
 class Arrow(NamedTuple):
     """relation.permission: the permission on what the relation links to."""
+
     kind: Literal["arrow"]
     rel: str
     perm: str
@@ -95,6 +99,7 @@ class Arrow(NamedTuple):
 
 class ArrowOn(NamedTuple):
     """An arrow followed only to some of the relation's subject types (made by the compiler)."""
+
     kind: Literal["arrow_on"]
     rel: str
     perm: str
@@ -111,19 +116,19 @@ Subject: TypeAlias = "tuple[str, str | None]"
 
 @dataclass
 class Source:
-    kind: str                   # column | table | shared | roles
+    kind: str  # column | table | shared | roles
     subjects: list[Subject]
     loc: Loc
     column: Cols | None = None  # column source: the id column (a tuple for [a, b]: a composite key)
     type_col: str | None = None  # polymorphic: the column holding the subject's type name
-    table: str | None = None    # table source
+    table: str | None = None  # table source
     obj_col: Cols | None = None
     subj_col: Cols | None = None
     where: str | None = None
     shared_by: str | None = None  # shared: the permission needed to share it (default: share)
     shared_if: str | None = None  # shared: extra SQL condition on each share
-    perm: str | None = None     # roles: the permission these role assignments grant
-    owner: str | None = None    # roles: the relation naming the object's owner, whose roles alone count here
+    perm: str | None = None  # roles: the permission these role assignments grant
+    owner: str | None = None  # roles: the relation naming the object's owner, whose roles alone count here
 
 
 @dataclass
@@ -131,7 +136,7 @@ class Relation:
     name: str
     loc: Loc
     sources: list[Source] = field(default_factory=list)
-    synthetic: bool = False     # made by the compiler (custom roles)
+    synthetic: bool = False  # made by the compiler (custom roles)
 
     def subjects(self) -> list[Subject]:
         return list(dict.fromkeys(s for src in self.sources for s in src.subjects))
@@ -143,8 +148,8 @@ class Perm:
     expr: Expr
     src: str
     loc: Loc
-    hidden: bool = False        # made by the compiler (the inheritance of a permission with a deny)
-    base: str | None = None     # for such a permission: the hidden one holding its inheritance
+    hidden: bool = False  # made by the compiler (the inheritance of a permission with a deny)
+    base: str | None = None  # for such a permission: the hidden one holding its inheritance
 
 
 # custom roles: (who may hold them, the permissions that write `roles`, where the roles line is)
@@ -155,16 +160,16 @@ Roles: TypeAlias = "tuple[list[Subject], list[str], Loc]"
 class Type:
     name: str
     table: str
-    pk: str | None              # the key column; None for a composite key
-    pktype: str                 # its type; text for a composite key (ids are its canonical row text)
+    pk: str | None  # the key column; None for a composite key
+    pktype: str  # its type; text for a composite key (ids are its canonical row text)
     loc: Loc
-    where: str | None = None    # rows that fail it hold nothing, and nothing passes through them
+    where: str | None = None  # rows that fail it hold nothing, and nothing passes through them
     relations: dict[str, Relation] = field(default_factory=dict)
     perms: dict[str, Perm] = field(default_factory=dict)
     roles: Roles | None = None
     roles_from: str | None = None  # `roles : ... from org`: only roles owned by the object's org count
     key: list[tuple[str, str]] = field(default_factory=list)  # [(column, type)]: several for a composite key
-    principal: bool = False     # signs in and holds access itself (the user type, and `principal` types)
+    principal: bool = False  # signs in and holds access itself (the user type, and `principal` types)
 
     @property
     def composite(self) -> bool:
@@ -184,7 +189,7 @@ def cols(c: Cols) -> tuple[str, ...]:
 @dataclass
 class Rule:
     table: str
-    command: str                # select | insert | update | update check (written "after") | delete | mask
+    command: str  # select | insert | update | update check (written "after") | delete | mask
     expr: Expr
     src: str
     loc: Loc
@@ -194,24 +199,26 @@ class Rule:
 @dataclass
 class Step:
     """One line of a named test: given (data), check (can/cannot) or as (a statement as someone)."""
-    kind: str                   # given | check | as
+
+    kind: str  # given | check | as
     text: str
     loc: Loc
-    var: str | None = None      # given: the $name it binds
-    sql: str | None = None      # given, as: the statement
-    ptype: str | None = None    # check, as: the principal type, or 'anyone'
-    who: str | None = None      # check, as: an id or a $name
+    var: str | None = None  # given: the $name it binds
+    sql: str | None = None  # given, as: the statement
+    ptype: str | None = None  # check, as: the principal type, or 'anyone'
+    who: str | None = None  # check, as: an id or a $name
     expect: bool | str | int | None = None  # check: True (can) / False; as: 'allowed' | 'refused' | a row count
     perm: str | None = None
     type: str | None = None
-    obj: str | None = None      # check: an id or a $name
+    obj: str | None = None  # check: an id or a $name
 
 
 @dataclass
 class Scenario:
     """test "name": its own data (given), then checks; rolled back when it ends."""
+
     name: str
-    loc: Loc | None             # None: the unnamed test section, gathered from its lines
+    loc: Loc | None  # None: the unnamed test section, gathered from its lines
     steps: list[Step] = field(default_factory=list)
 
 
@@ -243,7 +250,7 @@ class Invariant:
 
 @dataclass
 class Policy:
-    role: str | None = None     # the app role (`app role app_user`): the Postgres role the rules apply to
+    role: str | None = None  # the app role (`app role app_user`): the Postgres role the rules apply to
     types: dict[str, Type] = field(default_factory=dict)
     rules: list[Rule] = field(default_factory=list)
     tests: list[Step] = field(default_factory=list)  # the unnamed test section: checks of the data there
@@ -251,7 +258,7 @@ class Policy:
     scopes: dict[str, Scope] = field(default_factory=dict)
     caveats: dict[str, Caveat] = field(default_factory=dict)
     invariants: list[Invariant] = field(default_factory=list)
-    views: dict[str, str] = field(default_factory=dict)      # rules table -> masked view name
+    views: dict[str, str] = field(default_factory=dict)  # rules table -> masked view name
     view_locs: dict[str, Loc] = field(default_factory=dict)  # rules table -> where the view was named
     # read in the language before this one (a review's base): each of its old forms, where, and what it is now
     previous: list[str] | None = None
@@ -270,7 +277,7 @@ def strip_comment(line: str) -> str:
                 quote = ""
         elif c in "'\"":
             quote = c
-        elif c == "-" and line[i:i + 2] == "--":
+        elif c == "-" and line[i : i + 2] == "--":
             return line[:i]
     return line
 
@@ -303,7 +310,7 @@ def tokenize(s: str, loc: Loc) -> list[Token]:
                 j += 1
             else:
                 fail(loc, "a { condition is missing its closing }", "AZ102")
-            sql = s[i + 1:j].strip()
+            sql = s[i + 1 : j].strip()
             if not sql:
                 fail(loc, "empty {} condition", "AZ102")
             toks.append(("cond", sql))
@@ -348,7 +355,7 @@ class ExprParser:
 
     def __init__(self, text: str, loc: Loc, previous: list[str] | None = None) -> None:
         self.toks, self.i, self.loc = tokenize(text, loc), 0, loc
-        self.joined = False         # whether the last `and` read joined two items or more, outside parentheses
+        self.joined = False  # whether the last `and` read joined two items or more, outside parentheses
         self.previous = previous
 
     def peek(self) -> str | None:
@@ -378,8 +385,11 @@ class ExprParser:
             return items[0]
         node = Or("or", items)
         if mixed and self.previous is None:
-            fail(self.loc, f"`and` and `or` meet without parentheses, which reads two ways: write {written(node)}",
-                 "AZ102")
+            fail(
+                self.loc,
+                f"`and` and `or` meet without parentheses, which reads two ways: write {written(node)}",
+                "AZ102",
+            )
         if mixed and self.previous is not None:
             self.previous.append(f"{self.loc}: `and` and `or` without parentheses, now `{written(node)}`")
         return node
@@ -417,8 +427,11 @@ class ExprParser:
             if self.previous is None and w in KEYWORDS:
                 return Cond("cond", KEYWORDS[w])
             if w in RETIRED:
-                fail(self.loc, f"write `{RETIRED[w]}` instead of `{w}` (signed in or not, the word shares and tests use)",
-                     "AZ102")
+                fail(
+                    self.loc,
+                    f"write `{RETIRED[w]}` instead of `{w}` (signed in or not, the word shares and tests use)",
+                    "AZ102",
+                )
             if "__" in w:
                 fail(self.loc, f"'{w}': names with '__' are generated ones, which a policy can't refer to", "AZ107")
             if "." in w:
@@ -486,10 +499,10 @@ def collect_includes(text: str, read: Callable[[str], str | None]) -> dict[str, 
             m = INCLUDE.fullmatch(line.rstrip())
             key = include_name(including, m.group(1)) if m else None
             if key is None or key in files:
-                continue            # the compiler reports files included twice, with the line
+                continue  # the compiler reports files included twice, with the line
             got = read(key)
             if got is None:
-                continue            # ... and files that are missing
+                continue  # ... and files that are missing
             files[key] = got
             todo.append((key, got))
     return files
@@ -518,11 +531,13 @@ def disk_reader(folder: str) -> Callable[[str], str | None]:
                 return fh.read()
         except (OSError, UnicodeDecodeError):
             return None
+
     return read
 
 
-def read_lines(path: str | None, text: str, seen: set[str] | None = None, top: bool = True,
-               files: dict[str, str] | None = None) -> list[Line]:
+def read_lines(
+    path: str | None, text: str, seen: set[str] | None = None, top: bool = True, files: dict[str, str] | None = None
+) -> list[Line]:
     """Logical lines (loc, indent, text), with includes expanded. A line starting
     with 'or'/'and' continues the previous one. Includes are looked up in `files` (name -> text),
     relative to the including file, and never on disk."""
@@ -541,12 +556,20 @@ def read_lines(path: str | None, text: str, seen: set[str] | None = None, top: b
         if m and indent == 0:
             inc = include_name(name or "", m.group(1))
             if inc is None:
-                fail(loc, f"{m.group(1)}: an included file is in the policy's folder or below it, "
-                          f"named with / and without .. out of the folder", "AZ108")
+                fail(
+                    loc,
+                    f"{m.group(1)}: an included file is in the policy's folder or below it, "
+                    f"named with / and without .. out of the folder",
+                    "AZ108",
+                )
             if inc in seen:
                 fail(loc, f"{m.group(1)} is included twice (or includes itself)", "AZ108")
             if inc not in files:
-                fail(loc, f"can't find {m.group(1)}: pass it in the files argument, e.g. '{{\"{inc}\": \"...\"}}'", "AZ108")
+                fail(
+                    loc,
+                    f'can\'t find {m.group(1)}: pass it in the files argument, e.g. \'{{"{inc}": "..."}}\'',
+                    "AZ108",
+                )
             seen.add(inc)
             out += read_lines(inc, files[inc], seen, top=False, files=files)
             continue
@@ -603,8 +626,10 @@ def open_braces(text: str) -> int:
 # ----------------------------------------------------------------------
 # The policy file
 # ----------------------------------------------------------------------
-TYPE_RE = re.compile(rf"type\s+({IDENT})\s*=\s*({QNAME})(?:\s*\(([^)]*)\))?(\s+principal)?"
-                     rf"(?:\s+where\s*\{{(.*)\}})?")
+TYPE_RE = re.compile(
+    rf"type\s+({IDENT})\s*=\s*({QNAME})(?:\s*\(([^)]*)\))?(\s+principal)?"
+    rf"(?:\s+where\s*\{{(.*)\}})?"
+)
 # one column, or [a, b] for the columns of a composite key
 COLS = rf"(?:{IDENT}|\[\s*{IDENT}(?:\s*,\s*{IDENT})*\s*\])"
 # composite keys are compared as text: only types whose text form is canonical
@@ -626,8 +651,12 @@ def parse_key(text: str | None, loc: Loc) -> list[tuple[str, str]]:
     if len(key) > 1:
         for c, ty in key:
             if ty not in KEY_TYPES:
-                fail(loc, f"{c} is {ty}: a composite key's columns must be integers, text or uuid "
-                          f"(ids are compared as text, which must not depend on settings)", "AZ206")
+                fail(
+                    loc,
+                    f"{c} is {ty}: a composite key's columns must be integers, text or uuid "
+                    f"(ids are compared as text, which must not depend on settings)",
+                    "AZ206",
+                )
     return key
 
 
@@ -646,12 +675,16 @@ def parse_subjects(text: str, loc: Loc) -> list[Subject]:
             subjects.append((part, None))
             continue
         wild = re.fullmatch(rf"({IDENT}):\*", part)
-        if wild:                        # any signed-in principal of that type (user:*, service:*)
+        if wild:  # any signed-in principal of that type (user:*, service:*)
             subjects.append((wild.group(1), "*"))
             continue
         sm = re.fullmatch(rf"({IDENT})(?:#({IDENT}))?", part)
         if not sm:
-            fail(loc, f"bad subject '{part}' (use a type, type#relation, user:* or another type:*, anyone or link)", "AZ103")
+            fail(
+                loc,
+                f"bad subject '{part}' (use a type, type#relation, user:* or another type:*, anyone or link)",
+                "AZ103",
+            )
         if sm.group(1) in ("anyone", "link"):
             fail(loc, f"bad subject '{part}': {sm.group(1)} stands alone, without #relation", "AZ204")
         subjects.append((sm.group(1), sm.group(2)))
@@ -667,29 +700,57 @@ def parse_source(text: str, subjects: list[Subject], loc: Loc) -> Source:
     m = re.fullmatch(rf"\(\s*({IDENT})\s*,\s*({COLS})\s*\)", text)
     if m:
         return Source("column", subjects, loc, type_col=m.group(1), column=parse_cols(m.group(2)))
-    m = re.fullmatch(rf"({QNAME})\s*\(\s*({COLS})\s*->\s*(?:({COLS})|\(\s*({IDENT})\s*,\s*({COLS})\s*\))\s*\)"
-                     rf"\s*(?:where\s*\{{(.*)\}})?", text)
+    m = re.fullmatch(
+        rf"({QNAME})\s*\(\s*({COLS})\s*->\s*(?:({COLS})|\(\s*({IDENT})\s*,\s*({COLS})\s*\))\s*\)"
+        rf"\s*(?:where\s*\{{(.*)\}})?",
+        text,
+    )
     if m:
-        return Source("table", subjects, loc, table=m.group(1), obj_col=parse_cols(m.group(2)),
-                      subj_col=parse_cols(m.group(3) or m.group(5)), type_col=m.group(4), where=m.group(6))
+        return Source(
+            "table",
+            subjects,
+            loc,
+            table=m.group(1),
+            obj_col=parse_cols(m.group(2)),
+            subj_col=parse_cols(m.group(3) or m.group(5)),
+            type_col=m.group(4),
+            where=m.group(6),
+        )
     # the same with the columns named, in either order: schema.table(object: col, subject: col)
     side = rf"(object|subject)\s*:\s*(?:({COLS})|\(\s*({IDENT})\s*,\s*({COLS})\s*\))"
     m = re.fullmatch(rf"({QNAME})\s*\(\s*{side}\s*,\s*{side}\s*\)\s*(?:where\s*\{{(.*)\}})?", text)
     if m:
         sides = {m.group(2): m.group(3, 4, 5), m.group(6): m.group(7, 8, 9)}
         if set(sides) != {"object", "subject"}:
-            fail(loc, "name one 'object' column and one 'subject' column: schema.table(object: col, subject: col)", "AZ103")
+            fail(
+                loc,
+                "name one 'object' column and one 'subject' column: schema.table(object: col, subject: col)",
+                "AZ103",
+            )
         obj, subj = sides["object"], sides["subject"]
         if obj[0] is None:
             fail(loc, "the object side is one column: schema.table(object: col, subject: (type_col, id_col))", "AZ103")
-        return Source("table", subjects, loc, table=m.group(1), obj_col=parse_cols(obj[0]),
-                      subj_col=parse_cols(subj[0] or subj[2]), type_col=subj[1], where=m.group(10))
-    fail(loc, "a source is a column, (type_col, id_col), schema.table(this_col -> subject_col) "
-              "or schema.table(object: col, subject: col) [where {sql}], or 'shared'", "AZ103")
+        return Source(
+            "table",
+            subjects,
+            loc,
+            table=m.group(1),
+            obj_col=parse_cols(obj[0]),
+            subj_col=parse_cols(subj[0] or subj[2]),
+            type_col=subj[1],
+            where=m.group(10),
+        )
+    fail(
+        loc,
+        "a source is a column, (type_col, id_col), schema.table(this_col -> subject_col) "
+        "or schema.table(object: col, subject: col) [where {sql}], or 'shared'",
+        "AZ103",
+    )
 
 
-def parse_policy(text: str, path: str | None = None, files: dict[str, str] | None = None,
-                 previous: bool = False) -> Policy:
+def parse_policy(
+    text: str, path: str | None = None, files: dict[str, str] | None = None, previous: bool = False
+) -> Policy:
     """previous: read the policy in the language before this one, its old forms as it meant them, each noted in
     pol.previous: what a review reads its base in when this language refuses it (a pull request that upgrades
     rowstile and rewrites the policy). Everywhere else they are refused, saying what to write."""
@@ -699,14 +760,18 @@ def parse_policy(text: str, path: str | None = None, files: dict[str, str] | Non
     cur_type: Type | None = None
     cur_table: str | None = None
     cur_test: Scenario | None = None
-    if files is None:           # included files read from disk, next to the policy file (or here)
+    if files is None:  # included files read from disk, next to the policy file (or here)
         files = collect_includes(text, disk_reader(os.path.dirname(path) if path else "."))
     for loc, indent, s in read_lines(path, text, files=files):
         for sql in braced(s):
             tag = DOLLAR_TAG.search(sql)
             if tag:
-                fail(loc, f"{{{sql.strip()}}} contains {tag.group(0)}, which ends the generated function it goes "
-                          f"in: write the text another way ('$' || 'f$')", "AZ110")
+                fail(
+                    loc,
+                    f"{{{sql.strip()}}} contains {tag.group(0)}, which ends the generated function it goes "
+                    f"in: write the text another way ('$' || 'f$')",
+                    "AZ110",
+                )
         if indent == 0:
             m_type = TYPE_RE.fullmatch(s)
             m_rules = re.fullmatch(rf"rules\s+({QNAME})(?:\s+view\s+({QNAME}))?", s)
@@ -717,16 +782,26 @@ def parse_policy(text: str, path: str | None = None, files: dict[str, str] | Non
             if m_type:
                 name = m_type.group(1)
                 if name in ("anyone", "link"):
-                    fail(loc, f"'{name}' is a subject of its own (shared with {name}); name the type differently", "AZ204")
+                    fail(
+                        loc,
+                        f"'{name}' is a subject of its own (shared with {name}); name the type differently",
+                        "AZ204",
+                    )
                 check_name(name, loc, previous)
                 if name in pol.types:
                     fail(loc, f"type {name} is defined twice", "AZ109")
                 key = parse_key(m_type.group(3), loc)
                 composite = len(key) > 1
-                cur_type = pol.types[name] = Type(name, m_type.group(2), None if composite else key[0][0],
-                                                 "text" if composite else key[0][1], loc,
-                                                 where=m_type.group(5), key=key,
-                                                 principal=bool(m_type.group(4)) or name == "user")
+                cur_type = pol.types[name] = Type(
+                    name,
+                    m_type.group(2),
+                    None if composite else key[0][0],
+                    "text" if composite else key[0][1],
+                    loc,
+                    where=m_type.group(5),
+                    key=key,
+                    principal=bool(m_type.group(4)) or name == "user",
+                )
                 section = "type"
             elif m_rules:
                 section, cur_table = "rules", m_rules.group(1)
@@ -749,15 +824,23 @@ def parse_policy(text: str, path: str | None = None, files: dict[str, str] | Non
             elif s == "invariants":
                 section = "invariants"
             elif m_old_role and pol.previous is None:
-                fail(loc, f"write `app role {m_old_role.group(1)}`: the line names the Postgres role your app connects "
-                          f"as (`roles` are the custom roles people define)", "AZ101")
+                fail(
+                    loc,
+                    f"write `app role {m_old_role.group(1)}`: the line names the Postgres role your app connects "
+                    f"as (`roles` are the custom roles people define)",
+                    "AZ101",
+                )
             elif (m_app := m_role or m_old_role) is not None:
                 role = m_app.group(1)
                 if pol.role is not None:
                     fail(loc, f"the app role is named twice ({pol.role} and {role}): a policy applies to one", "AZ109")
                 if role.lower() == "public":
-                    fail(loc, "the app role is the one role your app connects as, not PUBLIC (every role in the "
-                              "database could then sign in as anyone)", "AZ111")
+                    fail(
+                        loc,
+                        "the app role is the one role your app connects as, not PUBLIC (every role in the "
+                        "database could then sign in as anyone)",
+                        "AZ111",
+                    )
                 if m_old_role and pol.previous is not None:
                     pol.previous.append(f"{loc}: `role {role}`, now `app role {role}`")
                 pol.role = role
@@ -771,8 +854,12 @@ def parse_policy(text: str, path: str | None = None, files: dict[str, str] | Non
                 pol.caveats[m_caveat.group(1)] = Caveat(m_caveat.group(1), m_caveat.group(2).strip(), loc)
                 section = None
             else:
-                fail(loc, f"expected 'app role', 'type', 'rules', 'scope', 'caveat', 'invariants', 'test', "
-                          f"'test \"name\"' or 'include', got: {s}", "AZ101")
+                fail(
+                    loc,
+                    f"expected 'app role', 'type', 'rules', 'scope', 'caveat', 'invariants', 'test', "
+                    f"'test \"name\"' or 'include', got: {s}",
+                    "AZ101",
+                )
             continue
 
         if section == "type" and cur_type is not None:
@@ -783,8 +870,12 @@ def parse_policy(text: str, path: str | None = None, files: dict[str, str] | Non
             # the same checks as a named test's: user 3 can view file 11, service 2 cannot ..., anyone can ...
             step = parse_step(s, loc) if re.match(r"(given|as)\b", s) is None else None
             if step is None or step.kind != "check":
-                fail(loc, "the test section checks the data already there, as: user 3 can view file 11 (a test "
-                          "that brings its own data, or runs a statement, is named: test \"...\")", "AZ106")
+                fail(
+                    loc,
+                    "the test section checks the data already there, as: user 3 can view file 11 (a test "
+                    'that brings its own data, or runs a statement, is named: test "...")',
+                    "AZ106",
+                )
             if pol.previous is not None and step.ptype not in ("user", "anyone"):
                 # the language before this one read the line's first word and checked a user
                 pol.previous.append(f"{loc}: `{step.text}` in the test section checked user {step.who}")
@@ -796,8 +887,9 @@ def parse_policy(text: str, path: str | None = None, files: dict[str, str] | Non
             m = re.fullmatch(rf"never\s+({IDENT})\s*:\s*(.+)", s)
             if not m:
                 fail(loc, "write invariants as: never file: view and not folder.in_org", "AZ106")
-            pol.invariants.append(Invariant(m.group(1), ExprParser(m.group(2), loc, pol.previous).parse(),
-                                            m.group(2), loc))
+            pol.invariants.append(
+                Invariant(m.group(1), ExprParser(m.group(2), loc, pol.previous).parse(), m.group(2), loc)
+            )
         else:
             fail(loc, "indented line outside a type, rules, invariants or test block", "AZ101")
     for sc in pol.scenarios:
@@ -833,14 +925,34 @@ def parse_step(s: str, loc: Loc) -> Step:
         expect: str | int = int(m.group(5)) if m.group(5) else m.group(4)
         if not m.group(6).strip():
             fail(loc, "as ... {...} needs a statement", "AZ106")
-        return Step("as", s, loc, ptype=m.group(1) or m.group(2), who=None if m.group(1) else value(m.group(3)),
-                    expect=expect, sql=m.group(6).strip())
+        return Step(
+            "as",
+            s,
+            loc,
+            ptype=m.group(1) or m.group(2),
+            who=None if m.group(1) else value(m.group(3)),
+            expect=expect,
+            sql=m.group(6).strip(),
+        )
     m = re.fullmatch(rf"(?:(anyone)|({IDENT})\s+{VALUE})\s+(can|cannot)\s+({IDENT})\s+({IDENT})\s+{VALUE}", s)
     if m:
-        return Step("check", s, loc, ptype=m.group(1) or m.group(2), who=None if m.group(1) else value(m.group(3)),
-                    expect=m.group(4) == "can", perm=m.group(5), type=m.group(6), obj=value(m.group(7)))
-    fail(loc, "a test's lines are: given name = {INSERT ... RETURNING id}, user $name can view file $f, "
-              "or as user $name allowed|refused|sees N {SQL}", "AZ106")
+        return Step(
+            "check",
+            s,
+            loc,
+            ptype=m.group(1) or m.group(2),
+            who=None if m.group(1) else value(m.group(3)),
+            expect=m.group(4) == "can",
+            perm=m.group(5),
+            type=m.group(6),
+            obj=value(m.group(7)),
+        )
+    fail(
+        loc,
+        "a test's lines are: given name = {INSERT ... RETURNING id}, user $name can view file $f, "
+        "or as user $name allowed|refused|sees N {SQL}",
+        "AZ106",
+    )
 
 
 def parse_scope_items(text: str, loc: Loc) -> list[ScopeItem]:
@@ -869,9 +981,13 @@ def parse_roles_line(t: Type, s: str, loc: Loc, previous: list[str] | None = Non
     if m:
         perms = ", ".join(p.strip() for p in m.group(2).split(","))
         if previous is None:
-            fail(loc, f"custom roles are written where they give a permission now: `roles : {m.group(1).strip()}"
-                      f"{' from ' + m.group(3) if m.group(3) else ''}`, and `roles` in each of {perms}, e.g. "
-                      f"`can {perms.split(',')[0]} = ... or roles`", "AZ103")
+            fail(
+                loc,
+                f"custom roles are written where they give a permission now: `roles : {m.group(1).strip()}"
+                f"{' from ' + m.group(3) if m.group(3) else ''}`, and `roles` in each of {perms}, e.g. "
+                f"`can {perms.split(',')[0]} = ... or roles`",
+                "AZ103",
+            )
         if t.roles:
             fail(loc, f"{t.name} declares custom roles twice", "AZ109")
         previous.append(f"{loc}: `grant {perms}`, now `roles` in {perms}")
@@ -919,9 +1035,12 @@ def join_roles(t: Type) -> None:
         if isinstance(perm.expr, And):
             grants = [x for x in perm.expr.items if not isinstance(x, (Cond, Not))]
             if len(grants) != 1:
-                fail(loc, f"custom roles on {t.name} can't grant '{p}': a role joins the part of `{p} = {perm.src}` "
-                          f"that grants it, and {'it has none' if not grants else 'several parts are joined with and'}",
-                     "AZ210")
+                fail(
+                    loc,
+                    f"custom roles on {t.name} can't grant '{p}': a role joins the part of `{p} = {perm.src}` "
+                    f"that grants it, and {'it has none' if not grants else 'several parts are joined with and'}",
+                    "AZ210",
+                )
             part = grants[0]
             joined = Or("or", [*part.items, role]) if isinstance(part, Or) else Or("or", [part, role])
             perm.expr = And("and", [joined if x is part else x for x in perm.expr.items])
@@ -941,16 +1060,26 @@ def parse_type_line(t: Type, s: str, loc: Loc, previous: list[str] | None = None
         if name in COMMANDS:
             fail(loc, f"'{name}' is a command name; call the permission something else", "AZ107")
         if name == ROLES:
-            fail(loc, f"'{ROLES}' is where custom roles give a permission (`can edit = editor or roles`); call the "
-                      f"permission something else", "AZ107")
+            fail(
+                loc,
+                f"'{ROLES}' is where custom roles give a permission (`can edit = editor or roles`); call the "
+                f"permission something else",
+                "AZ107",
+            )
         t.perms[name] = Perm(name, ExprParser(m.group(2), loc, previous).parse(), m.group(2), loc)
         return
     if re.match(r"roles\s*:", s):
         parse_roles_line(t, s, loc, previous)
         return
-    m = re.fullmatch(rf"({IDENT})\s*:\s*([^=]+?)\s*(?:=\s*(.+)|\s+shared(?:\s+by\s+({IDENT}))?(?:\s+if\s*\{{(.*)\}})?)", s)
+    m = re.fullmatch(
+        rf"({IDENT})\s*:\s*([^=]+?)\s*(?:=\s*(.+)|\s+shared(?:\s+by\s+({IDENT}))?(?:\s+if\s*\{{(.*)\}})?)", s
+    )
     if not m:
-        fail(loc, "write relations as: name : subject = source   (or: name : subjects shared [by perm] [if {sql}])", "AZ103")
+        fail(
+            loc,
+            "write relations as: name : subject = source   (or: name : subjects shared [by perm] [if {sql}])",
+            "AZ103",
+        )
     name, subj_txt, source = check_name(m.group(1), loc, previous is not None), m.group(2), m.group(3)
     if name in t.perms:
         fail(loc, f"{t.name}.{name} is already a permission", "AZ109")
@@ -962,8 +1091,12 @@ def parse_type_line(t: Type, s: str, loc: Loc, previous: list[str] | None = None
         if any(sr == "*" or st in ("anyone", "link") for st, sr in subjects):
             fail(loc, "user:* (or another type:*), anyone and link can only be used with 'shared'", "AZ204")
         if src.type_col is None and len(subjects) != 1:
-            fail(loc, "a column or table source links to exactly one kind of subject; "
-                      "for several, add a type column: (type_col, id_col)", "AZ205")
+            fail(
+                loc,
+                "a column or table source links to exactly one kind of subject; "
+                "for several, add a type column: (type_col, id_col)",
+                "AZ205",
+            )
         if src.type_col is not None and any(sr for _, sr in subjects):
             fail(loc, "a (type_col, id_col) source links to objects, not groups", "AZ205")
     t.relations.setdefault(name, Relation(name, loc)).sources.append(src)
@@ -978,13 +1111,21 @@ def parse_rule_line(pol: Policy, table: str, s: str, loc: Loc) -> None:
     # which row an update rule checks: the row before the change (the default), or after it
     when = rest.rsplit(None, 1)[-1] if rest else ""
     if when == "check":
-        fail(loc, f"write 'after' instead of 'check' (checked on the row after the change): "
-                  f"{head.strip()[:-len('check')].strip()} after : ...", "AZ105")
+        fail(
+            loc,
+            f"write 'after' instead of 'check' (checked on the row after the change): "
+            f"{head.strip()[: -len('check')].strip()} after : ...",
+            "AZ105",
+        )
     if when == "before" and rest == when:
-        fail(loc, "a plain update rule is checked on the row before and after the change: write 'update : ...' "
-                  "(a column named before: update before before : ...)", "AZ105")
+        fail(
+            loc,
+            "a plain update rule is checked on the row before and after the change: write 'update : ...' "
+            "(a column named before: update before before : ...)",
+            "AZ105",
+        )
     if when in ("before", "after"):
-        rest = rest[:-len(when)].strip()
+        rest = rest[: -len(when)].strip()
     else:
         when = ""
     check = when == "after"
@@ -995,6 +1136,16 @@ def parse_rule_line(pol: Policy, table: str, s: str, loc: Loc) -> None:
     elif (when or columns) and command != "update":
         fail(loc, f"only update rules can name columns, 'before' or 'after' (got: {head.strip()})", "AZ105")
     if any(not re.fullmatch(IDENT, c) for c in columns):
-        fail(loc, "write column rules as: update col1, col2 : expression   (or: update col after : expression)", "AZ105")
-    pol.rules.append(Rule(table, "update check" if check else command,
-                          ExprParser(expr.strip(), loc, pol.previous).parse(), expr.strip(), loc, columns))
+        fail(
+            loc, "write column rules as: update col1, col2 : expression   (or: update col after : expression)", "AZ105"
+        )
+    pol.rules.append(
+        Rule(
+            table,
+            "update check" if check else command,
+            ExprParser(expr.strip(), loc, pol.previous).parse(),
+            expr.strip(),
+            loc,
+            columns,
+        )
+    )

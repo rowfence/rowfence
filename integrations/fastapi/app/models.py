@@ -1,5 +1,6 @@
 """The conformance app's tables: projects with members, notes in them, a service that reads projects, and
 an inbox people can write to but only the recipient reads."""
+
 from sqlalchemy import BigInteger, Boolean, ForeignKey, MetaData, Text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 

@@ -15,6 +15,7 @@ An ORM update or delete of a row the user may not change matches no row, and SQL
 why_stale() asks the database which it was, for each row of the flush that failed: NotFound (the row is
 hidden) or Refused (and why) for the first one the database says no for.
 """
+
 from __future__ import annotations
 
 import typing
@@ -60,6 +61,7 @@ except ImportError:
     # SQLAlchemy's asyncio needs greenlet, which SQLAlchemy 2.1 installs only when asked (sqlalchemy[asyncio]):
     # an app on the sync engine has neither, and needs neither
     if not TYPE_CHECKING:
+
         class AsyncEngine:
             """Stands in where SQLAlchemy's asyncio can't be loaded: no engine is one."""
 
@@ -71,9 +73,9 @@ Result = TypeVar("Result")
 TypeName = TypeVar("TypeName", bound=str)
 PermissionName = TypeVar("PermissionName", bound=str)
 
-_engines: dict[Engine, Engine | AsyncEngine] = {}   # sync engine -> the engine install() was given (async or not)
+_engines: dict[Engine, Engine | AsyncEngine] = {}  # sync engine -> the engine install() was given (async or not)
 _mapper_events = False
-_recent: list[_Write] = []                          # when no request or acting_as block made a list
+_recent: list[_Write] = []  # when no request or acting_as block made a list
 
 
 def install(engine: AnyEngine, user: Callable[[], Who] | None = None) -> AnyEngine:
@@ -113,7 +115,7 @@ def _remember(command: str) -> Callable[[Mapper[Any], Connection, object], None]
     def remember(mapper: Mapper[Any], connection: Connection, target: object) -> None:
         table = mapper.local_table
         if not isinstance(table, Table):
-            return                      # mapped to a join or a query: no one table to ask about
+            return  # mapped to a join or a query: no one table to ask about
         name = f"{table.schema}.{table.name}" if table.schema else table.name
         key = mapper.primary_key_from_instance(target)
         writes = _writes.get()
@@ -121,6 +123,7 @@ def _remember(command: str) -> Callable[[Mapper[Any], Connection, object], None]
             writes = _recent
         writes.append((connection.engine, name, command, key))
         del writes[:-20]
+
     return remember
 
 
@@ -182,8 +185,9 @@ def _allowed(lines: Sequence[str] | None) -> bool:
     return bool(lines) and lines is not None and lines[0].lstrip().startswith("yes")
 
 
-async def expect(session: AsyncSession | AsyncConnection, result: Result, table: str, command: str,
-                 key: object) -> Result:
+async def expect(
+    session: AsyncSession | AsyncConnection, result: Result, table: str, command: str, key: object
+) -> Result:
     """A Core UPDATE or DELETE's result: returned if it changed a row (rowcount), else NotFound or Refused,
     asked in the same transaction: delete(Note).where(Note.id == 7) that matched nothing, and why."""
     if getattr(result, "rowcount", 1):
@@ -239,22 +243,30 @@ class Queries(Generic[TypeName, PermissionName]):
 
     Each method is the function of the same name."""
 
-    def ids(self, type_: TypeName, perm: PermissionName,
-            key_type: type[TypeEngine[Any]] | TypeEngine[Any] | None = BigInteger) -> Select[Any]:
+    def ids(
+        self,
+        type_: TypeName,
+        perm: PermissionName,
+        key_type: type[TypeEngine[Any]] | TypeEngine[Any] | None = BigInteger,
+    ) -> Select[Any]:
         return ids(type_, perm, key_type)
 
-    async def can(self, session: AsyncSession | AsyncConnection, type_: TypeName, id_: Id, perm: PermissionName) -> bool:
+    async def can(
+        self, session: AsyncSession | AsyncConnection, type_: TypeName, id_: Id, perm: PermissionName
+    ) -> bool:
         return await can(session, type_, id_, perm)
 
     def can_sync(self, session: Session | Connection, type_: TypeName, id_: Id, perm: PermissionName) -> bool:
         return can_sync(session, type_, id_, perm)
 
-    async def perms_of(self, session: AsyncSession | AsyncConnection, type_: TypeName,
-                       ids_: Iterable[Id]) -> dict[str, list[PermissionName]]:
+    async def perms_of(
+        self, session: AsyncSession | AsyncConnection, type_: TypeName, ids_: Iterable[Id]
+    ) -> dict[str, list[PermissionName]]:
         return typing.cast("dict[str, list[PermissionName]]", await perms_of(session, type_, ids_))
 
-    def perms_of_sync(self, session: Session | Connection, type_: TypeName,
-                      ids_: Iterable[Id]) -> dict[str, list[PermissionName]]:
+    def perms_of_sync(
+        self, session: Session | Connection, type_: TypeName, ids_: Iterable[Id]
+    ) -> dict[str, list[PermissionName]]:
         return typing.cast("dict[str, list[PermissionName]]", perms_of_sync(session, type_, ids_))
 
 

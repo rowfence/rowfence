@@ -8,6 +8,7 @@ Each release has a section, `## X.Y.Z (YYYY-MM-DD)`; while its alphas or its rel
 `## X.Y.Z (alpha)` or `## X.Y.Z (release candidate)`, and the notes of each of them are that section as it
 stands. A final release's heading must have its date. Standard library only.
 """
+
 from __future__ import annotations
 
 import os
@@ -34,9 +35,9 @@ def section(version: str, text: str) -> str:
     line = heading(version, text)
     if not line:
         return ""
-    body = text[text.index(line) + len(line):]
+    body = text[text.index(line) + len(line) :]
     end = re.search(r"^## ", body, re.M)
-    return (body[:end.start()] if end else body).strip() + "\n"
+    return (body[: end.start()] if end else body).strip() + "\n"
 
 
 def unreleased(text: str) -> list[str]:
@@ -44,9 +45,9 @@ def unreleased(text: str) -> list[str]:
     m = re.search(r"^## Unreleased$", text, re.M)
     if not m:
         return []
-    body = text[m.end():]
+    body = text[m.end() :]
     end = re.search(r"^## ", body, re.M)
-    return [line for line in (body[:end.start()] if end else body).splitlines() if line.startswith("- ")]
+    return [line for line in (body[: end.start()] if end else body).splitlines() if line.startswith("- ")]
 
 
 def main(argv: list[str]) -> None:
@@ -55,8 +56,10 @@ def main(argv: list[str]) -> None:
         raise SystemExit("usage: changelog.py [--tagged] VERSION")
     version, text = argv[-1], read()
     if tagged and unreleased(text):
-        raise SystemExit(f"changelog.py: {version} is being released with {len(unreleased(text))} lines still under "
-                         "Unreleased: move them into its section (RELEASING.md)")
+        raise SystemExit(
+            f"changelog.py: {version} is being released with {len(unreleased(text))} lines still under "
+            "Unreleased: move them into its section (RELEASING.md)"
+        )
     notes = section(version, text)
     if not notes.strip():
         raise SystemExit(f"changelog.py: CHANGELOG.md has no section for {version.split('-', 1)[0]}")

@@ -8,6 +8,7 @@ tables and the inheritance tables' rows. Then the migration back, which must giv
 
     PGHOST=... PGUSER=... python3 tests/migrate_test.py [--keep] [case ...]
 """
+
 import os
 import subprocess
 import sys
@@ -35,48 +36,151 @@ def edit(text: str, *pairs: tuple[str, str]) -> str:
 
 
 DOCS, MULTI, COMPOSITE = read("example/docs.authz"), read("tests/multi.authz"), read("tests/composite.authz")
-SCHEMAS = {"docs": "example/app_schema.sql", "multi": "tests/multi_schema.sql", "composite": "tests/composite_schema.sql"}
+SCHEMAS = {
+    "docs": "example/app_schema.sql",
+    "multi": "tests/multi_schema.sql",
+    "composite": "tests/composite_schema.sql",
+}
 
 # (name, schema, old policy, new policy)
 CASES: list[tuple[str, str, str, str]] = [
-    ("a new permission", "docs", DOCS, edit(DOCS, ("  can share = owner or folder.share\n",
-                                                  "  can share = owner or folder.share\n  can comment = folder.view\n"))),
-    ("a new shared relation used by a permission", "docs", DOCS,
-     edit(DOCS, ("  viewer : user, team#member shared\n\n  can share = owner or folder.share",
-                 "  viewer : user, team#member shared\n  editor : user  shared\n\n  can share = owner or folder.share"),
-          ("can edit  = share or folder.edit", "can edit  = share or editor or folder.edit"))),
-    ("inheritance that changes (a tree rebuilt)", "docs", DOCS,
-     edit(DOCS, ("can view  = edit or viewer or (parent.view and {inherit})", "can view  = edit or viewer or parent.view"))),
-    ("a link that stops passing view on (a tree removed)", "docs", DOCS,
-     edit(DOCS, ("can view  = edit or viewer or (parent.view and {inherit})\n           or linked_into.view",
-                 "can view  = edit or viewer or (parent.view and {inherit})"),
-          ("  linked_into : folder      = app.folder_links(folder_id -> parent_id)  -- also shown inside these\n", ""))),
-    ("a rule that changes", "docs", DOCS, edit(DOCS, ("  delete                            : edit", "  delete                            : share"))),
+    (
+        "a new permission",
+        "docs",
+        DOCS,
+        edit(
+            DOCS,
+            (
+                "  can share = owner or folder.share\n",
+                "  can share = owner or folder.share\n  can comment = folder.view\n",
+            ),
+        ),
+    ),
+    (
+        "a new shared relation used by a permission",
+        "docs",
+        DOCS,
+        edit(
+            DOCS,
+            (
+                "  viewer : user, team#member shared\n\n  can share = owner or folder.share",
+                "  viewer : user, team#member shared\n  editor : user  shared\n\n  can share = owner or folder.share",
+            ),
+            ("can edit  = share or folder.edit", "can edit  = share or editor or folder.edit"),
+        ),
+    ),
+    (
+        "inheritance that changes (a tree rebuilt)",
+        "docs",
+        DOCS,
+        edit(
+            DOCS,
+            ("can view  = edit or viewer or (parent.view and {inherit})", "can view  = edit or viewer or parent.view"),
+        ),
+    ),
+    (
+        "a link that stops passing view on (a tree removed)",
+        "docs",
+        DOCS,
+        edit(
+            DOCS,
+            (
+                "can view  = edit or viewer or (parent.view and {inherit})\n           or linked_into.view",
+                "can view  = edit or viewer or (parent.view and {inherit})",
+            ),
+            (
+                "  linked_into : folder      = app.folder_links(folder_id -> parent_id)  -- also shown inside these\n",
+                "",
+            ),
+        ),
+    ),
+    (
+        "a rule that changes",
+        "docs",
+        DOCS,
+        edit(DOCS, ("  delete                            : edit", "  delete                            : share")),
+    ),
     ("a rule that goes", "docs", DOCS, edit(DOCS, ("  delete                            : edit\n", ""))),
     ("a column rule that goes", "docs", DOCS, edit(DOCS, ("  update id, owner_id, confidential : share\n", ""))),
-    ("a table with no rules any more", "docs", DOCS,
-     edit(DOCS, ("rules app.files\n  select                            : view\n  insert                            : folder.edit and owner\n"
-                 "  update                            : edit\n  update folder_id after            : folder.edit\n"
-                 "  update id, owner_id, confidential : share\n  delete                            : edit\n", ""))),
-    ("a scope", "docs", DOCS, edit(DOCS, ("scope read  = select, view\n", "scope read  = select, view\nscope audit = select, file.view\n"))),
-    ("an invariant that goes", "docs", DOCS,
-     edit(DOCS, ("  never folder: share and not org.member  -- only members of its org manage a folder\n", ""))),
-    ("lines that only move", "docs", DOCS, edit(DOCS, ("app role app_user\n", "app role app_user\n\n\n-- a comment\n"))),
-    ("a mask that goes", "multi", MULTI, "\n".join(line for line in MULTI.split("\n") if "mask body" not in line).replace(" view mt.docs_visible", "")),
+    (
+        "a table with no rules any more",
+        "docs",
+        DOCS,
+        edit(
+            DOCS,
+            (
+                "rules app.files\n  select                            : view\n  insert                            : folder.edit and owner\n"
+                "  update                            : edit\n  update folder_id after            : folder.edit\n"
+                "  update id, owner_id, confidential : share\n  delete                            : edit\n",
+                "",
+            ),
+        ),
+    ),
+    (
+        "a scope",
+        "docs",
+        DOCS,
+        edit(DOCS, ("scope read  = select, view\n", "scope read  = select, view\nscope audit = select, file.view\n")),
+    ),
+    (
+        "an invariant that goes",
+        "docs",
+        DOCS,
+        edit(DOCS, ("  never folder: share and not org.member  -- only members of its org manage a folder\n", "")),
+    ),
+    (
+        "lines that only move",
+        "docs",
+        DOCS,
+        edit(DOCS, ("app role app_user\n", "app role app_user\n\n\n-- a comment\n")),
+    ),
+    (
+        "a mask that goes",
+        "multi",
+        MULTI,
+        "\n".join(line for line in MULTI.split("\n") if "mask body" not in line).replace(" view mt.docs_visible", ""),
+    ),
     # the masked view is what the app reads: a view of the app's built on it must not stop a migration, or an apply
-    ("a mask that changes, under a view of the app's", "multi", MULTI, edit(MULTI, ("  mask body : edit", "  mask body : view"))),
-    ("a permission the masked view reads changes, under a view of the app's", "multi", MULTI,
-     edit(MULTI, ("  can edit = author or container.edit\n  can view = edit or container.view",
-                  "  can edit = author\n  can view = edit or container.view"))),
-    ("a new permission on composite keys", "composite", COMPOSITE,
-     edit(COMPOSITE, ("  can edit = owner or uploader or folder.edit\n",
-                      "  can edit = owner or uploader or folder.edit\n  can comment = folder.view\n"))),
-    ("inheritance on composite keys that goes (a tree removed)", "composite", COMPOSITE,
-     edit(COMPOSITE, ("  can edit  = share or editor or parent.edit\n", "  can edit  = share or editor\n"))),
+    (
+        "a mask that changes, under a view of the app's",
+        "multi",
+        MULTI,
+        edit(MULTI, ("  mask body : edit", "  mask body : view")),
+    ),
+    (
+        "a permission the masked view reads changes, under a view of the app's",
+        "multi",
+        MULTI,
+        edit(
+            MULTI,
+            (
+                "  can edit = author or container.edit\n  can view = edit or container.view",
+                "  can edit = author\n  can view = edit or container.view",
+            ),
+        ),
+    ),
+    (
+        "a new permission on composite keys",
+        "composite",
+        COMPOSITE,
+        edit(
+            COMPOSITE,
+            (
+                "  can edit = owner or uploader or folder.edit\n",
+                "  can edit = owner or uploader or folder.edit\n  can comment = folder.view\n",
+            ),
+        ),
+    ),
+    (
+        "inheritance on composite keys that goes (a tree removed)",
+        "composite",
+        COMPOSITE,
+        edit(COMPOSITE, ("  can edit  = share or editor or parent.edit\n", "  can edit  = share or editor\n")),
+    ),
 ]
 # functions an older build made kept "$user" on their search path; a migration changes only some functions, and
 # the others must take the path the migration runs with
-OLDER_BUILD = "functions an older build made (\"$user\" on their search path)"
+OLDER_BUILD = 'functions an older build made ("$user" on their search path)'
 CASES.insert(1, (OLDER_BUILD, "docs", DOCS, CASES[0][3]))
 OLD_PATHS = r"""DO $o$
 DECLARE f record;
@@ -90,8 +194,10 @@ END $o$;"""
 
 
 # what the app built on what rowstile made, for the cases that say so
-APP_VIEW = ("CREATE VIEW mt.my_docs AS SELECT id FROM mt.docs_visible;\n"
-            "CREATE FUNCTION mt.count_docs() RETURNS bigint LANGUAGE sql BEGIN ATOMIC SELECT count(*) FROM mt.docs_visible; END;")
+APP_VIEW = (
+    "CREATE VIEW mt.my_docs AS SELECT id FROM mt.docs_visible;\n"
+    "CREATE FUNCTION mt.count_docs() RETURNS bigint LANGUAGE sql BEGIN ATOMIC SELECT count(*) FROM mt.docs_visible; END;"
+)
 
 
 def sh(*args: str, stdin: str | None = None, check: bool = True) -> str:
@@ -108,21 +214,42 @@ def psql(db: str, sql: str) -> str:
 def fresh(db: str, schema: str) -> None:
     sh("dropdb", "--if-exists", db)
     sh("createdb", db)
-    sh("psql", "-X", "-q", "-v", "ON_ERROR_STOP=1", "-d", db, "-c", "SET client_min_messages = error",
-       "-f", os.path.join(ROOT, schema))
+    sh(
+        "psql",
+        "-X",
+        "-q",
+        "-v",
+        "ON_ERROR_STOP=1",
+        "-d",
+        db,
+        "-c",
+        "SET client_min_messages = error",
+        "-f",
+        os.path.join(ROOT, schema),
+    )
 
 
 def apply_whole(db: str, policy: str) -> None:
     with tempfile.NamedTemporaryFile("w", suffix=".authz", delete=False, encoding="utf-8") as fh:
         fh.write(policy)
     try:
-        sh(sys.executable, os.path.join(ROOT, "cli", "rowstile_cli.py"), "--db", f"dbname={db}", "apply", fh.name, "--force")
+        sh(
+            sys.executable,
+            os.path.join(ROOT, "cli", "rowstile_cli.py"),
+            "--db",
+            f"dbname={db}",
+            "apply",
+            fh.name,
+            "--force",
+        )
     finally:
         os.unlink(fh.name)
 
 
 def run_migration(db: str, sql: str) -> str:
-    return sh("psql", "-X", "-q", "-1", "-v", "ON_ERROR_STOP=1", "-d", db, stdin="SET client_min_messages = error;\n" + sql)
+    return sh(
+        "psql", "-X", "-q", "-1", "-v", "ON_ERROR_STOP=1", "-d", db, stdin="SET client_min_messages = error;\n" + sql
+    )
 
 
 SNAPSHOT = r"""
@@ -189,8 +316,9 @@ def objects(text: str) -> dict[str, str]:
     out: dict[str, list[str]] = {}
     cur: str | None = None
     for line in text.split("\n"):
-        if line.startswith(("function ", "view ", "trigger ", "policy ", "table ", "column ", "index ", "type ",
-                            "schema ", "rows ")):
+        if line.startswith(
+            ("function ", "view ", "trigger ", "policy ", "table ", "column ", "index ", "type ", "schema ", "rows ")
+        ):
             cur = line
             out[cur] = []
         elif cur:
@@ -210,14 +338,17 @@ def compare(a: str, b: str) -> list[str]:
         elif oa[k] != ob[k]:
             la, lb = oa[k].split("\n"), ob[k].split("\n")
             i = next((i for i, (x, y) in enumerate(zip(la, lb, strict=False)) if x != y), min(len(la), len(lb)))
-            out.append(f"  differs: {k}\n    migrated: {la[i] if i < len(la) else '(end)'}\n"
-                       f"    whole:    {lb[i] if i < len(lb) else '(end)'}")
+            out.append(
+                f"  differs: {k}\n    migrated: {la[i] if i < len(la) else '(end)'}\n"
+                f"    whole:    {lb[i] if i < len(lb) else '(end)'}"
+            )
     return out
 
 
 # what the app changes while a migration waits (between the two of a tree built beside): moves, a condition,
 # links, a new row, deleted rows; the other database gets the same changes before the new policy
-CHANGES = {"docs": """
+CHANGES = {
+    "docs": """
 UPDATE app.folders SET parent_id = 1 WHERE id = 4;
 UPDATE app.folders SET inherit = true WHERE id = 5;
 INSERT INTO app.folders (id, org_id, parent_id, owner_id, name) VALUES (30, 1, 6, 5, 'New');
@@ -225,7 +356,8 @@ INSERT INTO app.folder_links VALUES (6, 20);
 DELETE FROM app.folder_links WHERE folder_id = 21 AND parent_id = 1;
 DELETE FROM app.files WHERE folder_id = 2;
 DELETE FROM app.folders WHERE id = 2;
-"""}
+"""
+}
 
 
 def main() -> None:
@@ -253,9 +385,9 @@ def main() -> None:
                     psql(db_m, changes)
                     run_migration(db_m, ms[0].sql)
                 else:
-                    run_migration(db_m, ms[0].sql)      # built beside ...
-                    psql(db_m, changes)                 # ... while the app writes ...
-                    run_migration(db_m, ms[1].sql)      # ... then swapped in
+                    run_migration(db_m, ms[0].sql)  # built beside ...
+                    psql(db_m, changes)  # ... while the app writes ...
+                    run_migration(db_m, ms[1].sql)  # ... then swapped in
             except RuntimeError as e:
                 failed += 1
                 print(f"FAIL  {label}: the migration fails\n{e}")
@@ -274,17 +406,27 @@ def main() -> None:
             if app and not diffs:
                 # the app's view is still there, and reads the view as it is now (not the emptied one)
                 for db in (db_m, db_w):
-                    left = psql(db, "SELECT count(*) FROM pg_views WHERE schemaname = 'mt' AND viewname = 'my_docs';"
-                                    "SELECT pg_get_viewdef('mt.docs_visible'::regclass) ~ 'WHERE false';"
-                                    "SELECT mt.count_docs() >= 0;").split()
+                    left = psql(
+                        db,
+                        "SELECT count(*) FROM pg_views WHERE schemaname = 'mt' AND viewname = 'my_docs';"
+                        "SELECT pg_get_viewdef('mt.docs_visible'::regclass) ~ 'WHERE false';"
+                        "SELECT mt.count_docs() >= 0;",
+                    ).split()
                     if left != ["1", "f", "t"]:
                         diffs.append(f"  {db}: the app's view after: {left}")
             size = " + ".join(f"{len(m.sql) // 1024} KB" for m in ms)
-            size += (f", {'builds beside and swaps in' if len(ms) == 2 else 'rebuilds'} {', '.join(ms[-1].rebuilt)}"
-                     if ms[-1].rebuilt else "")
+            size += (
+                f", {'builds beside and swaps in' if len(ms) == 2 else 'rebuilds'} {', '.join(ms[-1].rebuilt)}"
+                if ms[-1].rebuilt
+                else ""
+            )
             if diffs:
                 failed += 1
-                print(f"FAIL  {label} ({size}):\n" + "\n".join(diffs[:12]) + (f"\n  ... {len(diffs) - 12} more" if len(diffs) > 12 else ""))
+                print(
+                    f"FAIL  {label} ({size}):\n"
+                    + "\n".join(diffs[:12])
+                    + (f"\n  ... {len(diffs) - 12} more" if len(diffs) > 12 else "")
+                )
             else:
                 print(f"ok    {label} ({size})")
     if not KEEP:

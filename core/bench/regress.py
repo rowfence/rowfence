@@ -15,6 +15,7 @@ its own (scale.sh --large, --full), and this small run on a shared CI machine is
 Step 2 (throughput as clients grow) is left out: at 50 clients the machine is saturated and its
 latencies say more about the machine than about the code.
 """
+
 import re
 import sys
 
@@ -24,10 +25,10 @@ MIN_TXNS = 50
 
 def numbers(path: str) -> tuple[dict[str, float], list[str], set[str]]:
     out: dict[str, float] = {}
-    rare: set[str] = set()      # scripts that ran, too few times to judge
+    rare: set[str] = set()  # scripts that ran, too few times to judge
     fails: list[str] = []
     section: str | None = None
-    verified = False            # the run got as far as checking the inheritance tables after its writes
+    verified = False  # the run got as far as checking the inheritance tables after its writes
     with open(path, encoding="utf-8") as fh:
         for line in fh:
             m = re.match(r"== (\d+)\.", line)
@@ -81,7 +82,7 @@ def main() -> int:
     slower: list[str] = []
     print(f"{'measure':28}{'baseline':>10}{'now':>10}")
     for k in sorted(base):
-        if k in rare:           # the run's rate (READ_RATE) leaves few of a rare script: not judged this time
+        if k in rare:  # the run's rate (READ_RATE) leaves few of a rare script: not judged this time
             print(f"{k:28}{base[k]:10.2f}{'too few':>10}")
             continue
         if k not in now:

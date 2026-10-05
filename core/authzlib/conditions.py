@@ -11,6 +11,7 @@ The grammar: or < and < not < a comparison (`=`, `<>`, `!=`, `<`, `<=`, `>`, `>=
 `[not] in (...)`, of a column (`col`, `this.col`) with a constant (`'text'`, a number, `true`, `false`, `null`)
 or `authz.uid()`; a column alone is a boolean. Values follow SQL's three-valued logic: NULL compares to nothing.
 """
+
 from __future__ import annotations
 
 import re
@@ -52,15 +53,18 @@ class In(NamedTuple):
 
 
 class Bool(NamedTuple):
-    op: str                     # and | or | not
+    op: str  # and | or | not
     items: tuple[Node, ...]
 
 
 Node: TypeAlias = "Col | Const | Uid | Cmp | IsNull | In | Bool"
 
-TOKEN = re.compile(r"\s*(?:(?P<str>'(?:[^']|'')*')|(?P<num>\d+(?:\.\d+)?)(?![\w.])|"
-                   r"(?P<uid>authz\s*\.\s*uid\s*\(\s*\))|(?P<name>(?:this\s*\.\s*)?[A-Za-z_][A-Za-z0-9_]*)|"
-                   r"(?P<op><>|!=|<=|>=|=|<|>)|(?P<p>[(),]))", re.IGNORECASE)
+TOKEN = re.compile(
+    r"\s*(?:(?P<str>'(?:[^']|'')*')|(?P<num>\d+(?:\.\d+)?)(?![\w.])|"
+    r"(?P<uid>authz\s*\.\s*uid\s*\(\s*\))|(?P<name>(?:this\s*\.\s*)?[A-Za-z_][A-Za-z0-9_]*)|"
+    r"(?P<op><>|!=|<=|>=|=|<|>)|(?P<p>[(),]))",
+    re.IGNORECASE,
+)
 WORDS = ("and", "or", "not", "is", "null", "in", "true", "false")
 
 
@@ -99,14 +103,14 @@ class Parser:
 
     def take(self, kind: str, text: str | None = None) -> str:
         if not self.peek(kind, text):
-            raise NotSimple(str(self.toks[self.i:]))
+            raise NotSimple(str(self.toks[self.i :]))
         self.i += 1
         return self.toks[self.i - 1][1]
 
     def parse(self) -> Node:
         node = self.or_()
         if self.i != len(self.toks):
-            raise NotSimple(str(self.toks[self.i:]))
+            raise NotSimple(str(self.toks[self.i :]))
         return node
 
     def or_(self) -> Node:
@@ -180,7 +184,7 @@ class Parser:
         if self.peek("word", "null"):
             self.take("word")
             return None
-        raise NotSimple(str(self.toks[self.i:]))
+        raise NotSimple(str(self.toks[self.i :]))
 
 
 @cache
@@ -190,11 +194,14 @@ def simple(sql: str) -> Node | None:
         node = Parser(sql).parse()
     except NotSimple:
         return None
+
     # a column compared with a column, or a constant on its own, is not one the evaluator reads
     def fine(n: Node) -> bool:
         match n:
             case Cmp(left=a, right=b):
-                return sum(isinstance(x, Col) for x in (a, b)) == 1 and all(isinstance(x, (Col, Const, Uid)) for x in (a, b))
+                return sum(isinstance(x, Col) for x in (a, b)) == 1 and all(
+                    isinstance(x, (Col, Const, Uid)) for x in (a, b)
+                )
             case IsNull(item=x) | In(item=x):
                 return isinstance(x, Col)
             case Bool(items=items):
@@ -202,6 +209,7 @@ def simple(sql: str) -> Node | None:
             case Col():
                 return True
         return False
+
     return node if fine(node) else None
 
 
@@ -232,6 +240,7 @@ def columns_of(node: Node) -> dict[str, list[tuple[str, Scalar]]]:
             case Bool(items=items):
                 for x in items:
                     walk(x)
+
     walk(node)
     return out
 

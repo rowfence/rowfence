@@ -1,5 +1,6 @@
 """The conformance app: no permission checks anywhere. rowstile signs each request's transactions in, the
 database filters reads and refuses writes, and the SDK turns refusals into 403 and hidden rows into 404."""
+
 import os
 
 import rowstile
@@ -45,7 +46,9 @@ def make_app(url: str | None = None, check_connection: bool = True, pool_size: i
     @app.get("/projects/editable")
     async def editable() -> list[int]:
         async with Session() as s:
-            return sorted((await s.scalars(select(Project.id).where(Project.id.in_(queries.ids("project", "edit"))))).all())
+            return sorted(
+                (await s.scalars(select(Project.id).where(Project.id.in_(queries.ids("project", "edit"))))).all()
+            )
 
     @app.get("/projects/buttons")
     async def buttons() -> dict[str, list[Permission]]:
@@ -79,7 +82,7 @@ def make_app(url: str | None = None, check_connection: bool = True, pool_size: i
             note = await s.get(Note, note_id)
             if note is None:
                 raise NotFound("app.notes", note_id)
-            note.body = b.body          # an update the rules may refuse: StaleDataError -> 403 with the reason
+            note.body = b.body  # an update the rules may refuse: StaleDataError -> 403 with the reason
         return {"id": note_id}
 
     @app.delete("/notes/{note_id}", status_code=204)
@@ -97,15 +100,17 @@ def make_app(url: str | None = None, check_connection: bool = True, pool_size: i
         async with Session.begin() as s:
             msg = Message(sender_id=signed_in(), recipient_id=m.recipient_id, body=m.body)
             s.add(msg)
-            await s.flush()             # reads the id back (RETURNING): only the recipient may read it
+            await s.flush()  # reads the id back (RETURNING): only the recipient may read it
             return {"id": msg.id}
 
     @app.post("/inbox/quietly", status_code=202)
     async def send_quietly(m: NewMessage) -> dict[str, int]:
         # without reading the row back (SQLAlchemy's insert() would, with RETURNING, to learn the new id)
         async with Session.begin() as s:
-            await s.execute(text("INSERT INTO app.inbox (sender_id, recipient_id, body) VALUES (:s, :r, :b)"),
-                            {"s": signed_in(), "r": m.recipient_id, "b": m.body})
+            await s.execute(
+                text("INSERT INTO app.inbox (sender_id, recipient_id, body) VALUES (:s, :r, :b)"),
+                {"s": signed_in(), "r": m.recipient_id, "b": m.body},
+            )
         return {}
 
     return app

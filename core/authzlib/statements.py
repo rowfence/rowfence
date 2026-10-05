@@ -4,6 +4,7 @@ The migration writer (migrate.py) works on objects: a function, a view, a trigge
 the rows it holds. The compiler writes SQL text; this reads it back, the way psql does: quotes, dollar
 quotes, comments and BEGIN ATOMIC bodies (whose semicolons don't end the statement).
 """
+
 from __future__ import annotations
 
 import re
@@ -19,8 +20,8 @@ def split(sql: str) -> list[tuple[str, str]]:
     i, n = 0, len(sql)
     start: int | None = None
     comments: list[str] = []
-    atomic, depth = False, 0          # inside a BEGIN ATOMIC body, and how many BEGIN/CASE are open in it
-    first: str | None = None          # the statement's first word, and the last one (to spot CREATE ... BEGIN ATOMIC)
+    atomic, depth = False, 0  # inside a BEGIN ATOMIC body, and how many BEGIN/CASE are open in it
+    first: str | None = None  # the statement's first word, and the last one (to spot CREATE ... BEGIN ATOMIC)
     prev: str | None = None
     while i < n:
         c = sql[i]
@@ -87,7 +88,7 @@ def split(sql: str) -> list[tuple[str, str]]:
             continue
         if c.isalpha() or c == "_":
             m = WORD.match(sql, i)
-            assert m is not None      # a letter or _ starts a word
+            assert m is not None  # a letter or _ starts a word
             w = m.group(0).upper()
             if first is None:
                 first = w
@@ -128,7 +129,7 @@ def _args(text: str, start: int) -> tuple[str, int]:
         elif ch == ")":
             depth -= 1
             if depth == 0:
-                return text[start + 1:i], i + 1
+                return text[start + 1 : i], i + 1
         elif ch == "'":
             i = text.index("'", i + 1)
         elif ch == '"':
@@ -149,7 +150,7 @@ def _split_top(text: str, sep: str = ",") -> list[str]:
             depth -= 1
         elif ch in "'\"":
             j = text.index(ch, i + 1)
-            cur.append(text[i:j + 1])
+            cur.append(text[i : j + 1])
             i = j + 1
             continue
         if ch == sep and depth == 0:
@@ -180,11 +181,14 @@ def norm(name: str) -> str:
 CREATE_FN = re.compile(rf"CREATE\s+(?:OR\s+REPLACE\s+)?FUNCTION\s+({QNAME})\s*\(", re.IGNORECASE)
 CREATE_VIEW = re.compile(rf"CREATE\s+(?:OR\s+REPLACE\s+)?VIEW\s+({QNAME})", re.IGNORECASE)
 CREATE_TABLE = re.compile(rf"CREATE\s+(?:UNLOGGED\s+)?TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?({QNAME})", re.IGNORECASE)
-CREATE_TRIGGER = re.compile(rf"CREATE\s+(?:OR\s+REPLACE\s+)?(?:CONSTRAINT\s+)?TRIGGER\s+({NAME})\s.*?\bON\s+({QNAME})",
-                            re.IGNORECASE | re.S)
+CREATE_TRIGGER = re.compile(
+    rf"CREATE\s+(?:OR\s+REPLACE\s+)?(?:CONSTRAINT\s+)?TRIGGER\s+({NAME})\s.*?\bON\s+({QNAME})", re.IGNORECASE | re.S
+)
 CREATE_POLICY = re.compile(rf"CREATE\s+POLICY\s+({NAME})\s+ON\s+({QNAME})", re.IGNORECASE)
-CREATE_INDEX = re.compile(rf"CREATE\s+(?:UNIQUE\s+)?INDEX\s+(?:CONCURRENTLY\s+)?(?:IF\s+NOT\s+EXISTS\s+)?({QNAME})?\s*ON\s+({QNAME})",
-                          re.IGNORECASE)
+CREATE_INDEX = re.compile(
+    rf"CREATE\s+(?:UNIQUE\s+)?INDEX\s+(?:CONCURRENTLY\s+)?(?:IF\s+NOT\s+EXISTS\s+)?({QNAME})?\s*ON\s+({QNAME})",
+    re.IGNORECASE,
+)
 CREATE_TYPE = re.compile(rf"CREATE\s+TYPE\s+({QNAME})", re.IGNORECASE)
 CREATE_SCHEMA = re.compile(rf"CREATE\s+SCHEMA\s+(?:IF\s+NOT\s+EXISTS\s+)?({NAME})", re.IGNORECASE)
 RLS = re.compile(rf"ALTER\s+TABLE\s+({QNAME})\s+ENABLE\s+ROW\s+LEVEL\s+SECURITY", re.IGNORECASE)
@@ -215,7 +219,7 @@ def made(statement: str, comments: str = "") -> tuple[str, str] | None:
         return "policy", f"{m.group(1)} ON {norm(m.group(2))}"
     m = CREATE_INDEX.match(s)
     if m:
-        return ("index", norm(m.group(1))) if m.group(1) else None     # unnamed: goes with its table
+        return ("index", norm(m.group(1))) if m.group(1) else None  # unnamed: goes with its table
     m = RLS.match(s)
     if m:
         return "rls", norm(m.group(1))
@@ -224,14 +228,15 @@ def made(statement: str, comments: str = "") -> tuple[str, str] | None:
 
 def drop_sql(kind: str, key: str) -> str | None:
     """What undoes an object (None: nothing to undo, or kept on purpose)."""
-    return {"function": f"DROP FUNCTION IF EXISTS {key};",
-            "view": f"DROP VIEW IF EXISTS {key};",
-            "table": f"DROP TABLE IF EXISTS {key};",
-            "trigger": f"DROP TRIGGER IF EXISTS {key};",
-            "policy": f"DROP POLICY IF EXISTS {key};",
-            "index": f"DROP INDEX IF EXISTS {key};",
-            "type": f"DROP TYPE IF EXISTS {key};",
-            }.get(kind)
+    return {
+        "function": f"DROP FUNCTION IF EXISTS {key};",
+        "view": f"DROP VIEW IF EXISTS {key};",
+        "table": f"DROP TABLE IF EXISTS {key};",
+        "trigger": f"DROP TRIGGER IF EXISTS {key};",
+        "policy": f"DROP POLICY IF EXISTS {key};",
+        "index": f"DROP INDEX IF EXISTS {key};",
+        "type": f"DROP TYPE IF EXISTS {key};",
+    }.get(kind)
 
 
 REF = re.compile(rf"\b(authz|authz_int|authz_gen)\s*\.\s*({NAME})")
@@ -239,7 +244,9 @@ REF = re.compile(rf"\b(authz|authz_int|authz_gen)\s*\.\s*({NAME})")
 
 def references(text: str) -> set[str]:
     """The authz* names a piece of SQL mentions: {'authz_int.x', ...} (quotes removed)."""
-    return {f"{s}.{n[1:-1].replace(chr(34) * 2, chr(34)) if n.startswith(chr(34)) else n}" for s, n in REF.findall(text)}
+    return {
+        f"{s}.{n[1:-1].replace(chr(34) * 2, chr(34)) if n.startswith(chr(34)) else n}" for s, n in REF.findall(text)
+    }
 
 
 def unquoted(key: str) -> str:

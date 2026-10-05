@@ -10,6 +10,7 @@ Every function takes `db`, a connection.Db:
 
 and runs in the caller's transaction, so an error anywhere undoes everything the call did.
 """
+
 from __future__ import annotations
 
 import contextlib
@@ -52,18 +53,20 @@ class LintRow(TypedDict):
 
 
 class DiffRow(TypedDict):
-    change: str                 # gains | loses
-    user_id: str | None         # None: someone not signed in
+    change: str  # gains | loses
+    user_id: str | None  # None: someone not signed in
     type: str
     what: str
     id: str
 
 
 class ReviewRun(TypedDict):
-    deployed: float | None      # seconds the deploy took; None: it failed
+    deployed: float | None  # seconds the deploy took; None: it failed
     error: str | None
     tests: list[TestRow]
-    how: dict[tuple[str, str, str, str], list[str]]  # (user, type, id, perm) -> the lines of authz.explain that grant it
+    how: dict[
+        tuple[str, str, str, str], list[str]
+    ]  # (user, type, id, perm) -> the lines of authz.explain that grant it
 
 
 class Error(Exception):
@@ -75,7 +78,7 @@ class Error(Exception):
 
 
 VERSION = re.compile(r"(\d+)[.](\d+)[.](\d+)(?:-(alpha|rc)[.](\d+)|-(dev))?(?:[+].*)?$")
-STAGES = {"alpha": 0, "rc": 1}        # then the release itself
+STAGES = {"alpha": 0, "rc": 1}  # then the release itself
 
 
 def older_than(mine: str, theirs: str | None) -> bool:
@@ -99,9 +102,12 @@ def older_than(mine: str, theirs: str | None) -> bool:
 def refuse_older(theirs: str | None, what: str) -> None:
     """An older command would put its own, older work in place of a newer version's, as if it were an upgrade."""
     if older_than(BUILD, theirs):
-        raise Error(f"{what} was last written by rowstile {theirs}, which is newer than this command "
-                    f"({__version__}): going on would put this older version's work back [AZ616]", "55000",
-                    hint="upgrade the rowstile command; to go back to this version on purpose, add --downgrade")
+        raise Error(
+            f"{what} was last written by rowstile {theirs}, which is newer than this command "
+            f"({__version__}): going on would put this older version's work back [AZ616]",
+            "55000",
+            hint="upgrade the rowstile command; to go back to this version on purpose, add --downgrade",
+        )
 
 
 def files_map(files: Mapping[str, object] | str | None) -> Files:
@@ -109,7 +115,7 @@ def files_map(files: Mapping[str, object] | str | None) -> Files:
         return {}
     given: object = json.loads(files) if isinstance(files, str) else files
     if not isinstance(given, Mapping) or not all(isinstance(v, str) for v in given.values()):
-        raise PolicyError("files must be a map of file name -> policy text, e.g. {\"roles.authz\": \"...\"}", "AZ108")
+        raise PolicyError('files must be a map of file name -> policy text, e.g. {"roles.authz": "..."}', "AZ108")
     return {str(k): str(v) for k, v in given.items()}
 
 
@@ -154,12 +160,19 @@ def may_take(db: Db, role: str | None) -> None:
     it makes, so an owner that isn't a superuser gives itself the app role once."""
     if role is None:
         return
-    rows = db.rows("SELECT current_user::text AS me, pg_catalog.pg_has_role(current_user, r.oid, 'SET') AS ok "
-                   "FROM pg_catalog.pg_roles r WHERE r.rolname = $1", [role])
+    rows = db.rows(
+        "SELECT current_user::text AS me, pg_catalog.pg_has_role(current_user, r.oid, 'SET') AS ok "
+        "FROM pg_catalog.pg_roles r WHERE r.rolname = $1",
+        [role],
+    )
     if rows and not flag(rows[0], "ok"):
         me = text(rows[0], "me")
-        raise Error(f"{me} may not switch to the app role {role} (SET ROLE), and this looks at the data as the app "
-                    f"does [AZ618]", "42501", hint=f"once, as {me}: GRANT {q(role)} TO {q(me)}")
+        raise Error(
+            f"{me} may not switch to the app role {role} (SET ROLE), and this looks at the data as the app "
+            f"does [AZ618]",
+            "42501",
+            hint=f"once, as {me}: GRANT {q(role)} TO {q(me)}",
+        )
 
 
 class Undo(Exception):
@@ -168,13 +181,18 @@ class Undo(Exception):
 
 def run(db: Db, sql: str) -> None:
     """Runs generated SQL, then gives back the settings it changes for the rest of the transaction."""
-    before = db.rows("SELECT pg_catalog.current_setting('search_path') AS sp, "
-                     "pg_catalog.current_setting('check_function_bodies') AS cfb, "
-                     "pg_catalog.current_setting('lock_timeout') AS lt")[0]
+    before = db.rows(
+        "SELECT pg_catalog.current_setting('search_path') AS sp, "
+        "pg_catalog.current_setting('check_function_bodies') AS cfb, "
+        "pg_catalog.current_setting('lock_timeout') AS lt"
+    )[0]
     db.script(sql)
-    db.rows("SELECT pg_catalog.set_config('search_path', $1, true), "
-            "pg_catalog.set_config('check_function_bodies', $2, true), "
-            "pg_catalog.set_config('lock_timeout', $3, true)", [text(before, "sp"), text(before, "cfb"), text(before, "lt")])
+    db.rows(
+        "SELECT pg_catalog.set_config('search_path', $1, true), "
+        "pg_catalog.set_config('check_function_bodies', $2, true), "
+        "pg_catalog.set_config('lock_timeout', $3, true)",
+        [text(before, "sp"), text(before, "cfb"), text(before, "lt")],
+    )
 
 
 def lock_room(db: Db, sql: str) -> None:
@@ -182,16 +200,20 @@ def lock_room(db: Db, sql: str) -> None:
     it takes a lock on each, and stops with 'out of shared memory' when the table is full (GitLab's thousand
     tables: after two and a half minutes). The table holds max_locks_per_transaction for each connection."""
     made = sum(1 for _, st in statements.split(sql) if re.match(r"\s*(CREATE|ALTER|DROP)\b", st, re.I))
-    room = db.rows("SELECT pg_catalog.current_setting('max_locks_per_transaction')::int AS per, "
-                   "pg_catalog.current_setting('max_connections')::int "
-                   "+ pg_catalog.current_setting('max_prepared_transactions')::int AS slots")[0]
+    room = db.rows(
+        "SELECT pg_catalog.current_setting('max_locks_per_transaction')::int AS per, "
+        "pg_catalog.current_setting('max_connections')::int "
+        "+ pg_catalog.current_setting('max_prepared_transactions')::int AS slots"
+    )[0]
     per, slots = number(room, "per"), number(room, "slots")
     if made > per * slots * 0.8:
-        need = 1 << max(0, -(-made * 5 // (4 * slots)) - 1).bit_length()      # a power of two, with room to spare
-        db.warn(f"this makes about {made} objects in one transaction, and Postgres's lock table holds about "
-                f"{per * slots} locks (max_locks_per_transaction {per} for each of {slots} connections): it may stop "
-                f"with 'out of shared memory'",
-                hint=f"raise max_locks_per_transaction to {need} (a restart; on managed Postgres, a parameter)")
+        need = 1 << max(0, -(-made * 5 // (4 * slots)) - 1).bit_length()  # a power of two, with room to spare
+        db.warn(
+            f"this makes about {made} objects in one transaction, and Postgres's lock table holds about "
+            f"{per * slots} locks (max_locks_per_transaction {per} for each of {slots} connections): it may stop "
+            f"with 'out of shared memory'",
+            hint=f"raise max_locks_per_transaction to {need} (a restart; on managed Postgres, a parameter)",
+        )
 
 
 def run_policy(db: Db, sql: str, policy: str, files: Files) -> None:
@@ -220,10 +242,10 @@ def condition_error(err: Exception, sql: str, policy: str, files: Files) -> Erro
         pos = int(got["P"]) - 1
         start = sql.rfind(";\n", 0, pos) + 1
         end = sql.find(";\n", pos)
-        where, at = sql[start:end if end >= 0 else len(sql)], pos - start
+        where, at = sql[start : end if end >= 0 else len(sql)], pos - start
     else:
         return None
-    found: list[tuple[int, int, Loc, str]] = []     # each condition's occurrences in the failing text: where, how long
+    found: list[tuple[int, int, Loc, str]] = []  # each condition's occurrences in the failing text: where, how long
     for loc, _, line in read_lines(None, policy, files=files):
         for cond in braced(line):
             cond = cond.strip()
@@ -246,10 +268,15 @@ def condition_error(err: Exception, sql: str, policy: str, files: Files) -> Erro
     table = re.search(r'missing FROM-clause entry for table "([^"]+)"', got.get("M", ""))
     named = re.search(rf"\b{re.escape(table.group(1))}\s*\.\s*([A-Za-z_][A-Za-z0-9_]*)", cond) if table else None
     if table and named:
-        hint = (f"{table.group(1)}.{named.group(1)} names a table only where the query reads one by that name: for "
-                f"the row the condition is about, write this.{named.group(1)}")
-    return Error(f"policy {loc}: the condition {{{cond}}} doesn't run: {got.get('M', str(err))} [AZ613]",
-                 got.get("C", "42P17"), hint=hint)
+        hint = (
+            f"{table.group(1)}.{named.group(1)} names a table only where the query reads one by that name: for "
+            f"the row the condition is about, write this.{named.group(1)}"
+        )
+    return Error(
+        f"policy {loc}: the condition {{{cond}}} doesn't run: {got.get('M', str(err))} [AZ613]",
+        got.get("C", "42P17"),
+        hint=hint,
+    )
 
 
 def as_compiled(cond: str) -> re.Pattern[str]:
@@ -261,29 +288,41 @@ def as_compiled(cond: str) -> re.Pattern[str]:
     return re.compile("".join(parts) + re.escape(cond[last:]))
 
 
-def record(db: Db, action: str, policy: str | None = None, files: Mapping[str, object] | None = None,
-           lock: str | None = None) -> None:
-    db.rows("INSERT INTO authz.policy_versions (action, policy, files, version, lock) VALUES ($1, $2, $3::jsonb, $4, $5)",
-            [action, policy, json.dumps(files_map(files)), BUILD, lock])
+def record(
+    db: Db, action: str, policy: str | None = None, files: Mapping[str, object] | None = None, lock: str | None = None
+) -> None:
+    db.rows(
+        "INSERT INTO authz.policy_versions (action, policy, files, version, lock) VALUES ($1, $2, $3::jsonb, $4, $5)",
+        [action, policy, json.dumps(files_map(files)), BUILD, lock],
+    )
 
 
 def migratable(policy: str, files: Mapping[str, object] | str | None) -> tuple[str, migrate.Compiled, Compiler]:
     """(the whole compiled policy, the policy as migrate.py reads it, the compiler): what migrations start from."""
+
     def make(c: Compiler) -> tuple[str, Compiler]:
-        return c.compile("the policy", transaction=False), c      # compiling finds mistakes too: inside compiled()
+        return c.compile("the policy", transaction=False), c  # compiling finds mistakes too: inside compiled()
+
     sql, c = compiled(policy, files, make)
     return sql, migrate.read(c, policy, files_map(files)), c
 
 
-def migration(policy: str, files: Mapping[str, object] | str | None, lock_text: str | None,
-              name: str = "policy") -> migrate.Migration:
+def migration(
+    policy: str, files: Mapping[str, object] | str | None, lock_text: str | None, name: str = "policy"
+) -> migrate.Migration:
     """The migration from the lock file's text (None or '': the first) to this policy (migrate.Migration)."""
     sql, comp, _ = migratable(policy, files)
     return migrate.migration(sql, comp, migrate.parse_lock(lock_text), name)
 
 
-def migrations(policy: str, files: Mapping[str, object] | str | None, lock_text: str | None, name: str = "policy",
-               two_phase: bool = True, downgrade: bool = False) -> list[migrate.Migration]:
+def migrations(
+    policy: str,
+    files: Mapping[str, object] | str | None,
+    lock_text: str | None,
+    name: str = "policy",
+    two_phase: bool = True,
+    downgrade: bool = False,
+) -> list[migrate.Migration]:
     """The migrations from the lock file's text to this policy: one, or two when inheritance trees are
     built beside the ones in use first (migrate.migrations). Refused when a newer version wrote the lock."""
     lock = migrate.parse_lock(lock_text)
@@ -306,7 +345,9 @@ def applied(db: Db) -> tuple[str, Files]:
     """The policy in force: the last one applied, unless it was removed since."""
     rows: list[dict[str, Value]] = []
     if there(db, "authz.policy_versions"):
-        rows = db.rows("SELECT action, policy, files::text AS files FROM authz.policy_versions ORDER BY id DESC LIMIT 1")
+        rows = db.rows(
+            "SELECT action, policy, files::text AS files FROM authz.policy_versions ORDER BY id DESC LIMIT 1"
+        )
     if not rows or rows[0]["action"] != "apply":
         raise Error("no policy is applied [AZ609]", "55000", hint="rowstile apply db/policy.authz")
     return text(rows[0], "policy"), files_map(text_or_none(rows[0], "files") or "{}")
@@ -318,8 +359,14 @@ def one_at_a_time(db: Db) -> None:
     db.rows("SELECT pg_catalog.pg_advisory_xact_lock(1919905638, 0)")
 
 
-def apply(db: Db, policy: str, files: Mapping[str, object] | str | None = None, only_if_changed: bool = False,
-          downgrade: bool = False, rebuild: bool = False) -> str:
+def apply(
+    db: Db,
+    policy: str,
+    files: Mapping[str, object] | str | None = None,
+    only_if_changed: bool = False,
+    downgrade: bool = False,
+    rebuild: bool = False,
+) -> str:
     """'applied', or 'unchanged' (only_if_changed, and this policy is in force with everything it made).
     The whole compiled policy: everything it makes is made again (trees that didn't change keep their rows,
     unless rebuild: then each is computed again from the app's tables, which is what brings back a tree that
@@ -350,12 +397,15 @@ def rebuild_trees(db: Db) -> None:
 
 def development(db: Db) -> bool:
     """Whether this database is marked as a development database, which push may change."""
-    return bool(there(db, "authz.settings") and db.rows(
-        "SELECT 1 FROM authz.settings WHERE key = 'development' AND value = 'true'"))
+    return bool(
+        there(db, "authz.settings")
+        and db.rows("SELECT 1 FROM authz.settings WHERE key = 'development' AND value = 'true'")
+    )
 
 
-def push(db: Db, policy: str, files: Mapping[str, object] | str | None = None, mark: bool = False,
-         downgrade: bool = False) -> str:
+def push(
+    db: Db, policy: str, files: Mapping[str, object] | str | None = None, mark: bool = False, downgrade: bool = False
+) -> str:
     """Brings a development database to this policy with the migration from the policy in force, as the next
     migration file would: 'pushed', 'unchanged', or 'applied' (the whole policy, when the one in
     force was applied by another version of rowstile, or isn't as its record says).
@@ -373,9 +423,12 @@ def push(db: Db, policy: str, files: Mapping[str, object] | str | None = None, m
             what = "has a policy"
         except Error:
             what = "had a policy (removed since)"
-        raise Error(f"this database {what} and isn't marked as a development database, so push won't change "
-                    "it: production takes migrations (rowstile migrate) [AZ610]", "55000",
-                    hint="if it is a development database, mark it once: rowstile push --development")
+        raise Error(
+            f"this database {what} and isn't marked as a development database, so push won't change "
+            "it: production takes migrations (rowstile migrate) [AZ610]",
+            "55000",
+            hint="if it is a development database, mark it once: rowstile push --development",
+        )
     state = _push(db, policy, files, downgrade)
     db.rows("INSERT INTO authz.settings VALUES ('development', 'true') ON CONFLICT (key) DO UPDATE SET value = 'true'")
     return state
@@ -383,11 +436,17 @@ def push(db: Db, policy: str, files: Mapping[str, object] | str | None = None, m
 
 def _push(db: Db, policy: str, files: Files, downgrade: bool = False) -> str:
     last = None
-    if there(db, "authz.policy_versions") and number(db.rows(
+    if there(db, "authz.policy_versions") and number(
+        db.rows(
             "SELECT count(*) AS n FROM pg_catalog.pg_attribute WHERE attrelid = 'authz.policy_versions'::regclass "
-            "AND attname = 'lock' AND NOT attisdropped")[0], "n"):
-        rows = db.rows("SELECT action, policy, files::text AS files, version, lock FROM authz.policy_versions "
-                       "ORDER BY id DESC LIMIT 1")
+            "AND attname = 'lock' AND NOT attisdropped"
+        )[0],
+        "n",
+    ):
+        rows = db.rows(
+            "SELECT action, policy, files::text AS files, version, lock FROM authz.policy_versions "
+            "ORDER BY id DESC LIMIT 1"
+        )
         last = rows[0] if rows else None
     lock = text_or_none(last, "lock") if last else None
     if last and last["action"] == "apply" and last["version"] == BUILD and lock:
@@ -402,7 +461,7 @@ def _push(db: Db, policy: str, files: Files, downgrade: bool = False) -> str:
             m = migrate.migration(sql, comp, migrate.parse_lock(migrate.lock_of(before)), "push", lines=True)
             if m.empty and (last_policy, last_files) == (policy, files):
                 return "unchanged"
-            if m.empty:                 # the same objects (comments, tests): the new text is the one in force
+            if m.empty:  # the same objects (comments, tests): the new text is the one in force
                 record(db, "apply", policy, files, lock)
                 return "pushed"
             run_policy(db, m.sql, policy, files)
@@ -419,8 +478,9 @@ def unchanged(db: Db, policy: str, files: Files) -> bool:
     each table with rules, and each trigger it makes (enabled)."""
     if not there(db, "authz.policy_versions"):
         return False
-    rows = db.rows("SELECT action, policy, files::text AS files, version FROM authz.policy_versions "
-                   "ORDER BY id DESC LIMIT 1")
+    rows = db.rows(
+        "SELECT action, policy, files::text AS files, version FROM authz.policy_versions ORDER BY id DESC LIMIT 1"
+    )
     if not rows or rows[0]["action"] != "apply" or rows[0]["version"] != BUILD or rows[0]["policy"] != policy:
         return False
     if files_map(text_or_none(rows[0], "files") or "{}") != files:
@@ -428,28 +488,43 @@ def unchanged(db: Db, policy: str, files: Files) -> bool:
     try:
         rules = parse_policy(policy, None, files=files).rules
         # each rule on a whole row is a policy named authz_<command> (output.compile)
-        made = sorted({(r.table, "authz_" + r.command) for r in rules
-                       if r.command not in ("mask", "update check") and not r.columns})
+        made = sorted(
+            {
+                (r.table, "authz_" + r.command)
+                for r in rules
+                if r.command not in ("mask", "update check") and not r.columns
+            }
+        )
         sql = Compiler(parse_policy(policy, None, files=files)).compile("the policy", transaction=False)
     except PolicyError:
         return False
-    triggers = [(m[1].split(" ON ", 1)[1], statements.unquoted(m[1])) for c, st in statements.split(sql)
-                if (m := statements.made(st, c)) and m[0] == "trigger"]
-    return flag(db.rows(
-        "SELECT to_regnamespace('authz_int') IS NOT NULL AND to_regnamespace('authz_gen') IS NOT NULL "
-        "AND NOT EXISTS (SELECT 1 FROM unnest($1::text[], $2::text[]) m(tbl, name) WHERE NOT EXISTS ("
-        "  SELECT 1 FROM pg_catalog.pg_policy p JOIN pg_catalog.pg_description d ON d.objoid = p.oid "
-        f"  AND d.classoid = 'pg_catalog.pg_policy'::regclass AND d.description IN {POLICY_MARKS} "
-        "  WHERE p.polrelid = to_regclass(m.tbl) AND p.polname = m.name)) "
-        "AND NOT EXISTS (SELECT 1 FROM unnest($3::text[]) g(tbl) WHERE NOT coalesce("
-        "  (SELECT c.relrowsecurity FROM pg_catalog.pg_class c WHERE c.oid = to_regclass(g.tbl)), false)) "
-        "AND NOT EXISTS (SELECT 1 FROM unnest($4::text[], $5::text[]) t(tbl, name) WHERE NOT EXISTS ("
-        "  SELECT 1 FROM pg_catalog.pg_trigger g WHERE g.tgrelid = to_regclass(t.tbl) AND g.tgname = t.name "
-        "  AND g.tgenabled <> 'D')) AS there",
-        [text_array([t for t, _ in made]), text_array([n for _, n in made]),
-         text_array(sorted({r.table for r in rules})),
-         text_array([t for t, _ in triggers]), text_array([n for _, n in triggers])])[0],
-        "there")
+    triggers = [
+        (m[1].split(" ON ", 1)[1], statements.unquoted(m[1]))
+        for c, st in statements.split(sql)
+        if (m := statements.made(st, c)) and m[0] == "trigger"
+    ]
+    return flag(
+        db.rows(
+            "SELECT to_regnamespace('authz_int') IS NOT NULL AND to_regnamespace('authz_gen') IS NOT NULL "
+            "AND NOT EXISTS (SELECT 1 FROM unnest($1::text[], $2::text[]) m(tbl, name) WHERE NOT EXISTS ("
+            "  SELECT 1 FROM pg_catalog.pg_policy p JOIN pg_catalog.pg_description d ON d.objoid = p.oid "
+            f"  AND d.classoid = 'pg_catalog.pg_policy'::regclass AND d.description IN {POLICY_MARKS} "
+            "  WHERE p.polrelid = to_regclass(m.tbl) AND p.polname = m.name)) "
+            "AND NOT EXISTS (SELECT 1 FROM unnest($3::text[]) g(tbl) WHERE NOT coalesce("
+            "  (SELECT c.relrowsecurity FROM pg_catalog.pg_class c WHERE c.oid = to_regclass(g.tbl)), false)) "
+            "AND NOT EXISTS (SELECT 1 FROM unnest($4::text[], $5::text[]) t(tbl, name) WHERE NOT EXISTS ("
+            "  SELECT 1 FROM pg_catalog.pg_trigger g WHERE g.tgrelid = to_regclass(t.tbl) AND g.tgname = t.name "
+            "  AND g.tgenabled <> 'D')) AS there",
+            [
+                text_array([t for t, _ in made]),
+                text_array([n for _, n in made]),
+                text_array(sorted({r.table for r in rules})),
+                text_array([t for t, _ in triggers]),
+                text_array([n for _, n in triggers]),
+            ],
+        )[0],
+        "there",
+    )
 
 
 def text_array(items: Iterable[str]) -> str:
@@ -458,15 +533,98 @@ def text_array(items: Iterable[str]) -> str:
 
 
 # words a condition writes that are SQL's, not columns
-SQL_WORDS = frozenset({
-    "all", "and", "any", "array", "as", "asc", "between", "both", "by", "case", "cast", "coalesce", "collate", "cross",
-    "current_date", "current_time", "current_timestamp", "current_user", "date", "desc", "distinct", "do", "else",
-    "end", "except", "exists", "extract", "false", "filter", "from", "full", "greatest", "group", "having", "ilike",
-    "in", "inner", "interval", "intersect", "is", "isnull", "join", "lateral", "leading", "least", "left", "like",
-    "limit", "localtime", "localtimestamp", "not", "notnull", "null", "nullif", "offset", "on", "only", "or", "order",
-    "outer", "over", "overlaps", "partition", "position", "row", "select", "session_user", "similar", "some",
-    "substring", "symmetric", "table", "then", "time", "timestamp", "to", "trailing", "trim", "true", "union", "user",
-    "using", "values", "when", "where", "window", "with", "within"})
+SQL_WORDS = frozenset(
+    {
+        "all",
+        "and",
+        "any",
+        "array",
+        "as",
+        "asc",
+        "between",
+        "both",
+        "by",
+        "case",
+        "cast",
+        "coalesce",
+        "collate",
+        "cross",
+        "current_date",
+        "current_time",
+        "current_timestamp",
+        "current_user",
+        "date",
+        "desc",
+        "distinct",
+        "do",
+        "else",
+        "end",
+        "except",
+        "exists",
+        "extract",
+        "false",
+        "filter",
+        "from",
+        "full",
+        "greatest",
+        "group",
+        "having",
+        "ilike",
+        "in",
+        "inner",
+        "interval",
+        "intersect",
+        "is",
+        "isnull",
+        "join",
+        "lateral",
+        "leading",
+        "least",
+        "left",
+        "like",
+        "limit",
+        "localtime",
+        "localtimestamp",
+        "not",
+        "notnull",
+        "null",
+        "nullif",
+        "offset",
+        "on",
+        "only",
+        "or",
+        "order",
+        "outer",
+        "over",
+        "overlaps",
+        "partition",
+        "position",
+        "row",
+        "select",
+        "session_user",
+        "similar",
+        "some",
+        "substring",
+        "symmetric",
+        "table",
+        "then",
+        "time",
+        "timestamp",
+        "to",
+        "trailing",
+        "trim",
+        "true",
+        "union",
+        "user",
+        "using",
+        "values",
+        "when",
+        "where",
+        "window",
+        "with",
+        "within",
+    }
+)
 # a bare word in a condition: not after a dot or ::, not a qualifier or a function name
 BARE = re.compile(r"(?<![\w.$\"])(?<!::)([A-Za-z_][A-Za-z0-9_]*)\b(?!\s*[.(])")
 
@@ -487,6 +645,7 @@ def row_conditions(c: Compiler) -> list[tuple[str, str, Loc]]:
             case ("and", items) | ("or", items):
                 for x in items:
                     walk(table, x, loc)
+
     for t in c.types.values():
         if t.where:
             out.append((t.table, t.where, t.loc))
@@ -515,22 +674,27 @@ def warn_captured_names(db: Db, compiler: Compiler) -> None:
         words = {m.group(1).lower() for code, part in sql_code(cond) if code for m in BARE.finditer(part)} - SQL_WORDS
         try:
             with savepoint(db, "authz_probe"):
-                db.script(f"CREATE TEMP VIEW authz_probe AS SELECT ({row_cond(cond, alias)}) AS x FROM {qt(table)} AS {alias}")
+                db.script(
+                    f"CREATE TEMP VIEW authz_probe AS SELECT ({row_cond(cond, alias)}) AS x FROM {qt(table)} AS {alias}"
+                )
                 rows = db.rows(
                     "SELECT a.attname::text AS col, EXISTS (SELECT 1 FROM pg_catalog.pg_depend d "
                     "JOIN pg_catalog.pg_rewrite w ON w.oid = d.objid AND d.classid = 'pg_catalog.pg_rewrite'::regclass "
                     "WHERE w.ev_class = 'pg_temp.authz_probe'::regclass AND d.refobjid = a.attrelid "
                     "AND d.refobjsubid = a.attnum) AS read FROM pg_catalog.pg_attribute a "
-                    f"WHERE a.attrelid = {lit(qt(table))}::regclass AND a.attnum > 0 AND NOT a.attisdropped")
+                    f"WHERE a.attrelid = {lit(qt(table))}::regclass AND a.attnum > 0 AND NOT a.attisdropped"
+                )
                 db.script("DROP VIEW pg_temp.authz_probe")
-        except db.errors:                # a condition Postgres can't plan on its own: applying says why
+        except db.errors:  # a condition Postgres can't plan on its own: applying says why
             continue
         for r in rows:
             col = text(r, "col")
             if col in words and not flag(r, "read"):
-                db.warn(f"{loc}: the condition {{{cond}}} names {col}, a column of {table}'s rows, but reads it from "
-                        f"another table the condition names (which has a column of that name too)",
-                        hint=f"for the row's, write this.{col}")
+                db.warn(
+                    f"{loc}: the condition {{{cond}}} names {col}, a column of {table}'s rows, but reads it from "
+                    f"another table the condition names (which has a column of that name too)",
+                    hint=f"for the row's, write this.{col}",
+                )
 
 
 def warn_lint(db: Db) -> None:
@@ -545,8 +709,10 @@ LINT_ORDER = {"error": 0, "warning": 1, "performance": 2, "info": 3}
 def lint(db: Db) -> list[LintRow]:
     """Everything authz.lint() finds, the worst first."""
     applied(db)
-    rows: list[LintRow] = [{"severity": text(r, "severity"), "object": text(r, "object"), "problem": text(r, "problem")}
-                           for r in db.rows("SELECT severity, object, problem FROM authz.lint()")]
+    rows: list[LintRow] = [
+        {"severity": text(r, "severity"), "object": text(r, "object"), "problem": text(r, "problem")}
+        for r in db.rows("SELECT severity, object, problem FROM authz.lint()")
+    ]
     return sorted(rows, key=lambda r: (LINT_ORDER.get(r["severity"], 9), r["object"], r["problem"]))
 
 
@@ -554,12 +720,15 @@ def draft(db: Db, schemas: Sequence[str] | None = None, users: str | None = None
     """A first policy from the tables in these schemas (all of the app's, if None) and their foreign keys."""
     from .draft import CATALOG_SQL, DraftError, table_of
     from .draft import draft as make_draft
+
     rows = db.rows(CATALOG_SQL, [text_array(schemas) if schemas else None])
     tables = [table_of(r) for r in rows]
     if not tables:
         raise Error("no tables to draft a policy from" + (f" in {', '.join(schemas)}" if schemas else ""), "22023")
     try:
-        return make_draft(tables, users, role or "app_user", schemas or sorted({t["name"].split(".")[0] for t in tables}))
+        return make_draft(
+            tables, users, role or "app_user", schemas or sorted({t["name"].split(".")[0] for t in tables})
+        )
     except DraftError as e:
         raise Error(str(e), "22023") from None
 
@@ -569,8 +738,9 @@ def reapply(db: Db, rebuild: bool = False) -> str:
     return apply(db, policy, files, rebuild=rebuild)
 
 
-def diff(db: Db, policy: str, files: Mapping[str, object] | str | None = None,
-         users: list[str] | None = None) -> list[DiffRow]:
+def diff(
+    db: Db, policy: str, files: Mapping[str, object] | str | None = None, users: list[str] | None = None
+) -> list[DiffRow]:
     """Who would gain and lose what if the policy were applied: rows of change, user_id, type, what, id.
     Runs the new policy in a savepoint and undoes it."""
     parts = compiled(policy, files, lambda c: c.diff_parts("the policy", users or None))
@@ -579,10 +749,19 @@ def diff(db: Db, policy: str, files: Mapping[str, object] | str | None = None,
         with savepoint(db, "authz_diff"):
             for step in ("setup", "before", "body", "after"):
                 db.script(parts[step])
-            rows = [{"change": text(r, "change"), "user_id": text_or_none(r, "user_id"), "type": text(r, "type"),
-                     "what": text(r, "what"), "id": text(r, "id")}
-                    for r in db.rows(f"SELECT change, nullif(user_id, '') AS user_id, type, what, id FROM ({DIFF_ROWS}) d "
-                                     f"ORDER BY type, what, id, user_id, change")]
+            rows = [
+                {
+                    "change": text(r, "change"),
+                    "user_id": text_or_none(r, "user_id"),
+                    "type": text(r, "type"),
+                    "what": text(r, "what"),
+                    "id": text(r, "id"),
+                }
+                for r in db.rows(
+                    f"SELECT change, nullif(user_id, '') AS user_id, type, what, id FROM ({DIFF_ROWS}) d "
+                    f"ORDER BY type, what, id, user_id, change"
+                )
+            ]
             raise Undo
     except Undo:
         pass
@@ -591,17 +770,19 @@ def diff(db: Db, policy: str, files: Mapping[str, object] | str | None = None,
 
 def policy_compiler(policy: str, files: Mapping[str, object] | str | None = None) -> Compiler:
     """The policy compiled (a Compiler with every view and helper made), for what reads its structure."""
+
     def make(c: Compiler) -> Compiler:
         c.compile("the policy", transaction=False)
         return c
+
     return compiled(policy, files, make)
 
 
-def why(db: Db, ptype: str, pid: str, type_name: str, oid: str, perm: str,
-        compiler: Compiler | None = None) -> Answer:
+def why(db: Db, ptype: str, pid: str, type_name: str, oid: str, perm: str, compiler: Compiler | None = None) -> Answer:
     """Whether someone holds a permission, why, and if not the smallest changes that would grant it
     (grant.Answer). Each change is tried in a savepoint and undone: nothing stays."""
     from . import grant
+
     if not pid:
         raise Error("why: as whom? someone signed in (user:42, bot:7): nobody can be given access", "22023")
     c = compiler or policy_compiler(*applied(db))
@@ -618,8 +799,9 @@ def given_or_applied(db: Db, policy: str | None, files: Files) -> tuple[str, Fil
 
 def graph(policy: str, files: Mapping[str, object] | str | None = None) -> str:
     def make(c: Compiler) -> str:
-        c.compile("the policy", transaction=False)      # reports the same mistakes applying would
+        c.compile("the policy", transaction=False)  # reports the same mistakes applying would
         return c.graph()
+
     return compiled(policy, files, make)
 
 
@@ -630,6 +812,7 @@ def client(lang: str, policy: str, files: Mapping[str, object] | str | None = No
     def make(c: Compiler) -> str:
         c.compile("the policy", transaction=False)
         return c.client(lang, "the policy")
+
     return compiled(policy, files, make)
 
 
@@ -637,7 +820,7 @@ def test_files(tests: Mapping[str, object] | str | None) -> Files:
     """Named tests' files: name -> text (or the same as JSON)."""
     given: object = json.loads(tests) if isinstance(tests, str) else (tests or {})
     if not isinstance(given, Mapping) or not all(isinstance(v, str) for v in given.values()):
-        raise Error("tests must be a map of file name -> tests, e.g. {\"chats.authz\": \"test ...\"}", "22023")
+        raise Error('tests must be a map of file name -> tests, e.g. {"chats.authz": "test ..."}', "22023")
     return {str(k): str(v) for k, v in given.items()}
 
 
@@ -650,6 +833,7 @@ def takes_app_role(db: Db, tests_sql: str) -> None:
     would read as the policy refusing the check."""
     if "SET LOCAL ROLE" in tests_sql:
         from .perf import app_role
+
         may_take(db, app_role(db))
 
 
@@ -662,6 +846,7 @@ def test(db: Db, tests: Mapping[str, object] | str | None = None) -> list[TestRo
     def make(c: Compiler) -> str:
         c.add_test_files(named)
         return c.tests_function_sql()
+
     sql = compiled(policy, files, make)
     takes_app_role(db, sql)
     db.script(sql)
@@ -674,24 +859,30 @@ def coverage(db: Db, tests: Mapping[str, object] | str | None = None) -> tuple[l
     """test(), and the coverage of the permissions' branches by its passing checks: (rows, coverage.report)."""
     from . import coverage as cov
     from .testing import COVERAGE
+
     policy, files = applied(db)
     named = test_files(tests)
 
     def make(c: Compiler) -> str:
         c.add_test_files(named)
         return c.tests_function_sql(coverage=True)
+
     sql = compiled(policy, files, make)
     takes_app_role(db, sql)
     db.script(sql)
     rows = db.rows(f"SELECT * FROM {TESTS_FN}()")
     db.script(f"DROP FUNCTION {TESTS_FN}()")
     # the branches, as the policy in force writes them (compiled: a deny's hidden permission stays hidden)
-    report = cov.report(policy_compiler(policy, files), [text_or_none(r, "detail") for r in rows if r["test"] == COVERAGE])
+    report = cov.report(
+        policy_compiler(policy, files), [text_or_none(r, "detail") for r in rows if r["test"] == COVERAGE]
+    )
     return [test_row(r) for r in rows if r["test"] != COVERAGE], report
 
 
-SNAPSHOT_HEAD = ("# rowstile snapshot: who holds what on this database's data (rowstile snapshot writes it).\n"
-                 "# Commit it with the review data: a pull request that changes access changes these lines.\n")
+SNAPSHOT_HEAD = (
+    "# rowstile snapshot: who holds what on this database's data (rowstile snapshot writes it).\n"
+    "# Commit it with the review data: a pull request that changes access changes these lines.\n"
+)
 
 
 def snapshot(db: Db, limit: int = 500) -> list[str]:
@@ -702,10 +893,14 @@ def snapshot(db: Db, limit: int = 500) -> list[str]:
     principals: list[tuple[str | None, str | None]] = []
     for t in c.types.values():
         if t.principal:
-            ids = [text(r, "id") for r in db.rows(f"SELECT ({c.key(t, 'r')})::text AS id FROM {qt(t.table)} r ORDER BY 1")]
+            ids = [
+                text(r, "id") for r in db.rows(f"SELECT ({c.key(t, 'r')})::text AS id FROM {qt(t.table)} r ORDER BY 1")
+            ]
             principals += [(t.name, i) for i in ids]
     if len(principals) > limit:
-        raise Error(f"{len(principals)} people and principals: a snapshot is for small review data (at most {limit})", "54000")
+        raise Error(
+            f"{len(principals)} people and principals: a snapshot is for small review data (at most {limit})", "54000"
+        )
     held: dict[tuple[str, str, str], list[str]] = {}
     perms = [(t.name, p) for t in c.types.values() for p in c.public_perms(t)]
     for ptype, pid in principals + [(None, None)]:
@@ -719,17 +914,25 @@ def snapshot(db: Db, limit: int = 500) -> list[str]:
     def order(key: tuple[str, str, str]) -> tuple[str, tuple[int, int, str], str]:
         tname, oid, perm = key
         return (tname, (0, int(oid), "") if oid.isdigit() else (1, 0, oid), perm)
+
     return [f"{t} {o} {p}: {', '.join(held[(t, o, p)])}" for t, o, p in sorted(held, key=order)]
 
 
-def review_run(db: Db, policy: str, files: Mapping[str, object] | str | None, tests: Mapping[str, object] | str | None,
-               lock_text: str | None, explain: Iterable[tuple[str, str, str, str]] = ()) -> ReviewRun:
+def review_run(
+    db: Db,
+    policy: str,
+    files: Mapping[str, object] | str | None,
+    tests: Mapping[str, object] | str | None,
+    lock_text: str | None,
+    explain: Iterable[tuple[str, str, str, str]] = (),
+) -> ReviewRun:
     """For rowstile review, on a database at the base branch's state (its migrations and review data): the
     pull request's policy brought in the way it will be deployed (the migrations from the base branch's
     lock, or the whole policy without one), then its tests, all undone afterwards: how long the deploy took
     (or why it failed), the tests' rows, and for each (user, type, id, perm) in explain, the lines of
     authz.explain that grant it."""
     import time
+
     out: ReviewRun = {"deployed": None, "error": None, "tests": [], "how": {}}
     try:
         with savepoint(db, "authz_review"):
@@ -749,8 +952,12 @@ def review_run(db: Db, policy: str, files: Mapping[str, object] | str | None, te
             for user, type_, id_, perm in explain:
                 try:
                     with savepoint(db, "authz_review_explain"):
-                        lines = [text(r, "l") for r in db.rows("SELECT l FROM authz.explain($1, $2, $3, $4) l",
-                                                         [type_, id_, perm, user or None])]
+                        lines = [
+                            text(r, "l")
+                            for r in db.rows(
+                                "SELECT l FROM authz.explain($1, $2, $3, $4) l", [type_, id_, perm, user or None]
+                            )
+                        ]
                 except db.errors:
                     continue
                 out["how"][(user, type_, id_, perm)] = [x.strip() for x in lines if x.strip().startswith("yes")][1:4]
@@ -764,12 +971,13 @@ def review_run(db: Db, policy: str, files: Mapping[str, object] | str | None, te
 # Everything apply() made, in an order that works: policies and masked views, then the schemas (their
 # CASCADE takes the triggers on app tables and the event triggers along), then the table-wide SELECT
 # that masks replaced, then the functions and indexes it put into authz.
-REMOVE_SQL = "\n\n".join([
-    "DROP TABLE IF EXISTS pg_temp.authz_old_tables;",
-    DROP_OLD_POLICIES,
-    DROP_MASKED_VIEWS,
-    "DROP SCHEMA IF EXISTS authz_gen, authz_int CASCADE;",
-    """DO $mr$
+REMOVE_SQL = "\n\n".join(
+    [
+        "DROP TABLE IF EXISTS pg_temp.authz_old_tables;",
+        DROP_OLD_POLICIES,
+        DROP_MASKED_VIEWS,
+        "DROP SCHEMA IF EXISTS authz_gen, authz_int CASCADE;",
+        """DO $mr$
 DECLARE r record;
 BEGIN
   FOR r IN SELECT * FROM authz.masked_tables LOOP
@@ -779,7 +987,7 @@ BEGIN
     DELETE FROM authz.masked_tables WHERE tbl = r.tbl AND role = r.role;
   END LOOP;
 END $mr$;""",
-    """DO $rf$
+        """DO $rf$
 DECLARE f regprocedure; i regclass;
 BEGIN
   FOR f IN SELECT p.oid::regprocedure FROM pg_proc p WHERE p.pronamespace = 'authz'::regnamespace
@@ -791,8 +999,9 @@ BEGIN
     EXECUTE format('DROP INDEX %s', i);
   END LOOP;
 END $rf$;""",
-    LOST_RULES.replace("has no rules any more", "was governed by the removed policy"),
-])
+        LOST_RULES.replace("has no rules any more", "was governed by the removed policy"),
+    ]
+)
 
 
 def remove(db: Db) -> None:

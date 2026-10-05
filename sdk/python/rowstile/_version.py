@@ -1,10 +1,13 @@
 """The version, read from the compiler's (core/authzlib/__init__.py, the one place it is written)."""
+
 import os
 import re
 
 _here = os.path.dirname(os.path.abspath(__file__))
-_candidates = (os.path.join(_here, "_command", "authzlib", "__init__.py"),
-               os.path.join(_here, "..", "..", "..", "core", "authzlib", "__init__.py"))
+_candidates = (
+    os.path.join(_here, "_command", "authzlib", "__init__.py"),
+    os.path.join(_here, "..", "..", "..", "core", "authzlib", "__init__.py"),
+)
 __version__ = "0.0.0"
 for _path in _candidates:
     if os.path.isfile(_path):

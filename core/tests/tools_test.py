@@ -6,6 +6,7 @@
 Needs only the standard library (the Python client talks to Postgres with cli/pgwire.py);
 the TypeScript client is type-checked when tsc is installed.
 """
+
 import importlib
 import json
 import os
@@ -46,7 +47,9 @@ def psql(db: str, *cmds: str, check_rc: bool = True) -> str:
     args = ["psql", "-X", "-q", "-At", "-v", "ON_ERROR_STOP=1", "-d", db]
     for c in cmds:
         args += ["-c", c]
-    r = subprocess.run(args, capture_output=True, text=True, env=dict(os.environ, PGOPTIONS="-c client_min_messages=error"))
+    r = subprocess.run(
+        args, capture_output=True, text=True, env=dict(os.environ, PGOPTIONS="-c client_min_messages=error")
+    )
     if check_rc and r.returncode:
         raise SystemExit(f"psql failed: {r.stderr}")
     return r.stdout.strip()
@@ -62,9 +65,17 @@ def main() -> None:
     compiler = compile_policy.load(policy)
     sql = compiler.compile(policy)
     for f in (os.path.join(ROOT, "example", "app_schema.sql"),):
-        subprocess.run(["psql", "-X", "-q", "-v", "ON_ERROR_STOP=1", "-d", db, "-f", f], check=True, capture_output=True)
-    subprocess.run(["psql", "-X", "-q", "-v", "ON_ERROR_STOP=1", "-d", db], input=sql, text=True, check=True,
-                   capture_output=True, env=dict(os.environ, PGOPTIONS="-c client_min_messages=error"))
+        subprocess.run(
+            ["psql", "-X", "-q", "-v", "ON_ERROR_STOP=1", "-d", db, "-f", f], check=True, capture_output=True
+        )
+    subprocess.run(
+        ["psql", "-X", "-q", "-v", "ON_ERROR_STOP=1", "-d", db],
+        input=sql,
+        text=True,
+        check=True,
+        capture_output=True,
+        env=dict(os.environ, PGOPTIONS="-c client_min_messages=error"),
+    )
     psql(db, "SET ROLE app_user; SET authz.user_id = 5; SELECT authz.share('folder', 1, 'viewer', 'org', 1, 'member')")
 
     print("-- the diagram (--graph)")
@@ -85,7 +96,7 @@ def main() -> None:
     with open(os.path.join(tmp, "authz_client.py"), "w", encoding="utf-8") as fh:
         fh.write(compiler.client("py", "docs.authz"))
     sys.path.insert(0, tmp)
-    authz_client = importlib.import_module("authz_client")    # written above, for this database
+    authz_client = importlib.import_module("authz_client")  # written above, for this database
     conn = pgwire.connect(host=host, port=port, user=os.environ.get("PGUSER", "postgres"), database=db)
     conn.execute("BEGIN")
     conn.execute("SET LOCAL ROLE app_user")
@@ -93,21 +104,28 @@ def main() -> None:
     a.sign_in(3)
     check("can: carol may view file 11", a.can("file", 11, "view") is True)
     cur = conn.cursor()
-    cur.execute("UPDATE app.files SET name = name WHERE id = %s", (12,))        # file 12 is hidden from carol: no row changes
+    cur.execute("UPDATE app.files SET name = name WHERE id = %s", (12,))  # file 12 is hidden from carol: no row changes
     for label, given in (("a count of 0", 0), ("no rows", []), ("the cursor that ran it", Ran(0))):
         try:
             a.expect(given, "app.files", "update", 12)
             check(f"expect, given {label}: NotFound", False, "it returned")
         except authz_client.NotFound:
             check(f"expect, given {label}: NotFound", True)
-    check("expect, given a cursor that changed a row: returned", isinstance(a.expect(Ran(1), "app.files", "update", 11), Ran))
+    check(
+        "expect, given a cursor that changed a row: returned",
+        isinstance(a.expect(Ran(1), "app.files", "update", 11), Ran),
+    )
     try:
-        a.expect(Ran(0), "app.files", "update", 11)                               # carol sees file 11 and may not edit it
+        a.expect(Ran(0), "app.files", "update", 11)  # carol sees file 11 and may not edit it
         check("expect, a row the user may not change: Refused", False, "it returned")
     except authz_client.Refused as e:
-        check("expect, a row the user may not change: Refused, with why", bool(e.why) and e.why[0].startswith("no"), e.why)
+        check(
+            "expect, a row the user may not change: Refused, with why", bool(e.why) and e.why[0].startswith("no"), e.why
+        )
     check("can: carol may not edit it", a.can("file", 11, "edit") is False)
-    check("list: the files carol may view", sorted(a.list("file", "view")) == ["10", "11", "16"], a.list("file", "view"))
+    check(
+        "list: the files carol may view", sorted(a.list("file", "view")) == ["10", "11", "16"], a.list("file", "view")
+    )
     check("perms: on folder 1", a.perms("folder", 1) == ["view", "break_glass"], a.perms("folder", 1))
     try:
         a.can("file", 11, "fly")
@@ -117,8 +135,11 @@ def main() -> None:
     rid = a.request_access("folder", 2, "viewer", "need it", "1 day")
     check("request_access returns the request's id", isinstance(rid, int) and rid > 0, rid)
     other = a.request_access("folder", 2, "editor", "maybe", "1 day")
-    check("pending_requests: the requester sees their own", {r["id"] for r in a.pending_requests() if r["mine"]} >= {rid, other},
-          a.pending_requests())
+    check(
+        "pending_requests: the requester sees their own",
+        {r["id"] for r in a.pending_requests() if r["mine"]} >= {rid, other},
+        a.pending_requests(),
+    )
     a.cancel_request(other)
     check("cancel_request", other not in {r["id"] for r in a.pending_requests()})
     conn.execute("COMMIT")
@@ -134,13 +155,18 @@ def main() -> None:
         check("expect, when the rule allows the write: NotFound", True)
     except authz_client.Refused as e:
         check("expect, when the rule allows the write: NotFound", False, e.why)
-    check("explain: says why", any("erin" in e or "admin" in e for e in a.explain("file", 12, "view")) or
-          bool(a.explain("file", 12, "view")), a.explain("file", 12, "view"))
+    check(
+        "explain: says why",
+        any("erin" in e or "admin" in e for e in a.explain("file", 12, "view")) or bool(a.explain("file", 12, "view")),
+        a.explain("file", 12, "view"),
+    )
     a.decide_request(rid, True, "fine")
     a.share("file", 11, "viewer", "user", 4)
     check("share, then who", "4" in a.who("file", 11, "view"), a.who("file", 11, "view"))
     shares = a.list_shares("file", 11)
-    check("list_shares: rows as dicts", any(r["subject_id"] == "4" and r["relation"] == "viewer" for r in shares), shares)
+    check(
+        "list_shares: rows as dicts", any(r["subject_id"] == "4" and r["relation"] == "viewer" for r in shares), shares
+    )
     everything = a.list("folder", "view")
     first = a.list("folder", "view", limit=2)
     rest = a.list("folder", "view", after=first[-1])
@@ -152,7 +178,11 @@ def main() -> None:
         check("create_link refuses a relation that isn't shared, before asking the database", False)
     except ValueError:
         check("create_link refuses a relation that isn't shared, before asking the database", True)
-    check("list_links: erin may share file 11, which has none", list(a.list_links("file", 11)) == [], a.list_links("file", 11))
+    check(
+        "list_links: erin may share file 11, which has none",
+        list(a.list_links("file", 11)) == [],
+        a.list_links("file", 11),
+    )
     a.use_links(["not-a-token"])
     a.use_links([])
     conn.execute("COMMIT")
@@ -202,6 +232,7 @@ def main() -> None:
             elif isinstance(x, list):
                 for v in x:
                     walk(v)
+
         walk(g)
         bad = []
         for p in pats:
@@ -212,8 +243,10 @@ def main() -> None:
         check(f"the grammar's patterns compile ({len(pats)})", not bad, bad)
         with open(os.path.join(ROOT, "..", "editor", "package.json"), encoding="utf-8") as fh:
             pkg = json.load(fh)
-        check("the extension declares the .authz language", any(".authz" in lang.get("extensions", [])
-                                                                for lang in pkg["contributes"]["languages"]))
+        check(
+            "the extension declares the .authz language",
+            any(".authz" in lang.get("extensions", []) for lang in pkg["contributes"]["languages"]),
+        )
     except FileNotFoundError as e:
         check("the editor grammar exists", False, e)
 

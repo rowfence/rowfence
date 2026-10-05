@@ -4,6 +4,7 @@ download through links signed only after the file's row was read through row-lev
 A browser uploads to a place of its own (uploads/<key>), never to the object a file points at: the backend
 moves the bytes there when the upload is confirmed (accept), and reads their size then. So the signed upload
 link, which goes on working for a few minutes, can't change a confirmed file or its size afterwards."""
+
 from datetime import UTC, datetime, timedelta
 from typing import BinaryIO
 from urllib.parse import quote
@@ -16,8 +17,12 @@ from .config import Settings
 
 class Storage:
     def __init__(self, s: Settings) -> None:
-        common = {"aws_access_key_id": s.s3_access_key, "aws_secret_access_key": s.s3_secret_key,
-                  "region_name": s.s3_region, "config": Config(signature_version="s3v4", s3={"addressing_style": "path"})}
+        common = {
+            "aws_access_key_id": s.s3_access_key,
+            "aws_secret_access_key": s.s3_secret_key,
+            "region_name": s.s3_region,
+            "config": Config(signature_version="s3v4", s3={"addressing_style": "path"}),
+        }
         self.s3 = boto3.client("s3", endpoint_url=s.s3_endpoint, **common)
         self.public = boto3.client("s3", endpoint_url=s.s3_public_endpoint, **common)
         self.bucket, self.link_seconds, self.origins = s.s3_bucket, s.link_minutes * 60, list(s.web_origins)
@@ -27,8 +32,19 @@ class Storage:
         if self.bucket not in names:
             self.s3.create_bucket(Bucket=self.bucket)
         # the web app uploads straight to the bucket with signed links
-        self.s3.put_bucket_cors(Bucket=self.bucket, CORSConfiguration={"CORSRules": [{
-            "AllowedOrigins": self.origins, "AllowedMethods": ["PUT", "GET"], "AllowedHeaders": ["*"], "MaxAgeSeconds": 3600}]})
+        self.s3.put_bucket_cors(
+            Bucket=self.bucket,
+            CORSConfiguration={
+                "CORSRules": [
+                    {
+                        "AllowedOrigins": self.origins,
+                        "AllowedMethods": ["PUT", "GET"],
+                        "AllowedHeaders": ["*"],
+                        "MaxAgeSeconds": 3600,
+                    }
+                ]
+            },
+        )
 
     def put(self, key: str, fileobj: BinaryIO, content_type: str) -> None:
         self.s3.upload_fileobj(fileobj, self.bucket, key, ExtraArgs={"ContentType": content_type})
@@ -39,28 +55,53 @@ class Storage:
     def download_link(self, key: str, filename: str) -> str:
         quoted = quote(filename, safe="")
         return self.public.generate_presigned_url(
-            "get_object", ExpiresIn=self.link_seconds,
-            Params={"Bucket": self.bucket, "Key": key, "ResponseContentDisposition": f"attachment; filename*=UTF-8''{quoted}"})
+            "get_object",
+            ExpiresIn=self.link_seconds,
+            Params={
+                "Bucket": self.bucket,
+                "Key": key,
+                "ResponseContentDisposition": f"attachment; filename*=UTF-8''{quoted}",
+            },
+        )
 
     # shown in the browser rather than saved; anything else (HTML above all, which would run as the
     # storage's origin) is served as a download
-    PREVIEWABLE = ("image/png", "image/jpeg", "image/gif", "image/webp", "application/pdf", "text/plain",
-                   "audio/mpeg", "audio/ogg", "video/mp4", "video/webm")
+    PREVIEWABLE = (
+        "image/png",
+        "image/jpeg",
+        "image/gif",
+        "image/webp",
+        "application/pdf",
+        "text/plain",
+        "audio/mpeg",
+        "audio/ogg",
+        "video/mp4",
+        "video/webm",
+    )
 
     def preview_link(self, key: str, content_type: str) -> str:
         shown = content_type if content_type in self.PREVIEWABLE else "application/octet-stream"
         disposition = "inline" if content_type in self.PREVIEWABLE else "attachment"
         return self.public.generate_presigned_url(
-            "get_object", ExpiresIn=self.link_seconds,
-            Params={"Bucket": self.bucket, "Key": key, "ResponseContentType": shown, "ResponseContentDisposition": disposition})
+            "get_object",
+            ExpiresIn=self.link_seconds,
+            Params={
+                "Bucket": self.bucket,
+                "Key": key,
+                "ResponseContentType": shown,
+                "ResponseContentDisposition": disposition,
+            },
+        )
 
     UPLOADS = "uploads/"
 
     def upload_link(self, key: str, content_type: str) -> str:
         """A signed link the browser PUTs the file's bytes to, with this Content-Type: to the upload's own place."""
         return self.public.generate_presigned_url(
-            "put_object", ExpiresIn=self.link_seconds,
-            Params={"Bucket": self.bucket, "Key": self.UPLOADS + key, "ContentType": content_type})
+            "put_object",
+            ExpiresIn=self.link_seconds,
+            Params={"Bucket": self.bucket, "Key": self.UPLOADS + key, "ContentType": content_type},
+        )
 
     def size(self, key: str) -> int | None:
         """The stored object's size, or None if it isn't there."""

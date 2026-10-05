@@ -11,6 +11,7 @@ writes the next one into db/migrations (and db/policy.lock). The app uses only r
 surface: the rowstile command writes its migrations and its client, and the app calls
 authz.* functions.
 """
+
 import os
 import subprocess
 import sys
@@ -45,14 +46,16 @@ def main() -> None:
             cur.execute("CREATE ROLE ms_app LOGIN NOSUPERUSER NOBYPASSRLS")
         cur.execute(sql.SQL("ALTER ROLE ms_app PASSWORD {}").format(sql.Literal(password)))
         cur.execute("ALTER ROLE ms_app SET jit = off")
-        cur.execute("CREATE TABLE IF NOT EXISTS public.ms_migrations (name text PRIMARY KEY, at timestamptz DEFAULT now())")
+        cur.execute(
+            "CREATE TABLE IF NOT EXISTS public.ms_migrations (name text PRIMARY KEY, at timestamptz DEFAULT now())"
+        )
         cur.execute("SELECT name FROM public.ms_migrations")
         done = {r[0] for r in cur.fetchall()}
         for path in sorted((HERE / "migrations").glob("*.sql")):
             if path.name in done:
                 continue
             print(f"migration {path.name}")
-            cur.execute(path.read_bytes())               # a file's SQL, not a literal of this code
+            cur.execute(path.read_bytes())  # a file's SQL, not a literal of this code
             cur.execute("INSERT INTO public.ms_migrations (name) VALUES (%s)", (path.name,))
     if "--client" in sys.argv:
         CLIENT.write_text(rowstile("client", "py", str(HERE / "policy.authz")), encoding="utf-8", newline="\n")

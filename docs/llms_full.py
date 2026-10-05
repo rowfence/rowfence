@@ -4,6 +4,7 @@ file for agents that can't follow links. Built when the docs are published, not 
 
     python3 docs/llms_full.py [OUT]          (default: llms-full.txt at the repository's root)
 """
+
 import os
 import re
 import sys

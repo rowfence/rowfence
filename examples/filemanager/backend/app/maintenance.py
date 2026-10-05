@@ -9,6 +9,7 @@
 - rowstile's retention: the change feed, with authz.trim_changes(). The audit trail is kept; trim it with
   authz.trim_audit(...) once you have decided how long to keep it.
 """
+
 import argparse
 import os
 from datetime import timedelta
@@ -22,13 +23,15 @@ from .storage import Storage
 
 def abandoned_uploads(conn: psycopg.Connection[TupleRow], storage: Storage, older_than: str) -> int:
     """New files and new versions whose bytes never arrived (or were never confirmed)."""
-    rows = conn.execute("SELECT v.id, v.object_key, v.file_id, f.ready AS file_ready FROM fm.file_versions v "
-                        "JOIN fm.files f ON f.id = v.file_id WHERE NOT v.ready AND v.created_at < now() - %s::interval",
-                        (older_than,)).fetchall()
+    rows = conn.execute(
+        "SELECT v.id, v.object_key, v.file_id, f.ready AS file_ready FROM fm.file_versions v "
+        "JOIN fm.files f ON f.id = v.file_id WHERE NOT v.ready AND v.created_at < now() - %s::interval",
+        (older_than,),
+    ).fetchall()
     for version_id, key, file_id, file_ready in rows:
-        storage.discard(str(key))                   # the objects first: a row left behind is retried next time
+        storage.discard(str(key))  # the objects first: a row left behind is retried next time
         conn.execute("DELETE FROM fm.file_versions WHERE id = %s", (version_id,))
-        if not file_ready:                          # a new file that never arrived goes too
+        if not file_ready:  # a new file that never arrived goes too
             conn.execute("DELETE FROM fm.files WHERE id = %s AND NOT ready", (file_id,))
     return len(rows)
 

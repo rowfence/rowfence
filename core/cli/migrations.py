@@ -8,6 +8,7 @@
 Each writer gets the migration's SQL and a name, and returns the files it wrote. File names start with the
 time (UTC), as the tools do, so migrations sort in the order they were written.
 """
+
 from __future__ import annotations
 
 import calendar
@@ -22,8 +23,15 @@ from typing import TypedDict
 from authzlib.statements import split
 
 TOOLS = ("alembic", "prisma", "drizzle", "sql", "goose", "dbmate", "flyway")
-DEFAULT_DIRS = {"alembic": "alembic/versions", "prisma": "prisma/migrations", "drizzle": "drizzle",
-                "sql": "migrations", "goose": "migrations", "dbmate": "db/migrations", "flyway": "sql"}
+DEFAULT_DIRS = {
+    "alembic": "alembic/versions",
+    "prisma": "prisma/migrations",
+    "drizzle": "drizzle",
+    "sql": "migrations",
+    "goose": "migrations",
+    "dbmate": "db/migrations",
+    "flyway": "sql",
+}
 
 
 class Error(Exception):
@@ -33,13 +41,14 @@ class Error(Exception):
 class JournalEntry(TypedDict):
     idx: int
     version: str
-    when: int                   # milliseconds
+    when: int  # milliseconds
     tag: str
     breakpoints: bool
 
 
 class Journal(TypedDict):
     """Drizzle Kit's meta/_journal.json."""
+
     version: str
     dialect: str
     entries: list[JournalEntry]
@@ -56,9 +65,20 @@ def journal_of(value: object) -> Journal:
         if not isinstance(item, dict):
             raise Error(f"drizzle's journal has an entry that isn't one: {item!r}")
         e: dict[str, object] = {str(k): v for k, v in item.items()}
-        entries.append({"idx": int(str(e["idx"])), "version": str(e.get("version", "7")), "when": int(str(e.get("when", 0))),
-                        "tag": str(e["tag"]), "breakpoints": bool(e.get("breakpoints", True))})
-    return {"version": str(data.get("version", "7")), "dialect": str(data.get("dialect", "postgresql")), "entries": entries}
+        entries.append(
+            {
+                "idx": int(str(e["idx"])),
+                "version": str(e.get("version", "7")),
+                "when": int(str(e.get("when", 0))),
+                "tag": str(e["tag"]),
+                "breakpoints": bool(e.get("breakpoints", True)),
+            }
+        )
+    return {
+        "version": str(data.get("version", "7")),
+        "dialect": str(data.get("dialect", "postgresql")),
+        "entries": entries,
+    }
 
 
 def slug(name: str) -> str:
@@ -109,8 +129,12 @@ def write_migration(tool: str, folder: str, name: str, sql: str, now: float | No
     name = slug(name)
     ts = stamp(now)
     # after every migration already there, even ones written the same second
-    existing = [m.group(1) for f in (os.listdir(folder) if os.path.isdir(folder) else [])
-                for m in [re.match(r"^V?(\d{14})", f)] if m]
+    existing = [
+        m.group(1)
+        for f in (os.listdir(folder) if os.path.isdir(folder) else [])
+        for m in [re.match(r"^V?(\d{14})", f)]
+        if m
+    ]
     if existing and max(existing) >= ts:
         ts = stamp(calendar.timegm(time.strptime(max(existing), "%Y%m%d%H%M%S")) + 1)
     if tool == "sql":
@@ -123,8 +147,12 @@ def write_migration(tool: str, folder: str, name: str, sql: str, now: float | No
     if tool == "dbmate":
         return [write(os.path.join(folder, f"{ts}_{name}.sql"), f"-- migrate:up\n{sql}\n-- migrate:down\n")]
     if tool == "goose":
-        return [write(os.path.join(folder, f"{ts}_{name}.sql"),
-                      f"-- +goose Up\n-- +goose StatementBegin\n{sql}-- +goose StatementEnd\n")]
+        return [
+            write(
+                os.path.join(folder, f"{ts}_{name}.sql"),
+                f"-- +goose Up\n-- +goose StatementBegin\n{sql}-- +goose StatementEnd\n",
+            )
+        ]
     if tool == "prisma":
         return [write(os.path.join(folder, f"{ts}_{name}", "migration.sql"), sql)]
     if tool == "drizzle":
@@ -135,8 +163,12 @@ def write_migration(tool: str, folder: str, name: str, sql: str, now: float | No
 def sql_file_name(folder: str, name: str, ts: str) -> str:
     """Plain SQL files are named like the ones already there: numbered (0005_name.sql) after numbered ones,
     so they sort in order, else starting with the time."""
-    numbers = [m.group(1) for f in (os.listdir(folder) if os.path.isdir(folder) else [])
-               for m in [re.match(r"^(\d{1,13})_.*\.sql$", f)] if m]
+    numbers = [
+        m.group(1)
+        for f in (os.listdir(folder) if os.path.isdir(folder) else [])
+        for m in [re.match(r"^(\d{1,13})_.*\.sql$", f)]
+        if m
+    ]
     if numbers:
         width = max(len(n) for n in numbers)
         return f"{max(int(n) for n in numbers) + 1:0{width}d}_{name}.sql"
@@ -166,16 +198,35 @@ def drizzle(folder: str, name: str, sql: str, now: float | None) -> list[str]:
             with open(p, encoding="utf-8") as fh:
                 got = json.load(fh)
             prev = {str(k): v for k, v in got.items()} if isinstance(got, dict) else None
-    snap: dict[str, object] = dict(prev) if prev else {"version": "7", "dialect": "postgresql", "tables": {}, "enums": {}, "schemas": {},
-                                    "sequences": {}, "roles": {}, "policies": {}, "views": {},
-                                    "_meta": {"columns": {}, "schemas": {}, "tables": {}}}
+    snap: dict[str, object] = (
+        dict(prev)
+        if prev
+        else {
+            "version": "7",
+            "dialect": "postgresql",
+            "tables": {},
+            "enums": {},
+            "schemas": {},
+            "sequences": {},
+            "roles": {},
+            "policies": {},
+            "views": {},
+            "_meta": {"columns": {}, "schemas": {}, "tables": {}},
+        }
+    )
     prev_id = str(prev["id"]) if prev else "00000000-0000-0000-0000-000000000000"
     snap["prevId"] = prev_id
     snap["id"] = str(uuid.UUID(hashlib.sha256((prev_id + sql).encode()).hexdigest()[:32]))
     written.append(write(os.path.join(meta, f"{idx:04d}_snapshot.json"), json.dumps(snap, indent=2) + "\n"))
-    journal["entries"].append({"idx": idx, "version": journal["version"],
-                               "when": int((now if now is not None else time.time()) * 1000), "tag": tag,
-                               "breakpoints": True})
+    journal["entries"].append(
+        {
+            "idx": idx,
+            "version": journal["version"],
+            "when": int((now if now is not None else time.time()) * 1000),
+            "tag": tag,
+            "breakpoints": True,
+        }
+    )
     written.append(write(journal_path, json.dumps(journal, indent=2) + "\n"))
     return written
 

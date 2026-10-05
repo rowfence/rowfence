@@ -1,14 +1,15 @@
 """Settings, from the environment."""
+
 import os
 from dataclasses import dataclass
 
 
 @dataclass(frozen=True)
 class Settings:
-    database_url: str          # as ms_app: row-level security applies
+    database_url: str  # as ms_app: row-level security applies
     session_days: int
     cookie_secure: bool
-    invite_days: int           # how long an invite link works
+    invite_days: int  # how long an invite link works
 
 
 def load() -> Settings:

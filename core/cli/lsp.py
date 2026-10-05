@@ -6,6 +6,7 @@ rowstile.toml it also completes table and column names (read once from the catal
 
 A file of named tests (no types, only `test "..."` blocks) is checked against the policy rowstile.toml names.
 """
+
 from __future__ import annotations
 
 import json
@@ -63,6 +64,7 @@ class Diagnostic(TypedDict):
 
 class Symbol_(TypedDict):
     """An LSP DocumentSymbol."""
+
     name: str
     kind: int
     range: Range
@@ -80,6 +82,7 @@ class Completion(TypedDict):
 @dataclass(frozen=True)
 class Symbol:
     """What a name in the policy is: a type, or one of its relations and permissions."""
+
     type: Type
     member: str | None = None
 
@@ -102,15 +105,16 @@ def number(message: Message, key: str) -> int:
         raise ValueError(f"{key}: a number expected")
     return value
 
-THIS = "(this-file)"          # what a test file is called while it is checked
+
+THIS = "(this-file)"  # what a test file is called while it is checked
 WORD = re.compile(r"[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*")
 ERROR = re.compile(r"^(?:(\S+?) )?line (\d+): (.*)$", re.S)
 TOP_WORDS = ["app role", "type", "rules", "include", "scope", "caveat", "invariants", "test"]
 EXPR_WORDS = ["or", "and", "not", "signed_in", "anyone", "nobody"]
 RULE_WORDS = ["select", "insert", "update", "delete", "mask", "after", "before"]
 TYPE_WORDS = ["can", "shared", "by", "if", "where", "roles", "from", "principal"]
-KIND_CLASS, KIND_FIELD, KIND_METHOD, KIND_NAMESPACE = 5, 8, 6, 3        # SymbolKind
-C_KEYWORD, C_FIELD, C_METHOD, C_CLASS, C_MODULE = 14, 5, 2, 7, 9       # CompletionItemKind
+KIND_CLASS, KIND_FIELD, KIND_METHOD, KIND_NAMESPACE = 5, 8, 6, 3  # SymbolKind
+C_KEYWORD, C_FIELD, C_METHOD, C_CLASS, C_MODULE = 14, 5, 2, 7, 9  # CompletionItemKind
 
 
 # Path.from_uri is Python 3.13's; the command runs on 3.11. The URIs must stay as they are: they are matched
@@ -118,7 +122,7 @@ C_KEYWORD, C_FIELD, C_METHOD, C_CLASS, C_MODULE = 14, 5, 2, 7, 9       # Complet
 def uri_path(uri: str) -> str:
     p = urllib.parse.unquote(urllib.parse.urlparse(uri).path)
     if sys.platform == "win32" and re.match(r"/[A-Za-z]:", p):
-        p = p[1:]                       # /C:/a -> C:/a
+        p = p[1:]  # /C:/a -> C:/a
     return os.path.normpath(p)
 
 
@@ -134,8 +138,8 @@ def same_file(path: str) -> str:
 class Server:
     def __init__(self, cfg: Config) -> None:
         self.cfg = cfg
-        self.docs: dict[str, str] = {}   # uri -> text
-        self.open: dict[str, str] = {}   # the open files: same_file(path) -> the uri the editor calls it by
+        self.docs: dict[str, str] = {}  # uri -> text
+        self.open: dict[str, str] = {}  # the open files: same_file(path) -> the uri the editor calls it by
         self.sent: dict[str, set[str]] = {}  # uri checked -> the uris its last check published problems for
         # uri -> last policy that parsed: (pol, files, main path)
         self.models: dict[str, tuple[Policy, dict[str, str], str]] = {}
@@ -163,6 +167,7 @@ class Server:
         def read(key: str) -> str | None:
             uri = self.uri_of(os.path.join(folder, *key.split("/")))
             return self.docs[uri] if uri in self.docs else disk(key)
+
         return collect_includes(text, read)
 
     def included_by(self, path: str) -> str | None:
@@ -201,7 +206,7 @@ class Server:
             if main is None and self.is_test_file(text):
                 policy = self.cfg.policy
                 if not policy:
-                    raise PolicyError("line 1: to check tests, name the policy in rowstile.toml: policy = \"...\"")
+                    raise PolicyError('line 1: to check tests, name the policy in rowstile.toml: policy = "..."')
                 ptext = self.text_of(policy)
                 c = Compiler(parse_policy(ptext, None, files=self.includes(policy, ptext)))
                 c.add_test_files({THIS: text})
@@ -222,14 +227,24 @@ class Server:
             lines = (self.docs.get(target) or "").split("\n")
             width = len(lines[line - 1]) if 0 < line <= len(lines) else 200
             indent = len(lines[line - 1]) - len(lines[line - 1].lstrip()) if 0 < line <= len(lines) else 0
-            diag: Diagnostic = {"range": rng(line - 1, indent, line - 1, width), "severity": 1, "source": "rowstile",
-                                "message": msg}
+            diag: Diagnostic = {
+                "range": rng(line - 1, indent, line - 1, width),
+                "severity": 1,
+                "source": "rowstile",
+                "message": msg,
+            }
             if e.code:
-                diag["code"] = e.code      # rowstile help AZ201
+                diag["code"] = e.code  # rowstile help AZ201
             diags[target].append(diag)
-        except Exception as e:           # a compiler bug must not take the editor down
-            diags[uri].append({"range": rng(0, 0, 0, 1), "severity": 2, "source": "rowstile",
-                               "message": f"the checker failed: {type(e).__name__}: {e}"})
+        except Exception as e:  # a compiler bug must not take the editor down
+            diags[uri].append(
+                {
+                    "range": rng(0, 0, 0, 1),
+                    "severity": 2,
+                    "source": "rowstile",
+                    "message": f"the checker failed: {type(e).__name__}: {e}",
+                }
+            )
         # a file this check marked last time and doesn't now is cleared: its mistake was fixed
         for target in self.sent.get(uri, set()) - set(diags):
             diags[target] = []
@@ -324,9 +339,12 @@ class Server:
                 return Symbol(t)
             if t and name in t.perms:
                 return Symbol(t, name)
-        if re.match(r"type\s+" + re.escape(name) + r"\b", stripped) or \
-                (name in pol.types and not stripped.startswith(("can ",)) and self.block(uri, line)[0] != "rules"
-                 and self.home_type(uri, line) is None):
+        if re.match(r"type\s+" + re.escape(name) + r"\b", stripped) or (
+            name in pol.types
+            and not stripped.startswith(("can ",))
+            and self.block(uri, line)[0] != "rules"
+            and self.home_type(uri, line) is None
+        ):
             return Symbol(pol.types[name]) if name in pol.types else None
         t = self.home_type(uri, line)
         if t and (name in t.perms or name in t.relations):
@@ -356,7 +374,10 @@ class Server:
         t = sym.type
         if sym.member is None:
             key = ", ".join(f"{c} {ty}" for c, ty in t.key)
-            parts = [f"**type {t.name}** = `{t.table}` (key {key})" + (" — signs in (a principal)" if t.principal and t.name != "user" else "")]
+            parts = [
+                f"**type {t.name}** = `{t.table}` (key {key})"
+                + (" — signs in (a principal)" if t.principal and t.name != "user" else "")
+            ]
             if t.where:
                 parts.append(f"rows hold nothing unless `{t.where}`")
             if t.relations:
@@ -369,8 +390,9 @@ class Server:
         pol = self.model(uri)
         if name in t.perms:
             p = t.perms[name]
-            inherits = sorted({rel for rel, _ in arrows(p.expr) if pol and any(
-                x.name == t.name for x in self.targets(pol, t, rel))})
+            inherits = sorted(
+                {rel for rel, _ in arrows(p.expr) if pol and any(x.name == t.name for x in self.targets(pol, t, rel))}
+            )
             out = f"```authz\n{t.name}.{name} = {p.src}\n```"
             if inherits:
                 out += f"\n\ninherits through {', '.join('`' + r + '`' for r in inherits)}: as deep as it goes"
@@ -380,8 +402,11 @@ class Server:
         r = t.relations[name]
         lines = [self.source_line(uri, src.loc) for src in r.sources]
         subjects = ", ".join(st if not sr else f"{st}#{sr}" if sr != "*" else f"{st}:*" for st, sr in r.subjects())
-        return (f"**{t.name}.{name}**: relation to {subjects}\n\n```authz\n" + "\n".join(dict.fromkeys(lines)) +
-                f"\n```\n\n{t.name}, {r.loc}")
+        return (
+            f"**{t.name}.{name}**: relation to {subjects}\n\n```authz\n"
+            + "\n".join(dict.fromkeys(lines))
+            + f"\n```\n\n{t.name}, {r.loc}"
+        )
 
     def definition(self, uri: str, line: int, col: int) -> Location | None:
         sym = self.resolve(uri, line, col)
@@ -421,26 +446,62 @@ class Server:
             for n, s in enumerate(lines):
                 m = re.match(r'test\s+"?(.*?)"?\s*(?:--.*)?$', s)
                 if m and not s[:1].isspace():
-                    out.append({"name": m.group(1) or "test", "kind": KIND_METHOD,
-                                "range": rng(n, 0, n, len(s)), "selectionRange": rng(n, 0, n, len(s))})
+                    out.append(
+                        {
+                            "name": m.group(1) or "test",
+                            "kind": KIND_METHOD,
+                            "range": rng(n, 0, n, len(s)),
+                            "selectionRange": rng(n, 0, n, len(s)),
+                        }
+                    )
             return out
         for t in pol.types.values():
             if t.loc.file is not None:
                 continue
-            kids: list[Symbol_] = [{"name": r.name, "detail": "relation", "kind": KIND_FIELD,
-                     "range": rng(r.loc.line - 1, 0, r.loc.line - 1, 200), "selectionRange": rng(r.loc.line - 1, 0, r.loc.line - 1, 200)}
-                    for r in t.relations.values() if not r.synthetic and r.loc.file is None]
-            kids += [{"name": p.name, "detail": p.src, "kind": KIND_METHOD,
-                      "range": rng(p.loc.line - 1, 0, p.loc.line - 1, 200), "selectionRange": rng(p.loc.line - 1, 0, p.loc.line - 1, 200)}
-                     for p in t.perms.values() if not p.hidden and p.loc.file is None]
+            kids: list[Symbol_] = [
+                {
+                    "name": r.name,
+                    "detail": "relation",
+                    "kind": KIND_FIELD,
+                    "range": rng(r.loc.line - 1, 0, r.loc.line - 1, 200),
+                    "selectionRange": rng(r.loc.line - 1, 0, r.loc.line - 1, 200),
+                }
+                for r in t.relations.values()
+                if not r.synthetic and r.loc.file is None
+            ]
+            kids += [
+                {
+                    "name": p.name,
+                    "detail": p.src,
+                    "kind": KIND_METHOD,
+                    "range": rng(p.loc.line - 1, 0, p.loc.line - 1, 200),
+                    "selectionRange": rng(p.loc.line - 1, 0, p.loc.line - 1, 200),
+                }
+                for p in t.perms.values()
+                if not p.hidden and p.loc.file is None
+            ]
             last = max([t.loc.line] + [k["range"]["end"]["line"] + 1 for k in kids])
-            out.append({"name": t.name, "detail": t.table, "kind": KIND_CLASS, "children": kids,
-                        "range": rng(t.loc.line - 1, 0, last - 1, 200), "selectionRange": rng(t.loc.line - 1, 0, t.loc.line - 1, 200)})
+            out.append(
+                {
+                    "name": t.name,
+                    "detail": t.table,
+                    "kind": KIND_CLASS,
+                    "children": kids,
+                    "range": rng(t.loc.line - 1, 0, last - 1, 200),
+                    "selectionRange": rng(t.loc.line - 1, 0, t.loc.line - 1, 200),
+                }
+            )
         for n, s in enumerate(self.docs[uri].split("\n")):
             m = re.match(r"rules\s+(\S+)", s)
             if m:
-                out.append({"name": "rules " + m.group(1), "kind": KIND_NAMESPACE,
-                            "range": rng(n, 0, n, len(s)), "selectionRange": rng(n, 0, n, len(s))})
+                out.append(
+                    {
+                        "name": "rules " + m.group(1),
+                        "kind": KIND_NAMESPACE,
+                        "range": rng(n, 0, n, len(s)),
+                        "selectionRange": rng(n, 0, n, len(s)),
+                    }
+                )
         return out
 
     def completion(self, uri: str, line: int, col: int) -> list[Completion]:
@@ -452,6 +513,7 @@ class Server:
         def add(names: Iterable[str], kind: int, detail: str = "") -> None:
             for n in names:
                 items.append({"label": n, "kind": kind, "detail": detail})
+
         if not before.strip() and not before:
             add(TOP_WORDS, C_KEYWORD)
             return items
@@ -489,9 +551,14 @@ class Server:
         if pol:
             add(pol.types, C_CLASS, "type")
         add(EXPR_WORDS, C_KEYWORD)
-        add(RULE_WORDS if kind == "rules" else TYPE_WORDS if kind == "type" else ["given", "as", "can", "cannot",
-                                                                                   "allowed", "refused", "sees"],
-            C_KEYWORD)
+        add(
+            RULE_WORDS
+            if kind == "rules"
+            else TYPE_WORDS
+            if kind == "type"
+            else ["given", "as", "can", "cannot", "allowed", "refused", "sees"],
+            C_KEYWORD,
+        )
         return dedupe(items)
 
     def tables(self) -> dict[str, list[str]]:
@@ -501,18 +568,20 @@ class Server:
             self.catalog = catalog
             try:
                 import pgwire
-                database = self.cfg.database        # stops the command when it names a variable that isn't set
+
+                database = self.cfg.database  # stops the command when it names a variable that isn't set
                 if database:
                     args = pgwire.parse_dsn(database)
                     args["timeout"] = 3
                     conn = pgwire.connect(**args)
                     for schema, table, column in conn.query(
-                            "SELECT c.table_schema, c.table_name, c.column_name FROM information_schema.columns c "
-                            "WHERE c.table_schema NOT IN ('pg_catalog', 'information_schema', 'authz', 'authz_gen', "
-                            "'authz_int') ORDER BY 1, 2, c.ordinal_position"):
+                        "SELECT c.table_schema, c.table_name, c.column_name FROM information_schema.columns c "
+                        "WHERE c.table_schema NOT IN ('pg_catalog', 'information_schema', 'authz', 'authz_gen', "
+                        "'authz_int') ORDER BY 1, 2, c.ordinal_position"
+                    ):
                         catalog.setdefault(f"{schema}.{table}", []).append(str(column))
                     conn.close()
-            except (Exception, SystemExit):     # no database, its variable not set, or it is down: complete without it
+            except (Exception, SystemExit):  # no database, its variable not set, or it is down: complete without it
                 pass
         return self.catalog
 
@@ -524,10 +593,17 @@ class Server:
         method, params, mid = msg.get("method"), obj(msg.get("params")), msg.get("id")
         result: Json = None
         if method == "initialize":
-            result = {"capabilities": {
-                "textDocumentSync": 1, "hoverProvider": True, "definitionProvider": True, "referencesProvider": True,
-                "documentSymbolProvider": True, "completionProvider": {"triggerCharacters": [".", " "]}},
-                "serverInfo": {"name": "rowstile"}}
+            result = {
+                "capabilities": {
+                    "textDocumentSync": 1,
+                    "hoverProvider": True,
+                    "definitionProvider": True,
+                    "referencesProvider": True,
+                    "documentSymbolProvider": True,
+                    "completionProvider": {"triggerCharacters": [".", " "]},
+                },
+                "serverInfo": {"name": "rowstile"},
+            }
         elif method == "shutdown":
             result = None
         elif method == "exit":
@@ -550,8 +626,12 @@ class Server:
             closed = text(obj(params.get("textDocument")), "uri")
             self.docs.pop(closed, None)
             self.open.pop(same_file(uri_path(closed)), None)
-        elif method in ("textDocument/hover", "textDocument/definition", "textDocument/references",
-                        "textDocument/completion"):
+        elif method in (
+            "textDocument/hover",
+            "textDocument/definition",
+            "textDocument/references",
+            "textDocument/completion",
+        ):
             uri, pos = text(obj(params.get("textDocument")), "uri"), obj(params.get("position"))
             if uri in self.docs:
                 line, col = number(pos, "line"), number(pos, "character")
@@ -572,6 +652,7 @@ class Server:
             return
         if mid is not None and method is not None:
             send({"jsonrpc": "2.0", "id": mid, "result": result})
+
 
 def denies(node: Expr) -> bool:
     """Whether the expression takes something away: a `not` over a relation or a permission (a {condition} with
@@ -642,6 +723,12 @@ def serve(cfg: Config) -> None:
             break
         try:
             server.handle(msg)
-        except Exception as e:           # answer and carry on: an editor can't do much with a dead server
+        except Exception as e:  # answer and carry on: an editor can't do much with a dead server
             if msg.get("id") is not None:
-                send({"jsonrpc": "2.0", "id": msg["id"], "error": {"code": -32603, "message": f"{type(e).__name__}: {e}"}})
+                send(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": msg["id"],
+                        "error": {"code": -32603, "message": f"{type(e).__name__}: {e}"},
+                    }
+                )

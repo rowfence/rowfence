@@ -7,6 +7,7 @@ permission check in this file. Something you may not see answers 404, as if it d
 you see but may not do answers 403, with the database's own explanation of why: a refused write raises it
 (the rule, and what is missing), and an update or delete that changed nothing asks for it (authz.expect).
 """
+
 import asyncio
 import threading
 from collections.abc import AsyncIterator
@@ -51,8 +52,9 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         db.close_pool()
         raise RuntimeError("MS_DATABASE_URL can't be used with rowstile: " + "; ".join(problems))
     stop = threading.Event()
-    threading.Thread(target=events.listen, args=(settings.database_url, asyncio.get_running_loop(), stop),
-                     daemon=True).start()
+    threading.Thread(
+        target=events.listen, args=(settings.database_url, asyncio.get_running_loop(), stop), daemon=True
+    ).start()
     yield
     stop.set()
     db.close_pool()
@@ -99,7 +101,7 @@ async def database_error(request: Request, e: psycopg.Error) -> JSONResponse:
         return JSONResponse({"detail": "that is already there"}, 409)
     if isinstance(e, errors.ForeignKeyViolation):
         return JSONResponse({"detail": "no such person or chat"}, 404)
-    if isinstance(e, errors.InvalidAuthorizationSpecification):         # a bot's key that doesn't work
+    if isinstance(e, errors.InvalidAuthorizationSpecification):  # a bot's key that doesn't work
         return JSONResponse({"detail": "invalid API key"}, 401)
     if isinstance(e, (errors.CheckViolation, errors.RaiseException, errors.InvalidTextRepresentation)):
         return JSONResponse({"detail": message}, 400)
@@ -125,8 +127,14 @@ class LogIn(BaseModel):
 
 
 def set_cookie(response: Response, token: str) -> None:
-    response.set_cookie(auth.COOKIE, token, httponly=True, samesite="lax", secure=settings.cookie_secure,
-                        max_age=settings.session_days * 86400)
+    response.set_cookie(
+        auth.COOKIE,
+        token,
+        httponly=True,
+        samesite="lax",
+        secure=settings.cookie_secure,
+        max_age=settings.session_days * 86400,
+    )
 
 
 def phone_of(text: str) -> str:
@@ -136,8 +144,10 @@ def phone_of(text: str) -> str:
 @app.post("/api/signup")
 def sign_up(body: SignUp, response: Response) -> DictRow:
     with db.as_user(None) as tx:
-        user = tx.one("SELECT id, phone, name, about FROM ms.sign_up(%s, %s, %s)",
-                      (phone_of(body.phone), body.name, auth.hash_password(body.password)))
+        user = tx.one(
+            "SELECT id, phone, name, about FROM ms.sign_up(%s, %s, %s)",
+            (phone_of(body.phone), body.name, auth.hash_password(body.password)),
+        )
         token = auth.new_session(tx, user["id"], settings.session_days)
     set_cookie(response, token)
     return user
@@ -177,8 +187,11 @@ class Profile(BaseModel):
 @app.patch("/api/me")
 def edit_profile(body: Profile, user: DictRow = Depends(auth.current_user)) -> DictRow | None:
     with db.as_user(user["id"]) as tx:
-        return tx.row("UPDATE ms.users SET name = coalesce(%s, name), about = coalesce(%s, about) WHERE id = %s "
-                      "RETURNING id, phone, name, about", (body.name, body.about, user["id"]))
+        return tx.row(
+            "UPDATE ms.users SET name = coalesce(%s, name), about = coalesce(%s, about) WHERE id = %s "
+            "RETURNING id, phone, name, about",
+            (body.name, body.about, user["id"]),
+        )
 
 
 @app.get("/api/people")
@@ -217,10 +230,10 @@ def chats(user: DictRow = Depends(auth.current_user)) -> list[DictRow]:
 
 class NewChat(BaseModel):
     kind: Literal["direct", "group"]
-    user_id: UUID | None = None                        # direct: the other person
-    title: str | None = Field(default=None, min_length=1, max_length=100)   # group
+    user_id: UUID | None = None  # direct: the other person
+    title: str | None = Field(default=None, min_length=1, max_length=100)  # group
     about: str = Field(default="", max_length=500)
-    member_ids: list[UUID] = []                            # group: who else is in it
+    member_ids: list[UUID] = []  # group: who else is in it
 
 
 @app.post("/api/chats", status_code=201)
@@ -231,9 +244,11 @@ def new_chat(body: NewChat, user: DictRow = Depends(auth.current_user)) -> DictR
         if body.kind == "direct":
             if body.user_id is None or str(body.user_id) == str(me_id):
                 raise HTTPException(400, "say who to chat with")
-            old = tx.row("SELECT c.id FROM ms.chats c JOIN ms.members a ON a.chat_id = c.id AND a.user_id = %s "
-                         "JOIN ms.members b ON b.chat_id = c.id AND b.user_id = %s WHERE c.kind = 'direct'",
-                         (me_id, body.user_id))
+            old = tx.row(
+                "SELECT c.id FROM ms.chats c JOIN ms.members a ON a.chat_id = c.id AND a.user_id = %s "
+                "JOIN ms.members b ON b.chat_id = c.id AND b.user_id = %s WHERE c.kind = 'direct'",
+                (me_id, body.user_id),
+            )
             if old:
                 return old
             chat = tx.one("INSERT INTO ms.chats (kind, created_by) VALUES ('direct', %s) RETURNING id", (me_id,))
@@ -242,8 +257,10 @@ def new_chat(body: NewChat, user: DictRow = Depends(auth.current_user)) -> DictR
             return chat
         if not body.title:
             raise HTTPException(400, "a group needs a name")
-        chat = tx.one("INSERT INTO ms.chats (kind, title, about, created_by) VALUES ('group', %s, %s, %s) RETURNING id",
-                      (body.title, body.about, me_id))
+        chat = tx.one(
+            "INSERT INTO ms.chats (kind, title, about, created_by) VALUES ('group', %s, %s, %s) RETURNING id",
+            (body.title, body.about, me_id),
+        )
         tx.run("INSERT INTO ms.members (chat_id, user_id, role) VALUES (%s, %s, 'owner')", (chat["id"], me_id))
         for other in dict.fromkeys(body.member_ids):
             if str(other) != str(me_id):
@@ -251,7 +268,7 @@ def new_chat(body: NewChat, user: DictRow = Depends(auth.current_user)) -> DictR
         return chat
 
     try:
-        with db.as_user(me_id) as tx:          # the one refusal here: adding someone who blocked you
+        with db.as_user(me_id) as tx:  # the one refusal here: adding someone who blocked you
             return make(tx)
     except errors.UniqueViolation:
         # the other person made the pair's chat at the same moment (ms.direct_pairs): theirs is the one
@@ -264,26 +281,42 @@ def chat(chat_id: int, user: DictRow = Depends(auth.current_user)) -> DictRow:
     """A chat, its members and bots, and what you may do in it (authz.perms: the web app shows or hides
     buttons by it, and the database enforces the same thing when you press them)."""
     with db.as_user(user["id"]) as tx:
-        c = found(tx.row("SELECT id, kind, title, about, admins_only, created_at, last_seq FROM ms.chats WHERE id = %s",
-                         (chat_id,)))
+        c = found(
+            tx.row(
+                "SELECT id, kind, title, about, admins_only, created_at, last_seq FROM ms.chats WHERE id = %s",
+                (chat_id,),
+            )
+        )
         c["members"] = tx.rows(
             "SELECT m.user_id, m.role, m.joined_at, m.last_read_seq, u.name, u.phone, u.about "
             "FROM ms.members m JOIN ms.users u ON u.id = m.user_id WHERE m.chat_id = %s "
-            "ORDER BY array_position(ARRAY['owner', 'admin', 'member'], m.role), u.name", (chat_id,))
-        c["bots"] = tx.rows("SELECT b.id, b.name FROM ms.chat_bots cb JOIN ms.bots b ON b.id = cb.bot_id "
-                            "WHERE cb.chat_id = %s ORDER BY b.name", (chat_id,))
+            "ORDER BY array_position(ARRAY['owner', 'admin', 'member'], m.role), u.name",
+            (chat_id,),
+        )
+        c["bots"] = tx.rows(
+            "SELECT b.id, b.name FROM ms.chat_bots cb JOIN ms.bots b ON b.id = cb.bot_id "
+            "WHERE cb.chat_id = %s ORDER BY b.name",
+            (chat_id,),
+        )
         c["perms"] = list(tx.authz.perms("chat", chat_id))
         peer = next((m for m in c["members"] if str(m["user_id"]) != str(user["id"])), None)
         if c["kind"] == "direct" and peer:
             c["title"], c["peer_id"] = peer["name"], peer["user_id"]
-            c["i_blocked"] = tx.row("SELECT 1 FROM ms.blocks WHERE blocker_id = %s AND blocked_id = %s",
-                                    (user["id"], peer["user_id"])) is not None
+            c["i_blocked"] = (
+                tx.row(
+                    "SELECT 1 FROM ms.blocks WHERE blocker_id = %s AND blocked_id = %s", (user["id"], peer["user_id"])
+                )
+                is not None
+            )
     return c
 
 
 @app.get("/api/chats/{chat_id}/why/{perm}")
-def why(chat_id: int, perm: Literal["read", "post", "manage", "invite", "add_members"],
-        user: DictRow = Depends(auth.current_user)) -> list[str]:
+def why(
+    chat_id: int,
+    perm: Literal["read", "post", "manage", "invite", "add_members"],
+    user: DictRow = Depends(auth.current_user),
+) -> list[str]:
     """Why you hold perm on the chat, or what is missing: the database's own explanation (authz.explain)."""
     with db.as_user(user["id"]) as tx:
         found(tx.row("SELECT 1 FROM ms.chats WHERE id = %s", (chat_id,)))
@@ -299,9 +332,11 @@ class ChatChange(BaseModel):
 @app.patch("/api/chats/{chat_id}")
 def change_chat(chat_id: int, body: ChatChange, user: DictRow = Depends(auth.current_user)) -> DictRow | None:
     with db.as_user(user["id"]) as tx:
-        row = tx.row("UPDATE ms.chats SET title = coalesce(%s, title), about = coalesce(%s, about), "
-                     "admins_only = coalesce(%s, admins_only) WHERE id = %s RETURNING id, title, about, admins_only",
-                     (body.title, body.about, body.admins_only, chat_id))
+        row = tx.row(
+            "UPDATE ms.chats SET title = coalesce(%s, title), about = coalesce(%s, about), "
+            "admins_only = coalesce(%s, admins_only) WHERE id = %s RETURNING id, title, about, admins_only",
+            (body.title, body.about, body.admins_only, chat_id),
+        )
         return tx.authz.expect(row, "ms.chats", "update", chat_id)
 
 
@@ -324,8 +359,13 @@ ORDER BY x.seq DESC LIMIT %s"""
 
 
 @app.get("/api/chats/{chat_id}/messages")
-def messages(chat_id: int, before: int | None = None, after: int | None = None, limit: int = 50,
-             user: DictRow = Depends(auth.current_user)) -> list[DictRow]:
+def messages(
+    chat_id: int,
+    before: int | None = None,
+    after: int | None = None,
+    limit: int = 50,
+    user: DictRow = Depends(auth.current_user),
+) -> list[DictRow]:
     """The latest messages (or those before or after a number), oldest first. Messages from before you
     joined are not there: the policy's message.read says so. Each says whether you may edit or delete it:
     authz.can on the message, whose id is (chat_id, seq)."""
@@ -342,16 +382,21 @@ class NewMessage(BaseModel):
 @app.post("/api/chats/{chat_id}/messages", status_code=201)
 def post(chat_id: int, body: NewMessage, user: DictRow = Depends(auth.current_user)) -> DictRow:
     with db.as_user(user["id"]) as tx:
-        found(tx.row("SELECT 1 FROM ms.chats WHERE id = %s", (chat_id,)))     # a chat you can't see: 404
-        row = tx.one("INSERT INTO ms.messages AS x (chat_id, sender_id, body) VALUES (%s, %s, %s) "
-                     "RETURNING x.seq, x.created_at", (chat_id, user["id"], body.body))
-        tx.run("UPDATE ms.members SET last_read_seq = greatest(last_read_seq, %s) WHERE chat_id = %s AND user_id = %s",
-               (row["seq"], chat_id, user["id"]))
+        found(tx.row("SELECT 1 FROM ms.chats WHERE id = %s", (chat_id,)))  # a chat you can't see: 404
+        row = tx.one(
+            "INSERT INTO ms.messages AS x (chat_id, sender_id, body) VALUES (%s, %s, %s) RETURNING x.seq, x.created_at",
+            (chat_id, user["id"], body.body),
+        )
+        tx.run(
+            "UPDATE ms.members SET last_read_seq = greatest(last_read_seq, %s) WHERE chat_id = %s AND user_id = %s",
+            (row["seq"], chat_id, user["id"]),
+        )
         return row
 
 
-def change_message(user: DictRow, chat_id: int, seq: int, sql: LiteralString, args: Params,
-                   values: dict[str, object]) -> DictRow | None:
+def change_message(
+    user: DictRow, chat_id: int, seq: int, sql: LiteralString, args: Params, values: dict[str, object]
+) -> DictRow | None:
     with db.as_user(user["id"]) as tx:
         return tx.authz.expect(tx.row(sql, args), "ms.messages", "update", (chat_id, seq), values)
 
@@ -362,16 +407,27 @@ class Edit(BaseModel):
 
 @app.patch("/api/chats/{chat_id}/messages/{seq}")
 def edit(chat_id: int, seq: int, body: Edit, user: DictRow = Depends(auth.current_user)) -> DictRow | None:
-    return change_message(user, chat_id, seq,
-                          "UPDATE ms.messages SET body = %s, edited_at = now() WHERE chat_id = %s AND seq = %s "
-                          "RETURNING seq, body, edited_at", (body.body, chat_id, seq), {"body": body.body})
+    return change_message(
+        user,
+        chat_id,
+        seq,
+        "UPDATE ms.messages SET body = %s, edited_at = now() WHERE chat_id = %s AND seq = %s "
+        "RETURNING seq, body, edited_at",
+        (body.body, chat_id, seq),
+        {"body": body.body},
+    )
 
 
 @app.delete("/api/chats/{chat_id}/messages/{seq}")
 def delete_for_everyone(chat_id: int, seq: int, user: DictRow = Depends(auth.current_user)) -> DictRow | None:
-    return change_message(user, chat_id, seq,
-                          "UPDATE ms.messages SET deleted = true, body = '' WHERE chat_id = %s AND seq = %s "
-                          "RETURNING seq, deleted", (chat_id, seq), {"deleted": True, "body": ""})
+    return change_message(
+        user,
+        chat_id,
+        seq,
+        "UPDATE ms.messages SET deleted = true, body = '' WHERE chat_id = %s AND seq = %s RETURNING seq, deleted",
+        (chat_id, seq),
+        {"deleted": True, "body": ""},
+    )
 
 
 class Read(BaseModel):
@@ -381,8 +437,10 @@ class Read(BaseModel):
 @app.post("/api/chats/{chat_id}/read")
 def mark_read(chat_id: int, body: Read, user: DictRow = Depends(auth.current_user)) -> dict[str, bool]:
     with db.as_user(user["id"]) as tx:
-        tx.run("UPDATE ms.members SET last_read_seq = greatest(last_read_seq, %s) WHERE chat_id = %s AND user_id = %s",
-               (body.seq, chat_id, user["id"]))
+        tx.run(
+            "UPDATE ms.members SET last_read_seq = greatest(last_read_seq, %s) WHERE chat_id = %s AND user_id = %s",
+            (body.seq, chat_id, user["id"]),
+        )
     return {"ok": True}
 
 
@@ -436,10 +494,21 @@ def invites(chat_id: int, user: DictRow = Depends(auth.current_user)) -> list[Di
     with db.as_user(user["id"]) as tx:
         found(tx.row("SELECT 1 FROM ms.chats WHERE id = %s", (chat_id,)))
         links = tx.authz.list_links("chat", chat_id)
-        names = {str(u["id"]): u["name"] for u in tx.rows("SELECT id, name FROM ms.users WHERE id::text = ANY (%s)",
-                                                          ([x["created_by"] for x in links],))}
-        return [{"id": x["id"], "created_by": names.get(x["created_by"]), "created_at": x["created_at"],
-                 "expires_at": x["expires_at"]} for x in links]
+        names = {
+            str(u["id"]): u["name"]
+            for u in tx.rows(
+                "SELECT id, name FROM ms.users WHERE id::text = ANY (%s)", ([x["created_by"] for x in links],)
+            )
+        }
+        return [
+            {
+                "id": x["id"],
+                "created_by": names.get(x["created_by"]),
+                "created_at": x["created_at"],
+                "expires_at": x["expires_at"],
+            }
+            for x in links
+        ]
 
 
 @app.delete("/api/chats/{chat_id}/invites/{link_id}", status_code=204)
@@ -459,8 +528,13 @@ def linked_chat(user_id: str, token: str) -> DictRow:
         given = [c for c in tx.authz.list("chat", "join") if c not in without]
         if not given:
             raise HTTPException(404, "this invite link doesn't work (any more)")
-        return found(tx.row("SELECT c.id, c.title, c.about, EXISTS (SELECT 1 FROM ms.members m WHERE m.chat_id = c.id "
-                            "AND m.user_id = %s) AS member FROM ms.chats c WHERE c.id = %s", (user_id, int(given[0]))))
+        return found(
+            tx.row(
+                "SELECT c.id, c.title, c.about, EXISTS (SELECT 1 FROM ms.members m WHERE m.chat_id = c.id "
+                "AND m.user_id = %s) AS member FROM ms.chats c WHERE c.id = %s",
+                (user_id, int(given[0])),
+            )
+        )
 
 
 @app.get("/api/join/{token}")
@@ -481,8 +555,9 @@ def join(token: str, user: DictRow = Depends(auth.current_user)) -> dict[str, in
 @app.get("/api/blocks")
 def blocks(user: DictRow = Depends(auth.current_user)) -> list[DictRow]:
     with db.as_user(user["id"]) as tx:
-        return tx.rows("SELECT u.id, u.name, u.phone FROM ms.blocks b JOIN ms.users u ON u.id = b.blocked_id "
-                       "ORDER BY u.name")
+        return tx.rows(
+            "SELECT u.id, u.name, u.phone FROM ms.blocks b JOIN ms.users u ON u.id = b.blocked_id ORDER BY u.name"
+        )
 
 
 class Block(BaseModel):
@@ -492,8 +567,10 @@ class Block(BaseModel):
 @app.post("/api/blocks", status_code=201)
 def block(body: Block, user: DictRow = Depends(auth.current_user)) -> dict[str, bool]:
     with db.as_user(user["id"]) as tx:
-        tx.run("INSERT INTO ms.blocks (blocker_id, blocked_id) VALUES (%s, %s) ON CONFLICT DO NOTHING",
-               (user["id"], body.user_id))
+        tx.run(
+            "INSERT INTO ms.blocks (blocker_id, blocked_id) VALUES (%s, %s) ON CONFLICT DO NOTHING",
+            (user["id"], body.user_id),
+        )
     return {"ok": True}
 
 
@@ -511,7 +588,9 @@ class NewBot(BaseModel):
 @app.get("/api/bots")
 def my_bots(user: DictRow = Depends(auth.current_user)) -> list[DictRow]:
     with db.as_user(user["id"]) as tx:
-        return tx.rows("SELECT id, name, active, created_at FROM ms.bots WHERE owner_id = %s ORDER BY id", (user["id"],))
+        return tx.rows(
+            "SELECT id, name, active, created_at FROM ms.bots WHERE owner_id = %s ORDER BY id", (user["id"],)
+        )
 
 
 @app.post("/api/bots", status_code=201)
@@ -531,7 +610,10 @@ class ChatBot(BaseModel):
 def add_bot(chat_id: int, body: ChatBot, user: DictRow = Depends(auth.current_user)) -> dict[str, bool]:
     with db.as_user(user["id"]) as tx:
         found(tx.row("SELECT 1 FROM ms.chats WHERE id = %s", (chat_id,)))
-        tx.run("INSERT INTO ms.chat_bots (chat_id, bot_id, added_by) VALUES (%s, %s, %s)", (chat_id, body.bot_id, user["id"]))
+        tx.run(
+            "INSERT INTO ms.chat_bots (chat_id, bot_id, added_by) VALUES (%s, %s, %s)",
+            (chat_id, body.bot_id, user["id"]),
+        )
     return {"ok": True}
 
 
@@ -553,20 +635,24 @@ def bot_chats(key: str = Depends(auth.bot_key)) -> list[DictRow]:
 def bot_messages(chat_id: int, after: int = 0, key: str = Depends(auth.bot_key)) -> list[DictRow]:
     with db.as_bot(key) as tx:
         found(tx.row("SELECT 1 FROM ms.chats WHERE id = %s", (chat_id,)))
-        return tx.rows(f"SELECT {MESSAGE_COLS} FROM ms.messages x LEFT JOIN ms.users u ON u.id = x.sender_id "
-                       f"LEFT JOIN ms.bots b ON b.id = x.bot_id WHERE x.chat_id = %s AND x.seq > %s ORDER BY x.seq LIMIT 200",
-                       (chat_id, after))
+        return tx.rows(
+            f"SELECT {MESSAGE_COLS} FROM ms.messages x LEFT JOIN ms.users u ON u.id = x.sender_id "
+            f"LEFT JOIN ms.bots b ON b.id = x.bot_id WHERE x.chat_id = %s AND x.seq > %s ORDER BY x.seq LIMIT 200",
+            (chat_id, after),
+        )
 
 
 @app.post("/api/bot/chats/{chat_id}/messages", status_code=201)
 def bot_post(chat_id: int, body: NewMessage, key: str = Depends(auth.bot_key)) -> DictRow:
     with db.as_bot(key) as tx:
         found(tx.row("SELECT 1 FROM ms.chats WHERE id = %s", (chat_id,)))
-        who = tx.authz.principal()                       # ('bot', '3'): the database knows who the key is
+        who = tx.authz.principal()  # ('bot', '3'): the database knows who the key is
         if who is None:
             raise HTTPException(401, "invalid API key")
-        return tx.one("INSERT INTO ms.messages AS x (chat_id, bot_id, body) VALUES (%s, %s, %s) RETURNING x.seq",
-                      (chat_id, int(who[1]), body.body))
+        return tx.one(
+            "INSERT INTO ms.messages AS x (chat_id, bot_id, body) VALUES (%s, %s, %s) RETURNING x.seq",
+            (chat_id, int(who[1]), body.body),
+        )
 
 
 # --- live updates ------------------------------------------------------------------------------
