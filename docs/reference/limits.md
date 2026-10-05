@@ -91,9 +91,11 @@ above takes 290 ms instead of 32). The audit trail and change feed add about 15 
   pays for each of them.
   Planning is paid by every query that isn't a prepared statement. One that is gets planned in full its first
   five runs on a connection, and then Postgres usually keeps the plan: a read that took 13 ms to plan took
-  0.1 ms from its sixth run. Whether queries are prepared is the driver's doing, not the policy's: behind a
-  pooler that keeps no prepared statements, where the drivers are told to make none ([Behind a
-  pooler](../operations.md#behind-a-pooler)), every query pays for its planning.
+  0.1 ms from its sixth run. Whether queries are prepared is the driver's doing, not the policy's. asyncpg and
+  postgres.js prepare every query, and psycopg one it has run five times. node-postgres prepares only a query
+  given a `name`, and Prisma's `pg` adapter only with its `statementNameGenerator` option: without them, each
+  query is planned anew. So is every query behind a pooler that keeps no prepared statements, where the drivers
+  are told to make none ([Behind a pooler](../operations.md#behind-a-pooler)).
   `authz.lint()` warns when a table's select rule passes 50 (applying shows it). Name each permission once on
   the way: `can edit = owner or editor`, `can view = edit or viewer`, not `view` written out again inside
   three others. The same name twice in one `and` or `or` counts once.
