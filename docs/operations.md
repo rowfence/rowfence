@@ -36,7 +36,8 @@ Statement mode can't: signing in and the queries after it are one transaction, a
   - postgres.js: `{ prepare: false }`. node-postgres and Prisma need nothing.
 
   Without it, requests fail with "prepared statement ... does not exist" or "already exists". They fail; nobody
-  is signed in as someone else.
+  is signed in as someone else. With no prepared statements, each query is planned anew, the policy's checks
+  with it: [what that costs](reference/limits.md#limits).
 - **Nothing may outlive a transaction.** The next transaction on that server connection may be another
   client's. A session-level `SET`, a temporary table, a statement prepared by name, or a `WITH HOLD` cursor in
   your own code reaches it: a cursor declared while signed in as one user is read by the next client, signed
