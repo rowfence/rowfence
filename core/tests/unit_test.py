@@ -1287,6 +1287,7 @@ class Wire(unittest.TestCase):
                     conn.sendall(b"S" if tls else b"N")
                     if tls:
                         context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+                        context.minimum_version = ssl.TLSVersion.TLSv1_2
                         context.load_cert_chain(os.path.join(fixtures, "wire_test.crt"), os.path.join(fixtures, "wire_test.key"))
                         conn = context.wrap_socket(conn, server_side=True)
                         seen["tls"] = True
