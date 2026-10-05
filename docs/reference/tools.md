@@ -70,11 +70,11 @@ the browser (Pyodide and PGlite).
 `prove`, `review`, `test`, `why`, `lint`, and `push` to a development database. Each call runs the command
 once, in the folder the agent started it in, so `rowstile.toml` names the policy and the database. `check`
 also returns the mistake's file and line. A finding (a mistake, a failing test, a counterexample) is an
-answer with `ok: false`; a call that couldn't run (no policy file, no database) is an error. For Claude Code:
+answer with `ok: false`; a call that couldn't run (no policy file, no database) is an error. An agent is given
+the command to start it, in its own settings for MCP servers:
 
-```sh
-claude mcp add rowstile -- rowstile mcp
+```json
+{"command": "rowstile", "args": ["mcp"]}
 ```
 
-Other clients take the same command: `{"command": "rowstile", "args": ["mcp"]}`. `push` is the only tool that
-changes anything, and it is marked so; production takes migrations.
+`push` is the only tool that changes anything, and it is marked so; production takes migrations.
