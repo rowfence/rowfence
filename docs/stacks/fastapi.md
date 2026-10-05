@@ -141,7 +141,9 @@ queries = authz_sa.Queries[ObjectType, Permission]()
     @app.get("/projects/editable")
     async def editable() -> list[int]:
         async with Session() as s:
-            return sorted((await s.scalars(select(Project.id).where(Project.id.in_(queries.ids("project", "edit"))))).all())
+            return sorted(
+                (await s.scalars(select(Project.id).where(Project.id.in_(queries.ids("project", "edit"))))).all()
+            )
 
     @app.get("/projects/buttons")
     async def buttons() -> dict[str, list[Permission]]:
@@ -175,8 +177,13 @@ objects alone, so `alembic check` shows no change:
 ```python
 from rowstile.alembic import include_name, include_object
 
-    context.configure(connection=connection, target_metadata=Base.metadata, include_schemas=True,
-                      include_name=include_name, include_object=include_object)
+    context.configure(
+        connection=connection,
+        target_metadata=Base.metadata,
+        include_schemas=True,
+        include_name=include_name,
+        include_object=include_object,
+    )
 ```
 
 ```sh

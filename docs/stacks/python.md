@@ -79,7 +79,9 @@ A refused INSERT is an error already: `rowstile.refusal(exc)` reads it as `Refus
                 assert [r["id"] for r in await conn.fetch("SELECT id FROM app.projects ORDER BY id")] == [1, 3]
         async with pga.transaction(conn, 2):
             with pytest.raises(rowstile.NotFound):
-                await pga.expect(conn, await conn.execute("DELETE FROM app.notes WHERE id = 1"), "app.notes", "delete", 1)
+                await pga.expect(
+                    conn, await conn.execute("DELETE FROM app.notes WHERE id = 1"), "app.notes", "delete", 1
+                )
 ```
 
 ## Migrations
