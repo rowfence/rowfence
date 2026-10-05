@@ -10,20 +10,113 @@ role: what the app sees), both SQLAlchemy or libpq URLs, give the authz_owner_ur
 The fixtures' types, for annotating a test's arguments: AsUser, AssertRefused, AssertNotFound.
 
 With an async function, await the helper in an async test: `await assert_refused(lambda: rename(note_id, "x"))`.
+
+A database per worker: database_per_worker(owner_url) copies the migrated test database (with the policy) once
+for each pytest-xdist worker, so tests that write don't meet each other.
 """
 from __future__ import annotations
 
+import importlib.util
 import inspect
 import os
-from collections.abc import Awaitable, Callable
+import re
+import urllib.parse
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from contextlib import AbstractContextManager
+from dataclasses import dataclass
 from typing import Protocol, TypeVar, cast, overload
 
 import pytest
 
 from . import NotFound, Principal, Refused, Who, acting_as, refusal
+from .command import command_dir
 
 AsUser = Callable[[Who], AbstractContextManager["Principal | None"]]
+
+
+@dataclass(frozen=True)
+class WorkerDatabase:
+    """A worker's own test database: its URL (the owner's), and the app role's if one was given."""
+    url: str
+    app_url: str | None = None
+
+
+class _Connection(Protocol):
+    def query(self, sql: str, args: Sequence[object] = ()) -> Sequence[Sequence[object]]: ...
+    def script(self, sql: str) -> None: ...
+    def close(self) -> None: ...
+
+
+class _Postgres(Protocol):
+    """What this module uses of the command's Postgres client (cli/pgwire.py)."""
+    PgError: type[Exception]
+
+    def parse_dsn(self, text: str | None) -> Mapping[str, object]: ...
+    def connect(self, **settings: object) -> _Connection: ...
+
+
+def _postgres() -> _Postgres:
+    """The rowstile command's own Postgres client (standard library only), so copying a database needs no driver
+    of the app's. Loaded from its file: nothing of the command becomes importable."""
+    spec = importlib.util.spec_from_file_location("rowstile._pgwire", os.path.join(command_dir(), "pgwire.py"))
+    if spec is None or spec.loader is None:
+        raise RuntimeError("rowstile.testing: the command's Postgres client is missing from this installation")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return cast("_Postgres", module)
+
+
+def worker_id() -> str:
+    """This worker's number: pytest-xdist's (gw3 is "3"); "0" in a run without workers."""
+    return re.sub(r"\D", "", os.environ.get("PYTEST_XDIST_WORKER", "")) or "0"
+
+
+def _with_database(url: str, name: str) -> str:
+    u = urllib.parse.urlsplit(url)
+    return urllib.parse.urlunsplit(u._replace(path="/" + urllib.parse.quote(name, safe="")))
+
+
+def database_per_worker(url: str, app_url: str | None = None, fresh: bool = True) -> WorkerDatabase:
+    """A database for this worker, copied from `url`'s (migrated, with the policy): its URL, with the same user
+    and in the same form (SQLAlchemy's or libpq's). The copy is made by a role that may create databases (the
+    owner), while nothing else is connected to the original. A copy an earlier run left is made again, unless
+    fresh=False. app_url: the app role's URL, returned for the copy.
+
+        @pytest.fixture(scope="session")
+        def worker_database() -> WorkerDatabase:
+            return database_per_worker(os.environ["ROWSTILE_TESTS_URL"], app_url=os.environ["ROWSTILE_APP_URL"])
+    """
+    template = urllib.parse.unquote(urllib.parse.urlsplit(url).path.lstrip("/"))
+    if not template:
+        raise ValueError("database_per_worker needs a database to copy, and this URL names none")
+    name = f"{template}_w{worker_id()}"
+
+    def q(ident: str) -> str:
+        return '"' + ident.replace('"', '""') + '"'
+
+    pg = _postgres()
+    # CREATE DATABASE ... TEMPLATE needs no one connected to the original, this connection included
+    elsewhere = re.sub(r"^postgres(ql)?(\+\w+)?://", "postgresql://", _with_database(url, "postgres"))
+    conn = pg.connect(**pg.parse_dsn(elsewhere))
+    try:
+        exists = bool(conn.query("SELECT 1 FROM pg_database WHERE datname = $1", [name]))
+        if fresh or not exists:
+            if exists:
+                conn.script(f"DROP DATABASE {q(name)} WITH (FORCE)")
+            try:
+                conn.script(f"CREATE DATABASE {q(name)} TEMPLATE {q(template)}")
+            except pg.PgError as e:
+                # 55006: something is connected to the original (Postgres has waited five seconds for it to leave)
+                if not str(e).startswith("55006"):
+                    raise
+                raise RuntimeError(
+                    f"rowstile.testing: {template} can't be copied while anything is connected to it: close what "
+                    "holds it (the app, a migration tool, a console). Where the service keeps a connection of its "
+                    "own for minutes after yours (Neon does), a copy per worker can't be made: use one test "
+                    "database, where each test rolls back, or a branch for each run") from e
+    finally:
+        conn.close()
+    return WorkerDatabase(_with_database(url, name), _with_database(app_url, name) if app_url else None)
 
 
 Raised = TypeVar("Raised", Refused, NotFound)

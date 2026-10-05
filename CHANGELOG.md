@@ -10,6 +10,9 @@ Each release upgrades from the one before it. How releases are numbered and made
 ### Added
 
 - The VS Code extension is on the VS Code Marketplace too, as `rowstile.rowstile` (a preview, like on Open VSX).
+- The Python SDK copies the migrated test database for each pytest-xdist worker, as `@rowstile/vitest` does
+  for Vitest's: `rowstile.testing.database_per_worker(url)` returns the copy's URL (and the app role's), so
+  tests that write don't meet each other. It needs no driver of the app's.
 
 ## 0.1.0 (alpha)
 

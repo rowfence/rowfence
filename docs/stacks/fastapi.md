@@ -191,6 +191,19 @@ The policy's own tests run with `rowstile test`. In pytest, sign in the way the 
             assert sorted(s.scalars(select(Note.id)).all()) == [2, 3]
 ```
 
+`database_per_worker(owner_url)` copies the migrated test database once for each pytest-xdist worker, so tests
+that write don't meet each other (a run without workers has one copy):
+
+```python
+@pytest.fixture(scope="session")
+def worker_database() -> WorkerDatabase:
+    return database_per_worker(os.environ["ROWSTILE_TESTS_URL"], app_url=os.environ["ROWSTILE_APP_URL"])
+```
+
+It returns the copy's URL, and the app role's for it. The copy needs nobody connected to the original; where the
+service keeps a connection (Neon does, for minutes after one), it says so and what to use instead ([Managed
+Postgres](../managed-postgres.md)).
+
 ## Other drivers
 
 The sync engine (and SQLModel, built on it) takes `install(engine)`. psycopg and asyncpg without SQLAlchemy:
