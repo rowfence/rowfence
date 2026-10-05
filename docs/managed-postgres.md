@@ -59,7 +59,7 @@ The owner is the role the project was made with (`neondb_owner`, or the one you 
   ("unsupported startup parameter in options"). Set it on the role: `ALTER ROLE app_user SET search_path = app`.
 - **A database can't be copied for about five minutes after anything connected to it.** `CREATE DATABASE ...
   TEMPLATE` says "source database is being accessed by other users", though nobody shows in
-  `pg_stat_activity`. So a copy of the test database per test worker (`databasePerWorker`) doesn't work: use one
+  `pg_stat_activity`. So a copy of the test database per test worker (`databasePerWorker`, `database_per_worker`) doesn't work: use one
   test database, where each test rolls back, or a Neon branch per run.
 - **Prisma waits 2 seconds for a transaction.** The Prisma SDK runs each `findUnique` in a transaction of its
   own. With many at once and the database far away (20 at once, on a pool of 5, failed on both services), give
@@ -135,7 +135,7 @@ your policy that calls such a function writes `extensions.` too.
   authentication failed" until it reads the role again. An app that keeps retrying then sets off Supavisor's
   circuit breaker: "too many authentication failures, new connections are temporarily blocked", for every role
   from that machine, for a few minutes. Set the app role's password once, in the migration that makes it.
-- **A test database can't be copied** (`databasePerWorker`): Supavisor keeps its own connections to the
+- **A test database can't be copied** (`databasePerWorker`, `database_per_worker`): Supavisor keeps its own connections to the
   database for a while after yours, and `CREATE DATABASE ... TEMPLATE` is refused, as on Neon. Use one test
   database, where each test rolls back.
 - **60 connections** on the free plan, for the app, the command and the dashboard together.

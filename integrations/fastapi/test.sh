@@ -16,10 +16,12 @@ docker rm -f "$NAME" >/dev/null 2>&1
 docker run -d --name "$NAME" -e POSTGRES_PASSWORD=postgres -p "$PORT:5432" "rowstile:$PG" >/dev/null || exit 1
 for _ in $(seq 60); do docker exec "$NAME" pg_isready -q -U postgres 2>/dev/null && break; sleep 1; done
 sleep 2
-# the migration role owns the database: not a superuser, as on managed Postgres
-docker exec "$NAME" psql -q -U postgres -c "CREATE ROLE conf_owner LOGIN PASSWORD 'owner' CREATEROLE" \
-  -c "ALTER ROLE conf_owner SET createrole_self_grant = 'set, inherit'" -c "CREATE DATABASE conf OWNER conf_owner" >/dev/null || exit 1
+# the migration role owns the databases: not a superuser, as on managed Postgres (CREATEDB: a test database per worker)
+docker exec "$NAME" psql -q -U postgres -c "CREATE ROLE conf_owner LOGIN PASSWORD 'owner' CREATEROLE CREATEDB" \
+  -c "ALTER ROLE conf_owner SET createrole_self_grant = 'set, inherit'" -c "CREATE DATABASE conf OWNER conf_owner" \
+  -c "CREATE DATABASE conf_tests OWNER conf_owner" >/dev/null || exit 1
 export ROWSTILE_OWNER_URL="postgresql+psycopg://conf_owner:owner@localhost:$PORT/conf"
+export ROWSTILE_TESTS_URL="postgresql+psycopg://conf_owner:owner@localhost:$PORT/conf_tests"
 export ROWSTILE_OWNER_DSN="postgresql://conf_owner:owner@localhost:$PORT/conf"
 APP_PORT=$PORT
 if [ "${POOLER:-}" = pgbouncer ]; then          # the app through PgBouncer in transaction mode (../pooler.sh)
@@ -36,6 +38,8 @@ uv run --quiet alembic check >/tmp/conformance-alembic-check.log 2>&1 &&
   echo "ok    11: ... and Alembic's own diff shows no change" || { cat /tmp/conformance-alembic-check.log; echo "FAIL  11: alembic check"; rc=1; }
 uv run --quiet rowstile migrate --check >/dev/null &&
   echo "ok    the policy's lock file is up to date" || { echo "FAIL  rowstile migrate --check"; rc=1; }
+# 12: the framework's test database, migrated the same way (the tests copy it for each worker)
+ROWSTILE_OWNER_URL=$ROWSTILE_TESTS_URL uv run --quiet alembic upgrade head || { echo "FAIL  12: alembic upgrade head, on the test database"; rc=1; }
 uv run --quiet pytest -q -p no:cacheprovider "$@" || rc=1
 [ -n "${KEEP:-}" ] || { [ "${POOLER:-}" = pgbouncer ] && pooler_stop "$NAME"; docker rm -f "$NAME" >/dev/null; }
 exit $rc

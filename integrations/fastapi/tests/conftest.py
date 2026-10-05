@@ -3,6 +3,7 @@ from collections.abc import Iterator
 
 import psycopg
 import pytest
+from rowstile.testing import WorkerDatabase, database_per_worker
 
 OWNER = os.environ.get("ROWSTILE_OWNER_URL", "")
 
@@ -15,6 +16,12 @@ def libpq(url: str) -> str:
 @pytest.fixture(scope="session")
 def anyio_backend() -> str:
     return "asyncio"
+
+
+@pytest.fixture(scope="session")
+def worker_database() -> WorkerDatabase:
+    """This worker's own copy of the migrated test database (check 12): tests that write don't meet each other."""
+    return database_per_worker(os.environ["ROWSTILE_TESTS_URL"], app_url=os.environ["ROWSTILE_APP_URL"])
 
 
 @pytest.fixture(scope="session", autouse=True)

@@ -3,6 +3,7 @@ SQLAlchemy async on asyncpg, Alembic. test.sh does check 11 (a fresh database: m
 then Alembic's own diff shows no change) before these run."""
 import asyncio
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -17,7 +18,14 @@ import rowstile
 from app.main import digest, make_app
 from fastapi import FastAPI
 from rowstile import ConnectionProblem, Refused
-from rowstile.testing import AssertNotFound, AssertRefused, AsUser
+from rowstile.testing import (
+    AssertNotFound,
+    AssertRefused,
+    AsUser,
+    WorkerDatabase,
+    database_per_worker,
+    worker_id,
+)
 
 from .conftest import OWNER, libpq
 
@@ -158,6 +166,43 @@ def test_10_an_id_with_a_colon_is_a_users_not_a_service() -> None:
     assert rowstile.Principal.parse(str(rowstile.Principal("service", "1"))) == rowstile.Principal("service", "1")
     assert rowstile.Principal.parse("42") == rowstile.Principal("user", "42")
     assert rowstile.Principal.parse("nobody") == rowstile.NOBODY
+
+
+# 12: the framework's test database has the policy: a database per worker, copied from the migrated one
+async def test_12_a_test_database_per_worker_has_the_policy(worker_database: WorkerDatabase,
+                                                            monkeypatch: pytest.MonkeyPatch) -> None:
+    import rowstile.psycopg as pgp
+    tests = os.environ["ROWSTILE_TESTS_URL"]
+    assert re.search(r"/conf_tests_w\d+$", worker_database.url), worker_database.url
+    assert worker_database.url.startswith("postgresql+psycopg://")              # the URL's own form, another database
+    assert worker_database.app_url and worker_database.app_url.startswith("postgresql+asyncpg://conf_app:")
+
+    def projects(who: int) -> list[int]:
+        with psycopg.connect(libpq(worker_database.app_url or "")) as conn, pgp.transaction(conn, who):
+            return [r[0] for r in conn.execute("SELECT id FROM app.projects ORDER BY id")]
+
+    def users(url: str) -> int:
+        with psycopg.connect(libpq(url)) as conn:
+            return int(conn.execute("SELECT count(*) FROM app.users").fetchall()[0][0])
+
+    with psycopg.connect(libpq(worker_database.url), autocommit=True) as conn:
+        conn.execute("INSERT INTO app.users VALUES (1, 'ann'), (2, 'bo')")
+        conn.execute("INSERT INTO app.projects VALUES (1, 1, 'Plans', false)")
+    copy = make_app(worker_database.app_url, check_connection=False)
+    await copy.state.authz.check()                                            # the app's role, under row-level security
+    await copy.state.engine.dispose()
+    assert projects(1) == [1] and projects(2) == []
+    assert users(tests) == 0                                                    # the original is left as it was migrated
+    assert database_per_worker(tests, fresh=False).url == worker_database.url   # kept, with what the tests wrote
+    assert users(worker_database.url) == 2
+    assert database_per_worker(tests).url == worker_database.url                # copied again: as migrated
+    assert users(worker_database.url) == 0
+    # one for each of pytest-xdist's workers; a run without workers has one
+    assert worker_id() == "0"
+    monkeypatch.setenv("PYTEST_XDIST_WORKER", "gw3")
+    assert worker_id() == "3" and database_per_worker(tests).url.endswith("/conf_tests_w3")
+    with pytest.raises(ValueError, match="a database to copy"):
+        database_per_worker("postgresql://conf_owner:owner@localhost")
 
 
 # 13: the app refuses to start on a connection that skips row-level security

@@ -27,7 +27,7 @@ Rowstile(app, engine, user=current_user)     # current_user(request): its user's
 | `rowstile.psycopg` | `transaction(conn, who)`, `atransaction(aconn, who)`, `expect()`, `aexpect()` |
 | `rowstile.asyncpg` | `transaction(conn, who)`, `expect()` |
 | `rowstile.alembic` | `include_name`, `include_object`: autogenerate leaves rowstile's objects alone |
-| `rowstile.testing` | pytest fixtures: `as_user`, `assert_refused`, `assert_not_found` (awaited, with an async function), `authz_owner_url`, `authz_app_url` |
+| `rowstile.testing` | pytest fixtures: `as_user`, `assert_refused`, `assert_not_found` (awaited, with an async function), `authz_owner_url`, `authz_app_url`; `database_per_worker(url)`: a copy of the migrated test database for each pytest-xdist worker |
 
 Who a transaction acts for: `42` or `"42"` (a user), `("service", 3)` (another principal type of the policy),
 or `None` (nobody: only what `anyone` may see; `None` given to a call is nobody too, whoever the code around

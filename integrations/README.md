@@ -17,8 +17,8 @@ this list.
 9. The generated names type-check, and a wrong permission name doesn't.
 10. A background job signs in as a service principal.
 11. A fresh database: migrate, and the policy tests pass. Then the tool's own diff shows no change.
-12. The framework's test database has the policy (Next.js: a database per Vitest worker; the Python SDK has
-    no helper for it yet).
+12. The framework's test database has the policy: a copy of the migrated one for each test worker (Vitest's,
+    pytest-xdist's).
 13. The app refuses to start on a connection that skips row-level security.
 14. After a policy change and a new migration, the app works with the new generated names.
 15. Next.js only: a signed-in page is never served from a cache to another user, and a signed-in read inside
