@@ -233,9 +233,11 @@ For one suite, start a container and run it inside:
   `unit_test.py --update` writes `docs/errors/`), and a case in `tests/policy_errors.py`. What the runtime raises
   (what apps see) carries its code in the HINT instead, `rowstile help AZ709`, so the message stays as the SDKs
   read it; `ErrorCodes` in `tests/unit_test.py` finds any RAISE without a code.
-- Types: all Python is strongly typed. `uvx ty@0.0.56 check && uvx ruff@0.15.12 check` from the root (CI's
-  `unit` job): ty checks the types (`ty.toml`, every rule an error), Ruff the lint and that every function is
-  annotated (`ruff.toml`, `ANN`, no exceptions). ty's root settings cover the standard-library code; what needs
+- Types: all Python is strongly typed. `uvx ty@0.0.56 check && uvx ruff@0.15.12 check && uvx ruff@0.15.12
+  format --check` from the root (CI's `unit` job): ty checks the types (`ty.toml`, every rule an error), Ruff
+  the lint, that every function is annotated (`ruff.toml`, `ANN`, no exceptions), and the layout: run `uvx
+  ruff@0.15.12 format` before a commit (120 columns; what the command generates, the apps' clients and the
+  Alembic revisions, is left as generated). ty's root settings cover the standard-library code; what needs
   a package's environment has its own (`uv sync` it first), `--project` sdk/python (the fastapi app's
   environment), integrations/fastapi, examples/filemanager and examples/messenger (their backends'); CI's `unit`
   job runs them all. Test code types the JSON it checks as `Answer = Any`, one alias, named; app code types rows

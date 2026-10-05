@@ -35,8 +35,10 @@ Fixes go to `main` first, then to the release branch.
 - **A line in [CHANGELOG.md](CHANGELOG.md)** under **Unreleased**, if users will notice: under Added, Changed,
   Fixed or Upgrading (what someone upgrading must do). A check asks for it when a pull request changes what
   users run; a maintainer adds the label `no changelog` when they won't notice.
-- **Types.** Every Python function says its arguments' and result's types, and the code passes ty and Ruff:
-  `uvx ty@0.0.56 check && uvx ruff@0.15.12 check`, from the repository's root (`ty.toml`, `ruff.toml`); code that needs packages in its own
+- **Types and layout.** Every Python function says its arguments' and result's types, the code passes ty and
+  Ruff, and Ruff lays it out (`uvx ruff@0.15.12 format` before you commit; 120 columns):
+  `uvx ty@0.0.56 check && uvx ruff@0.15.12 check && uvx ruff@0.15.12 format --check`, from the repository's
+  root (`ty.toml`, `ruff.toml`); code that needs packages in its own
   environment: `uv sync --project integrations/fastapi && uvx ty@0.0.56 check --project sdk/python` (and
   `--project` integrations/fastapi, examples/filemanager, examples/messenger after syncing their backends). The
   command's code uses the standard library only, annotations included. TypeScript is `strict`, and so is the

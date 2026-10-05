@@ -1,7 +1,8 @@
-# Ruff lints every Python file here (CI's `unit` job: uvx ruff@0.15.12 check), and with ty (ty.toml) keeps
-# the Python strongly typed: ANN asks for every argument's and result's type. It doesn't format: the code
-# keeps its layout, and no line length is enforced.
+# Ruff lints and formats every Python file here (CI's `unit` job: uvx ruff@0.15.12 check, then
+# uvx ruff@0.15.12 format --check), and with ty (ty.toml) keeps the Python strongly typed: ANN asks for every
+# argument's and result's type. `uvx ruff@0.15.12 format` before a commit lays the code out.
 target-version = "py311"
+line-length = 120
 
 [lint]
 select = [
@@ -13,7 +14,7 @@ select = [
     "ANN",              # annotations everywhere
 ]
 ignore = [
-    "E501",             # no line length
+    "E501",             # the formatter keeps lines to 120; a long string or comment is left as written
     "E731",             # a lambda may be named
     "RUF005",           # a + [b] reads as well as [*a, b]
     "SIM105",           # try/except/pass reads as well as contextlib.suppress
@@ -24,3 +25,7 @@ ignore = [
 extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "fastapi.Header", "fastapi.Cookie", "fastapi.File",
                           "fastapi.Form", "fastapi.Body", "fastapi.Path"]
 
+[format]
+# what the command writes is left as it writes it: the apps' generated clients (their tests fail when one
+# differs from what `rowstile client` gives) and the Alembic revisions `rowstile migrate` made
+exclude = ["**/authz_client.py", "integrations/fastapi/migrations/versions/*_authz_*.py"]
