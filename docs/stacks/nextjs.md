@@ -42,9 +42,10 @@ as the role the policy names, which row-level security applies to (`ROWSTILE_APP
 `signedIn` wraps Prisma's driver adapter: every transaction Prisma begins signs in as whoever `user` returns
 for the request (`null`: nobody, who sees only what `anyone` may). `authz()` turns Prisma's "record not found"
 into 404 or 403 with the reason, and adds `db.$authz`. Use the client `$extends(authz())` returns, and only
-that one: the client it was made from is refused whenever it is used. Importing `@rowstile/next` keeps
-signed-in reads out of Next.js's caches, and `authz.gen.ts` (written by `rowstile client`) gives the SDK the
-policy's names, so a misspelled permission doesn't type-check.
+that one: the client it was made from is refused whenever it is used, inside your own Prisma extensions too
+(add them to the client `authz()` returns: they are placed before it, and each hook runs once for a call).
+Importing `@rowstile/next` keeps signed-in reads out of Next.js's caches, and `authz.gen.ts` (written by
+`rowstile client`) gives the SDK the policy's names, so a misspelled permission doesn't type-check.
 
 ```ts
 import { PrismaPg } from "@prisma/adapter-pg";

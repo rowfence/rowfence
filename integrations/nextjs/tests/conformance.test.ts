@@ -128,6 +128,34 @@ test("5: a client that isn't extended is refused", async () => {
       actingAs(u || null, () => extendedLater.$transaction(() => plain.note.findUnique({ where: { id: 1 } })))
         .then((n) => n?.id ?? null, (e: Error) => e.message)));
     for (const g of inside) expect(g).toContain("isn't extended with authz()");
+    // ... and inside the app's own extensions, on either side of authz(): their hooks are the app's code too.
+    // Each hook is called once for each call (a findUnique's own transaction doesn't run them again), and the
+    // plain client is refused there: note 1, which users 1 and 3 may see, reaches nobody through it
+    const called: string[] = [];
+    const reached: unknown[] = [];
+    const hook = (name: string) => ({
+      name,
+      query: { async $allOperations({ operation, args, query }: { operation: string; args: unknown; query: (a: unknown) => Promise<unknown> }) {
+        called.push(`${name} ${operation}`);
+        reached.push(await plain.note.findUnique({ where: { id: 1 } }).then((n) => n?.id ?? null,
+          (e: Error) => (e.message.includes("isn't extended with authz()") ? "refused" : e.message)));
+        return query(args);
+      } },
+    });
+    const both = plain.$extends(hook("before")).$extends(authz()).$extends(hook("after")).$extends({
+      result: { note: { shout: { needs: { body: true }, compute: (n) => n.body.toUpperCase() } } },
+    });
+    const four = await Promise.all(users.slice(0, 4).map((u) => actingAs(u || null, () => both.note.findUnique({ where: { id: 1 } }))));
+    expect(four.map((n) => n?.id ?? null)).toEqual([1, null, 1, null]);
+    expect(four[0]?.shout).toBe(four[0]?.body.toUpperCase());   // the app's computed fields, on a findUnique too
+    expect([...called].sort()).toEqual([...Array(4).fill("after findUnique"), ...Array(4).fill("before findUnique")]);
+    expect(reached).toEqual(Array(8).fill("refused"));
+    called.length = reached.length = 0;
+    expect((await actingAs("2", () => both.note.findMany())).length).toBe(2);
+    expect(await actingAs("2", () => both.$transaction((tx) => tx.note.count()))).toBe(2);
+    expect(await actingAs("3", () => both.$authz.perms("note", 4))).toEqual(["edit", "view"]);
+    expect(called).toEqual(["before findMany", "after findMany", "before count", "after count", "before $queryRawUnsafe", "after $queryRawUnsafe"]);
+    expect(reached).toEqual(Array(6).fill("refused"));
   } finally {
     await plain.$disconnect();
     await own.end().catch(() => undefined);
