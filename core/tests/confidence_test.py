@@ -165,7 +165,7 @@ def main() -> None:
         rc, out = cli(db, "test", "--coverage", path)
         check(
             "rowstile test --coverage",
-            rc == 0 and "coverage: " in out and "branches made true by a test; no test reaches:" in out,
+            rc == 0 and "coverage: " in out and 'branches made true by a test; no "can" check reaches:' in out,
             out,
         )
 

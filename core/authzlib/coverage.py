@@ -92,14 +92,15 @@ def describe(r: Report, limit: int | None = None) -> str:
     more = len(r["missing"]) - len(shown)
     return (
         head
-        + "; no test reaches:\n"
+        + '; no "can" check reaches:\n'
         + "\n".join(f"  {line}: {name}: {item}" for line, name, item in shown)
         + (f"\n  ... and {more} more" if more > 0 else "")
     )
 
 
 def summary(r: Report, limit: int = 2) -> str:
-    """For rowstile dev's line: '2 branches no test reaches (line 18: org.admin, line 40: {not locked})'."""
+    """For rowstile dev's line: '2 branches no "can" check reaches (line 18: org.admin, line 40: {not locked})'.
+    It names the checks that count: a statement run `as` someone passes and covers nothing."""
     if not r["missing"]:
         return ""
     short: Callable[[str], str] = lambda item: (
@@ -107,4 +108,4 @@ def summary(r: Report, limit: int = 2) -> str:
     )
     shown = ", ".join(f"{line}: {short(item)}" for line, _, item in r["missing"][:limit])
     n = len(r["missing"])
-    return f"{n} branch{'es' if n != 1 else ''} no test reaches ({shown}{', ...' if n > limit else ''})"
+    return f'{n} branch{"es" if n != 1 else ""} no "can" check reaches ({shown}{", ..." if n > limit else ""})'

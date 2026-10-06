@@ -12,7 +12,8 @@ supported stack passes (`integrations/fastapi/test.sh`).
 ## Install
 
 ```sh
-uv add --prerelease=allow "rowstile[fastapi,sqlalchemy,asyncpg,psycopg]"   # while only an alpha is published
+# while only an alpha is published: `>=0.1.0a0` lets uv take rowstile's, and no other package's pre-release
+uv add "rowstile[fastapi,sqlalchemy,asyncpg,psycopg]>=0.1.0a0"
 uv run rowstile init        # a first policy from your tables, a test file, rowstile.toml
 ```
 
@@ -82,7 +83,12 @@ itself. What a middleware of yours puts on `request.state` is there only if that
 token). WebSockets are not signed in: use `rowstile.acting_as()` in the endpoint.
 
 ```python
+from fastapi import FastAPI, Request
+from rowstile import NotFound, Principal
+from rowstile import sqlalchemy as authz_sa
 from rowstile.fastapi import Rowstile
+from sqlalchemy import delete, func, select, text
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 def user_of(request: Request) -> str | None:
     """Who the request is: a real app would read its session or token; here a header (none: nobody)."""
@@ -209,8 +215,9 @@ uv run rowstile migrate --check    # in CI: exit 1 if a policy change has no mig
 While you edit, `rowstile dev` checks, pushes to the development database, runs the tests and rewrites
 `app/authz_client.py` on every save (and writes the migration once you stop editing).
 
-The development database then holds what `dev` pushed, not what its migrations left, and the next
-`alembic upgrade head` on it stops with AZ607. Production and CI only ever take migrations. On the
+The development database then holds what `dev` pushed, not what its migrations left. The first migration,
+the whole policy, applies over that; a later one stops there with AZ607 (`alembic upgrade head` prints it
+far above the bottom of its output). Production and CI only ever take migrations. On the
 development database, once `rowstile migrate --check` says there is nothing to migrate (it holds the policy
 the newest revision makes), `alembic stamp head` brings Alembic's history level; or rebuild it from the
 migrations.

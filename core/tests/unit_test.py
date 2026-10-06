@@ -1583,6 +1583,28 @@ class Draft(unittest.TestCase):
         Compiler(parse_policy(text, None, files={})).compile("the policy")  # what the guide promises: it compiles
         return text
 
+    def test_the_first_row_of_a_tree_can_be_made(self) -> None:
+        # folders inside folders: "inside one you edit" alone lets nobody make the first folder through the app, so
+        # the drafted rule also lets a row with nothing above it be made, in the maker's own name. The column is
+        # written as SQL reads it (a capital needs its quotes), the relation by its name
+        tree = lambda parent, owner: self.compiled(
+            [
+                self.table("app.users", {"id": "bigint"}, ["id"]),
+                self.table(
+                    "app.folders",
+                    {"id": "bigint", parent: "bigint", owner: "bigint"},
+                    ["id"],
+                    (([parent], "app.folders", ["id"]), ([owner], "app.users", ["id"])),
+                ),
+            ]
+        )
+        self.assertIn(
+            "  insert : owner and (parent.edit or {parent_id is null})   -- decide", tree("parent_id", "owner_id")
+        )
+        self.assertIn(
+            '  insert : owner and (parent.edit or {"parentId" is null})   -- decide', tree("parentId", "ownerId")
+        )
+
     def test_names_the_language_or_sql_reads_another_way(self) -> None:
         users = self.table("app.users", {"id": "bigint"}, ["id"])
         to_user = lambda col: ([col], "app.users", ["id"])
@@ -1599,7 +1621,7 @@ class Draft(unittest.TestCase):
             ]
         )
         self.assertIn("  author : user = authorId\n", text)
-        self.assertIn('{"authorId" = authz.uid()}', text)  # a {condition} is SQL: the capital needs its quotes
+        self.assertIn("  insert : author\n", text)  # the relation, not its column once more
         self.assertIn("app._prisma_migrations: the migration tool's own table", text)
         self.assertNotIn("type _prisma_migration", text)
         # a column named like a word of the language, a link table and a column named like a permission
@@ -2246,7 +2268,7 @@ class Confidence(unittest.TestCase):
         r = coverage.report(c, [explain])
         self.assertEqual(r["covered"], 3)
         self.assertIn(("line 49", "folder.edit", "editor"), r["missing"])
-        self.assertIn("branches no test reaches (line ", coverage.summary(r))
+        self.assertIn('branches no "can" check reaches (line ', coverage.summary(r))
 
     def test_coverage_of_a_deny_inside_inheritance(self) -> None:
         from authzlib import coverage
@@ -2693,7 +2715,9 @@ class DocPages(unittest.TestCase):
                         (npm and npm.group(1) != "@next")
                         or any(tag != "@next" for tag in sdk)
                         or (pip and "--pre" not in line)
-                        or (uv and "--prerelease=allow" not in line)
+                        # for uv, a requirement that names a pre-release allows rowstile's and no other
+                        # package's (`--prerelease=allow` brought betas of the app's own dependencies)
+                        or (uv and f">={version.split('-')[0]}a0" not in line)
                         or (image and image.group(1) != f":{version}")
                     )
                 else:
@@ -2701,7 +2725,7 @@ class DocPages(unittest.TestCase):
                         (npm and npm.group(1) == "@next")
                         or any(tag == "@next" for tag in sdk)
                         or (pip and "--pre" in line)
-                        or (uv and "--prerelease" in line)
+                        or (uv and ("--prerelease" in line or re.search(r">=[\d.]+(a|rc)\d", line)))
                         or (image and "-" in (image.group(1) or ""))
                     )
                 if bad:

@@ -160,7 +160,7 @@ SQL
 mkdir -p "$T/n"
 out=$(cd "$T/n" && python3 "$OLDPWD/cli/rowstile_cli.py" --db "dbname=${DB}_names" init --schema pr 2>&1)
 draft=$(cat "$T/n/db/policy.authz" 2>/dev/null)
-case "$draft" in *'type user = pr.User'*'author : user = authorId'*'viewer : user = pr.post_views(post_id -> user_id)'*'{"authorId" = authz.uid()}'*'pr._prisma_migrations: the migration tool'*'pr.owner list: a name the policy language'*)
+case "$draft" in *'type user = pr.User'*'author : user = authorId'*'viewer : user = pr.post_views(post_id -> user_id)'*'insert : author'*'pr._prisma_migrations: the migration tool'*'pr.owner list: a name the policy language'*)
   ok "a draft of a schema with capitals and awkward names: quoted where SQL reads it, the rest left out and said";; *) bad "draft names" "$out $draft";; esac
 out=$(cd "$T/n" && python3 "$OLDPWD/cli/rowstile_cli.py" check 2>&1); rc=$?
 [ $rc -eq 0 ] && ok "... which compiles" || bad "draft names compile" "$out"
