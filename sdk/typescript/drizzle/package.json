@@ -1,6 +1,6 @@
 {
   "name": "@rowstile/drizzle",
-  "version": "0.1.0-alpha.4",
+  "version": "0.1.0-dev",
   "description": "rowstile with Drizzle ORM: transactions signed in as the request's user, ids() for where clauses",
   "license": "Apache-2.0",
   "repository": { "type": "git", "url": "git+https://github.com/rowstile/rowstile.git", "directory": "sdk/typescript/drizzle" },
@@ -10,6 +10,6 @@
   "exports": { ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" } },
   "files": ["dist"],
   "sideEffects": false,
-  "dependencies": { "@rowstile/client": "0.1.0-alpha.4" },
+  "dependencies": { "@rowstile/client": "0.1.0-dev" },
   "peerDependencies": { "drizzle-orm": ">=0.40" }
 }
