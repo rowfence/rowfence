@@ -1,0 +1,24 @@
+-- Bots and services (docs/cookbook/bots-and-services.md): a service signs in as itself, with its own keys, and
+-- posts where it was added.
+app role app_user
+
+type user = app.users
+
+type service = app.services principal
+  owner : user = owner_id
+  can manage_keys = owner
+
+type channel = app.channels
+  member : user    = app.channel_members(channel_id -> user_id)
+  bot    : service = app.channel_bots(channel_id -> service_id)
+
+  can read = member or bot
+  can post = bot
+
+type post = app.posts
+  channel  : channel = channel_id
+  from_bot : service = bot_id
+
+rules app.posts
+  select : channel.read
+  insert : channel.post and from_bot

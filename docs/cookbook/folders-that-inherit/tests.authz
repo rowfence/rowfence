@@ -1,0 +1,18 @@
+-- Folders that inherit (docs/cookbook/folders-that-inherit.md). The test brings its own rows and rolls them back.
+
+test "what you may do in a folder, you may do below it, until one says stop"
+  given ann = {INSERT INTO app.users VALUES (901, 'Ann') RETURNING id}
+  given bo = {INSERT INTO app.users VALUES (902, 'Bo') RETURNING id}
+  given top = {INSERT INTO app.folders (owner_id, name) VALUES ($ann, 'Top') RETURNING id}
+  given sub = {INSERT INTO app.folders (parent_id, name) VALUES ($top, 'Sub') RETURNING id}
+  given low = {INSERT INTO app.folders (parent_id, name) VALUES ($sub, 'Low') RETURNING id}
+  given own = {INSERT INTO app.folders (parent_id, name, inherit) VALUES ($sub, 'Private', false) RETURNING id}
+  given other = {INSERT INTO app.folders (owner_id, name) VALUES ($bo, 'Bo''s') RETURNING id}
+  user $ann can edit folder $low
+  user $ann cannot view folder $own
+  user $bo cannot view folder $sub
+  as user $ann sees 3 {SELECT FROM app.folders WHERE id IN ($top, $sub, $low, $own, $other)}
+  as user $ann allowed {INSERT INTO app.folders (parent_id, owner_id, name) VALUES ($sub, $ann, 'Notes')}
+  as user $ann refused {INSERT INTO app.folders (parent_id, owner_id, name) VALUES ($own, $ann, 'Notes')}
+  as user $ann refused {UPDATE app.folders SET parent_id = $other WHERE id = $low}
+  as user $ann allowed {UPDATE app.folders SET parent_id = $top WHERE id = $low}

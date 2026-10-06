@@ -105,8 +105,9 @@ const again = await db.run(gs.data, must(c.compile(gs.policy, gs.tests)));
 check("the same example again (roles and schemas dropped first)", again.ok && again.tests.every((r) => r.ok), again);
 const other = examples[1];
 const second = await db.run(other.data, must(c.compile(other.policy, other.tests)));
-const left = await pg.query("SELECT count(*)::int AS n FROM pg_namespace WHERE nspname = 'cb'");
-check("another example after it, and nothing of the one before", second.ok && left.rows[0].n === 0, second);
+// the getting-started example's tables are gone (both examples use the schema app)
+const left = await pg.query("SELECT (to_regclass('app.projects') IS NULL AND to_regclass('app.notes') IS NULL) AS gone");
+check("another example after it, and nothing of the one before", second.ok && left.rows[0].gone === true, [second, left.rows]);
 
 // the glue calls the compiler its own way: what it writes is what the command writes
 console.log("-- the same SQL as the command");

@@ -1,0 +1,19 @@
+-- Conditions on the row (docs/cookbook/conditions-on-the-row.md). The test brings its own rows and rolls them back.
+
+test "in an announcement channel, members read and only admins post"
+  given ann = {INSERT INTO app.users VALUES (901, 'Ann') RETURNING id}
+  given bo = {INSERT INTO app.users VALUES (902, 'Bo') RETURNING id}
+  given cy = {INSERT INTO app.users VALUES (903, 'Cy') RETURNING id}
+  given news = {INSERT INTO app.channels (name, announce) VALUES ('announcements', true) RETURNING id}
+  given chat = {INSERT INTO app.channels (name) VALUES ('general') RETURNING id}
+  given {INSERT INTO app.channel_members VALUES ($news, $ann, true), ($news, $bo, false), ($chat, $ann, false), ($chat, $bo, false)}
+  user $bo can read channel $news
+  user $bo cannot post channel $news
+  user $ann can post channel $news
+  user $bo can post channel $chat
+  user $cy cannot read channel $chat
+  as user $ann allowed {INSERT INTO app.posts (channel_id, author_id, body) VALUES ($news, $ann, 'hello')}
+  as user $bo refused {INSERT INTO app.posts (channel_id, author_id, body) VALUES ($news, $bo, 'hi')}
+  as user $bo allowed {INSERT INTO app.posts (channel_id, author_id, body) VALUES ($chat, $bo, 'hi')}
+  as user $bo refused {INSERT INTO app.posts (channel_id, author_id, body) VALUES ($chat, $ann, 'as Ann')}
+  as user $cy sees 0 {SELECT FROM app.posts WHERE channel_id IN ($news, $chat)}

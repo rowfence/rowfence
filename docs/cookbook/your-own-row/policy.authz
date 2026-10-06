@@ -1,0 +1,11 @@
+-- Your own row (docs/cookbook/your-own-row.md): people edit their own profile, and only it.
+app role app_user
+
+type user = app.users
+  self : user = id  -- your own row
+  can edit = self
+
+rules app.users
+  select    : signed_in
+  update    : edit
+  update id : nobody

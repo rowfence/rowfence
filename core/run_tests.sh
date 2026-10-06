@@ -171,7 +171,7 @@ record $? "adversarial"
 step "docs/getting-started.md runs as written"
 tests/docs_test.sh
 record $? "docs"
-step "docs/cookbook.md: its policy applies, its tests pass, and it shows only what is tested"
+step "the cookbook's recipes: each one's policy applies, its tests pass, and its page shows only what is tested"
 tests/cookbook.sh
 record $? "cookbook"
 

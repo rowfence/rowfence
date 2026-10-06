@@ -1,0 +1,16 @@
+-- Teams inside teams (docs/cookbook/teams-inside-teams.md). The test brings its own rows and rolls them back.
+
+test "what a team may read, its sub-teams' members may read"
+  given ann = {INSERT INTO app.users VALUES (901, 'Ann') RETURNING id}
+  given bo = {INSERT INTO app.users VALUES (902, 'Bo') RETURNING id}
+  given cy = {INSERT INTO app.users VALUES (903, 'Cy') RETURNING id}
+  given eng = {INSERT INTO app.teams (id, name) VALUES (901, 'Engineering') RETURNING id}
+  given web = {INSERT INTO app.teams (id, parent_id, name) VALUES (902, $eng, 'Web') RETURNING id}
+  given {INSERT INTO app.team_members VALUES ($web, $bo)}
+  given d = {INSERT INTO app.documents (owner_id, title) VALUES ($ann, 'Plans') RETURNING id}
+  user $bo cannot view document $d
+  given {INSERT INTO app.document_teams VALUES ($d, $eng)}
+  user $bo can view document $d
+  user $cy cannot view document $d
+  as user $bo sees 1 {SELECT FROM app.documents WHERE id = $d}
+  as user $cy sees 0 {SELECT FROM app.documents WHERE id = $d}

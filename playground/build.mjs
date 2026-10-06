@@ -52,21 +52,8 @@ export function bundle() {
       as: "user:1",
       ask: "SELECT f.id, f.name, f.folder_id FROM app.files f ORDER BY f.id",
     },
-    {
-      name: "Cookbook: one small app per pattern",
-      source: "docs/cookbook.md",
-      // its tests bring their own rows; these few are for asking as someone
-      data: read("docs", "cookbook", "schema.sql") + "\n-- a few rows to ask about (the tests bring their own)\n" +
-        "INSERT INTO cb.users VALUES (1, 'Ann'), (2, 'Bo');\n" +
-        "INSERT INTO cb.notes (owner_id, body) VALUES (1, 'Ann''s note'), (2, 'Bo''s note');\n",
-      policy: read("docs", "cookbook", "policy.authz"),
-      tests: readdirSync(join(REPO, "docs", "cookbook", "tests")).sort()
-        .map((f) => read("docs", "cookbook", "tests", f)).join("\n"),
-      as: "user:1",
-      ask: "SELECT id, body FROM cb.notes",
-    },
   ];
-  // each recipe with a page of its own (docs/cookbook/<name>.md shows docs/cookbook/<name>/): the page links to
+  // the cookbook's recipes (docs/cookbook/<name>.md shows docs/cookbook/<name>/): each page links to
   // /playground/#e=<name>. rows.sql is a few rows to ask about; the tests bring their own
   const book = join(REPO, "docs", "cookbook");
   for (const entry of readdirSync(book, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
@@ -75,12 +62,11 @@ export function bundle() {
     const title = read("docs", "cookbook", `${entry.name}.md`).match(/^# (.+)/m);
     const table = policy.match(/^rules (\S+)/m);
     if (!title || !table) throw new Error(`docs/cookbook/${entry.name}: its page needs a title, its policy a rules block`);
-    const rows = existsSync(join(book, entry.name, "rows.sql")) ? "\n" + read("docs", "cookbook", entry.name, "rows.sql") : "";
     examples.push({
       slug: entry.name,
       name: `Recipe: ${title[1]}`,
       source: `docs/cookbook/${entry.name}.md`,
-      data: read("docs", "cookbook", entry.name, "schema.sql") + rows,
+      data: read("docs", "cookbook", entry.name, "schema.sql") + "\n" + read("docs", "cookbook", entry.name, "rows.sql"),
       policy,
       tests: read("docs", "cookbook", entry.name, "tests.authz"),
       as: "user:1",

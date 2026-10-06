@@ -1,0 +1,17 @@
+-- Teams inside teams (docs/cookbook/teams-inside-teams.md): what a team may read, its sub-teams' members may read.
+app role app_user
+
+type user = app.users
+
+type team = app.teams
+  member : user        = app.team_members(team_id -> user_id)
+  member : team#member = app.teams(parent_id -> id)  -- members of sub-teams count too
+
+type document = app.documents
+  owner  : user        = owner_id
+  reader : team#member = app.document_teams(document_id -> team_id)
+  can view = owner or reader
+
+rules app.documents
+  select : view
+  insert : owner

@@ -1,0 +1,10 @@
+-- Your own row (docs/cookbook/your-own-row.md). The test brings its own rows and rolls them back.
+
+test "people edit their own row, and only it"
+  given ann = {INSERT INTO app.users VALUES (901, 'Ann') RETURNING id}
+  given bo = {INSERT INTO app.users VALUES (902, 'Bo') RETURNING id}
+  user $ann can edit user $ann
+  user $ann cannot edit user $bo
+  as user $ann sees 2 {SELECT FROM app.users WHERE id IN ($ann, $bo)}
+  as user $ann allowed {UPDATE app.users SET name = 'Annie' WHERE id = $ann}
+  as user $ann refused {UPDATE app.users SET name = 'Bob' WHERE id = $bo}

@@ -1,0 +1,22 @@
+-- Tenants (docs/cookbook/tenants.md): every ticket is in one organisation, and only its members see it.
+app role app_user
+
+type user = app.users
+
+type org = app.orgs
+  member : user = app.org_members(org_id -> user_id)
+  admin  : user = app.org_members(org_id -> user_id) where {role = 'admin'}
+
+type ticket = app.tickets (org_id, id)
+  org      : org  = org_id
+  assignee : user = assignee_id
+
+  can edit = assignee or org.admin
+  can view = edit or org.member
+
+rules app.tickets
+  select             : view
+  insert             : org.member
+  update             : edit
+  update assignee_id : org.admin  -- only admins reassign
+  update org_id, id  : nobody

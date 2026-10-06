@@ -1,0 +1,20 @@
+-- Folders that inherit (docs/cookbook/folders-that-inherit.md): what you may do in a folder, you may do in
+-- everything inside it, until a folder says stop.
+app role app_user
+
+type user = app.users
+
+type folder = app.folders
+  parent : folder = parent_id
+  owner  : user   = owner_id
+
+  can edit = owner or (parent.edit and {inherit})
+  can view = edit
+
+rules app.folders
+  select                   : view
+  insert                   : parent.edit and owner
+  update                   : edit
+  update parent_id after   : parent.edit
+  update owner_id, inherit : owner
+  delete                   : edit

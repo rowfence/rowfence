@@ -1,0 +1,49 @@
+# Nested groups: teams inside teams
+
+A relation can come from a link table, and it can be declared twice, with two sources. Here a team's members
+are the people in it and the members of its sub-teams, to any depth, loops included.
+
+```authz
+type team = app.teams
+  member : user        = app.team_members(team_id -> user_id)
+  member : team#member = app.teams(parent_id -> id)
+
+type document = app.documents
+  owner  : user        = owner_id
+  reader : team#member = app.document_teams(document_id -> team_id)
+  can view = owner or reader
+```
+
+- `team#member` is "the members of a team". The second `member` line says: the members of a team whose
+  `parent_id` is this team are members of this team too.
+- `reader : team#member` gives a document to a team's members, whoever they are that day. Nobody is copied
+  into a list per document: joining Web is enough to read what Engineering reads.
+
+## Tested
+
+Bo is in Web, Web is inside Engineering, and the document is given to Engineering:
+
+```authz
+test "what a team may read, its sub-teams' members may read"
+  user $bo cannot view document $d
+  given {INSERT INTO app.document_teams VALUES ($d, $eng)}
+  user $bo can view document $d
+  user $cy cannot view document $d
+```
+
+## Try it
+
+[Open it in the playground](https://rowstile.dev/playground/#e=teams-inside-teams): the tables, the policy and the
+test, in your browser, with nothing to install. Or take the files of
+[`docs/cookbook/teams-inside-teams/`](teams-inside-teams/) (`schema.sql`, `policy.authz`, `tests.authz`) and run `rowstile dev`.
+CI applies and tests them on every change (`core/tests/cookbook.sh`), and every line shown here is in those
+files.
+
+## What it costs
+
+Nested groups are worked out for each query, walking up from the asker's own teams; nothing is stored for
+them. [Speed and limits](../reference/limits.md) has the measure: with 20,000 teams in chains ten deep,
+opening something given to the top of a chain takes 1.7 ms.
+
+More: [subjects and groups](../reference/language.md), [sharing with a team](sharing-and-links.md),
+[the other recipes](../cookbook.md).
