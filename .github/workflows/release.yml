@@ -235,5 +235,13 @@ jobs:
           echo "$SHA256  mcp-publisher.tar.gz" | sha256sum -c -
           tar xzf mcp-publisher.tar.gz mcp-publisher
       - run: ./mcp-publisher validate
+      # npm takes some minutes to show a version it has just accepted, and the registry asks npm for it: wait until
+      # it answers (ten minutes at most), and sign in only then, the token being short-lived
       - if: needs.check.outputs.publish == 'public'
-        run: ./mcp-publisher login github-oidc && ./mcp-publisher publish
+        run: |
+          version=$(python3 -c "import json; print(json.load(open('server.json'))['packages'][0]['version'])")
+          for _ in $(seq 60); do
+            curl -fsS -o /dev/null "https://registry.npmjs.org/rowstile/$version" && break
+            sleep 10
+          done
+          ./mcp-publisher login github-oidc && ./mcp-publisher publish
