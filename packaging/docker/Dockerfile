@@ -10,6 +10,13 @@ COPY sdk/python /src/sdk/python
 RUN pip wheel --no-cache-dir --no-deps -w /wheels /src/sdk/python
 
 FROM python:3.13-slim
+# what the image's page shows: `source` ties it to the repository, whose README the registry then shows
+LABEL org.opencontainers.image.title="rowstile" \
+      org.opencontainers.image.description="Access rules for Postgres: the rowstile command (policies compiled to row-level security, shipped as migrations)" \
+      org.opencontainers.image.source="https://github.com/rowstile/rowstile" \
+      org.opencontainers.image.url="https://rowstile.dev" \
+      org.opencontainers.image.documentation="https://rowstile.dev/installing" \
+      org.opencontainers.image.licenses="Apache-2.0"
 RUN apt-get update \
  && apt-get install -y --no-install-recommends git \
  && rm -rf /var/lib/apt/lists/*

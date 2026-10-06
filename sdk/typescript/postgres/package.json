@@ -3,6 +3,8 @@
   "version": "0.1.0-dev",
   "description": "rowstile with postgres.js: transactions signed in as the request's user",
   "license": "Apache-2.0",
+  "homepage": "https://rowstile.dev",
+  "keywords": ["rowstile", "postgres", "postgresql", "authorization", "row-level-security", "rls", "permissions", "access-control", "rbac", "rebac", "multi-tenant", "postgres.js"],
   "repository": { "type": "git", "url": "git+https://github.com/rowstile/rowstile.git", "directory": "sdk/typescript/postgres" },
   "type": "module",
   "main": "./dist/index.js",
