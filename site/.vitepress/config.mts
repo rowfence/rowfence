@@ -4,7 +4,7 @@ import { join, relative } from "node:path";
 import sql from "shiki/langs/sql.mjs";
 import type { Plugin } from "vite";
 import { defineConfig } from "vitepress";
-import { GITHUB, ORIGIN, PAGES, REPO, TITLES, describe, errorSidebar, notPages, siteLink, url } from "../pages.mjs";
+import { GITHUB, ORIGIN, PAGES, REPO, TITLES, describe, errorSidebar, notPages, recipeSidebar, siteLink, url } from "../pages.mjs";
 
 // ```authz blocks: the editor's grammar (SQL inside { } too, so Shiki's SQL is loaded with it)
 const authz = JSON.parse(readFileSync(join(REPO, "editor", "syntaxes", "authz.tmLanguage.json"), "utf8"));
@@ -26,7 +26,6 @@ const vueFromSite: Plugin = {
 const guide = [
   { text: "Installing", link: "/installing" },
   { text: "Getting started", link: "/getting-started" },
-  { text: "Cookbook", link: "/cookbook" },
   { text: "Troubleshooting", link: "/troubleshooting" },
   { text: "Running rowstile", link: "/operations" },
   { text: "Managed Postgres: Neon, Supabase", link: "/managed-postgres" },
@@ -129,6 +128,7 @@ export default defineConfig({
       "/errors/": [{ text: "Error codes", link: "/errors/" }, ...errorSidebar()],
       "/": [
         { text: "Guide", items: guide },
+        { text: "Recipes", items: [{ text: "Cookbook", link: "/cookbook/" }, ...recipeSidebar()] },
         { text: "Stacks", items: stacks },
         { text: "SDKs", items: sdks },
         { text: "Reference", items: reference },

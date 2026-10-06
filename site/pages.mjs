@@ -11,13 +11,17 @@ export const GITHUB = "https://github.com/rowstile/rowstile";
 const BRANCH = "main";
 
 const errorPages = readdirSync(join(REPO, "docs", "errors")).filter((f) => /^AZ\d+\.md$/.test(f)).sort();
+// a recipe with a page of its own: docs/cookbook/<name>.md, beside the folder that holds what it shows
+const recipePages = readdirSync(join(REPO, "docs", "cookbook")).filter((f) => /^[a-z0-9-]+\.md$/.test(f)).sort();
 
 /** Repository path -> address in the site (the page's path, with .md). @type {Record<string, string>} */
 export const PAGES = {
   "site/index.md": "index.md",
   "docs/installing.md": "installing.md",
   "docs/getting-started.md": "getting-started.md",
-  "docs/cookbook.md": "cookbook.md",
+  // an index, not cookbook.md: beside a folder of the same name, a static host answers /cookbook with the folder
+  "docs/cookbook.md": "cookbook/index.md",
+  ...Object.fromEntries(recipePages.map((f) => [`docs/cookbook/${f}`, `cookbook/${f}`])),
   "docs/troubleshooting.md": "troubleshooting.md",
   "docs/operations.md": "operations.md",
   "docs/managed-postgres.md": "managed-postgres.md",
@@ -63,13 +67,14 @@ export const TITLES = { "development.md": "Working on rowstile", "words.md": "Wo
 export const ORIGIN = "https://rowstile.dev";
 
 /** One sentence per page, for search results and shared links. It is here and not in the Markdown, which is read on
- *  GitHub too, where front matter shows as a table. An error page's is made from its title (describe).
+ *  GitHub too, where front matter shows as a table. An error page's and a recipe's are made from their titles
+ *  (describe).
  *  @type {Record<string, string>} */
 export const DESCRIPTIONS = {
   "index.md": "Access rules for Postgres: a policy file compiled into row-level security",
   "installing.md": "Install the rowstile command and its SDKs with npm, pip or Docker. Nothing is installed in the Postgres database. PostgreSQL 16, 17 and 18.",
   "getting-started.md": "From a Postgres schema to a tested access policy enforced by row-level security, the edit loop and the first migration, in about fifteen minutes.",
-  "cookbook.md": "Tested row-level security patterns for Postgres: owner-only rows, teams inside teams, folders that inherit, sharing and share links, tenants, bots.",
+  "cookbook/index.md": "Tested row-level security patterns for Postgres: owner-only rows, teams inside teams, folders that inherit, sharing and share links, tenants, bots.",
   "troubleshooting.md": "What people run into with rowstile and Postgres row-level security, by what they see, and how to fix each.",
   "operations.md": "Running rowstile in production: behind PgBouncer and other poolers, deploying a policy change, upgrading, backups, retention, what to watch.",
   "managed-postgres.md": "rowstile on managed Postgres: the setup on Neon and Supabase as tried, with their poolers, connection strings and limits.",
@@ -119,6 +124,9 @@ export function describe(address, title) {
   const said = DESCRIPTIONS[address];
   if (said) return said;
   if (/^errors\/AZ\d+\.md$/.test(address)) return `${title}: what this rowstile error means, the mistake, and the same mistake fixed.`;
+  if (/^cookbook\/[a-z0-9-]+\.md$/.test(address)) {
+    return `${title}: a tested recipe for Postgres row-level security, with its tables, its policy and its tests.`;
+  }
   throw new Error(`${address}: no description in site/pages.mjs (DESCRIPTIONS)`);
 }
 
@@ -158,6 +166,15 @@ export function notPages() {
     }
   })("");
   return found;
+}
+
+/** The recipes' sidebar: each page's title (its first heading). @returns {{text: string, link: string}[]} */
+export function recipeSidebar() {
+  return recipePages.map((f) => {
+    const title = readFileSync(join(REPO, "docs", "cookbook", f), "utf8").match(/^# (.+)/m);
+    if (!title) throw new Error(`docs/cookbook/${f} has no title`);
+    return { text: title[1], link: `/cookbook/${f.replace(/\.md$/, "")}` };
+  });
 }
 
 /** The error pages' sidebar: the sections of docs/errors/README.md, each code with its title. */

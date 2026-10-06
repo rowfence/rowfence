@@ -350,6 +350,15 @@ async function start() {
       el.status.textContent = "the link's policy couldn't be read; showing an example";
     }
   }
+  // #e=<slug>: one of the page's own examples, by its name (the cookbook's recipes link here)
+  const named = /^#e=([a-z0-9-]+)$/.exec(location.hash);
+  if (named) {
+    const at = bundle.examples.findIndex((x) => x.slug === named[1]);
+    if (at >= 0) {
+      state = bundle.examples[at];
+      el.example.value = String(at);
+    }
+  }
   show(state);
   wire();
   const began = performance.now();

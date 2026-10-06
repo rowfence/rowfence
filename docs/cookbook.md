@@ -5,36 +5,19 @@ one set of tables, `docs/cookbook/` (`schema.sql`, `policy.authz`, `tests/patter
 and tests: every line shown here is in those files (`core/tests/cookbook.sh` checks it). To try one:
 copy the lines, then `rowstile dev`.
 
+Some recipes have a page of their own, with their own small tables, policy and tests (a folder each under
+`docs/cookbook/`, tested the same way) and a link that opens them in the playground:
+
+- [Rows only their owner can see and change](cookbook/owner-only.md)
+
 The language in one breath: a **type** is a table; a **relation** says who or what a row is linked to (a
 column, a link table, or shares people make); a **permission** combines relations with `or`, `and`, `not`,
 `rel.perm` (follow a relation) and `{SQL}`; **rules** say what each command on a table needs.
 
 ## Owner only
 
-The simplest rule: a row belongs to whoever its column names.
-
-```authz
-type note = cb.notes
-  owner : user = owner_id
-  can edit = owner
-  can view = owner
-
-rules cb.notes
-  select : view
-  insert : owner
-  update : edit
-  update owner_id : nobody
-  delete : edit
-```
-
-`insert : owner` (the new row names you as its owner) stops people from making rows in someone else's name,
-and `update owner_id : nobody` from giving theirs away. Tested:
-
-```authz
-  user $bo cannot view note $n
-  as user $bo refused {INSERT INTO cb.notes (owner_id, body) VALUES ($ann, 'as Ann')}
-  as user $ann refused {UPDATE cb.notes SET owner_id = $bo WHERE id = $n}
-```
+The simplest rule: a row belongs to whoever its column names. It has a page of its own:
+[Rows only their owner can see and change](cookbook/owner-only.md).
 
 ## Your own row
 

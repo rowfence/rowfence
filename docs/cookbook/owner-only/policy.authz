@@ -1,0 +1,16 @@
+-- Owner only (docs/cookbook/owner-only.md): a note belongs to whoever its column names.
+app role app_user
+
+type user = app.users
+
+type note = app.notes
+  owner : user = owner_id
+  can edit = owner
+  can view = owner
+
+rules app.notes
+  select          : view
+  insert          : owner
+  update          : edit
+  update owner_id : nobody
+  delete          : edit

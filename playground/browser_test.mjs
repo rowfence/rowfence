@@ -176,6 +176,16 @@ try {
   const shown = await until("document.getElementById('count').textContent");
   check("a link that isn't a state: the page loads, with an example", Boolean(ready) && shown === "7 ✓"
     && (await js("document.getElementById('example').value")) === "0", [ready, shown]);
+
+  // a link that names one of the page's examples (the cookbook's recipes link this way)
+  await open(`${PAGE}#e=owner-only`);
+  const recipe = await js(`(() => { const s = document.getElementById('example');
+    return [s.options[s.selectedIndex].textContent, document.getElementById('policy').value.includes('type note = app.notes')]; })()`);
+  check("a link that names an example opens it", Array.isArray(recipe) && String(recipe[0]).startsWith("Recipe: ") && recipe[1] === true, recipe);
+  check("... and its tests pass", /^\d+ ✓$/.test(String(await until("document.getElementById('count').textContent"))),
+    await js("document.getElementById('count').textContent"));
+  await open(`${PAGE}#e=no-such-recipe`);
+  check("a link that names no example: the first one", (await js("document.getElementById('example').value")) === "0");
 } catch (e) {
   check("the page", false, e instanceof Error ? e.message : String(e));
 } finally {
