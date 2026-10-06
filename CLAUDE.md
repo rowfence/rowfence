@@ -144,8 +144,9 @@ User-facing docs: `README.md`, then `docs/reference/` (read them first). Terms i
   the benchmark check, last (`gh workflow run nightly.yml -f only=bench` runs it alone; it judges speed against
   the runners' own baseline, not the gate's limits). On self-hosted runners sharing one machine, jobs with fixed container
   names or ports hold a `flock` of their own, and `ci.sh` writes its logs where `ROWSTILE_CI_LOGS` says
-- `.github/workflows/scorecard.yml` — the OpenSSF Scorecard, weekly and on `main`: the score in the run's files,
-  the findings under Security, Code scanning; not published
+- `.github/workflows/scorecard.yml` — the OpenSSF Scorecard, weekly and on `main`: published at scorecard.dev
+  (the README's badge), each check's reason in the run's files, the findings under Security, Code scanning.
+  Publishing restricts the workflow: only its listed actions, no `run` steps, no `env`
 - `docs/threat-model.md` — the trust boundary and what `tests/adversarial.sh` checks
 
 ## Running
