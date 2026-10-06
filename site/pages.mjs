@@ -59,6 +59,69 @@ export const PAGES = {
 /** Titles for pages whose first heading says something else on the site. @type {Record<string, string>} */
 export const TITLES = { "development.md": "Working on rowstile", "words.md": "Words" };
 
+/** Where the site is served: the sitemap's and the canonical links' host. */
+export const ORIGIN = "https://rowstile.dev";
+
+/** One sentence per page, for search results and shared links. It is here and not in the Markdown, which is read on
+ *  GitHub too, where front matter shows as a table. An error page's is made from its title (describe).
+ *  @type {Record<string, string>} */
+export const DESCRIPTIONS = {
+  "index.md": "Access rules for Postgres: a policy file compiled into row-level security",
+  "installing.md": "Install the rowstile command and its SDKs with npm, pip or Docker. Nothing is installed in the Postgres database. PostgreSQL 16, 17 and 18.",
+  "getting-started.md": "From a Postgres schema to a tested access policy enforced by row-level security, the edit loop and the first migration, in about fifteen minutes.",
+  "cookbook.md": "Tested row-level security patterns for Postgres: owner-only rows, teams inside teams, folders that inherit, sharing and share links, tenants, bots.",
+  "troubleshooting.md": "What people run into with rowstile and Postgres row-level security, by what they see, and how to fix each.",
+  "operations.md": "Running rowstile in production: behind PgBouncer and other poolers, deploying a policy change, upgrading, backups, retention, what to watch.",
+  "managed-postgres.md": "rowstile on managed Postgres: the setup on Neon and Supabase as tried, with their poolers, connection strings and limits.",
+  "signed-urls.md": "Files in S3-compatible storage behind Postgres row-level security: a signed URL handed out only after the row was read.",
+  "threat-model.md": "rowstile's threat model: what the generated row-level security protects, who is trusted, what stops what, and the known limits.",
+  "security.md": "How to report a vulnerability in rowstile privately, and what to expect.",
+  "changelog.md": "What changed in each rowstile release, and what to do when upgrading.",
+  "reference/language.md": "The rowstile policy language: types, relations, permissions, inheritance, denies, rules per table command, masked columns, invariants, tests.",
+  "reference/app-code.md": "Using rowstile from app code: the authz.* SQL functions for checks, lists, sharing, who has access and why, and the generated clients.",
+  "reference/identity.md": "Who is asking, in each transaction: a trusted backend, API keys with scopes, JWT login, services, and signed sessions in Postgres.",
+  "reference/governance.md": "Audit trail, change feed, access requests, break glass, access reviews and authz.lint() for Postgres row-level security.",
+  "reference/tools.md": "Every rowstile command (init, dev, check, test, prove, review, migrate, why, Studio), rowstile.toml and the MCP server for coding agents.",
+  "reference/migrations.md": "A policy change as a migration for Alembic, Prisma, Drizzle Kit, plain SQL, goose, dbmate or Flyway, and the lock file.",
+  "reference/review.md": "rowstile review says on the pull request what a policy change does: who gains or loses access, the risk, the tests, the deploy. For GitHub and GitLab.",
+  "reference/guarantees.md": "How rowstile works: what a policy compiles to in Postgres (views, closure tables, row-level security policies), what it guarantees, security.",
+  "reference/limits.md": "The measured speed of rowstile's row-level security at 20 million files, its limits, and what a 0.x release promises.",
+  "development.md": "Working on rowstile's core: what is where, and the test suites.",
+  "words.md": "The words rowstile uses: policy, object, subject, principal, relation, permission, share, role, rule.",
+  "editor.md": "rowstile in your editor: the VS Code and Zed extensions, Tree-sitter for Helix and Neovim, and the language server for .authz files.",
+  "benchmark.md": "rowstile's scale benchmark: row-level security reads and tree writes in Postgres, measured with 20 million files and a million folders.",
+  "stacks/index.md": "rowstile in your stack: FastAPI, Next.js with Prisma, Node with pg, postgres.js or Drizzle, Python, or plain SQL from any language.",
+  "stacks/fastapi.md": "Permissions for a FastAPI app with SQLAlchemy and Alembic, enforced by Postgres row-level security: each transaction signed in, 403 and 404 from the database.",
+  "stacks/nextjs.md": "Permissions for a Next.js app with Prisma and React, enforced by Postgres row-level security: every query signed in, refusals as errors, signed-in reads out of the caches.",
+  "stacks/node.md": "rowstile for Node apps on pg, postgres.js or Drizzle (Express, Hono, workers): transactions signed in as the request's user.",
+  "stacks/python.md": "rowstile for Python apps on SQLAlchemy, SQLModel, psycopg or asyncpg: transactions signed in as the request's user.",
+  "stacks/sql.md": "rowstile from any language (Go, Ruby, Java, Rust): the few SQL statements that sign a transaction in and read a refusal.",
+  "sdk/python.md": "The rowstile Python SDK: FastAPI, SQLAlchemy, psycopg, asyncpg, Alembic and pytest on a rowstile policy.",
+  "sdk/typescript.md": "The rowstile TypeScript SDK: Next.js, Prisma, Drizzle, pg, postgres.js, React and Vitest on a rowstile policy.",
+  "sdk/conformance.md": "The conformance suites: the checks every rowstile SDK must pass, run by a small app per stack.",
+  "examples/index.md": "Complete apps built on rowstile, with no permission checks in their backends: a file manager and a messenger.",
+  "examples/filemanager.md": "A file manager on rowstile: folders inside folders, sharing with people and groups, links and versions, with FastAPI, React and S3-compatible storage.",
+  "examples/messenger.md": "A WhatsApp-style messenger on rowstile: direct chats, groups and admins, invite links, blocking, bots with API keys, live updates.",
+  "problems/refused.md": "The problem type the rowstile SDKs answer with (403) when Postgres refused a write, with the rule and the reason.",
+  "problems/not-found.md": "The problem type the rowstile SDKs answer with (404) when a row isn't there or can't be seen.",
+  "errors/index.md": "Every rowstile error code: what it means, the mistake, and the same mistake fixed.",
+};
+
+{
+  const addresses = new Set(Object.values(PAGES));
+  const stale = Object.keys(DESCRIPTIONS).filter((a) => !addresses.has(a));
+  if (stale.length) throw new Error(`site/pages.mjs: DESCRIPTIONS names what isn't a page: ${stale.join(", ")}`);
+}
+
+/** A page's description. A page without one fails the build: add its sentence to DESCRIPTIONS.
+ *  @param {string} address @param {string} title */
+export function describe(address, title) {
+  const said = DESCRIPTIONS[address];
+  if (said) return said;
+  if (/^errors\/AZ\d+\.md$/.test(address)) return `${title}: what this rowstile error means, the mistake, and the same mistake fixed.`;
+  throw new Error(`${address}: no description in site/pages.mjs (DESCRIPTIONS)`);
+}
+
 /** A page's URL: "/reference", "/stacks/". @param {string} address */
 export function url(address) {
   return "/" + address.replace(/(^|\/)index\.md$/, "$1").replace(/\.md$/, "");

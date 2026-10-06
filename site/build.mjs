@@ -4,11 +4,11 @@
 // (site/tsconfig.json).
 //   cd site && npm ci && node build.mjs          (PYTHON=... if python3 isn't the one)
 import { spawnSync } from "node:child_process";
-import { cpSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "vitepress";
-import { PAGES, REPO, siteLink } from "./pages.mjs";
+import { ORIGIN, PAGES, REPO, siteLink, url } from "./pages.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DIST = join(HERE, "dist");
@@ -32,7 +32,28 @@ function markdownLinks(source, text) {
   });
 }
 
+/** A file's text once it is whole. VitePress ends its sitemap's stream without waiting for it, so the file is
+ *  finished a moment after build() returns.
+ *  @param {string} file @param {string} end */
+async function written(file, end) {
+  for (let tries = 0; tries < 100; tries++) {
+    if (existsSync(file)) {
+      const text = readFileSync(file, "utf8");
+      if (text.includes(end)) return text;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  throw new Error(`${file} wasn't written`);
+}
+
 await build(HERE);
+
+// for search engines: the sitemap VitePress wrote must hold every page, and robots.txt names it (the site's source
+// folder is the repository's root, so there is no public/ folder to put the file in)
+const sitemap = await written(join(DIST, "sitemap.xml"), "</urlset>");
+const unlisted = Object.values(PAGES).map((address) => ORIGIN + url(address)).filter((u) => !sitemap.includes(`<loc>${u}</loc>`));
+if (unlisted.length) throw new Error(`sitemap.xml doesn't list ${unlisted.join(", ")}`);
+writeFileSync(join(DIST, "robots.txt"), `User-agent: *\nAllow: /\n\nSitemap: ${ORIGIN}/sitemap.xml\n`);
 
 run(process.execPath, "playground/build.mjs");
 cpSync(join(REPO, "playground", "dist"), join(DIST, "playground"), { recursive: true });

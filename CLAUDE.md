@@ -123,7 +123,9 @@ User-facing docs: `README.md`, then `docs/reference/` (read them first). Terms i
   file, for GitHub) into the page's address or the file on GitHub; a link to a missing file or page fails the
   build. `build.mjs` writes `dist/`: the pages, `/playground/`, each page's Markdown (`/cookbook.md`),
   `llms.txt` pointing to those, `llms-full.txt`. Its own pages: `index.md` and `problems/` (the SDKs' problem
-  `type` URLs). A new doc page goes in `PAGES` and the sidebar (`.vitepress/config.mts`).
+  `type` URLs). A new doc page goes in `PAGES`, with its sentence in `DESCRIPTIONS` (what a search result and a
+  shared link show; a page without one fails the build), and in the sidebar (`.vitepress/config.mts`). `build.mjs`
+  also checks that the sitemap lists every page, and writes `robots.txt`.
   `.github/workflows/site.yml` deploys it to GitHub Pages (rowstile.dev), built from a release tag
 - `.github/workflows/ci.yml` — on each push: `tests/unit_test.py` and the type checks, every suite on PG 16
   (`ci.sh`) and what depends on the version on 17 and 18 (`ci.sh --short`), the examples, the conformance suites,
