@@ -1,7 +1,7 @@
 [project]
 name = "rowstile"
 dynamic = ["version"]
-description = "Access rules for Postgres: the rowstile command, and the SDK for Python apps (FastAPI, SQLAlchemy, psycopg, asyncpg, Alembic, pytest)"
+description = "Authorization for Postgres apps: access rules compiled to row-level security. The rowstile command, and the SDK for Python apps (FastAPI, SQLAlchemy, psycopg, asyncpg, Alembic, pytest)"
 readme = "README.md"
 requires-python = ">=3.11"
 license = "Apache-2.0"

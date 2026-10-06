@@ -1,6 +1,7 @@
 # rowstile
 
-> Access rules for Postgres. A policy file (`.authz`) says who can do what; the `rowstile` command compiles it
+> Authorization for apps on Postgres: sharing, groups, nested folders and tenants, with no service beside the
+> database. A policy file (`.authz`) says who can do what; the `rowstile` command compiles it
 > into row-level security, trigger-maintained tables for inheritance and `authz.*` SQL functions, and ships
 > each change as a migration for the app's own tool (Alembic, Prisma, Drizzle Kit, SQL, goose, dbmate,
 > Flyway). Any Postgres 16, 17 or 18; no extension, no superuser. SDKs for Python (FastAPI, SQLAlchemy) and

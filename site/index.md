@@ -3,7 +3,7 @@ layout: home
 hero:
   name: rowstile
   text: Access rules for Postgres
-  tagline: Write who can do what in one small file. rowstile compiles it into row-level security, and Postgres enforces it on every query.
+  tagline: Authorization inside your Postgres. Sharing, groups and nested folders in one policy file, compiled to row-level security. No second service, no data to sync.
   actions:
     - theme: brand
       text: Get started
@@ -16,14 +16,14 @@ hero:
       text: Reference
       link: /reference/language
 features:
-  - title: One policy file
-    details: Relations read from your own columns and tables, permissions built from them, inherited down trees of folders or teams, and a rule for each table command.
+  - title: No second system
+    details: The rules read the tables your app already has. Relations come from your own columns and link tables, permissions are built from them and inherited down trees of folders or teams. Nothing to copy into an authorization service and keep in step.
   - title: Enforced by Postgres
     details: Row-level security filters every read and checks every write. The app signs in each transaction and queries its tables as usual. A refused write says which rule and why.
-  - title: Ships as migrations
-    details: Each change to the policy is a migration for the tool your app already uses (Alembic, Prisma, Drizzle Kit, SQL, goose, dbmate, Flyway). Any Postgres 16, 17 or 18. No extension, no superuser.
-  - title: Tested like code
-    details: Tests next to the policy, invariants checked in many small worlds, and a review of each change that says who gains or loses access.
+  - title: A change you can review
+    details: Tests next to the policy, invariants checked in many small worlds, and on each pull request a review that says who gains or loses access.
+  - title: Plain SQL, shipped as migrations
+    details: Each change to the policy is a migration for the tool your app already uses (Alembic, Prisma, Drizzle Kit, SQL, goose, dbmate, Flyway). Any Postgres 16, 17 or 18. No extension, no superuser, and what lands in the database is SQL you can read.
 ---
 
 ## A small policy
@@ -54,6 +54,19 @@ COMMIT;
 
 The SDKs turn a write that changed nothing into a 404 (the row can't be seen) or a 403 that says which rule
 refused it and why.
+
+## Is it for you?
+
+It fits when your app's data is in one Postgres database, and who may see or change a row depends on other
+rows: its owner, the members of a team (teams inside teams), a folder or a project that passes access down, a
+tenant, what people share with each other. It is for you if you were about to add an authorization service and
+keep it in step with the database, or if your hand-written row-level security has become hard to test and to
+change.
+
+It doesn't fit when what decides access is in several databases or outside Postgres, when a browser reads the
+tables through Supabase's Data API, or when one tree takes many moves and links a second. And if you need an
+outside audit or a vendor behind it today: rowstile is a 0.x preview with one maintainer, and
+[nobody outside has audited it](../docs/reference/guarantees.md#security).
 
 Next: [Getting started](../docs/getting-started.md) goes from a schema to a policy, its tests, the edit loop and
 the first migration. [Pick your stack](../docs/stacks/README.md) for the SDK that does the signing in for you.
