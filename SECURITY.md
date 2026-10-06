@@ -6,8 +6,9 @@ privately, not in a public issue.
 ## Reporting a vulnerability
 
 Use GitHub's private vulnerability reporting: the repository's **Security** tab, then **Report a
-vulnerability**. Only you and the maintainers see the report. Once it's fixed, it can be published as an
-advisory, with credit to you if you want it.
+vulnerability**, or directly https://github.com/rowstile/rowstile/security/advisories/new. Only you and the
+maintainers see the report. Once it's fixed, it can be published as an advisory, with credit to you if you
+want it. The advisories published so far are at https://github.com/rowstile/rowstile/security/advisories.
 
 A report is easiest to act on with:
 
