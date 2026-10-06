@@ -17,6 +17,8 @@ Each release upgrades from the one before it. How releases are numbered and made
   such a policy's path as it is.
 - `rowstile migrate` no longer adds a line to `.gitattributes` for a migrations folder or a lock file outside
   `rowstile.toml`'s folder: such a line (`../migrations/*_authz_*`) matches nothing.
+- `rowstile review` flags a relation that is newly shared once. It said so once for each kind of subject the
+  relation may be shared with (`viewer : user, team#member, org#member shared`: three times, word for word).
 
 ## 0.1.0 (alpha)
 

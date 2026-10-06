@@ -1111,6 +1111,17 @@ class Review(unittest.TestCase):
         )
         flags = {f["why"] for f in self.run_review(widened)["risk"]}
         self.assertIn("access widened", flags)
+        # a relation people can newly share is flagged once, however many kinds of subjects it may be shared with
+        shared = replaced(
+            self.text,
+            "  viewer : user, team#member shared\n",
+            "  viewer : user, team#member shared\n  reader : user, team#member, org#member shared\n",
+        )
+        shared = replaced(shared, "  can view  = edit or viewer\n", "  can view  = edit or viewer or reader\n")
+        self.assertEqual(
+            [f["flag"] for f in self.run_review(shared)["risk"] if f["why"] == "a relation newly shared"],
+            ["`file.reader` is newly shared (by whoever holds `share`)"],
+        )
         no_deny = replaced(self.text, "           or (folder.view and not {confidential})", "           or folder.view")
         flags = {f["why"] for f in self.run_review(no_deny)["risk"]}
         self.assertIn("a deny removed", flags)
