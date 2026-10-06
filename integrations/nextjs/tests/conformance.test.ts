@@ -196,6 +196,11 @@ test("7: hidden is 404, not allowed is 403", async () => {
   await expect(actingAs("3", () => db.$transaction((tx) => tx.note.update({ where: { id: 1 }, data: { body: "x" } }))))
     .rejects.toBeRefused("update", "note.edit");
   await expect(actingAs("2", () => db.note.delete({ where: { id: 1 } }))).rejects.toBeNotFound();
+  // a read that must find its row: hidden and absent alike are NotFound, not Prisma's own error (a 500)
+  await expect(actingAs("2", () => db.note.findUniqueOrThrow({ where: { id: 1 } }))).rejects.toBeNotFound();
+  await expect(actingAs("2", () => db.note.findFirstOrThrow({ where: { id: 1 } }))).rejects.toBeNotFound();
+  await expect(actingAs("1", () => db.note.findUniqueOrThrow({ where: { id: 987654 } }))).rejects.toBeNotFound();
+  expect((await actingAs("3", () => db.note.findUniqueOrThrow({ where: { id: 1 } }))).id).toBe(1);
 });
 
 // 8: an insert read back works when the select rule allows it, and is explained when not
