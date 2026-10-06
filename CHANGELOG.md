@@ -17,6 +17,14 @@ Each release upgrades from the one before it. How releases are numbered and made
   such a policy's path as it is.
 - `rowstile migrate` no longer adds a line to `.gitattributes` for a migrations folder or a lock file outside
   `rowstile.toml`'s folder: such a line (`../migrations/*_authz_*`) matches nothing.
+- On Windows, the command's output is UTF-8 when it goes into a file or a pipe (CI, `rowstile review --markdown
+  > comment.md`, `rowstile graph > policy.mmd`), as it already was in a terminal. Python wrote it in the
+  system's code page: a character that page lacks (an arrow, a name or a text in another script, in a
+  condition) stopped `review`, `prove` and the others with `UnicodeEncodeError`, and the files written were not
+  UTF-8.
+- `rowstile review` finds, at the base, a test file whose name has an accent or another non-ASCII character (it
+  read the base as having no such file, so its checks showed as added), and reads a base file that isn't UTF-8
+  with the bytes it can't read replaced (on Linux and macOS it stopped with a traceback).
 - `rowstile review` flags a relation that is newly shared once. It said so once for each kind of subject the
   relation may be shared with (`viewer : user, team#member, org#member shared`: three times, word for word).
 
