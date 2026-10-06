@@ -1,5 +1,8 @@
 blank_issues_enabled: false
 contact_links:
+  - name: A question
+    url: https://github.com/rowstile/rowstile/discussions/categories/q-a
+    about: How to write a rule, set rowstile up, or read what it says. Ask in Discussions, where an answer stays findable.
   - name: A security problem
     url: https://github.com/rowstile/rowstile/security/advisories/new
     about: Report it privately, never in an issue (SECURITY.md says why and what to send).

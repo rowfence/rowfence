@@ -115,6 +115,7 @@ packages and says which line to change.
 
 ## Contributing
 
+A question, or something you built with rowstile: [Discussions](https://github.com/rowstile/rowstile/discussions).
 Issues and pull requests are welcome: [CONTRIBUTING.md](CONTRIBUTING.md) says how a change gets in, and
 [the code of conduct](CODE_OF_CONDUCT.md) how we work together. What
 changed in each release: [CHANGELOG.md](CHANGELOG.md). How releases are numbered and made:
