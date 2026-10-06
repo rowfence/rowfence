@@ -53,7 +53,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with: {fetch-depth: 0}
-      - uses: rowstile/rowstile/review-ci/github@v0.1.0-alpha.4   # the release you use
+      - uses: rowstile/rowstile/review-ci/github@v0.1.0-dev   # the release you use
 ```
 
 The review reports; it doesn't gate. It exits 0 whatever it finds: a widened permission, a failing test and a
