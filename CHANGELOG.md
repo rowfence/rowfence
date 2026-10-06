@@ -33,6 +33,9 @@ Each release upgrades from the one before it. How releases are numbered and made
 - The FastAPI page didn't say that Alembic needs a sync driver (the policy's revision fails on asyncpg with
   "cannot insert multiple commands into a prepared statement"), that the owner must hold the app role, or
   what to do with a development database `rowstile dev` pushed to. It says all three.
+- The getting-started guide began in a clone of the repository: it now begins with the installed command
+  and any Postgres, and keeps the clone as the other way. It says that the `SET ROLE` session of step 6 is
+  a trusted one, where a forgotten sign-in gives no rows and not the error an app's connection gets.
 - The Next.js and Node pages' install lines asked for the alpha of the command only, so the SDK packages
   came at an older alpha than the command. Every line asks for `@next` while only alphas are published.
 

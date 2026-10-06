@@ -1,21 +1,29 @@
 # Getting started
 
-From an empty folder to access rules enforced by Postgres, tested, in about fifteen minutes. You need Docker
-and Python 3.11 or newer. (This guide runs as written in the tests: `core/tests/docs_test.sh`.)
+From an empty folder to access rules enforced by Postgres, tested, in about fifteen minutes. You need a
+Postgres (Docker runs one below) and the `rowstile` command. (This guide runs as written in the tests:
+`core/tests/docs_test.sh`.)
 
 ## 1. Postgres with rowstile
 
-From the repository root:
+rowstile needs nothing installed in the database: any PostgreSQL 16, 17 or 18 will do. [Install the
+command](installing.md), start a Postgres, and say where it is:
+
+    pip install --pre rowstile     # or: npm i -D rowstile@next, and write npx rowstile below
+    docker run -d --name pga -e POSTGRES_PASSWORD=secret -p 5432:5432 postgres:18
+    export DATABASE_URL=postgresql://postgres:secret@localhost:5432/postgres
+
+Or, in a clone of the repository, from its root: the image the tests use (the stock Postgres 16, or 17, 18
+with `PG_MAJOR`, and the command in it) and the command as it is in the repository:
 
     docker build -t rowstile:16 --build-arg PG_MAJOR=16 -f core/Dockerfile .
     docker run -d --name pga -e POSTGRES_PASSWORD=secret -p 5432:5432 rowstile:16
     export PATH="$PWD/core/cli:$PATH"                              # the rowstile command
     export DATABASE_URL=postgresql://postgres:secret@localhost:5432/postgres
 
-The image is the stock Postgres 16 (or 17, 18 with `PG_MAJOR`) with the `rowstile` command in it. rowstile
-needs nothing installed in the database: the `rowstile` command compiles your policy and
-applies plain SQL, connected as the owner of your tables (`DATABASE_URL`; here the `postgres` user). Your app
-will connect as its own role. Work in an empty folder from here on. For SQL, `docker exec -it pga psql -U postgres`.
+The `rowstile` command compiles your policy and applies plain SQL, connected as the owner of your tables
+(`DATABASE_URL`; here the `postgres` user). Your app will connect as its own role. Work in an empty folder
+from here on. For SQL, `docker exec -it pga psql -U postgres`.
 
 ## 2. Your tables, and the role your app connects as
 
@@ -166,7 +174,13 @@ it fixed (`docs/errors/`).
 
 Every transaction starts by saying who is asking, with `authz.act_as`, then plain SQL is filtered by
 row-level security. The sign-in is signed and lasts one transaction, so the app can't change it later by
-setting `authz.user_id`, and a transaction that forgets it gets an error, not an empty page:
+setting `authz.user_id`, and a transaction that forgets it gets an error, not an empty page.
+
+Those two hold for a connection that logs in as the app role, as your app's will. The session below is
+`postgres`'s, switched to the app role with `SET ROLE`: handy for trying things, but a superuser's or the
+owner's session is believed without a signature (it could `RESET ROLE` anyway), so in it a forgotten
+sign-in reads as nobody and returns no rows. `SELECT * FROM authz.connection_check()` says which kind a
+connection is. The rules themselves apply in both:
 
 ```sql
 SET ROLE app_backend;
@@ -190,7 +204,8 @@ COMMIT;
 RESET ROLE;
 ```
 
-When the database refuses a write, the error says which rule refused it and why:
+When the database refuses a write, the error says which rule refused it and why. Here cy, who has no access
+to the project, adds a note to it (`INSERT INTO app.notes (project_id, author_id, body) VALUES (1, 3, 'mine')`):
 
 ```text
 ERROR:  permission denied: user 3 may not insert this row into app.notes
@@ -258,12 +273,17 @@ wrote .gitattributes (reviews show the generated files collapsed)
 Commit all three. From then on each change to the policy is the next migration, holding only what
 changed (a new permission is a few statements) and starting with what changed, as comments.
 `rowstile dev` writes it once you stop editing, and `rowstile migrate --check` in CI fails a policy
-change that has no migration. Deploy them as you deploy the others: there is no extra step.
+change that has no migration. Deploy them as you deploy the others: there is no extra step. With plain SQL
+files, each runs in one transaction: `psql -1 -v ON_ERROR_STOP=1 -f migrations/<file>.sql`.
 
 ## Next
 
-- `docs/cookbook.md`: patterns (teams, folders that inherit, sharing, denies, bots, blocking...), each tested.
-- `docs/troubleshooting.md`: what people run into, by symptom.
-- `docs/reference/`: the whole language, every function and every command.
-- `examples/messenger/` and `examples/filemanager/`: complete apps with no permission checks in their backends.
-- `docs/operations.md`: upgrading, backups, retention, monitoring.
+- [Your stack](stacks/README.md): FastAPI, Next.js, Node, Python, or plain SQL from any language.
+- [The cookbook](cookbook.md): recipes (tenants, teams, folders that inherit, sharing, denies, bots,
+  blocking...), each tested.
+- [Troubleshooting](troubleshooting.md): what people run into, by symptom.
+- The reference: [the language](reference/language.md), [every function](reference/app-code.md) and
+  [every command](reference/tools.md).
+- [The messenger](../examples/messenger/README.md) and [the file manager](../examples/filemanager/README.md):
+  complete apps with no permission checks in their backends.
+- [Running rowstile](operations.md): upgrading, backups, retention, monitoring.
