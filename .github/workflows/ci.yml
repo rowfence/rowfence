@@ -37,6 +37,19 @@ jobs:
           for app in filemanager messenger; do
             uv sync --project examples/$app/backend --frozen && uvx ty@0.0.56 check --project examples/$app || exit 1
           done
+  # The command on Windows, where no other job runs it. What only Windows does (a path on another drive, the
+  # system's code page in a pipe, backslashes, no right to make links) otherwise shows first on a user's machine.
+  # The unit tests need no database; on the oldest Python the command supports, which no other job runs them on.
+  windows:
+    needs: unit
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
+        with: {fetch-depth: 0}     # as in unit: commits are checked against the history
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97   # v7.0.0
+        with:
+          python-version: "3.11"
+      - run: python core/tests/unit_test.py
   postgres:
     needs: unit
     runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}

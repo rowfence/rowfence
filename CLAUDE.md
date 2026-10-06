@@ -125,7 +125,8 @@ User-facing docs: `README.md`, then `docs/reference/` (read them first). Terms i
   `llms.txt` pointing to those, `llms-full.txt`. Its own pages: `index.md` and `problems/` (the SDKs' problem
   `type` URLs). A new doc page goes in `PAGES` and the sidebar (`.vitepress/config.mts`).
   `.github/workflows/site.yml` deploys it to GitHub Pages (rowstile.dev), built from a release tag
-- `.github/workflows/ci.yml` — on each push: `tests/unit_test.py` and the type checks, every suite on PG 16
+- `.github/workflows/ci.yml` — on each push: `tests/unit_test.py` and the type checks (the unit tests again on
+  Windows, on Python 3.11: what only Windows does is tested there or mocked), every suite on PG 16
   (`ci.sh`) and what depends on the version on 17 and 18 (`ci.sh --short`), the examples, the conformance suites,
   the editors, packaging, the site. `nightly.yml` (main) — every suite on 17 and 18, the proofs (`--proofs`) on
   each version, the soak (new seeds each night, one version in turn), the conformance suites on 17 and 18 and on 16
