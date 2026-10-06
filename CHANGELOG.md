@@ -13,6 +13,11 @@ Each release upgrades from the one before it. How releases are numbered and made
   `io.github.rowstile/rowstile`, so clients that find servers there can add it by name. The entry names the
   npm package.
 
+### Changed
+
+- The VS Code extension (0.1.1) has an icon, keywords and a link to its page on rowstile.dev. Nothing in
+  what it does changes.
+
 ## 0.1.0 (alpha)
 
 **rowfence is now rowstile**, and 0.1.0-alpha.2 is its first release under the new name (0.1.0-alpha.1 was

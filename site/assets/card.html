@@ -1,0 +1,34 @@
+<!doctype html>
+<!-- The card a shared link shows (1200 x 630): rendered once to card.png with a headless browser. -->
+<meta charset="utf-8">
+<style>
+  html, body { margin: 0; }
+  body { width: 1200px; height: 630px; background: #14213d; color: #e8ecf4; font-family: "Segoe UI", system-ui, sans-serif;
+         display: grid; grid-template-columns: 560px 1fr; }
+  .left { padding: 72px 0 0 72px; }
+  .name { display: flex; align-items: center; gap: 22px; font-size: 64px; font-weight: 600; letter-spacing: -1px; }
+  .name img { width: 88px; height: 88px; border-radius: 18px; outline: 2px solid #2a3a63; }
+  h1 { margin: 44px 0 0; font-size: 44px; line-height: 1.15; font-weight: 600; }
+  p { margin: 22px 0 0; font-size: 26px; line-height: 1.4; color: #b9c2d6; max-width: 440px; }
+  .url { margin-top: 44px; font-size: 24px; color: #fca311; }
+  pre { margin: 72px 60px 72px 20px; padding: 30px 32px; background: #0d1730; border: 1px solid #2a3a63; border-radius: 16px;
+        font: 21px/1.55 "Cascadia Mono", Consolas, monospace; color: #dfe6f3; align-self: start; }
+  .k { color: #fca311; } .c { color: #7f8cab; } .t { color: #9ecbff; }
+</style>
+<div class="left">
+  <div class="name"><img src="mark.svg" alt="">rowstile</div>
+  <h1>Authorization inside your Postgres</h1>
+  <p>Sharing, groups and nested folders in one policy file, compiled to row-level security.</p>
+  <div class="url">rowstile.dev</div>
+</div>
+<pre><span class="k">type</span> folder = <span class="t">app.folders</span>
+  owner  : user   = owner_id
+  parent : folder = parent_id
+  editor : user   = <span class="t">app.folder_editors</span>(…)
+
+  <span class="k">can</span> edit = owner <span class="k">or</span> editor <span class="k">or</span> parent.edit
+  <span class="k">can</span> view = edit
+
+<span class="k">rules</span> <span class="t">app.folders</span>
+  select : view
+  update : edit</pre>

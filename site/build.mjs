@@ -53,6 +53,8 @@ await build(HERE);
 const sitemap = await written(join(DIST, "sitemap.xml"), "</urlset>");
 const unlisted = Object.values(PAGES).map((address) => ORIGIN + url(address)).filter((u) => !sitemap.includes(`<loc>${u}</loc>`));
 if (unlisted.length) throw new Error(`sitemap.xml doesn't list ${unlisted.join(", ")}`);
+// the mark and the card for shared links, at the site's root (no public/ folder: see above)
+for (const f of ["mark.svg", "card.png"]) cpSync(join(HERE, "assets", f), join(DIST, f));
 writeFileSync(join(DIST, "robots.txt"), `User-agent: *\nAllow: /\n\nSitemap: ${ORIGIN}/sitemap.xml\n`);
 
 run(process.execPath, "playground/build.mjs");
