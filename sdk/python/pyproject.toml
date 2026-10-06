@@ -39,7 +39,8 @@ Issues = "https://github.com/rowstile/rowstile/issues"
 [project.optional-dependencies]
 fastapi = ["fastapi>=0.100", "sqlalchemy[asyncio]>=2.0"]
 sqlalchemy = ["sqlalchemy>=2.0"]
-psycopg = ["psycopg>=3.1"]
+# with its own libpq: psycopg alone can't be imported where the system has none (Windows)
+psycopg = ["psycopg[binary]>=3.1"]
 asyncpg = ["asyncpg>=0.28"]
 
 [project.scripts]
