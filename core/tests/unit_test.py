@@ -2596,9 +2596,17 @@ class DocPages(unittest.TestCase):
                 pip = re.search(r"\bpip install\b.*\browstile\b", line)
                 uv = re.search(r"\buv add\b.*\browstile\b", line)
                 image = re.search(r"ghcr\.io/rowstile/rowstile(:[\w.-]+)?", line)
+                # the SDK's packages, each with its own tag: npm's `latest` doesn't move with pre-releases, so a
+                # plain `npm install @rowstile/prisma` gets the first alpha ever published
+                sdk = (
+                    re.findall(r"@rowstile/[\w-]+(@\w+)?", line.split("#")[0])
+                    if re.search(r"\bnpm (?:i|install)\b", line)
+                    else []
+                )
                 if pre:
                     bad = (
                         (npm and npm.group(1) != "@next")
+                        or any(tag != "@next" for tag in sdk)
                         or (pip and "--pre" not in line)
                         or (uv and "--prerelease=allow" not in line)
                         or (image and image.group(1) != f":{version}")
@@ -2606,6 +2614,7 @@ class DocPages(unittest.TestCase):
                 else:
                     bad = (
                         (npm and npm.group(1) == "@next")
+                        or any(tag == "@next" for tag in sdk)
                         or (pip and "--pre" in line)
                         or (uv and "--prerelease" in line)
                         or (image and "-" in (image.group(1) or ""))
