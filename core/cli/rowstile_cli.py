@@ -763,6 +763,27 @@ ARGUMENTS: dict[str, int | None] = {
 }
 
 
+def check_row(text: str) -> None:
+    """--row is a JSON object. What isn't is shown as it arrived: Windows PowerShell 5 and cmd take the double
+    quotes out of '{"column": 1}' before the command sees it, and JSON's own message doesn't say so."""
+    try:
+        row = json.loads(text)
+    except ValueError as e:
+        taken = '"' not in text and re.match(r"\s*\{\s*\w+\s*:", text)
+        fail(
+            f"--row: not JSON: {text}\n  {e}"
+            + (
+                "\n  The shell took the double quotes: in Windows PowerShell write '{\\\"column\\\": 1}', "
+                'in cmd "{\\"column\\": 1}"'
+                if taken
+                else ""
+            ),
+            2,
+        )
+    if not isinstance(row, dict):
+        fail('--row: the row as a JSON object, {"column": value}', 2)
+
+
 def utf8_output() -> None:
     """What the command prints is UTF-8 wherever it goes. On Windows, Python writes into a pipe or a file in the
     system's code page: a character it lacks (an arrow, a name in another script) stopped the command, and the
@@ -1470,11 +1491,7 @@ def ask(conn: pgwire.Connection, cmd: str, args: list[str], opts: dict[str, str]
                 fail("rowstile explain-rule --as WHO TABLE insert|update|delete [ID] [--row JSON]", 2)
             row = opts.get("--row")
             if row is not None:
-                try:
-                    if not isinstance(json.loads(row), dict):
-                        fail('--row: the row as a JSON object, {"column": value}', 2)
-                except ValueError as e:
-                    fail(f"--row: {e}", 2)
+                check_row(row)
             take_app_role(conn)
             ((lines,),) = q(
                 "SELECT authz.explain_rule($1, $2, $3, $4::jsonb)",

@@ -729,6 +729,27 @@ class Command(unittest.TestCase):
             p = subprocess.run([sys.executable, cli, "check", "閲.authz"], cwd=d, env=env, capture_output=True)
             self.assertIn("閲.authz: ", p.stderr.decode("utf-8"))
 
+    def test_a_row_that_isnt_json_is_shown_as_it_arrived(self) -> None:
+        # Windows PowerShell 5 and cmd take the double quotes out of '{"column": 1}': JSON's message alone
+        # ("Expecting property name enclosed in double quotes") doesn't say what happened
+        import contextlib
+        import io
+
+        def refused(row: str) -> str:
+            err = io.StringIO()
+            with contextlib.redirect_stderr(err), self.assertRaises(SystemExit) as stop:
+                rowstile_cli.check_row(row)
+            self.assertEqual(stop.exception.code, 2)
+            return err.getvalue()
+
+        rowstile_cli.check_row('{"project_id": 1, "author_id": 3}')
+        said = refused("{project_id: 1, author_id: 3}")
+        self.assertIn("--row: not JSON: {project_id: 1, author_id: 3}\n", said)
+        self.assertIn("The shell took the double quotes: in Windows PowerShell write '{\\\"column\\\": 1}'", said)
+        self.assertIn('in cmd "{\\"column\\": 1}"', said)
+        self.assertNotIn("The shell", refused('{"project_id": }'))  # a mistake of one's own
+        self.assertIn("JSON object", refused("[1]"))
+
     def test_only_what_is_below_is_marked_generated(self) -> None:
         # .gitattributes names files from its own folder: a migrations folder or a lock file outside it gets no line
         import migrations

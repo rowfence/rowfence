@@ -40,6 +40,9 @@ Each release upgrades from the one before it. How releases are numbered and made
 - `rowstile review` says when a test file of the pull request doesn't parse, with the mistake. It compared the
   policies without any test file then, and said "no change to what the tests claim". A check that changed is
   shown on its own file's line (`tests/docs.authz line 12`), no longer on a line counted from the policy's top.
+- `rowstile explain-rule --row` shows a row that isn't JSON as it arrived. Windows PowerShell 5 and cmd take
+  the double quotes out of `'{"project_id": 1}'`, and the message was JSON's own ("Expecting property name
+  enclosed in double quotes"): it now says the shell took them, and how to write the row there.
 - `rowstile review` flags a relation that is newly shared once. It said so once for each kind of subject the
   relation may be shared with (`viewer : user, team#member, org#member shared`: three times, word for word).
 
