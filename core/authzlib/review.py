@@ -637,14 +637,15 @@ def risk(b: Side, h: Side, worlds: int) -> list[Flag]:
     for key, subs in sorted(sh.items()):
         old = sb.get(key, set())
         name = f"{key[0]}.{key[1]}"
-        for st, sr, kind, by in sorted(subs - old, key=repr):
+        for st, sr, kind, _ in sorted(subs - old, key=repr):
             if st in WIDE or sr == "*":
                 who = st if st in WIDE else f"{st}:*"
                 flag(f"`{name}` now reaches {who}" + (" (shared)" if kind == "shared" else ""), name, "access widened")
-            if kind == "shared" and not any(k == "shared" for _, _, k, _ in old):
-                flag(f"`{name}` is newly shared (by whoever holds `{by}`)", name, "a relation newly shared")
         old_by = {k_by for _, _, k, k_by in old if k == "shared"}
         new_by = {k_by for _, _, k, k_by in subs if k == "shared"}
+        if not old_by:  # once, however many kinds of subjects it may be shared with
+            for by in sorted(new_by, key=repr):
+                flag(f"`{name}` is newly shared (by whoever holds `{by}`)", name, "a relation newly shared")
         if old_by and new_by and old_by != new_by:
             flag(
                 f"`{name}` is now shared by `{', '.join(sorted(new_by))}` (was `{', '.join(sorted(old_by))}`)",
