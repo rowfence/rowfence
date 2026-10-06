@@ -104,6 +104,7 @@ run lint --colour; [ $rc -eq 2 ] && case "$out" in *"--colour is not an option"*
 out=$(python3 cli/rowstile_cli.py --db "dbname=authz_no_such_db" bogus 2>&1); rc=$?
 case "$out" in "unknown command 'bogus'"*) [ $rc -eq 2 ] && ok "an unknown command is said before connecting" || bad "unknown command exit" "$rc";; *) bad "unknown command" "${out:0:120}";; esac
 run sql --as user:5 "SELECT count(*) FROM app.files -- --limit 3"; [ $rc -eq 0 ] && ok "sql's statement is left as it is" || bad "sql" "$rc $out"
+run explain-rule --as user:3 app.files insert --row '{folder_id: 6}'; [ $rc -eq 2 ] && case "$out" in *"--row: not JSON: {folder_id: 6}"*"The shell took the double quotes"*) true;; *) false;; esac && ok "explain-rule shows a row a Windows shell took the quotes out of, and how to write it there" || bad "explain-rule --row without quotes" "$out"
 run explain-rule --as user:3 app.files insert --row '[1]'; [ $rc -eq 2 ] && case "$out" in *"JSON object"*) true;; *) false;; esac && ok "explain-rule --row wants an object" || bad "--row" "$rc $out"
 
 echo "-- files that can't be read as they should"
