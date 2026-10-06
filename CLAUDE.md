@@ -116,6 +116,8 @@ User-facing docs: `README.md`, then `docs/reference/` (read them first). Terms i
   `signed-urls.md`, `stacks/` (a page per stack; every line of code in them is in a
   conformance app, `StackPages` in `tests/unit_test.py`), `errors/` (a page per error code, written from
   `authzlib/errors.py` by `unit_test.py --update`)
+- `context7.json` — for an index of docs that coding agents ask (Context7): the folders it reads, and what an
+  agent should know first (`LlmsTxt` in `unit_test.py` checks its paths and its limits)
 - `llms.txt` — for agents: what to know, and the links; `docs/llms_full.py` puts those files in one
   (`llms-full.txt`, built when the docs are published, not committed)
 - `site/` — the docs site (VitePress; own `package.json`, like `playground/`): the Markdown stays where it is,
