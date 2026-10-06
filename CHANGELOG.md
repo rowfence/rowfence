@@ -7,7 +7,19 @@ Each release upgrades from the one before it. How releases are numbered and made
 
 ## Unreleased
 
+### Added
+
+- `authz.lint()` warns of a rule for a command the app role has no privilege for on the table (`update :
+  manage` on a table it may not `UPDATE`): the rule never applies, and the statement fails with Postgres's
+  own "permission denied for table", which reads like the policy refusing. It says what to grant. A privilege
+  on one column is enough; `nobody` asks for none.
+
 ### Changed
+
+- `authz.lint()` notes a relation named like a type only when that type signs in (`user : user = owner_id`:
+  alone in a rule, `user` reads like any user). A relation named like another type, as `rowstile init` drafts
+  and getting started writes (`project : project = project_id`), is only ever followed (`project.edit`) and
+  gets no note.
 
 - `rowstile sql --as` says what a statement that returns no rows did, in the server's words (`UPDATE 0, as
   user:2; rolled back`): "done" read as allowed when the rules had let it change nothing.

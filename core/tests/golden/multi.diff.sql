@@ -4942,11 +4942,25 @@ WHERE w.who IS NOT NULL AND n.nspname !~ '^pg_(toast_)?temp_' LOOP
     problem := format('runs with JIT on: permission checks are many small subplans, and JIT can take longer to compile a read than to run it (a third of a second for a large one): ALTER ROLE %s SET jit = off', 'app_user');
     RETURN NEXT;
   END IF;
-  -- relations named like a type
-  FOR r IN SELECT * FROM (VALUES ('project', 'org', 'relation project.org'), ('folder', 'org', 'relation folder.org')) v(type, rel, loc)
+  -- rules for a command the app role has no privilege for (one column's is enough for a read, an insert or
+  -- an update: the app may write some columns only)
+  FOR r IN SELECT to_regclass(v.tbl) AS tbl, v.cmd FROM (VALUES ('"mt"."docs"', 'select'), ('"mt"."docs"', 'update')) v(tbl, cmd)
+           WHERE v.tbl IS NOT NULL LOOP
+    CONTINUE WHEN r.tbl IS NULL;
+    IF r.cmd = 'delete' THEN
+      CONTINUE WHEN has_table_privilege(v_role, r.tbl, 'DELETE');
+    ELSE
+      CONTINUE WHEN has_any_column_privilege(v_role, r.tbl, r.cmd);
+    END IF;
+    severity := 'warning'; object := r.tbl::text;
+    problem := format('the policy has a rule for %s, but %s has no %s privilege on the table: the rule never applies, and the statement fails with Postgres''s own "permission denied for table". GRANT %s ON %s TO %s, or make the rule "%s : nobody"', r.cmd, 'app_user', upper(r.cmd), upper(r.cmd), r.tbl, 'app_user', r.cmd);
+    RETURN NEXT;
+  END LOOP;
+  -- relations named like a type that signs in
+  FOR r IN SELECT * FROM (VALUES (NULL::text, NULL::text, NULL::text)) v(type, rel, loc)
            WHERE type IS NOT NULL LOOP
     severity := 'info'; object := r.type || '.' || r.rel;
-    problem := format('is named like the type %s (%s), so in rules it reads like the type: a name that says what the relation is (author, member) reads better', r.rel, coalesce((SELECT l.loc FROM authz_gen.policy_lines l WHERE l.what = r.loc), '?'));
+    problem := format('is named like the type %s (%s), which signs in: alone in a rule it reads like any %s, and it is this row''s. A name that says what the relation is (author, owner) reads better', r.rel, coalesce((SELECT l.loc FROM authz_gen.policy_lines l WHERE l.what = r.loc), '?'), r.rel);
     RETURN NEXT;
   END LOOP;
   -- columns that move a row under another, with nothing checking where it moves to
@@ -5070,8 +5084,6 @@ INSERT INTO authz_gen.policy_lines VALUES
   ('relation doc.author author_id', 'line 41'),
   ('relation doc.container container_id', 'line 40'),
   ('relation doc.container container_type', 'line 40'),
-  ('relation folder.org', 'line 33'),
-  ('relation project.org', 'line 19'),
   ('rule mt.docs update', 'line 50'),
   ('share folder.editor team#member', 'line 29'),
   ('share folder.editor user', 'line 29'),
