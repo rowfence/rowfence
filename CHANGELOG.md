@@ -18,6 +18,19 @@ Each release upgrades from the one before it. How releases are numbered and made
 - The VS Code extension (0.1.1) has an icon, keywords and a link to its page on rowstile.dev. Nothing in
   what it does changes.
 
+### Fixed
+
+- `rowstile indexes` and `rowstile dev` named indexes as missing on tables whose name has capital letters
+  (`"TeamMember"`, as Prisma writes them): the table was looked up by its name unquoted, and never found.
+- `@rowstile/prisma`: `findUniqueOrThrow` and `findFirstOrThrow` on a row that isn't there, or that the user
+  can't see, threw Prisma's own error, which `route()` answered with a 500. They throw `NotFound` (404), as
+  an update or a delete of such a row does.
+- On Windows, in a project whose path is so long that the Python inside the npm package can't be loaded,
+  `npx rowstile` stopped with a Python traceback ("DLL load failed ... The filename or extension is too
+  long"). It now runs on a Python 3.11 or later from `PATH`, and without one says what is wrong in a line.
+- The Next.js and Node pages' install lines asked for the alpha of the command only, so the SDK packages
+  came at an older alpha than the command. Every line asks for `@next` while only alphas are published.
+
 ## 0.1.0 (alpha)
 
 **rowfence is now rowstile**, and 0.1.0-alpha.2 is its first release under the new name (0.1.0-alpha.1 was
