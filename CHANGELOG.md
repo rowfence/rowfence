@@ -7,38 +7,6 @@ Each release upgrades from the one before it. How releases are numbered and made
 
 ## Unreleased
 
-### Added
-
-- Each release publishes the MCP server's entry (`rowstile mcp`) to the official MCP registry, as
-  `io.github.rowstile/rowstile`, so clients that find servers there can add it by name. The entry names the
-  npm package.
-
-### Changed
-
-- The VS Code extension (0.1.1) has an icon, keywords and a link to its page on rowstile.dev. Nothing in
-  what it does changes.
-
-### Fixed
-
-- `rowstile indexes` and `rowstile dev` named indexes as missing on tables whose name has capital letters
-  (`"TeamMember"`, as Prisma writes them): the table was looked up by its name unquoted, and never found.
-- `@rowstile/prisma`: `findUniqueOrThrow` and `findFirstOrThrow` on a row that isn't there, or that the user
-  can't see, threw Prisma's own error, which `route()` answered with a 500. They throw `NotFound` (404), as
-  an update or a delete of such a row does.
-- On Windows, in a project whose path is so long that the Python inside the npm package can't be loaded,
-  `npx rowstile` stopped with a Python traceback ("DLL load failed ... The filename or extension is too
-  long"). It now runs on a Python 3.11 or later from `PATH`, and without one says what is wrong in a line.
-- `rowstile[psycopg]` installed a psycopg that can't be imported where the system has no libpq (Windows):
-  the extra asks for `psycopg[binary]`.
-- The FastAPI page didn't say that Alembic needs a sync driver (the policy's revision fails on asyncpg with
-  "cannot insert multiple commands into a prepared statement"), that the owner must hold the app role, or
-  what to do with a development database `rowstile dev` pushed to. It says all three.
-- The getting-started guide began in a clone of the repository: it now begins with the installed command
-  and any Postgres, and keeps the clone as the other way. It says that the `SET ROLE` session of step 6 is
-  a trusted one, where a forgotten sign-in gives no rows and not the error an app's connection gets.
-- The Next.js and Node pages' install lines asked for the alpha of the command only, so the SDK packages
-  came at an older alpha than the command. Every line asks for `@next` while only alphas are published.
-
 ## 0.1.0 (alpha)
 
 **rowfence is now rowstile**, and 0.1.0-alpha.2 is its first release under the new name (0.1.0-alpha.1 was
@@ -73,6 +41,47 @@ The first release, as an alpha: for trying rowstile early. Anything in it may st
 
 PostgreSQL 16, 17 and 18. Installed with npm (the command with its own Python), pip or the Docker image:
 [Installing](docs/installing.md).
+
+What changed since 0.1.0-alpha.4:
+
+### Added
+
+- The cookbook is eighteen recipes, each a page with its own tables, policy and tests and a link that opens
+  it in the playground: tenants, roles, teams inside teams, folders that inherit, sharing and links, access
+  on request, a masked column, archive and trash, bots, blocking ([the cookbook](docs/cookbook.md)).
+- Two pages: [rowstile and the alternatives](docs/comparison.md), and
+  [how rowstile is checked](docs/how-it-is-checked.md).
+- The packages say what they are on npm, PyPI and ghcr.io (keywords, links, labels), and the site has a
+  sitemap, a description per page and a card for shared links.
+- Each release publishes the MCP server's entry (`rowstile mcp`) to the official MCP registry, as
+  `io.github.rowstile/rowstile`, so clients that find servers there can add it by name. The entry names the
+  npm package.
+
+### Changed
+
+- The VS Code extension (0.1.1) has an icon, keywords and a link to its page on rowstile.dev. Nothing in
+  what it does changes.
+
+### Fixed
+
+- `rowstile indexes` and `rowstile dev` named indexes as missing on tables whose name has capital letters
+  (`"TeamMember"`, as Prisma writes them): the table was looked up by its name unquoted, and never found.
+- `@rowstile/prisma`: `findUniqueOrThrow` and `findFirstOrThrow` on a row that isn't there, or that the user
+  can't see, threw Prisma's own error, which `route()` answered with a 500. They throw `NotFound` (404), as
+  an update or a delete of such a row does.
+- On Windows, in a project whose path is so long that the Python inside the npm package can't be loaded,
+  `npx rowstile` stopped with a Python traceback ("DLL load failed ... The filename or extension is too
+  long"). It now runs on a Python 3.11 or later from `PATH`, and without one says what is wrong in a line.
+- `rowstile[psycopg]` installed a psycopg that can't be imported where the system has no libpq (Windows):
+  the extra asks for `psycopg[binary]`.
+- The FastAPI page didn't say that Alembic needs a sync driver (the policy's revision fails on asyncpg with
+  "cannot insert multiple commands into a prepared statement"), that the owner must hold the app role, or
+  what to do with a development database `rowstile dev` pushed to. It says all three.
+- The getting-started guide began in a clone of the repository: it now begins with the installed command
+  and any Postgres, and keeps the clone as the other way. It says that the `SET ROLE` session of step 6 is
+  a trusted one, where a forgotten sign-in gives no rows and not the error an app's connection gets.
+- The Next.js and Node pages' install lines asked for the alpha of the command only, so the SDK packages
+  came at an older alpha than the command. Every line asks for `@next` while only alphas are published.
 
 What changed since 0.1.0-alpha.3:
 
