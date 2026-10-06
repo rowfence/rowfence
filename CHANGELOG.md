@@ -28,6 +28,11 @@ Each release upgrades from the one before it. How releases are numbered and made
 - On Windows, in a project whose path is so long that the Python inside the npm package can't be loaded,
   `npx rowstile` stopped with a Python traceback ("DLL load failed ... The filename or extension is too
   long"). It now runs on a Python 3.11 or later from `PATH`, and without one says what is wrong in a line.
+- `rowstile[psycopg]` installed a psycopg that can't be imported where the system has no libpq (Windows):
+  the extra asks for `psycopg[binary]`.
+- The FastAPI page didn't say that Alembic needs a sync driver (the policy's revision fails on asyncpg with
+  "cannot insert multiple commands into a prepared statement"), that the owner must hold the app role, or
+  what to do with a development database `rowstile dev` pushed to. It says all three.
 - The Next.js and Node pages' install lines asked for the alpha of the command only, so the SDK packages
   came at an older alpha than the command. Every line asks for `@next` while only alphas are published.
 

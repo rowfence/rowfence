@@ -12,9 +12,12 @@ supported stack passes (`integrations/fastapi/test.sh`).
 ## Install
 
 ```sh
-uv add --prerelease=allow "rowstile[fastapi,sqlalchemy,asyncpg]"   # while only an alpha is published
+uv add --prerelease=allow "rowstile[fastapi,sqlalchemy,asyncpg,psycopg]"   # while only an alpha is published
 uv run rowstile init        # a first policy from your tables, a test file, rowstile.toml
 ```
+
+asyncpg is the app's driver and psycopg is Alembic's ([Migrations](#migrations) says why). `init` reads the
+tables, so it needs the database: `DATABASE_URL`, or `--db`.
 
 `init` finds FastAPI and Alembic, and writes `rowstile.toml` for them. The conformance app's, with its own
 name for the variable that holds the owner's connection and for the client:
@@ -33,6 +36,8 @@ dir  = "migrations/versions"
 Two roles connect. The owner of the tables runs the migrations (`ROWSTILE_OWNER_DSN` for the command, and
 the same as an SQLAlchemy URL, `ROWSTILE_OWNER_URL`, for Alembic), and the app connects
 as the role the policy names (`app role conf_app`), which row-level security applies to (`ROWSTILE_APP_URL`).
+The owner must be able to switch to the app role, since the command looks at the data as the app does when it
+runs the policy's tests: `GRANT conf_app TO conf_owner`, once, by whoever made the app role.
 
 ## The policy
 
@@ -186,6 +191,14 @@ from rowstile.alembic import include_name, include_object
     )
 ```
 
+Alembic connects as the owner, with a sync driver: `ROWSTILE_OWNER_URL` is a `postgresql+psycopg://` URL.
+A policy's revision is one script of many statements, and asyncpg takes one statement at a time ("cannot
+insert multiple commands into a prepared statement"). The app itself stays on asyncpg.
+
+```python
+engine = create_engine(os.environ["ROWSTILE_OWNER_URL"])
+```
+
 ```sh
 uv run rowstile migrate            # after changing the policy
 uv run alembic upgrade head
@@ -194,6 +207,12 @@ uv run rowstile migrate --check    # in CI: exit 1 if a policy change has no mig
 
 While you edit, `rowstile dev` checks, pushes to the development database, runs the tests and rewrites
 `app/authz_client.py` on every save (and writes the migration once you stop editing).
+
+The development database then holds what `dev` pushed, not what its migrations left, and the next
+`alembic upgrade head` on it stops with AZ607. Production and CI only ever take migrations. On the
+development database, once `rowstile migrate --check` says there is nothing to migrate (it holds the policy
+the newest revision makes), `alembic stamp head` brings Alembic's history level; or rebuild it from the
+migrations.
 
 ## Tests
 
