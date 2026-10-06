@@ -180,8 +180,9 @@ setting `authz.user_id`, and a transaction that forgets it gets an error, not an
 Those two hold for a connection that logs in as the app role, as your app's will. The session below is
 `postgres`'s, switched to the app role with `SET ROLE`: handy for trying things, but a superuser's or the
 owner's session is believed without a signature (it could `RESET ROLE` anyway), so in it a forgotten
-sign-in reads as nobody and returns no rows. `SELECT * FROM authz.connection_check()` says which kind a
-connection is. The rules themselves apply in both:
+sign-in reads as nobody and returns no rows. `SELECT * FROM authz.connection_check()` lists what is wrong
+with a connection for an app: a row for `postgres`'s (a superuser's), none for one that logs in as the app
+role. The rules themselves apply in both once the role is the app's:
 
 ```sql
 SET ROLE app_backend;
@@ -255,6 +256,9 @@ def on_error(e):
 Keep every request in one transaction that starts with `sign_in`: the setting ends with the
 transaction, so a pooled connection never carries one user's identity into another's request.
 
+No Python in your app? [Plain SQL, from any language](stacks/sql.md) has the same in the statements
+themselves, and [your stack](stacks/README.md) has an SDK that does it for you.
+
 ## 8. Ship it: migrations
 
 `rowstile dev` applies straight to your development database. Production takes the policy as
@@ -274,8 +278,9 @@ wrote .gitattributes (reviews show the generated files collapsed)
 ```
 
 Commit all three. From then on each change to the policy is the next migration, holding only what
-changed (a new permission is a few statements) and starting with what changed, as comments.
-`rowstile dev` writes it once you stop editing, and `rowstile migrate --check` in CI fails a policy
+changed, not the whole policy again, and starting with what changed, as comments.
+`rowstile dev`, left watching, writes it some minutes after your last save; after `rowstile dev --once`,
+or whenever you want it now, `rowstile migrate` does. `rowstile migrate --check` in CI fails a policy
 change that has no migration. Deploy them as you deploy the others: there is no extra step. With plain SQL
 files, each runs in one transaction: `psql -1 -v ON_ERROR_STOP=1 -f migrations/<file>.sql`.
 

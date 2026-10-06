@@ -141,8 +141,9 @@ CODES = {
     "AZ110": Code(
         "A dollar-quote tag in a condition",
         "The SQL in `{...}` goes into generated functions, whose bodies are quoted with tags such as `$f$`. The "
-        "same tag in a condition would end the body there. Write the text another way: `'$' || 'f$'` (`$$` is "
-        "fine).",
+        "same tag in a condition would end the body there. Write the text another way: `'$' || 'f$'`. A bare "
+        "`$$` is fine; a tag with a name between the dollars (`$changed$`, as in `$$changed$$`) is not: quote "
+        "such text with apostrophes.",
         "type folder = app.folders\n  owner : user = owner_id\n  can view = owner and {name <> '$f$'}\n",
         "type folder = app.folders\n  owner : user = owner_id\n  can view = owner and {name <> '$' || 'f$'}\n",
     ),

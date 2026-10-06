@@ -925,6 +925,15 @@ def parse_step(s: str, loc: Loc) -> Step:
         expect: str | int = int(m.group(5)) if m.group(5) else m.group(4)
         if not m.group(6).strip():
             fail(loc, "as ... {...} needs a statement", "AZ106")
+        # `sees N` counts the rows of a query, which a write can't be put inside: at run time that was a bare
+        # "syntax error" from Postgres
+        if isinstance(expect, int) and re.match(r"\s*(insert|update|delete|merge)\b", m.group(6), re.I):
+            fail(
+                loc,
+                "`sees N` counts the rows of a SELECT, and this statement writes: for a write that must change "
+                "no row, write `as ... refused {...}` (a write that changes no row is refused)",
+                "AZ106",
+            )
         return Step(
             "as",
             s,
