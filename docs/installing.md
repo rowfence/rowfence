@@ -6,14 +6,16 @@ the command writes migrations, and your migration tool runs them as the owner of
 
 ## The command
 
-Only an alpha is published so far, 0.1.0-alpha.4, and a plain install doesn't get it. Ask for it:
+Only an alpha is published so far, 0.1.0-alpha.4. Ask for it by name:
 
     npm i -D rowstile@next         # the command with its own Python: a TypeScript app needs none
     pip install --pre rowstile     # the command and the Python SDK: rowstile[fastapi], [sqlalchemy], ...
     docker run --rm -u "$(id -u):$(id -g)" -v "$PWD:/work" ghcr.io/rowstile/rowstile:0.1.0-alpha.4 migrate
 
 Once 0.1.0 is out, the plain `npm i -D rowstile`, `pip install rowstile` and `ghcr.io/rowstile/rowstile` get
-it.
+it. Until then the two registries differ: a plain `pip install rowstile` takes the newest alpha (pip takes a
+version that isn't final when no final one exists), and a plain `npm i rowstile` may get an older alpha (npm's
+`latest` doesn't move with versions that aren't final). The lines above get the newest on both.
 
 - **npm**: the package brings a Python of its own, built for your machine: Linux (glibc and musl, x64 and
   arm64), macOS (x64 and arm64) and Windows x64. Run it as `npx rowstile`, or from a script in `package.json`.
@@ -28,7 +30,7 @@ it.
 
 ## Alphas and release candidates
 
-A version that isn't final is never what a plain install gets. Ask for it:
+Once a final release exists, a plain install gets it, never a version that isn't final. Ask for one:
 
     npm i -D rowstile@next
     pip install --pre rowstile

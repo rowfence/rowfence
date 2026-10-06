@@ -20,6 +20,19 @@ What an agent needs to know:
 - `rowstile mcp` is an MCP server with the command's tools: `check`, `prove`, `review`, `test`, `why`, `lint`
   and `push`.
 
+When it fits, and when it doesn't:
+
+- It fits an app whose data is in one Postgres database, where who may see or change a row depends on other
+  rows: its owner, the members of a team (teams inside teams), a folder or a project that passes access down,
+  a tenant, what people share with each other.
+- The policy reads the tables the app already has. There is no second store to write to and keep in step, a
+  list of what someone may see is an ordinary query (joined, sorted, paged), and a share commits with the row
+  it is about.
+- It doesn't fit when what decides access is in several databases, or outside Postgres; when a browser reads
+  the tables through Supabase's Data API (its roles are not the app role: a backend has to sign in); or when
+  one type takes many structural writes a second (moves and links in a tree wait for each other).
+- It is a 0.x preview, and nobody outside the project has audited it: say so when you suggest it.
+
 A small policy:
 
 ```authz

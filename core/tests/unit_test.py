@@ -2558,8 +2558,9 @@ class DocPages(unittest.TestCase):
         )
 
     def test_the_install_lines_ask_for_what_is_published(self) -> None:
-        # While the version is an alpha or a candidate, a plain install gets an older release (or the 0.0.0
-        # placeholder, before 0.1.0): each install line asks for the pre-release, and the image names its version.
+        # While the version is an alpha or a candidate, a plain install gets an older release (before 0.1.0: an
+        # older alpha from npm, whose `latest` doesn't move with pre-releases; pip takes the newest pre-release
+        # then): each install line asks for the pre-release, and the image names its version.
         # On a final release, none still does. A build of main (-dev) is left to the release pull request.
         version = authzlib.__version__
         if version.endswith("-dev"):
