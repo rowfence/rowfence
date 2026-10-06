@@ -1,9 +1,10 @@
 # The OpenSSF Scorecard: what an outside reader checks first about how a project is run (actions pinned by commit,
 # what each workflow's token may do, known vulnerabilities in what it depends on, fuzzing, review, releases).
-# Every Monday, on each push to main, and by hand. The score and each check's reason are in the run's files
-# (scorecard.json); what a check finds is listed under Security, Code scanning. Nothing is published to
-# scorecard.dev: `publish_results` would do that, and the badge needs it.
-# On GitHub's own runner whatever the repository variable RUNNER says: publishing takes nothing else.
+# Every Monday, on each push to main, and by hand. The score is published at scorecard.dev (the README's badge
+# reads it); each check's reason is also in the run's files (scorecard.json), and what a check finds is listed
+# under Security, Code scanning.
+# Publishing has its rules: GitHub's own Ubuntu runner whatever the repository variable RUNNER says, no steps but
+# these actions, no `env`, and `id-token: write` in this job only.
 name: scorecard
 on:
   schedule:
@@ -19,15 +20,17 @@ permissions: {contents: read}
 jobs:
   scorecard:
     runs-on: ubuntu-latest
-    permissions: {contents: read, actions: read, security-events: write}   # security-events: the findings' list
+    # security-events: the findings' list; id-token: the proof, to scorecard.dev, that this run made the result
+    permissions: {contents: read, actions: read, security-events: write, id-token: write}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
         with: {persist-credentials: false}
-      # twice: the score is only in the JSON, and Code scanning only takes SARIF
+      # twice: each check's reason is easiest read from the JSON, and Code scanning only takes SARIF (the run
+      # that is published)
       - uses: ossf/scorecard-action@2d1146689b8cda280b9bc96326124645441f03bc   # v2.4.4
         with: {results_file: scorecard.json, results_format: json, publish_results: false}
       - uses: ossf/scorecard-action@2d1146689b8cda280b9bc96326124645441f03bc   # v2.4.4
-        with: {results_file: scorecard.sarif, results_format: sarif, publish_results: false}
+        with: {results_file: scorecard.sarif, results_format: sarif, publish_results: true}
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a   # v7.0.1
         with: {name: scorecard, path: "scorecard.*", retention-days: 30}
       - uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2   # v4.38.2

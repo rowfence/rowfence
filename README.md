@@ -125,6 +125,10 @@ changed in each release: [CHANGELOG.md](CHANGELOG.md). How releases are numbered
 rowstile has not been audited by anyone outside the project. [The threat model](docs/threat-model.md) says
 what it protects and from whom. Report a vulnerability privately: [SECURITY.md](SECURITY.md).
 
+How the project itself is run, as the OpenSSF Scorecard measures it (pinned actions, what each workflow's
+token may do, known vulnerabilities in dependencies, review, releases):
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/rowstile/rowstile/badge)](https://scorecard.dev/viewer/?uri=github.com/rowstile/rowstile)
+
 ## License
 
 Apache License 2.0; see [LICENSE](LICENSE). Copyright 2026 Salaheddine EL HSSANI.
