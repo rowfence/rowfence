@@ -8,7 +8,8 @@
  * in with authz.act_as() as whoever the code acts for (actingAs, a job), else user(), else nobody; a query
  * outside a transaction runs in one of its own. `authz()` turns the answers into errors: an update or delete
  * of a row the user can't see is NotFound (Prisma's P2025), of one they may not change Refused with the
- * reason, a refused create Refused naming the rule; and adds db.$authz (can, ids, permsOf, ...). It refuses
+ * reason, a refused create Refused naming the rule, a findUniqueOrThrow or findFirstOrThrow that finds no row
+ * NotFound; and adds db.$authz (can, ids, permsOf, ...). It refuses
  * array transactions, $transaction([...]): Prisma starts them from another caller's context.
  *
  * Use the client `$extends(authz())` returns, and only that one: the client it was made from is refused
@@ -20,7 +21,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { Prisma } from "@prisma/client/extension";
 import {
-  actAs, calls, idText, signingIn, translate, verdict,
+  actAs, calls, idText, NotFound, signingIn, translate, verdict,
   type AuthzCalls, type Id, type ObjectType, type Permission, type Queryable, type UserResolver,
 } from "@rowstile/client";
 
@@ -251,6 +252,12 @@ export function authz(options: ExtensionOptions = {}) {
                   throw v;
                 }
               }
+            }
+            // a read that must find a row and found none: the row isn't there, or this user can't see it (the
+            // two answer alike). Left as Prisma's P2025 it is a 500, where an update or a delete is a 404
+            if (model && isP2025(e) && (operation === "findUniqueOrThrow" || operation === "findFirstOrThrow")) {
+              const key = keyOf(model, (args as { where?: Record<string, unknown> }).where);
+              throw new NotFound(tableOf(model), key === undefined ? undefined : idText(key), { cause: e });
             }
             throw translate(e, schemaOf) ?? e;
           }
