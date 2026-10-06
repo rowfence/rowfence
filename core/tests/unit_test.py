@@ -3041,6 +3041,20 @@ class Version(unittest.TestCase):
             sys.path.pop(0)
         self.assertEqual(list(version.found()), [authzlib.__version__])
 
+    def test_the_mcp_registrys_entry_names_the_npm_package(self) -> None:
+        # the registry takes server.json only if the npm package it names says the same name back (`mcpName`), and
+        # refuses a description over 100 characters; `rowstile mcp` is how the package starts the server
+        with open(os.path.join(self.REPO, "server.json"), encoding="utf-8") as fh:
+            entry = json.load(fh)
+        with open(os.path.join(self.REPO, "packaging", "npm", "rowstile", "package.json"), encoding="utf-8") as fh:
+            package = json.load(fh)
+        self.assertEqual(entry["name"], package["mcpName"])
+        self.assertLessEqual(len(entry["description"]), 100)
+        (npm,) = entry["packages"]
+        self.assertEqual((npm["registryType"], npm["identifier"]), ("npm", package["name"]))
+        self.assertEqual(npm["packageArguments"], [{"type": "positional", "value": "mcp"}])
+        self.assertEqual(npm["version"], entry["version"])
+
     def test_npm_packages_name_the_repository(self) -> None:
         # npm refuses a package published with provenance unless repository.url is the repository it came from;
         # the extension's is its Marketplace page's link

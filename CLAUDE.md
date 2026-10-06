@@ -98,6 +98,8 @@ User-facing docs: `README.md`, then `docs/reference/` (read them first). Terms i
 - `packaging/` — how rowstile is installed: `npm/build.mjs` (the `rowstile` npm package and one
   `@rowstile/cli-<platform>` per platform with a standalone Python), `docker/Dockerfile` (the command's image);
   `test.sh` installs each on a clean machine; `version.py` sets the version (X.Y.Z, X.Y.Z-alpha.N or X.Y.Z-rc.N).
+  `server.json` (the repository's root) is the MCP server's entry in the official registry: it names the npm
+  package, whose `mcpName` must be its name (`Version` in `unit_test.py`), and the release publishes it last.
   `.github/workflows/release.yml` publishes them on a tag: to private places while the repository is private
   (GitHub Packages, the GitHub release), to PyPI, npm and ghcr.io once public. The workflows run on the
   runner the repository variable `RUNNER` names, else `ubuntu-latest` (GitHub's runners since 2026-10-03; `RUNNER`

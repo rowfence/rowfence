@@ -77,4 +77,7 @@ the command to start it, in its own settings for MCP servers:
 {"command": "rowstile", "args": ["mcp"]}
 ```
 
+Each release publishes the server's entry to the official MCP registry, as `io.github.rowstile/rowstile`, for
+clients that find servers there. The entry names the npm package, which brings its own Python.
+
 `push` is the only tool that changes anything, and it is marked so; production takes migrations.
