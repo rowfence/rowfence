@@ -697,6 +697,12 @@ TESTS = [
         11,
     ),
     ("a $name in the test section", "test\n  user $ann can share doc 1\n", "$ann is not named yet", 11),
+    (
+        "sees N on a statement that writes",
+        'test "t"\n  as user 1 sees 0 {UPDATE alt.docs SET up = NULL RETURNING doc_no}\n',
+        "`sees N` counts the rows of a SELECT, and this statement writes",
+        11,
+    ),
 ]
 
 

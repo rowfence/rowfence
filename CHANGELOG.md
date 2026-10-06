@@ -44,6 +44,11 @@ Each release upgrades from the one before it. How releases are numbered and made
   owner's URL, and what to do on a development database that `rowstile dev` pushed to before
   `prisma migrate deploy` (AZ607: `prisma migrate resolve --applied`); `rowstile help AZ607`, the
   migration's own hint and the troubleshooting page say the same for each tool.
+- A test line `as user X sees N {UPDATE ...}` is refused when the tests are compiled, saying that `sees`
+  counts a SELECT's rows and that a write which must change no row is `refused` (it was a bare "syntax
+  error" when the tests ran).
+- `rowstile dev`'s access line reads "2 user(s) gain permission comment on 1 project" (it said "on 1 of
+  project").
 - `rowstile help` for a code the runtime raises (AZ701 to AZ713) ends with its own code, not AZ709's.
 - The FastAPI page shows the imports its code uses; getting started says the draft is replaced, not edited,
   and what its Python example needs; the language page says how a condition names a column with capital

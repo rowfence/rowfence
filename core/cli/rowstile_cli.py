@@ -663,7 +663,7 @@ class Dev:
             self.say("~", "access: nobody gains or loses anything")
             return
         parts = [
-            f"{users} user(s) {change.rstrip('s')} {what} on {objs} of {type_}"
+            f"{users} user(s) {change.rstrip('s')} {what} on {objs} {type_}{'' if objs == 1 else 's'}"
             for change, type_, what, users, objs in rows[:8]
         ]
         more = f"\n... and {len(rows) - 8} more (rowstile diff)" if len(rows) > 8 else ""
