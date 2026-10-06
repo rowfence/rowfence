@@ -710,6 +710,25 @@ class Command(unittest.TestCase):
             self.assertEqual(studio.shown(path), path)
             self.assertIsNone(rowstile_cli.Config(os.path.join(d, "rowstile.toml"), {}).below(path))
 
+    def test_prints_utf8_whatever_the_systems_encoding(self) -> None:
+        # on Windows, Python writes into a pipe or a file in the system's code page: an arrow or a name in another
+        # script stopped the command there (UnicodeEncodeError), and a graph written to a file was not UTF-8
+        policy = (
+            "app role app_user\ntype user = app.users\ntype doc = app.docs\n  owner : user = owner_id\n"
+            "  can view = owner or {note = '閲覧 →'}\ninvariants\n  never doc: view and not owner\n"
+        )
+        cli = os.path.join(ROOT, "cli", "rowstile_cli.py")
+        env = {k: v for k, v in os.environ.items() if k != "PYTHONUTF8"} | {"PYTHONIOENCODING": "cp1252"}
+        with tempfile.TemporaryDirectory() as d:
+            with open(os.path.join(d, "policy.authz"), "w", encoding="utf-8", newline="\n") as fh:
+                fh.write(policy)
+            for command, shown in (("prove", "doc 1: note = '閲覧 →'"), ("graph", "doc · app.docs")):
+                p = subprocess.run([sys.executable, cli, command, "policy.authz"], cwd=d, env=env, capture_output=True)
+                self.assertNotIn(b"Traceback", p.stderr, command)
+                self.assertIn(shown, p.stdout.decode("utf-8"), command)
+            p = subprocess.run([sys.executable, cli, "check", "閲.authz"], cwd=d, env=env, capture_output=True)
+            self.assertIn("閲.authz: ", p.stderr.decode("utf-8"))
+
     def test_only_what_is_below_is_marked_generated(self) -> None:
         # .gitattributes names files from its own folder: a migrations folder or a lock file outside it gets no line
         import migrations
@@ -743,8 +762,12 @@ class Command(unittest.TestCase):
         before = os.getcwd()
         with tempfile.TemporaryDirectory() as d:
             os.makedirs(os.path.join(d, "p", "tests"))
-            with open(os.path.join(d, "p", "tests", "a.authz"), "w", encoding="utf-8", newline="\n") as fh:
-                fh.write("test one\n")
+            # a name with an accent: git lists it quoted ("tests/acc\303\250s.authz") unless asked not to
+            for name, text in (("a.authz", b"test one\n"), ("accès.authz", b"test two\n")):
+                with open(os.path.join(d, "p", "tests", name), "wb") as fh:
+                    fh.write(text)
+            with open(os.path.join(d, "p", "latin1.authz"), "wb") as fh:
+                fh.write("-- propriétaire\n".encode("latin-1"))
             for args in (["init", "-q"], ["add", "-A"], ["commit", "-q", "-m", "base"]):
                 subprocess.run(
                     ["git", "-c", "user.name=t", "-c", "user.email=t@example.com", *args],
@@ -756,9 +779,14 @@ class Command(unittest.TestCase):
             try:
                 cfg = rowstile_cli.Config(os.path.join(os.getcwd(), "rowstile.toml"), {"tests": ["tests/*.authz"]})
                 with mock.patch.object(rowstile_cli, "git", git):
-                    self.assertEqual(rowstile_cli.base_tests(cfg, "HEAD"), {"tests/a.authz": "test one\n"})
+                    self.assertEqual(
+                        rowstile_cli.base_tests(cfg, "HEAD"),
+                        {"tests/a.authz": "test one\n", "tests/accès.authz": "test two\n"},
+                    )
                     self.assertEqual(rowstile_cli.in_repository(os.path.join("tests", "a.authz")), "p/tests/a.authz")
-                self.assertEqual(list(rowstile_cli.read_tests(cfg.tests())), ["tests/a.authz"])
+                self.assertEqual(list(rowstile_cli.read_tests(cfg.tests())), ["tests/a.authz", "tests/accès.authz"])
+                # a file at the base that isn't UTF-8 is read, the byte replaced: no traceback from the review
+                self.assertEqual(rowstile_cli.at_base("HEAD", "latin1.authz"), "-- propri�taire\n")
             finally:
                 os.chdir(before)
 

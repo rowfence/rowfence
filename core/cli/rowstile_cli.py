@@ -100,6 +100,7 @@ apps call. Applying, previewing and testing each run in one transaction on the d
 from __future__ import annotations
 
 import glob
+import io
 import json
 import os
 import posixpath
@@ -762,7 +763,17 @@ ARGUMENTS: dict[str, int | None] = {
 }
 
 
+def utf8_output() -> None:
+    """What the command prints is UTF-8 wherever it goes. On Windows, Python writes into a pipe or a file in the
+    system's code page: a character it lacks (an arrow, a name in another script) stopped the command, and the
+    files written this way (the review's comment, a graph) were not UTF-8."""
+    for stream in (sys.stdout, sys.stderr):
+        if isinstance(stream, io.TextIOWrapper):
+            stream.reconfigure(encoding="utf-8", errors="backslashreplace")
+
+
 def main(argv: list[str]) -> None:
+    utf8_output()
     dsn: str | None = None
     opts: dict[str, str] = {}
 
@@ -1147,10 +1158,12 @@ def main(argv: list[str]) -> None:
 
 # --- review and fmt ------------------------------------------------------------------------------
 def git(*args: str) -> str | None:
+    """What a git command prints, None if it fails. A file at the base that isn't UTF-8 is read all the same,
+    its other bytes replaced: the review goes on, as it does for any base that doesn't compile."""
     import subprocess
 
     try:
-        p = subprocess.run(["git", *args], capture_output=True, text=True, encoding="utf-8")
+        p = subprocess.run(["git", *args], capture_output=True, text=True, encoding="utf-8", errors="replace")
     except FileNotFoundError:
         fail("rowstile: git is not installed (the review reads the base branch with it)", 2)
     return p.stdout if p.returncode == 0 else None
@@ -1191,13 +1204,14 @@ def base_tests(cfg: Config, ref: str) -> dict[str, str]:
     import fnmatch
 
     here = git("rev-parse", "--show-prefix")  # this folder, from the top one
-    listed = git("ls-tree", "-r", "--name-only", "--full-tree", ref)  # from the top folder, wherever this runs
+    # from the top folder, wherever this runs; -z: names as they are (git quotes one with an accent otherwise)
+    listed = git("ls-tree", "-r", "-z", "--name-only", "--full-tree", ref)
     if here is None or listed is None:
         return {}
     out: dict[str, str] = {}
     for pattern in cfg.test_globs():
         rel_pattern = in_repository(cfg.file(pattern))
-        for name in listed.split("\n"):
+        for name in listed.split("\0"):
             if name and fnmatch.fnmatch(name, rel_pattern):
                 text = git("show", f"{ref}:{name}")
                 if text is not None:
