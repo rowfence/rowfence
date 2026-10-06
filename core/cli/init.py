@@ -28,7 +28,7 @@ def init(policy: str, opts: dict[str, str], cfg: Config) -> None:
     written: list[str] = []
     policy_path = os.path.join(out, "policy.authz")
     write_new(policy_path, policy, written)
-    m = re.search(r"^role (\S+)", policy, re.M)
+    m = re.search(r"^app role (\S+)", policy, re.M)
     role = m.group(1) if m else "app_user"  # a draft always has one
     first = re.search(r"^type (?!user\b)(\w+) = (\S+)", policy, re.M)
     example = first.group(1) if first else "user"
@@ -88,7 +88,7 @@ database = "{database}"     # a DSN or URL, or env:NAME for an environment varia
         added = stack.add_npm(os.getcwd(), found.npm, __version__)
         if added:
             print(f"added   {', '.join(added)} to package.json (then: npm install)")
-    if found.pip:
+    if found.pip and not found.pip_there:
         req = stack.pip_requirement(found.pip, __version__)
         print(f"add     {req} to your Python dependencies (pip install '{req}', or uv add '{req}')")
     setup = ""
@@ -100,7 +100,9 @@ database = "{database}"     # a DSN or URL, or env:NAME for an environment varia
 {lines}
      The role your app connects as ({role}) must not bypass row-level security:
        CREATE ROLE {role} LOGIN PASSWORD '...' NOSUPERUSER NOBYPASSRLS;
-       ALTER ROLE {role} SET jit = off;"""
+       ALTER ROLE {role} SET jit = off;
+     The app connects as {role}, with a URL of its own: never the one this command uses, the
+     tables' owner's, which row-level security doesn't apply to."""
     else:
         setup = f"""
   2. The role your app connects as ({role}) must not bypass row-level security:

@@ -3715,13 +3715,13 @@ WHERE w.who IS NOT NULL AND n.nspname !~ '^pg_(toast_)?temp_' LOOP
     END IF;
   END LOOP;
   -- columns that grant a relation, changed by anyone who may update the row
-  FOR r IN SELECT * FROM (VALUES ('"lp"."orgs"', 'owner_id', 'org.owner', 'relation org.owner owner_id'), ('"lp"."orgs"', 'settings_id', 'org.settings', 'relation org.settings settings_id'), ('"lp"."settings"', 'email_id', 'setting.email', 'relation setting.email email_id')) v(tbl, col, what, loc)
+  FOR r IN SELECT * FROM (VALUES ('"lp"."orgs"', 'owner_id', 'org.owner', 'relation org.owner owner_id', 'nobody'), ('"lp"."orgs"', 'settings_id', 'org.settings', 'relation org.settings settings_id', 'nobody'), ('"lp"."settings"', 'email_id', 'setting.email', 'relation setting.email email_id', 'nobody')) v(tbl, col, what, loc, ask)
            WHERE tbl IS NOT NULL LOOP
     IF EXISTS (SELECT 1 FROM pg_attribute a WHERE a.attrelid = to_regclass(r.tbl) AND a.attname = r.col
                AND a.attnum > 0 AND NOT a.attisdropped)
        AND has_column_privilege(v_role, r.tbl, r.col, 'UPDATE') THEN
       severity := 'warning'; object := to_regclass(r.tbl)::text || '.' || r.col;
-      problem := format('grants %s (%s), and anyone who may update the row may change it: add a rule such as "update %s : share"', r.what, coalesce((SELECT l.loc FROM authz_gen.policy_lines l WHERE l.what = r.loc), '?'), r.col);
+      problem := format('grants %s (%s), and anyone who may update the row may change it: add a rule such as "update %s : %s"', r.what, coalesce((SELECT l.loc FROM authz_gen.policy_lines l WHERE l.what = r.loc), '?'), r.col, r.ask);
       RETURN NEXT;
     END IF;
   END LOOP;

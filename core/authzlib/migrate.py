@@ -731,7 +731,9 @@ BEGIN
     RAISE EXCEPTION 'rowstile: this migration changes the policy the migration before it left (%), but the database has % [AZ607]',
       {sql_lit(old_hash)}, coalesce(v_lock, 'none')
       USING HINT = 'apply the migrations in order; a database changed with rowstile push or apply since needs the '
-                   'migrations from the start (or rowstile apply of the policy the previous migration left)';
+                   'migrations from the start (or rowstile apply of the policy the previous migration left). '
+                   'A development database that rowstile dev pushed the newest policy to already holds what '
+                   'this migration brings: mark it as applied in your migration tool (rowstile help AZ607)';
   END IF;
 END $authz_guard$;""")
     out.append(body)

@@ -13,7 +13,7 @@ type folder = app.folders
 
 rules app.folders
   select                   : view
-  insert                   : parent.edit and owner
+  insert                   : owner and (parent.edit or {parent_id is null})
   update                   : edit
   update parent_id after   : parent.edit
   update owner_id, inherit : owner
@@ -26,7 +26,9 @@ rules app.folders
   own owner still holds it.
 - `update parent_id after : parent.edit` is the rule for a move. A rule on a column is checked against the row
   before the change; `after` checks the row as it will be, so a folder moves only to where you may edit.
-- `insert : parent.edit and owner` makes a folder inside one you may edit, in your own name.
+- `insert : owner and (parent.edit or {parent_id is null})` makes a folder in your own name: inside one you
+  may edit, or at the top, where anyone starts a tree of their own. Without the second half nobody could
+  make the first folder through the app.
 
 ## Tested
 
@@ -36,6 +38,8 @@ test "what you may do in a folder, you may do below it, until one says stop"
   user $ann cannot view folder $own
   user $bo cannot view folder $sub
   as user $ann refused {INSERT INTO app.folders (parent_id, owner_id, name) VALUES ($own, $ann, 'Notes')}
+  as user $bo allowed {INSERT INTO app.folders (owner_id, name) VALUES ($bo, 'A tree of my own')}
+  as user $bo refused {INSERT INTO app.folders (owner_id, name) VALUES ($ann, 'In her name')}
   as user $ann refused {UPDATE app.folders SET parent_id = $other WHERE id = $low}
   as user $ann allowed {UPDATE app.folders SET parent_id = $top WHERE id = $low}
 ```

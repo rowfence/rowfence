@@ -14,5 +14,7 @@ test "what you may do in a folder, you may do below it, until one says stop"
   as user $ann sees 3 {SELECT FROM app.folders WHERE id IN ($top, $sub, $low, $own, $other)}
   as user $ann allowed {INSERT INTO app.folders (parent_id, owner_id, name) VALUES ($sub, $ann, 'Notes')}
   as user $ann refused {INSERT INTO app.folders (parent_id, owner_id, name) VALUES ($own, $ann, 'Notes')}
+  as user $bo allowed {INSERT INTO app.folders (owner_id, name) VALUES ($bo, 'A tree of my own')}
+  as user $bo refused {INSERT INTO app.folders (owner_id, name) VALUES ($ann, 'In her name')}
   as user $ann refused {UPDATE app.folders SET parent_id = $other WHERE id = $low}
   as user $ann allowed {UPDATE app.folders SET parent_id = $top WHERE id = $low}

@@ -7,6 +7,36 @@ Each release upgrades from the one before it. How releases are numbered and made
 
 ## Unreleased
 
+### Changed
+
+- `rowstile sql --as` says what a statement that returns no rows did, in the server's words (`UPDATE 0, as
+  user:2; rolled back`): "done" read as allowed when the rules had let it change nothing.
+- A policy's Alembic revision stops in one line when Alembic is connected with asyncpg (which takes one
+  statement at a time), naming the sync driver to give it, instead of the driver's error with the whole
+  script in it.
+- The cookbook's folders recipe lets anyone start a top-level folder of their own
+  (`insert : owner and (parent.edit or {parent_id is null})`): with `parent.edit and owner` nobody could make
+  the first folder through the app.
+
+### Fixed
+
+- `authz.lint()` no longer warns about a column a relation reads on a table whose rule is `update : nobody`,
+  and the rule it suggests for such a column names `share` only where the type has it (`nobody` otherwise:
+  the suggestion didn't compile on a type without `share`).
+- `rowstile init` names the policy's app role in what it prints and in the first test file (it said
+  `app_user` whatever `--role` was), doesn't ask to add `rowstile` to a project that has it, finds FastAPI
+  and SQLAlchemy when they come through rowstile's own extras, and in a Prisma project shows the app's
+  client on a URL of its own (`ROWSTILE_APP_URL`), not on Prisma's `DATABASE_URL`, which is the owner's.
+- With no `--db`, no `database` in `rowstile.toml` and no variable, a failed connection says that no database
+  was named and how to name one (on Windows it said `host=/var/run/postgresql is a Unix socket`).
+- `rowstile dev`: an error after the policy went in (the tests' switch to the app role refused, AZ618) ends
+  with "the policy is applied; its tests didn't run", not "nothing applied". AZ618's hint says who may run
+  the grant when the owner didn't make the app role.
+- The Next.js page shows the migration that makes the app role and its grants, Prisma's configuration on the
+  owner's URL, and what to do on a development database that `rowstile dev` pushed to before
+  `prisma migrate deploy` (AZ607: `prisma migrate resolve --applied`); `rowstile help AZ607`, the
+  migration's own hint and the troubleshooting page say the same for each tool.
+
 ## 0.1.0 (alpha)
 
 **rowfence is now rowstile**, and 0.1.0-alpha.2 is its first release under the new name (0.1.0-alpha.1 was

@@ -117,9 +117,13 @@ of a second: its tables are kept.
 
 A rowstile migration starts where the one before it left the database, and says so when it doesn't:
 it was applied twice or out of order, the ones before it weren't applied, or the database was changed
-since with `rowstile push` or `rowstile apply` (development databases). Apply the migrations in order;
-for a development database, make it again from the migrations, or `rowstile push` the policy and keep
-using `push` there.
+since with `rowstile push` or `rowstile apply` (development databases). Apply the migrations in order.
+
+A development database that `rowstile dev` or `push` brought to the newest policy already holds what the
+migration brings (`rowstile migrate --check` says there is nothing to migrate). Tell your migration tool
+the migration is applied (Prisma: `prisma migrate resolve --applied <its folder>`, which also clears the
+failed migration Prisma kept; Alembic: `alembic stamp head`), or make the database again from the
+migrations, or keep using `push` there and leave the migrations to the other databases.
 
 ## `rowstile push` or `dev`: isn't marked as a development database (AZ610)
 

@@ -284,9 +284,17 @@ depends_on = None
 
 
 def upgrade() -> None:
+    bind = op.get_bind()
+    if bind.dialect.driver == "asyncpg":
+        # asyncpg prepares each statement, and a prepared statement is one command: said here, in a line, rather
+        # than by the driver with the whole script in its message
+        raise RuntimeError(
+            "rowstile: Alembic is connected with asyncpg, which takes one statement at a time, and this revision "
+            "is one script. Give Alembic a sync driver (postgresql+psycopg://); the app keeps asyncpg"
+        )
     sql = Path(__file__).with_suffix(".sql").read_text(encoding="utf-8")
     # as one script, straight to the driver: the SQL has % signs and colons, which are not parameters
-    op.get_bind().exec_driver_sql(sql, execution_options={{"no_parameters": True}})
+    bind.exec_driver_sql(sql, execution_options={{"no_parameters": True}})
 
 
 def downgrade() -> None:
