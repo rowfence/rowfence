@@ -14,8 +14,9 @@ postgres.js: [Node apps](node.md).
 ## Install
 
 ```sh
-npm install @rowstile/client @rowstile/prisma @rowstile/next @rowstile/react
-npm install --save-dev rowstile@next @rowstile/vitest    # @next while only an alpha is published
+# @next on each while only an alpha is published: a plain install gets an older one
+npm install @rowstile/client@next @rowstile/prisma@next @rowstile/next@next @rowstile/react@next
+npm install --save-dev rowstile@next @rowstile/vitest@next
 npx rowstile init        # a first policy from your tables, a test file, rowstile.toml
 ```
 

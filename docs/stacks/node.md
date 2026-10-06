@@ -18,8 +18,9 @@ uses a session-level `SET`, so pools and poolers in transaction mode are safe. T
 needs its own connection to Postgres: [Behind a pooler](../operations.md#behind-a-pooler).
 
 ```sh
-npm install @rowstile/client @rowstile/pg          # or @rowstile/postgres, @rowstile/drizzle
-npm install --save-dev rowstile@next                # the command (@next while only an alpha is published)
+# @next on each while only an alpha is published: a plain install gets an older one
+npm install @rowstile/client@next @rowstile/pg@next   # or @rowstile/postgres@next, @rowstile/drizzle@next
+npm install --save-dev rowstile@next                  # the command
 ```
 
 ## pg
