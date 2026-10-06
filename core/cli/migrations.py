@@ -87,10 +87,12 @@ def slug(name: str) -> str:
     return s if s.startswith("authz_") or s == "authz" else f"authz_{s}"
 
 
-def generated_patterns(tool: str, folder_rel: str, lock_rel: str) -> list[str]:
-    """The .gitattributes lines that mark what rowstile migrate writes as generated."""
+def generated_patterns(tool: str, folder_rel: str | None, lock_rel: str | None) -> list[str]:
+    """The .gitattributes lines that mark what rowstile migrate writes as generated: the lock file and the
+    migrations folder, each named from the .gitattributes file's folder (None: outside it, so no line)."""
     pat = f"{folder_rel}/*_authz_*/**" if tool == "prisma" else f"{folder_rel}/*_authz_*"
-    return [f"{lock_rel} linguist-generated=true", f"{pat} linguist-generated=true"]
+    paths = ([lock_rel] if lock_rel else []) + ([pat] if folder_rel else [])
+    return [f"{path} linguist-generated=true" for path in paths]
 
 
 def mark_generated(root: str, lines: list[str]) -> str | None:

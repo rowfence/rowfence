@@ -102,6 +102,7 @@ from __future__ import annotations
 import glob
 import json
 import os
+import posixpath
 import re
 import sys
 import time
@@ -243,6 +244,15 @@ class Config:
                 2,
             )
         return path
+
+    def below(self, path: str) -> str | None:
+        """A path from rowstile.toml's folder, with /, as a .gitattributes there names it. None for one outside
+        the folder (another drive, on Windows, or ..): no pattern there matches it."""
+        try:
+            rel = os.path.relpath(path, self.dir).replace(os.sep, "/")
+        except ValueError:
+            return None
+        return None if rel == ".." or rel.startswith("../") else rel
 
     def section(self, name: str) -> dict[str, object]:
         """A [table] of the file (empty if it isn't there, or isn't a table)."""
@@ -1148,8 +1158,23 @@ def git(*args: str) -> str | None:
 
 def at_base(ref: str, path: str) -> str | None:
     """A file's text at a commit (None if it isn't there), for a path relative to here."""
-    rel = os.path.relpath(path).replace(os.sep, "/")
+    try:
+        rel = os.path.relpath(path).replace(os.sep, "/")
+    except ValueError:
+        return None  # on another drive (Windows): not a file of the repository this folder is in
     return git("show", f"{ref}:./{rel}" if not rel.startswith("..") else f"{ref}:{rel}")
+
+
+def in_repository(path: str) -> str:
+    """A path as git names it: from the repository's top folder, with /. Worked out from this folder (git says
+    where it is in the repository), never from the top folder's own path: git gives that one resolved, and on
+    Windows this folder may be reached through a subst drive or a junction, so the two don't start alike. A path
+    on another drive stays as it is."""
+    try:
+        rel = os.path.relpath(path).replace(os.sep, "/")
+    except ValueError:
+        return path.replace(os.sep, "/")
+    return posixpath.normpath(posixpath.join((git("rev-parse", "--show-prefix") or "").strip(), rel))
 
 
 def base_policy(ref: str, path: str) -> tuple[str | None, dict[str, str]]:
@@ -1165,20 +1190,18 @@ def base_tests(cfg: Config, ref: str) -> dict[str, str]:
     """The test files rowstile.toml names, as they were at a commit."""
     import fnmatch
 
-    root = git("rev-parse", "--show-toplevel")
+    here = git("rev-parse", "--show-prefix")  # this folder, from the top one
     listed = git("ls-tree", "-r", "--name-only", "--full-tree", ref)  # from the top folder, wherever this runs
-    if root is None or listed is None:
+    if here is None or listed is None:
         return {}
-    root = root.strip()
     out: dict[str, str] = {}
     for pattern in cfg.test_globs():
-        full = os.path.normpath(cfg.file(pattern))
-        rel_pattern = os.path.relpath(full, root).replace(os.sep, "/")
+        rel_pattern = in_repository(cfg.file(pattern))
         for name in listed.split("\n"):
             if name and fnmatch.fnmatch(name, rel_pattern):
                 text = git("show", f"{ref}:{name}")
                 if text is not None:
-                    out[relative(os.path.join(root, name)).replace(os.sep, "/")] = text
+                    out[posixpath.relpath(name, here.strip() or ".")] = text  # named as read_tests names it
     return out
 
 
@@ -1254,8 +1277,7 @@ def review_cmd(cfg: Config, args: list[str], opts: dict[str, str], flags: set[st
         sys.stdout.write(review.markdown(r))
     elif "--annotations" in flags:
         # GitHub finds the file from the repository's top folder, wherever in it the review runs
-        top = (git("rev-parse", "--show-toplevel") or "").strip() or os.getcwd()
-        sys.stdout.write(review.annotations(r, os.path.relpath(os.path.abspath(path), top).replace(os.sep, "/")))
+        sys.stdout.write(review.annotations(r, in_repository(path)))
     else:
         sys.stdout.write(review.text(r))
     return 0
@@ -1381,9 +1403,8 @@ def migrate_cmd(
     for f in written:
         print(f"wrote {relative(f)}")
     print(f"wrote {relative(lock)}")
-    rel: Callable[[str], str] = lambda p: os.path.relpath(p, cfg.dir).replace(os.sep, "/")
     marked = (
-        migrations.mark_generated(cfg.dir, migrations.generated_patterns(tool, rel(folder), rel(lock)))
+        migrations.mark_generated(cfg.dir, migrations.generated_patterns(tool, cfg.below(folder), cfg.below(lock)))
         if cfg.path
         else None
     )

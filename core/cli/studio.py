@@ -62,6 +62,14 @@ class Problem(Exception):
         self.status = status
 
 
+def shown(path: str) -> str:
+    """A file's path from here, for the page; as it is when it is on another drive (Windows)."""
+    try:
+        return os.path.relpath(path)
+    except ValueError:
+        return path
+
+
 def principal(who: str | None) -> Who:
     """'user:42' -> ('user', '42'); 'anyone' or '' -> (None, None): nobody."""
     who = (who or "").strip()
@@ -178,7 +186,7 @@ class Studio:
                 "types": types,
                 "tables": list[Json](tables),
                 "principals": principals,
-                "policy_file": os.path.relpath(self.policy_path) if self.policy_path else None,
+                "policy_file": shown(self.policy_path) if self.policy_path else None,
             }
 
         return self.work(run)

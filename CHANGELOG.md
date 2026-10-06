@@ -7,6 +7,17 @@ Each release upgrades from the one before it. How releases are numbered and made
 
 ## Unreleased
 
+### Fixed
+
+- On Windows, three commands ended in a Python traceback when two paths were on different drives. `rowstile
+  review` now works from a `subst` drive or a folder reached through a junction (it stopped with test files
+  named in `rowstile.toml`, and with `--annotations`); for a policy on another drive than the one it runs on,
+  it reviews the whole policy as new, as for any file outside the repository. `rowstile migrate --dir` with a
+  folder on another drive wrote the migration and the lock file, then stopped: it now finishes. Studio shows
+  such a policy's path as it is.
+- `rowstile migrate` no longer adds a line to `.gitattributes` for a migrations folder or a lock file outside
+  `rowstile.toml`'s folder: such a line (`../migrations/*_authz_*`) matches nothing.
+
 ## 0.1.0 (alpha)
 
 **rowfence is now rowstile**, and 0.1.0-alpha.2 is its first release under the new name (0.1.0-alpha.1 was

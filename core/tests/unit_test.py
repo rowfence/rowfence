@@ -694,6 +694,74 @@ class Command(unittest.TestCase):
                 with self.assertRaises(SystemExit):
                     rowstile_cli.Config(os.path.join(d, "rowstile.toml"), {}).inside("x.authz", "policy")
 
+    def test_a_path_on_another_drive_is_said_as_it_is(self) -> None:
+        # on Windows, relpath raises for a path on another drive than the folder it is told from: the command names
+        # the path as it was given, the review reads nothing of it from git, no .gitattributes names it
+        import studio
+
+        other_drive = mock.patch.object(
+            os.path, "relpath", side_effect=ValueError("path is on mount 'R:', start on mount 'C:'")
+        )
+        path = os.path.join(os.sep, "elsewhere", "policy.authz")
+        with tempfile.TemporaryDirectory() as d, other_drive:
+            self.assertIsNone(rowstile_cli.at_base("HEAD", path))
+            self.assertEqual(rowstile_cli.in_repository(path), "/elsewhere/policy.authz")
+            self.assertEqual(rowstile_cli.relative(path), path)
+            self.assertEqual(studio.shown(path), path)
+            self.assertIsNone(rowstile_cli.Config(os.path.join(d, "rowstile.toml"), {}).below(path))
+
+    def test_only_what_is_below_is_marked_generated(self) -> None:
+        # .gitattributes names files from its own folder: a migrations folder or a lock file outside it gets no line
+        import migrations
+
+        with tempfile.TemporaryDirectory() as d:
+            cfg = rowstile_cli.Config(os.path.join(d, "p", "rowstile.toml"), {})
+            self.assertEqual(cfg.below(os.path.join(d, "p", "db", "policy.lock")), "db/policy.lock")
+            self.assertIsNone(cfg.below(os.path.join(d, "migrations")))
+            self.assertIsNone(cfg.below(d))
+        self.assertEqual(
+            migrations.generated_patterns("prisma", "prisma/migrations", "db/policy.lock"),
+            ["db/policy.lock linguist-generated=true", "prisma/migrations/*_authz_*/** linguist-generated=true"],
+        )
+        self.assertEqual(
+            migrations.generated_patterns("sql", None, "db/policy.lock"), ["db/policy.lock linguist-generated=true"]
+        )
+        self.assertEqual(migrations.generated_patterns("sql", None, None), [])
+
+    def test_review_names_files_from_this_folder_not_from_the_top_folders_path(self) -> None:
+        # git names the top folder by its resolved path; through a subst drive or a junction (Windows) this
+        # process reaches the same folder by another one, even on another drive, so the two are never compared
+        import shutil
+
+        if shutil.which("git") is None:
+            self.skipTest("git is not installed")
+        real_git = rowstile_cli.git
+
+        def git(*args: str) -> str | None:
+            return "Z:/elsewhere\n" if args == ("rev-parse", "--show-toplevel") else real_git(*args)
+
+        before = os.getcwd()
+        with tempfile.TemporaryDirectory() as d:
+            os.makedirs(os.path.join(d, "p", "tests"))
+            with open(os.path.join(d, "p", "tests", "a.authz"), "w", encoding="utf-8", newline="\n") as fh:
+                fh.write("test one\n")
+            for args in (["init", "-q"], ["add", "-A"], ["commit", "-q", "-m", "base"]):
+                subprocess.run(
+                    ["git", "-c", "user.name=t", "-c", "user.email=t@example.com", *args],
+                    cwd=d,
+                    check=True,
+                    capture_output=True,
+                )
+            os.chdir(os.path.join(d, "p"))  # the project in a folder of the repository
+            try:
+                cfg = rowstile_cli.Config(os.path.join(os.getcwd(), "rowstile.toml"), {"tests": ["tests/*.authz"]})
+                with mock.patch.object(rowstile_cli, "git", git):
+                    self.assertEqual(rowstile_cli.base_tests(cfg, "HEAD"), {"tests/a.authz": "test one\n"})
+                    self.assertEqual(rowstile_cli.in_repository(os.path.join("tests", "a.authz")), "p/tests/a.authz")
+                self.assertEqual(list(rowstile_cli.read_tests(cfg.tests())), ["tests/a.authz"])
+            finally:
+                os.chdir(before)
+
     def test_typescript_sdk_gets_only_the_names(self) -> None:
         # an app on the TypeScript SDK (a @rowstile/* dependency) gets the policy's names, registered with it
         with tempfile.TemporaryDirectory() as d:
