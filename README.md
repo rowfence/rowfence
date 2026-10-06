@@ -87,6 +87,8 @@ packages and says which line to change.
 
 - [Getting started](docs/getting-started.md): from a schema to a policy, its tests, the edit loop and the
   first migration, in about fifteen minutes.
+- [rowstile and the alternatives](docs/comparison.md): authorization services, policy engines, rules in the
+  ORM, row-level security by hand; and [how rowstile is checked](docs/how-it-is-checked.md).
 - [Your stack](docs/stacks/README.md): FastAPI, Next.js, other Node and Python apps, and the SQL any other
   language sends.
 - [Cookbook](docs/cookbook.md), [troubleshooting](docs/troubleshooting.md), [running
