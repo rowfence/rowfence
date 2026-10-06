@@ -271,6 +271,19 @@ def main() -> None:
         [(m[0], m[1]) for m in work(behind_an_expression)] == [("app.team_members", ("user_id",))],
     )
 
+    def capitals(d: Db) -> list[tuple[str, ...]]:
+        # names with capital letters, as Prisma writes them: the table is looked up by its quoted name
+        d.script(
+            'CREATE TABLE app."TeamMember" ("teamId" bigint, "userId" bigint, PRIMARY KEY ("teamId", "userId")); '
+            'CREATE INDEX ON app."TeamMember" ("userId")'
+        )
+        return sorted(perf.table_indexes(d, "app.TeamMember"))
+
+    check(
+        "a table whose name has capital letters: its indexes are found",
+        work(capitals) == [("teamId", "userId"), ("userId",)],
+    )
+
     print("-- plans and bench")
     p = work(lambda d: perf.plans(d, database.policy_compiler(*database.applied(d)), ("user", "1")))
     tables = {t["table"]: t for t in p["tables"]}

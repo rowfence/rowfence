@@ -115,7 +115,7 @@ def table_indexes(db: Db, table: str) -> list[tuple[str, ...]]:
         "SELECT array(SELECT a.attname::text FROM unnest(i.indkey::int2[]) WITH ORDINALITY k(n, o) "
         "LEFT JOIN pg_catalog.pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = k.n ORDER BY k.o) AS cols "
         "FROM pg_catalog.pg_index i WHERE i.indrelid = to_regclass($1) AND i.indpred IS NULL AND i.indisvalid",
-        [table],
+        [qt(table)],  # quoted: to_regclass folds a bare name to lower case, and "TeamMember" is then not found
     )
     out: list[tuple[str, ...]] = []
     for r in rows:
@@ -354,7 +354,7 @@ def plain_column(db: Db, c: Compiler, t: Type) -> str | None:
     rows = db.rows(
         "SELECT attname::text AS a FROM pg_catalog.pg_attribute WHERE attrelid = to_regclass($1) AND attnum > 0 "
         "AND NOT attisdropped AND attgenerated = '' ORDER BY attnum",
-        [t.table],
+        [qt(t.table)],
     )
     return next((text(r, "a") for r in rows if r["a"] not in used), None)
 
