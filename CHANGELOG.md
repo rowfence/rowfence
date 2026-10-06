@@ -7,8 +7,20 @@ Each release upgrades from the one before it. How releases are numbered and made
 
 ## Unreleased
 
+### Changed
+
+- `@rowstile/prisma`: a Prisma extension added to the client `authz()` returns is placed before `authz()`,
+  which stays the last one. Your query hooks then see the errors `authz()` makes (`Refused`, `NotFound`) where
+  they saw Prisma's `P2025`.
+
 ### Fixed
 
+- `@rowstile/prisma`: the client `authz()` was made from is refused inside your own query extensions too. In a
+  hook added after `authz()` it was let through, and Prisma could then answer the `findUnique` calls that
+  several requests made on it in one tick with one query, signed in as the first caller: a request could be
+  given a row its user may not see. An app that only uses the client `authz()` returns was not affected.
+- `@rowstile/prisma`: a query hook of yours runs once for a `findUnique` or a `findUniqueOrThrow`. One added
+  before `authz()` ran twice; one added after it was not called at all, so a filter it added was skipped.
 - On Windows, three commands ended in a Python traceback when two paths were on different drives. `rowstile
   review` now works from a `subst` drive or a folder reached through a junction (it stopped with test files
   named in `rowstile.toml`, and with `--annotations`); for a policy on another drive than the one it runs on,

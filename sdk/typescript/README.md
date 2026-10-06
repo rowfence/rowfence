@@ -57,7 +57,9 @@ Traps it handles:
   transactions, from the first caller's context. `authz()` runs each `findUnique` in a transaction of its own,
   and refuses `$transaction([...])` (use `$transaction(async (tx) => ...)`), so no query runs as someone else.
   Use the client `$extends(authz())` returns, and only that one: the client it was made from is refused
-  whenever it is used.
+  whenever it is used, inside your own extensions too. An extension you add to the client `authz()` returns is
+  placed before it, so `authz()` stays the last one: each of your query hooks runs once for a call, and sees
+  the errors `authz()` makes (`Refused`, `NotFound`).
 - **Inserts that read the row back** (`RETURNING`, Prisma's `create`) also need the select rule: Postgres's own
   message comes back as `Refused` naming the select rule.
 - **Prisma's promises are lazy**: `actingAs` and `job` await what they return inside their scope.

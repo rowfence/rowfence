@@ -13,7 +13,9 @@
  *
  * Use the client `$extends(authz())` returns, and only that one: the client it was made from is refused
  * whenever it is used (Prisma answers the findUnique calls of one tick with one query, signed in as whoever
- * called first).
+ * called first). That holds inside the app's own extensions too, on either side of authz(): an extension added
+ * to the client authz() returns is placed before it, so authz() stays the last one, and every hook of the
+ * app's runs once for each call, outside what authz() lets through.
  */
 import { AsyncLocalStorage } from "node:async_hooks";
 import { Prisma } from "@prisma/client/extension";
@@ -135,7 +137,24 @@ interface ModelInfo { dbName?: string | null; schema?: string | null }
 interface RawClient {
   $queryRawUnsafe(query: string, ...values: unknown[]): Promise<any[]>;
   $transaction<R>(fn: (tx: unknown) => Promise<R>): Promise<R>;
+  $extends(extension: unknown): RawClient;
   _runtimeDataModel?: { models: Record<string, ModelInfo> };
+}
+
+// Prisma's own, not in its types. A hook's query() takes the request's parameters as a second argument, which is
+// how an extension has the rest of the chain run in a transaction; a transaction's client makes its promises
+// with a factory that hands the transaction to their callback.
+interface InternalParams { transaction?: { kind?: string } }
+type Rest = (args: unknown, params?: InternalParams) => Promise<unknown>;
+async function transactionOf(tx: unknown): Promise<{ kind?: string }> {
+  let found: { kind?: string } | undefined;
+  const make = (tx as { _createPrismaPromise?: (cb: (t?: { kind?: string }) => Promise<void>) => PromiseLike<void> })._createPrismaPromise;
+  if (typeof make === "function") await make(async (t) => { found = t; });
+  if (found?.kind !== "itx") {
+    throw new Error("@rowstile/prisma: this version of Prisma starts its transactions another way; " +
+      "report it at https://github.com/rowstile/rowstile/issues with the version of @prisma/client");
+  }
+  return found;
 }
 
 /** The runtime's functions on a Prisma client, and db.$authz's type. */
@@ -186,8 +205,10 @@ export function authz(options: ExtensionOptions = {}) {
       if (v && typeof v === "object" && Object.values(v).every(isScalar)) return Object.values(v) as Id;
       return undefined;
     };
+    // through the client this returns (set below), whose last hook lets the query through
+    let self: RawClient = raw;
     const q: Queryable = {
-      query: async (text, values = []) => ({ rows: await extended(() => raw.$queryRawUnsafe(text, ...values)) }),
+      query: async (text, values = []) => ({ rows: await self.$queryRawUnsafe(text, ...values) }),
     };
     const c = calls(q);
     const $authz: PrismaAuthz = {
@@ -201,7 +222,7 @@ export function authz(options: ExtensionOptions = {}) {
       name: "rowstile",
       query: {
         async $allOperations({ model, operation, args, query, ...rest }) {
-          const internal = (rest as { __internalParams?: { transaction?: { kind?: string } } }).__internalParams;
+          const internal = (rest as { __internalParams?: InternalParams }).__internalParams;
           if (internal?.transaction?.kind === "batch") {
             // Prisma starts an array's transaction later, from whichever request came first in that tick: it
             // might sign in as someone else
@@ -211,10 +232,11 @@ export function authz(options: ExtensionOptions = {}) {
           try {
             if (!internal?.transaction && model && (operation === "findUnique" || operation === "findUniqueOrThrow")) {
               // Prisma answers the findUnique calls of one tick together, from the first caller's context: run each
-              // in an interactive transaction of its own, which begins (and signs in) in this caller's context
-              const delegate = model.charAt(0).toLowerCase() + model.slice(1);
+              // in an interactive transaction of its own, which begins (and signs in) in this caller's context.
+              // What is left of the call (this hook is the last: Prisma's own work) runs in it; calling the model
+              // again on the transaction would run every hook of the app's a second time
               return await extended(() => raw.$transaction(async (tx) =>
-                (tx as unknown as Record<string, Record<string, (a: unknown) => Promise<unknown>>>)[delegate][operation](args)));
+                (query as Rest)(args, { ...internal, transaction: await transactionOf(tx) })));
             }
             return await extended(() => query(args));
           } catch (e) {
@@ -237,7 +259,7 @@ export function authz(options: ExtensionOptions = {}) {
       client: { $authz },
     });
     // a second layer, so that $parent has the hooks above: transactions begin through this client too. It
-    // changes nothing in $transaction's type.
+    // changes nothing in $transaction's type, nor in $extends's.
     // The transaction begins inside the mark, but the app's callback runs outside it: the callback is the app's
     // code, and a client not extended with authz() is refused there as anywhere (its findUnique calls would be
     // answered together). Queries through tx go through the transaction, which needs no mark. What the callback
@@ -250,8 +272,18 @@ export function authz(options: ExtensionOptions = {}) {
           ? (tx: unknown) => through.exit(async () => await (fn as (tx: unknown) => unknown)(tx)) : fn;
         return extended(() => parent.$transaction(app, ...rest));
       },
+      // An extension added to this client goes before authz(), which is then applied again: Prisma calls query
+      // hooks in the order they were added, so a hook added after authz()'s would run inside what it lets
+      // through, and the client authz() was made from would not be refused there. (A function is called with
+      // this client, as Prisma does: what it adds comes back here.)
+      $extends(this: unknown, extension: unknown) {
+        if (typeof extension === "function") return (extension as (client: unknown) => unknown)(this);
+        return raw.$extends(extension).$extends(authz(options));
+      },
     };
-    return hooks.$extends({ name: "rowstile-transactions", client: transactions as {} });
+    const out = hooks.$extends({ name: "rowstile-transactions", client: transactions as {} });
+    self = out as unknown as RawClient;
+    return out;
   });
 }
 
