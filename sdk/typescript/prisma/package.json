@@ -3,6 +3,8 @@
   "version": "0.1.0-dev",
   "description": "rowstile with Prisma: a client extension that signs every query in, and turns refusals into errors",
   "license": "Apache-2.0",
+  "homepage": "https://rowstile.dev",
+  "keywords": ["rowstile", "postgres", "postgresql", "authorization", "row-level-security", "rls", "permissions", "access-control", "rbac", "rebac", "multi-tenant", "prisma"],
   "repository": { "type": "git", "url": "git+https://github.com/rowstile/rowstile.git", "directory": "sdk/typescript/prisma" },
   "type": "module",
   "main": "./dist/index.js",

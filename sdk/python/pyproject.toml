@@ -6,7 +6,35 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
+keywords = [
+    "postgres", "postgresql", "authorization", "row-level-security", "rls", "permissions", "access-control",
+    "rbac", "rebac", "multi-tenant", "fastapi", "sqlalchemy", "alembic",
+]
+# no licence classifier: `license` is an SPDX expression, and the two don't go together
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Framework :: FastAPI",
+    "Framework :: Pytest",
+    "Topic :: Database",
+    "Topic :: Security",
+    "Typing :: Typed",
+]
 dependencies = []
+
+[project.urls]
+Homepage = "https://rowstile.dev"
+Documentation = "https://rowstile.dev/getting-started"
+Repository = "https://github.com/rowstile/rowstile"
+Changelog = "https://rowstile.dev/changelog"
+Issues = "https://github.com/rowstile/rowstile/issues"
 
 [project.optional-dependencies]
 fastapi = ["fastapi>=0.100", "sqlalchemy[asyncio]>=2.0"]

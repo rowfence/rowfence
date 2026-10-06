@@ -195,6 +195,8 @@ function platform(key) {
     version,
     description: `The Python the rowstile command runs on, for ${key} (python-build-standalone ${PYTHON}, trimmed)`,
     license: "Apache-2.0 AND PSF-2.0",
+    homepage: "https://rowstile.dev",
+    keywords: ["rowstile"],
     repository: { type: "git", url: "git+https://github.com/rowstile/rowstile.git", directory: "packaging/npm" },
     os: [target.os],
     cpu: [target.cpu],
