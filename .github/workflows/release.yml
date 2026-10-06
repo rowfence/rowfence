@@ -214,3 +214,26 @@ jobs:
           else
             npx --yes ovsx@1.2.0 publish rowstile.vsix
           fi
+
+  # The MCP server's entry in the official registry (registry.modelcontextprotocol.io): server.json, which names
+  # the npm package. The registry reads `mcpName` in the package of that version, so this follows the npm job. It
+  # believes this workflow's own token for names under io.github.rowstile/, so there is no secret. A dry run
+  # checks the file and publishes nothing. The registry is a preview and may change or be away: this job never
+  # fails a release (run it again once the registry answers).
+  mcp:
+    needs: [check, npm]
+    runs-on: ubuntu-latest            # the publisher below is the one built for x64
+    continue-on-error: true
+    permissions: {id-token: write, contents: read}
+    env:
+      PUBLISHER: "1.8.1"
+      SHA256: a06c9096dcb9727c13555b6be26c7effa707b01f06a4c561ba7a3635443cf2cc
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
+      - run: |
+          curl -fsSL --retry 4 -o mcp-publisher.tar.gz "https://github.com/modelcontextprotocol/registry/releases/download/v$PUBLISHER/mcp-publisher_linux_amd64.tar.gz"
+          echo "$SHA256  mcp-publisher.tar.gz" | sha256sum -c -
+          tar xzf mcp-publisher.tar.gz mcp-publisher
+      - run: ./mcp-publisher validate
+      - if: needs.check.outputs.publish == 'public'
+        run: ./mcp-publisher login github-oidc && ./mcp-publisher publish

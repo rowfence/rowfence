@@ -32,6 +32,7 @@ PLACES = [
     (["sdk/typescript/*/package.json"], r'^  "version": "([^"]+)"'),
     (["sdk/typescript/*/package.json", "package-lock.json"], r'"@rowstile/[a-z-]+": "(\d[^"]*)"'),  # optional
     (["package-lock.json"], r'"name": "@rowstile/[a-z-]+",\n\s+"version": "([^"]+)"'),
+    (["server.json"], r'^ +"version": "([^"]+)"'),  # the MCP registry's entry: its own version, and the package's
     (["review-ci/github/action.yml"], r'^    default: "(\d[^"]*)"'),
     (["review-ci/github/action.yml", "docs/reference/review.md"], r"review-ci/github@v(\S+)"),
     (["review-ci/gitlab/rowstile-review.gitlab-ci.yml"], r'ROWSTILE_VERSION: "([^"]+)"'),

@@ -7,6 +7,12 @@ Each release upgrades from the one before it. How releases are numbered and made
 
 ## Unreleased
 
+### Added
+
+- Each release publishes the MCP server's entry (`rowstile mcp`) to the official MCP registry, as
+  `io.github.rowstile/rowstile`, so clients that find servers there can add it by name. The entry names the
+  npm package.
+
 ## 0.1.0 (alpha)
 
 **rowfence is now rowstile**, and 0.1.0-alpha.2 is its first release under the new name (0.1.0-alpha.1 was

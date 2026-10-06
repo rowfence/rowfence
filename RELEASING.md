@@ -84,7 +84,9 @@ A build from `main` records its version with a hash of the compiler's sources (`
 4. **The release workflow** (`.github/workflows/release.yml`) runs on the tag. It checks that the tag and the
    version agree, runs the unit tests and the packaging tests, then publishes: the Python package, the npm
    packages, the image, and a GitHub release holding the wheel, the sdist, the npm launcher and the VS Code
-   extension, with the changelog's section as its notes. Where it publishes follows the repository: private
+   extension, with the changelog's section as its notes. Last, the MCP server's entry in the official registry
+   (`server.json`): that registry is a preview, and a failure there never fails the release (run the `mcp` job
+   again). Where it publishes follows the repository: private
    places while it is private, PyPI, npm and ghcr.io once public. The tag also deploys the docs site at
    rowstile.dev (`.github/workflows/site.yml`), built from the tag, when the release is what a plain install
    gets, or while no final release exists: `gh workflow run site.yml -f tag=vX.Y.Z` deploys another one.
