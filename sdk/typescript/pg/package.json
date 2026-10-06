@@ -1,6 +1,6 @@
 {
   "name": "@rowstile/pg",
-  "version": "0.1.0-dev",
+  "version": "0.1.0-alpha.4",
   "description": "rowstile with node-postgres (pg): transactions signed in as the request's user",
   "license": "Apache-2.0",
   "repository": { "type": "git", "url": "git+https://github.com/rowstile/rowstile.git", "directory": "sdk/typescript/pg" },
@@ -10,6 +10,6 @@
   "exports": { ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" } },
   "files": ["dist"],
   "sideEffects": false,
-  "dependencies": { "@rowstile/client": "0.1.0-dev" },
+  "dependencies": { "@rowstile/client": "0.1.0-alpha.4" },
   "peerDependencies": { "pg": ">=8" }
 }
