@@ -79,6 +79,8 @@ export default defineConfig({
   cacheDir: "./.vitepress/cache",
   cleanUrls: true,
   sitemap: { hostname: ORIGIN },
+  // the mark (site/assets/mark.svg, which build.mjs puts at the site's root): the tab's icon and the navigation's
+  head: [["link", { rel: "icon", type: "image/svg+xml", href: "/mark.svg" }]],
   vite: { plugins: [vueFromSite] },
   markdown: {
     languages: [...sql, { ...authz, name: "authz", embeddedLangs: ["sql"] }],
@@ -114,9 +116,15 @@ export default defineConfig({
       ["meta", { property: "og:title", content: title }],
       ["meta", { property: "og:description", content: description }],
       ["meta", { property: "og:url", content: href }],
+      // the card (site/assets/card.png): one image for every page
+      ["meta", { property: "og:image", content: `${ORIGIN}/card.png` }],
+      ["meta", { property: "og:image:width", content: "1200" }],
+      ["meta", { property: "og:image:height", content: "630" }],
+      ["meta", { name: "twitter:card", content: "summary_large_image" }],
     ];
   },
   themeConfig: {
+    logo: "/mark.svg",
     nav: [
       { text: "Guide", link: "/getting-started" },
       { text: "Reference", link: "/reference/language" },

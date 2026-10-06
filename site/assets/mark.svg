@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="rowstile">
+  <!-- three rows; the middle one has a gate, ajar -->
+  <rect width="128" height="128" rx="26" fill="#14213d"/>
+  <rect x="26" y="33" width="76" height="12" rx="6" fill="#e8ecf4"/>
+  <rect x="26" y="58" width="30" height="12" rx="6" fill="#e8ecf4"/>
+  <rect x="64" y="58" width="38" height="12" rx="6" fill="#fca311" transform="rotate(-32 70 64)"/>
+  <rect x="26" y="83" width="76" height="12" rx="6" fill="#e8ecf4"/>
+</svg>

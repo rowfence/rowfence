@@ -134,7 +134,9 @@ User-facing docs: `README.md`, then `docs/reference/` (read them first). Terms i
   `llms.txt` pointing to those, `llms-full.txt`. Its own pages: `index.md` and `problems/` (the SDKs' problem
   `type` URLs). A new doc page goes in `PAGES`, with its sentence in `DESCRIPTIONS` (what a search result and a
   shared link show; a page without one fails the build), and in the sidebar (`.vitepress/config.mts`). `build.mjs`
-  also checks that the sitemap lists every page, and writes `robots.txt`.
+  also checks that the sitemap lists every page, and writes `robots.txt`. `assets/` holds the mark (`mark.svg`:
+  the tab's icon, the navigation's) and what is rendered from it and committed, by `node site/assets/render.mjs`
+  with a headless Chrome or Edge: `card.png` (what a shared link shows, from `card.html`) and `editor/icon.png`.
   `.github/workflows/site.yml` deploys it to GitHub Pages (rowstile.dev), built from a release tag
 - `.github/workflows/ci.yml` — on each push: `tests/unit_test.py` and the type checks, every suite on PG 16
   (`ci.sh`) and what depends on the version on 17 and 18 (`ci.sh --short`), the examples, the conformance suites,
