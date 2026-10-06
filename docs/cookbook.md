@@ -27,16 +27,31 @@ column, a link table, or shares people make); a **permission** combines relation
 
 - [Sharing a row with a person or a team, for a while, and share links](cookbook/sharing-and-links.md):
   `shared by share`, `authz.share()`, `authz.create_link()`.
+- [Sharing like Google Docs: private, shared with people, anyone with the link, public](cookbook/google-docs-sharing.md):
+  a `visibility` column beside shares and links.
+- [Access on request: ask, approve, and it ends by itself](cookbook/access-on-request.md):
+  `authz.request_access()`, `authz.decide_request()`.
+- [Who has access to this row, why, and who gave it](cookbook/who-has-access.md): `authz.who()`,
+  `authz.list_shares()`, `authz.explain()`.
 
-## Tenants
+## Tenants and roles
 
+- [Multi-tenant row-level security: organisations, workspaces, projects](cookbook/multi-tenant-app.md): the
+  tenant reached through the rows, and an invariant proved.
 - [Tenant isolation, with keys of two columns](cookbook/tenants.md): every row in its organisation, admins
   and members.
+- [Admin, member and guest roles per organisation, and roles the admins make](cookbook/roles-per-organization.md):
+  roles from a column, and custom roles.
 
 ## Rules on the row, and who writes
 
 - [Rules that depend on the row: read-only announcement channels](cookbook/conditions-on-the-row.md): `{SQL}`
   conditions.
+- [Soft-deleted and archived rows: read-only archives, and a trash the owner restores from](cookbook/archived-and-deleted.md):
+  conditions for a row's state.
+- [Hiding a column from some users: a masked salary](cookbook/hiding-a-column.md): a masked view.
+- [Letting support staff see what a user sees, and emergency access](cookbook/support-and-emergency-access.md):
+  `authz.view_as()`, `authz.break_glass()`.
 - [Permissions for services and bots, not only users](cookbook/bots-and-services.md): principals with their
   own API keys.
 - [Blocking a user: nobody writes to someone who blocked them](cookbook/blocking.md): following a relation to

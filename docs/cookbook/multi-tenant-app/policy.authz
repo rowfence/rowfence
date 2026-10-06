@@ -1,0 +1,45 @@
+-- A multi-tenant app (docs/cookbook/multi-tenant-app.md): an organisation's workspaces and projects are seen by
+-- its people, and by nobody else.
+app role app_user
+
+type user = app.users
+
+type org = app.orgs
+  member : user = app.org_members(org_id -> user_id)
+  admin  : user = app.org_members(org_id -> user_id) where {role = 'admin'}
+
+  can manage = admin
+  can view   = manage or member
+
+type workspace = app.workspaces
+  org    : org  = org_id
+  member : user = app.workspace_members(workspace_id -> user_id)
+
+  can manage = org.manage
+  can view   = manage or (member and org.view)
+
+type project = app.projects
+  workspace : workspace = workspace_id
+
+  can edit = workspace.view
+  can view = edit
+
+rules app.orgs
+  select : view
+
+rules app.workspaces
+  select        : view
+  insert        : org.manage
+  update        : manage
+  update org_id : nobody
+  delete        : manage
+
+rules app.projects
+  select                    : view
+  insert                    : workspace.view
+  update                    : edit
+  update workspace_id after : workspace.view
+  delete                    : workspace.manage
+
+invariants
+  never workspace: view and not org.view

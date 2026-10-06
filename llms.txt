@@ -63,7 +63,7 @@ rules app.folders
 - [Speed and limits](docs/reference/limits.md): measured speed, and what it doesn't do
 - [Installing](docs/installing.md): npm, pip or the image; alphas and release candidates; from the repository
 - [Getting started](docs/getting-started.md): from a schema to a policy, tests, the dev loop and migrations (run as written by the tests)
-- [Cookbook](docs/cookbook.md): tested patterns (teams inside teams, inheritance that stops, sharing for a while and share links, denies, tenants, bots, blocking, live updates)
+- [Cookbook](docs/cookbook.md): eighteen tested recipes, a page each (tenants, roles, teams inside teams, folders that inherit, sharing and links, requests, masks, soft deletes, bots, blocking, live updates)
 - [Troubleshooting](docs/troubleshooting.md): what people run into, by what they see
 - [Running rowstile](docs/operations.md): configuration, behind a pooler, deploying a change, upgrading, backups, retention, what to watch
 - [Managed Postgres](docs/managed-postgres.md): the setup on a managed service; Neon and Supabase, as tried

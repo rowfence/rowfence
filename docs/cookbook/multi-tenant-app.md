@@ -1,0 +1,92 @@
+# Multi-tenant row-level security: organisations, workspaces, projects
+
+Each organisation is a tenant. Its workspaces and the projects in them are seen by its own people, and by
+nobody else. The tenant check is written once, where the types are, so no query has to remember
+`WHERE org_id = ...`.
+
+```authz
+type org = app.orgs
+  member : user = app.org_members(org_id -> user_id)
+  admin  : user = app.org_members(org_id -> user_id) where {role = 'admin'}
+
+  can manage = admin
+  can view   = manage or member
+
+type workspace = app.workspaces
+  org    : org  = org_id
+  member : user = app.workspace_members(workspace_id -> user_id)
+
+  can manage = org.manage
+  can view   = manage or (member and org.view)
+
+type project = app.projects
+  workspace : workspace = workspace_id
+
+  can edit = workspace.view
+  can view = edit
+```
+
+- A project has no `org_id`. `workspace.view` follows it to its workspace, and `org.manage` and `org.view`
+  follow the workspace to its organisation: the tenant is reached through the rows, not copied onto each one.
+- `member and org.view`: being put in a workspace gives nothing to someone who isn't in its organisation.
+- Admins of the organisation manage every workspace in it; members see the ones they were added to.
+
+```authz
+rules app.projects
+  select                    : view
+  insert                    : workspace.view
+  update                    : edit
+  update workspace_id after : workspace.view
+  delete                    : workspace.manage
+```
+
+A project moves only to a workspace its mover may see, so never across tenants.
+
+## Proved, not only tested
+
+An invariant says what must never be true, and `rowstile prove` looks for a small world in which it is:
+
+```authz
+invariants
+  never workspace: view and not org.view
+```
+
+    $ rowstile prove policy.authz
+    line 45: never workspace: view and not org.view
+      ok   holds in every world tried (400 worlds, up to 4 of each type)
+
+The prover reads the policy, not the tables: to it `admin` and `member` are two relations, and it doesn't know
+that every admin row is a member row. With `can view = member` on the organisation it finds an admin who
+isn't a member, and says so. `can view = manage or member` writes the fact into the policy.
+
+## Tested
+
+Bo is in the Design workspace of Acme, Cy is in Acme but not in Design, Dee runs another organisation:
+
+```authz
+test "a project is seen in its organisation, by the people of its workspace"
+  user $bo can edit project $p
+  user $ann can edit project $p
+  user $cy cannot view project $p
+  user $dee cannot view project $p
+  as user $dee sees 0 {SELECT FROM app.projects WHERE workspace_id = $design}
+  as user $dee refused {INSERT INTO app.projects (workspace_id, name) VALUES ($design, 'Not mine to make')}
+  as user $ann refused {UPDATE app.projects SET workspace_id = $research WHERE id = $p}
+```
+
+```authz
+test "someone put in a workspace without being in its organisation holds nothing"
+  given {INSERT INTO app.workspace_members VALUES ($design, $dee)}
+  user $dee cannot view workspace $design
+```
+
+## Try it
+
+[Open it in the playground](https://rowstile.dev/playground/#e=multi-tenant-app): the tables, the policy and the
+tests, in your browser, with nothing to install. Or take the files of
+[`docs/cookbook/multi-tenant-app/`](multi-tenant-app/) (`schema.sql`, `policy.authz`, `tests.authz`) and run `rowstile dev`.
+CI applies and tests them on every change (`core/tests/cookbook.sh`), and every line shown here is in those
+files.
+
+More: [tenants with a key of two columns](tenants.md), [roles in an organisation](roles-per-organization.md),
+[invariants and `rowstile prove`](../reference/tools.md), [the other recipes](../cookbook.md).

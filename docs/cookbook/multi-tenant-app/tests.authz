@@ -1,0 +1,30 @@
+-- A multi-tenant app (docs/cookbook/multi-tenant-app.md). Each test brings its own rows and rolls them back.
+
+test "a project is seen in its organisation, by the people of its workspace"
+  given ann = {INSERT INTO app.users VALUES (901, 'Ann') RETURNING id}
+  given bo = {INSERT INTO app.users VALUES (902, 'Bo') RETURNING id}
+  given cy = {INSERT INTO app.users VALUES (903, 'Cy') RETURNING id}
+  given dee = {INSERT INTO app.users VALUES (904, 'Dee') RETURNING id}
+  given acme = {INSERT INTO app.orgs VALUES (901, 'Acme') RETURNING id}
+  given globex = {INSERT INTO app.orgs VALUES (902, 'Globex') RETURNING id}
+  given {INSERT INTO app.org_members VALUES ($acme, $ann, 'admin'), ($acme, $bo, 'member'), ($acme, $cy, 'member'), ($globex, $dee, 'admin')}
+  given design = {INSERT INTO app.workspaces (org_id, name) VALUES ($acme, 'Design') RETURNING id}
+  given research = {INSERT INTO app.workspaces (org_id, name) VALUES ($globex, 'Research') RETURNING id}
+  given {INSERT INTO app.workspace_members VALUES ($design, $bo)}
+  given p = {INSERT INTO app.projects (workspace_id, name) VALUES ($design, 'Website') RETURNING id}
+  user $bo can edit project $p
+  user $ann can edit project $p
+  user $cy cannot view project $p
+  user $dee cannot view project $p
+  as user $dee sees 0 {SELECT FROM app.projects WHERE workspace_id = $design}
+  as user $ann allowed {INSERT INTO app.workspaces (org_id, name) VALUES ($acme, 'Sales')}
+  as user $bo refused {INSERT INTO app.workspaces (org_id, name) VALUES ($acme, 'Mine')}
+  as user $dee refused {INSERT INTO app.projects (workspace_id, name) VALUES ($design, 'Not mine to make')}
+  as user $ann refused {UPDATE app.projects SET workspace_id = $research WHERE id = $p}
+
+test "someone put in a workspace without being in its organisation holds nothing"
+  given dee = {INSERT INTO app.users VALUES (904, 'Dee') RETURNING id}
+  given acme = {INSERT INTO app.orgs VALUES (901, 'Acme') RETURNING id}
+  given design = {INSERT INTO app.workspaces (org_id, name) VALUES ($acme, 'Design') RETURNING id}
+  given {INSERT INTO app.workspace_members VALUES ($design, $dee)}
+  user $dee cannot view workspace $design

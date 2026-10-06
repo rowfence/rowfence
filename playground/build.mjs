@@ -70,7 +70,9 @@ export function bundle() {
       policy,
       tests: read("docs", "cookbook", entry.name, "tests.authz"),
       as: "user:1",
-      ask: `SELECT * FROM ${table[1]}`,
+      // what to ask first: the recipe's ask.sql if it has one (a masked column can't be read with *), else the
+      // first table that has rules
+      ask: existsSync(join(book, entry.name, "ask.sql")) ? read("docs", "cookbook", entry.name, "ask.sql").trim() : `SELECT * FROM ${table[1]}`,
     });
   }
   return { compiler, examples };

@@ -1,0 +1,17 @@
+-- Access on request (docs/cookbook/access-on-request.md). The test brings its own rows and rolls them back.
+
+test "ask, and whoever may share decides"
+  given ann = {INSERT INTO app.users VALUES (901, 'Ann') RETURNING id}
+  given bo = {INSERT INTO app.users VALUES (902, 'Bo') RETURNING id}
+  given cy = {INSERT INTO app.users VALUES (903, 'Cy') RETURNING id}
+  given d = {INSERT INTO app.documents (owner_id, title) VALUES ($ann, 'Plans') RETURNING id}
+  user $bo cannot view document $d
+  as user $bo allowed {SELECT authz.request_access('document', $d, 'viewer', 'for the audit', '7 days')}
+  user $bo cannot view document $d
+  as user $cy sees 0 {SELECT FROM authz.pending_requests()}
+  as user $bo refused {SELECT authz.decide_request(r.id, true, 'mine') FROM authz.pending_requests() r}
+  as user $bo sees 1 {SELECT FROM authz.pending_requests()}
+  as user $ann sees 1 {SELECT FROM authz.pending_requests()}
+  as user $ann allowed {SELECT authz.decide_request(r.id, true, 'ok') FROM authz.pending_requests() r}
+  user $bo can view document $d
+  user $cy cannot view document $d

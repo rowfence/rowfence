@@ -1,0 +1,25 @@
+-- Support and emergency access (docs/cookbook/support-and-emergency-access.md). Each test brings its own rows and
+-- rolls them back.
+
+test "a customer's agent may view as them, and nobody else"
+  given ann = {INSERT INTO app.users VALUES (901, 'Ann') RETURNING id}
+  given bo = {INSERT INTO app.users VALUES (902, 'Bo') RETURNING id}
+  given cy = {INSERT INTO app.users VALUES (903, 'Cy') RETURNING id}
+  given {INSERT INTO app.support_assignments VALUES ($ann, $bo)}
+  user $bo can impersonate user $ann
+  user $cy cannot impersonate user $ann
+  user $bo cannot impersonate user $cy
+  as user $bo allowed {SELECT authz.view_as($ann::text, 'ticket 1234')}
+  as user $cy refused {SELECT authz.view_as($ann::text, 'curious')}
+
+test "emergency access: for a while, with a reason"
+  given ann = {INSERT INTO app.users VALUES (901, 'Ann') RETURNING id}
+  given bo = {INSERT INTO app.users VALUES (902, 'Bo') RETURNING id}
+  given cy = {INSERT INTO app.users VALUES (903, 'Cy') RETURNING id}
+  given {INSERT INTO app.support_assignments VALUES ($ann, $bo)}
+  given n = {INSERT INTO app.notes (owner_id, body) VALUES ($ann, 'mine') RETURNING id}
+  user $bo cannot view note $n
+  as user $cy refused {SELECT authz.break_glass('note', $n, 'viewer', 'curious', '1 hour')}
+  as user $bo allowed {SELECT authz.break_glass('note', $n, 'viewer', 'INC-7 outage', '1 hour')}
+  user $bo can view note $n
+  as user $bo refused {UPDATE app.notes SET body = 'changed' WHERE id = $n}

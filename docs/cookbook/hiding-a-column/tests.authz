@@ -1,0 +1,12 @@
+-- Hiding a column (docs/cookbook/hiding-a-column.md). The test brings its own rows and rolls them back.
+
+test "everyone sees the directory; a salary, only the person and their manager"
+  given ann = {INSERT INTO app.users VALUES (901, 'Ann') RETURNING id}
+  given bo = {INSERT INTO app.users VALUES (902, 'Bo') RETURNING id}
+  given cy = {INSERT INTO app.users VALUES (903, 'Cy') RETURNING id}
+  given e = {INSERT INTO app.employees (user_id, manager_id, title, salary) VALUES ($bo, $ann, 'Engineer', 5000) RETURNING id}
+  as user $cy sees 1 {SELECT FROM app.employees_visible WHERE id = $e AND title = 'Engineer' AND salary IS NULL}
+  as user $bo sees 1 {SELECT FROM app.employees_visible WHERE id = $e AND salary = 5000}
+  as user $ann sees 1 {SELECT FROM app.employees_visible WHERE id = $e AND salary = 5000}
+  as user $cy refused {SELECT salary FROM app.employees WHERE id = $e}
+  as user $cy sees 1 {SELECT title FROM app.employees WHERE id = $e}

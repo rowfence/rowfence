@@ -3,7 +3,8 @@
 # docs/cookbook/<name>/: schema.sql (its tables), rows.sql (a few rows, for the playground), policy.authz and
 # tests.authz. For each: the tables and the rows load, the policy applies without a warning, its tests pass
 # (with the rows there, as in the playground), and every line the page shows is in the policy or the tests, so
-# the page can't drift. A page without its folder, or a folder without its page, fails.
+# the page can't drift. Its invariants, if it states any, are proved, and ask.sql, if it has one (what the
+# playground asks first), runs as the app role. A page without its folder, or a folder without its page, fails.
 #   PGHOST=... PGUSER=postgres tests/cookbook.sh
 set -u
 cd "$(dirname "$0")/.."
@@ -44,6 +45,17 @@ for block in blocks:
 PY
 )
   [ -z "$missing" ] && ok "$name: every line its page shows is in its tested policy or tests" || bad "$name: lines not in the policy or tests" "$missing"
+  # a recipe that states invariants shows them proved: rowstile prove finds no small world that breaks one
+  if grep -q '^invariants' "$dir/policy.authz"; then
+    out=$(python3 cli/rowstile_cli.py prove "$dir/policy.authz" 2>&1)
+    if echo "$out" | grep -q '^  ok   holds' && ! echo "$out" | grep -q '^  no  '; then ok "$name: its invariants are proved"; else bad "$name: prove" "$out"; fi
+  fi
+  # the question the playground asks first, as its first user, runs
+  if [ -f "$dir/ask.sql" ]; then
+    out=$({ echo "BEGIN; SET LOCAL ROLE app_user; SELECT authz.act_as('user', '1');"; cat "$dir/ask.sql"; echo "; ROLLBACK;"; } |
+      psql -X -q -At -v ON_ERROR_STOP=1 -d "$db" 2>&1) &&
+      ok "$name: the playground's question runs as the app role" || bad "$name: ask.sql" "$out"
+  fi
   [ -z "${KEEP:-}" ] && dropdb "$db"
 }
 
@@ -65,6 +77,6 @@ for dir in "$BOOK"/*/; do
   [ -f "$dir/policy.authz" ] || continue
   grep -qF "(cookbook/$name.md)" "$BOOK.md" || bad "$name: docs/cookbook.md doesn't link to it"
 done
-[ "$recipes" -ge 10 ] && ok "$recipes recipes" || bad "only $recipes recipes were found"
+[ "$recipes" -ge 18 ] && ok "$recipes recipes" || bad "only $recipes recipes were found"
 
 if [ $fails -eq 0 ]; then echo "cookbook: all passed"; else echo "cookbook: $fails failed"; exit 1; fi

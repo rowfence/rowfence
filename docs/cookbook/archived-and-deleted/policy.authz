@@ -1,0 +1,20 @@
+-- Archived and deleted rows (docs/cookbook/archived-and-deleted.md): an archived document is read and not
+-- changed; a deleted one is in its owner's trash, and gone for everyone else.
+app role app_user
+
+type user = app.users
+
+type document = app.documents
+  owner  : user = owner_id
+  viewer : user shared by share
+
+  can share = owner
+  can view  = owner or (viewer and {deleted_at is null})
+  can edit  = owner and {not archived} and {deleted_at is null}
+
+rules app.documents
+  select          : view
+  insert          : owner
+  update          : owner
+  update title    : edit
+  update owner_id : nobody

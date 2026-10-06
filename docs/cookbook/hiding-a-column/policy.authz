@@ -1,0 +1,15 @@
+-- Hiding a column (docs/cookbook/hiding-a-column.md): everyone signed in sees the directory; a salary is seen
+-- by the person it is paid to and by their manager.
+app role app_user
+
+type user = app.users
+
+type employee = app.employees
+  self    : user = user_id
+  manager : user = manager_id
+
+  can see_salary = self or manager
+
+rules app.employees view app.employees_visible
+  select      : signed_in
+  mask salary : see_salary

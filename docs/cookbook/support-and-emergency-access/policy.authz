@@ -1,0 +1,23 @@
+-- Support and emergency access (docs/cookbook/support-and-emergency-access.md): a customer's support agents may
+-- see the app as that customer, read-only, and give themselves a note for an hour in an emergency; both are
+-- on the record.
+app role app_user
+
+type user = app.users
+  agent : user = app.support_assignments(customer_id -> agent_id)  -- the support agents assigned to this person
+  can impersonate = agent
+
+type note = app.notes
+  owner  : user = owner_id
+  viewer : user shared by share
+
+  can share       = owner
+  can view        = owner or viewer
+  can break_glass = owner.impersonate
+
+rules app.notes
+  select          : view
+  insert          : owner
+  update          : owner
+  update owner_id : nobody
+  delete          : owner

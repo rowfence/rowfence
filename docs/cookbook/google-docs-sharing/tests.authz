@@ -1,0 +1,25 @@
+-- Sharing like Google Docs (docs/cookbook/google-docs-sharing.md). Each test brings its own rows and rolls them back.
+
+test "private, shared with a person, public"
+  given ann = {INSERT INTO app.users VALUES (901, 'Ann') RETURNING id}
+  given bo = {INSERT INTO app.users VALUES (902, 'Bo') RETURNING id}
+  given diary = {INSERT INTO app.documents (owner_id, title) VALUES ($ann, 'Diary') RETURNING id}
+  given blog = {INSERT INTO app.documents (owner_id, title, visibility) VALUES ($ann, 'Blog', 'public') RETURNING id}
+  user $bo cannot view document $diary
+  anyone cannot view document $diary
+  anyone can view document $blog
+  user $bo can view document $blog
+  user $bo cannot edit document $blog
+  as user $ann allowed {SELECT authz.share('document', $diary, 'editor', 'user', $bo)}
+  user $bo can edit document $diary
+  as user $bo refused {UPDATE app.documents SET visibility = 'public' WHERE id = $diary}
+  as user $ann allowed {UPDATE app.documents SET visibility = 'public' WHERE id = $diary}
+  anyone can view document $diary
+
+test "anyone with the link"
+  given ann = {INSERT INTO app.users VALUES (901, 'Ann') RETURNING id}
+  given bo = {INSERT INTO app.users VALUES (902, 'Bo') RETURNING id}
+  given d = {INSERT INTO app.documents (owner_id, title) VALUES ($ann, 'Plans') RETURNING id}
+  as user $bo refused {SELECT authz.create_link('document', $d, 'viewer')}
+  as user $ann allowed {SELECT authz.create_link('document', $d, 'viewer')}
+  as user $ann sees 1 {SELECT FROM authz.list_links('document', $d)}
