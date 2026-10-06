@@ -1,0 +1,14 @@
+# Commits that changed only the layout: `git blame` skips them and shows who last changed what a line says.
+# GitHub's blame view reads this file by itself. In a clone, turn it on once:
+#
+#     git config blame.ignoreRevsFile .git-blame-ignore-revs
+#
+# One full hash per line (git refuses a short one), of a commit already on main: a rebase or a squash gives a
+# commit a new hash, so the line is added in a later pull request. core/tests/unit_test.py checks both.
+
+# Three comments move above their lines, where a formatter leaves the line whole
+4319ffd43fb7b2de047a013e0c5e0185ea008388
+# All Python laid out by ruff format (120 columns): layout only
+3797a7de98b6dfa0f9d0b17d053b3774f9f1b800
+# The stack pages quote the apps' code as it is laid out now
+375345c4b1a234efde9bde78ebe0714f0f8bf3c8

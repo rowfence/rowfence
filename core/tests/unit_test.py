@@ -2743,7 +2743,8 @@ class Editors(unittest.TestCase):
 
 class Layout(unittest.TestCase):
     """One Ruff lays the Python out: the version CI checks with is the one the pre-commit hook runs and the one
-    the rules for contributors name, so a commit the hook lets through passes CI's layout check."""
+    the rules for contributors name, so a commit the hook lets through passes CI's layout check. And the commits
+    that only laid code out, which `git blame` skips, are commits of this history."""
 
     REPO = os.path.dirname(ROOT)
     NAMED_IN = (".github/workflows/ci.yml", ".githooks/pre-commit", "CONTRIBUTING.md", "CLAUDE.md", "ruff.toml")
@@ -2756,6 +2757,30 @@ class Layout(unittest.TestCase):
         ci = versions[".github/workflows/ci.yml"]
         self.assertEqual(len(ci), 1, "CI runs one version of Ruff")
         self.assertEqual({path: found for path, found in versions.items() if found != ci}, {})
+
+    def test_blame_skips_commits_of_main(self) -> None:
+        # .git-blame-ignore-revs: git stops at a line that isn't a full hash, and skips one it doesn't know in silence
+        with open(os.path.join(self.REPO, ".git-blame-ignore-revs"), encoding="utf-8") as fh:
+            revs = [line.strip() for line in fh if line.strip() and not line.startswith("#")]
+        self.assertTrue(revs)
+        self.assertEqual([rev for rev in revs if not re.fullmatch(r"[0-9a-f]{40}", rev)], [], "full hashes only")
+        try:
+            shallow = subprocess.run(
+                ["git", "rev-parse", "--is-shallow-repository"], cwd=self.REPO, capture_output=True, text=True
+            ).stdout.strip()
+        except OSError:
+            shallow = ""
+        if shallow != "false":
+            self.skipTest("the history isn't all here")
+        # an ancestor: a rebase or squash merge gives the commit another hash, and blame would skip nothing
+        lost = [
+            rev
+            for rev in revs
+            if subprocess.run(
+                ["git", "merge-base", "--is-ancestor", rev, "HEAD"], cwd=self.REPO, capture_output=True
+            ).returncode
+        ]
+        self.assertEqual(lost, [], "not in this branch's history: name commits that are on main already")
 
 
 class Executable(unittest.TestCase):

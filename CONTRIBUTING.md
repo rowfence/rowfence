@@ -38,7 +38,9 @@ Fixes go to `main` first, then to the release branch.
 - **Types and layout.** Every Python function says its arguments' and result's types, the code passes ty and
   Ruff, and Ruff lays it out (`uvx ruff@0.15.12 format` before you commit; 120 columns). A pre-commit hook
   refuses staged Python that isn't laid out; turn it on once in your clone with
-  `git config core.hooksPath .githooks`. The checks CI runs:
+  `git config core.hooksPath .githooks`. The commits that only changed the layout are listed in
+  `.git-blame-ignore-revs`: `git config blame.ignoreRevsFile .git-blame-ignore-revs` makes `git blame` skip
+  them (GitHub does already). The checks CI runs:
   `uvx ty@0.0.56 check && uvx ruff@0.15.12 check && uvx ruff@0.15.12 format --check`, from the repository's
   root (`ty.toml`, `ruff.toml`); code that needs packages in its own
   environment: `uv sync --project integrations/fastapi && uvx ty@0.0.56 check --project sdk/python` (and
