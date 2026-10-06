@@ -130,6 +130,19 @@ case "$out" in *"found   Next.js, Prisma (prisma/schema.prisma)"*"added   @rowst
 grep -q 'tool = "prisma"' "$T/k/rowstile.toml" && grep -q 'dir  = "prisma/migrations"' "$T/k/rowstile.toml" && grep -q 'ts = "src/authz.gen.ts"' "$T/k/rowstile.toml" &&
   grep -q '"@rowstile/prisma": "^' "$T/k/package.json" && grep -q '^    "name": "shop"' "$T/k/package.json" && grep -q 'linguist-generated' "$T/k/.gitattributes" &&
   ok "... in rowstile.toml, package.json (its layout kept) and .gitattributes" || bad "init stack files" "$(cat "$T/k/rowstile.toml" "$T/k/package.json")"
+# ...and that the app's client takes a URL of its own, not Prisma's, which is the owner's
+case "$out" in *"process.env.ROWSTILE_APP_URL"*"never the one this command uses"*) ok "... and that the app connects with its own URL, as the app role";;
+  *) bad "init: the app's connection" "$out";; esac
+# in a FastAPI app that got FastAPI through rowstile's extras, with a role of its own name: the stack is found, the
+# role named is the policy's, and rowstile isn't asked for again
+mkdir -p "$T/f"
+printf '[project]\nname = "tracker"\ndependencies = [\n    "rowstile[asyncpg,fastapi,sqlalchemy]>=0.1.0a4",\n]\n' > "$T/f/pyproject.toml"
+printf 'script_location = migrations\n' > "$T/f/alembic.ini"
+out=$(cd "$T/f" && python3 "$OLDPWD/cli/rowstile_cli.py" --db "dbname=$DB" init --schema app --role tracker_app 2>&1)
+case "$out" in *"to your Python dependencies"*|*"(app_user)"*) bad "init in a FastAPI app asks again, or names another role" "$out";;
+  *"found   FastAPI, SQLAlchemy, Alembic"*"Rowstile(app, engine"*"connects as (tracker_app)"*) ok "init finds FastAPI through rowstile's extras, and names the policy's role";;
+  *) bad "init in a FastAPI app" "$out";; esac
+grep -q "(tracker_app)" "$T/f/db/tests/first.authz" && ok "... in the first test file too" || bad "init: the role in the test file" "$(cat "$T/f/db/tests/first.authz")"
 # a schema as Prisma names it (capitals), a column named like an SQL word, a link table named like a permission,
 # one through a unique column, a name with a space, and the migration tool's own table: the draft compiles and applies
 dropdb --if-exists "${DB}_names" 2>/dev/null; createdb "${DB}_names"

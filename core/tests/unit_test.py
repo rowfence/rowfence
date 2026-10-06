@@ -15,9 +15,10 @@ import re
 import subprocess
 import sys
 import tempfile
+import types
 import unittest
-from collections.abc import Sequence
-from typing import ClassVar
+from collections.abc import Callable, Sequence
+from typing import ClassVar, cast
 from unittest import mock
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -466,6 +467,27 @@ class LanguageForms(unittest.TestCase):
         self.assertNotIn("('\"app\".\"users\"', 'id', 'self',", sql)
         self.assertIn("('\"app\".\"users\"', 'boss_id', 'boss',", sql)
 
+    def test_a_column_nobody_may_update_needs_no_rule_of_its_own(self) -> None:
+        # lint asks for a rule on a column a relation reads when the plain `update` rule lets someone change the row.
+        # `update : nobody` lets no one; and the rule lint suggests names `share` only where the type has it (a
+        # suggestion that doesn't compile helps no one)
+        def sql(perms: str, update: str) -> str:
+            text = (
+                errors_prelude()
+                + f"  boss : user = boss_id\n{perms}rules app.users\n  select : edit\n  update : {update}\n"
+            )
+            return Compiler(parse_policy(text)).compile("x")
+
+        row = "('\"app\".\"users\"', 'boss_id', 'user.boss', '[^']*', '%s')"
+        self.assertRegex(
+            sql("  can edit = boss\n", "edit"), re.escape(row % "nobody").replace(re.escape("[^']*"), "[^']*")
+        )
+        self.assertRegex(
+            sql("  can edit = boss\n  can share = boss\n", "edit"),
+            re.escape(row % "share").replace(re.escape("[^']*"), "[^']*"),
+        )
+        self.assertNotIn("'boss_id', 'user.boss',", sql("  can edit = boss\n", "nobody"))
+
 
 class Denies(unittest.TestCase):
     def test_hidden_base(self) -> None:
@@ -870,6 +892,19 @@ class Command(unittest.TestCase):
                 "app/main.py",
             ),
         )
+        self.assertFalse(s.pip_there)
+        # the stack pages install FastAPI's part through rowstile's own extras: the stack is found there too, and
+        # rowstile, a dependency already, isn't asked for again
+        s = stack.detect(
+            at(
+                {
+                    "pyproject.toml": '[project]\ndependencies = [\n    "rowstile[asyncpg,fastapi,sqlalchemy]>=0.1.0a4",\n]\n',
+                    "alembic.ini": "script_location = migrations\n",
+                }
+            )
+        )
+        self.assertEqual((s.found, s.pip_there), (["FastAPI", "SQLAlchemy", "Alembic"], True))
+        self.assertEqual(s.setup[0], "from rowstile.fastapi import Rowstile")
         # a release's name is bare; an alpha, a candidate or main's build asks for at least itself, which lets pip
         # take a pre-release (a bare name got the 0.0.0 placeholder while only an alpha was published)
         self.assertEqual(stack.pip_requirement("rowstile[fastapi]", "0.2.0"), "rowstile[fastapi]")
@@ -885,6 +920,22 @@ class Command(unittest.TestCase):
         self.assertIn('\t\t"@rowstile/next": "^1.2.3"', text)
         self.assertIn('"devDependencies"', text)
         self.assertEqual(stack.add_npm(d, ["@rowstile/next"], "1.2.3"), [])
+
+    def test_no_database_named_is_said(self) -> None:
+        # with no --db, no `database` in rowstile.toml and no variable, the defaults are tried (a local socket): when
+        # they fail the message says nothing named a database and how to name one, not only a host nobody gave
+        # (on Windows: "host=/var/run/postgresql is a Unix socket"). A database that was named fails as itself
+        e = OSError("host=/var/run/postgresql is a Unix socket, which Windows doesn't have: use host=localhost")
+        named = ("PGHOST", "PGPORT", "PGDATABASE", "PGUSER", "PGSERVICE")
+        with mock.patch.dict(os.environ, {k: v for k, v in os.environ.items() if k not in named}, clear=True):
+            said = rowstile_cli.cant_connect(e, None)
+            self.assertTrue(
+                said.startswith("can't connect: no database was named, and the default failed (host="), said
+            )
+            self.assertIn("--db DSN, `database` in rowstile.toml, or DATABASE_URL", said)
+            self.assertEqual(rowstile_cli.cant_connect(e, "host=db"), f"can't connect: {e}")
+        with mock.patch.dict(os.environ, {"PGHOST": "db"}):
+            self.assertEqual(rowstile_cli.cant_connect(e, None), f"can't connect: {e}")
 
     def test_without_git_and_help_after_a_command(self) -> None:
         # a machine without git: the review says so, not a traceback; `rowstile review --help` is the usage
@@ -1095,6 +1146,40 @@ class Migrations(unittest.TestCase):
             self.assertRegex(migrations.sql_file_name(d, "authz_x", "20260101000000"), r"^20260101000000_authz_x\.sql$")
             open(os.path.join(d, "0004_schema.sql"), "w", encoding="utf-8").close()
             self.assertEqual(migrations.sql_file_name(d, "authz_x", "20260101000000"), "0005_authz_x.sql")
+
+    def test_the_alembic_revision_says_asyncpg_in_a_line(self) -> None:
+        # a policy's revision is one script, and asyncpg takes one statement at a time: its own error carries the
+        # whole script (four thousand lines for a small policy). The revision says it first, with the way out; with a
+        # sync driver it sends the script as before
+        import migrations
+
+        class Bind:
+            def __init__(self, driver: str) -> None:
+                self.dialect = types.SimpleNamespace(driver=driver)
+                self.sent: list[str] = []
+
+            def exec_driver_sql(self, sql: str, execution_options: dict[str, bool]) -> None:
+                self.sent.append(sql)
+
+        with tempfile.TemporaryDirectory() as d:
+            py, _ = migrations.alembic(d, "authz_x", "SELECT 1;\n", 0)
+            with open(py, encoding="utf-8") as fh:
+                code = compile(fh.read(), py, "exec")
+            for driver in ("asyncpg", "psycopg"):
+                bind = Bind(driver)
+                fake = types.ModuleType("alembic")
+                fake.__dict__["op"] = types.SimpleNamespace(get_bind=lambda bind=bind: bind)
+                scope: dict[str, object] = {"__file__": py}
+                with mock.patch.dict(sys.modules, {"alembic": fake}):
+                    exec(code, scope)
+                    upgrade = cast(Callable[[], None], scope["upgrade"])
+                    if driver == "asyncpg":
+                        with self.assertRaisesRegex(RuntimeError, r"asyncpg.*one script.*postgresql\+psycopg://"):
+                            upgrade()
+                        self.assertEqual(bind.sent, [])
+                    else:
+                        upgrade()
+                        self.assertEqual(bind.sent, ["SELECT 1;\n"])
 
 
 class Review(unittest.TestCase):

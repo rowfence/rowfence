@@ -245,6 +245,20 @@ rm -rf "$TMPD"
 
 echo "-- ways around row-level security (authz.lint)"
 admin "the example has no errors or warnings" "0" "SELECT count(*) FROM authz.lint() WHERE severity IN ('error', 'warning')"
+# without its column rule, whoever may edit a file may make themselves its owner: lint asks for a rule, and
+# suggests the type's own share
+grep -v "update id, owner_id, confidential" example/docs.authz > /tmp/authz_no_column_rule.authz
+python3 compile_policy.py /tmp/authz_no_column_rule.authz > /tmp/authz_no_column_rule.sql &&
+PGOPTIONS="-c client_min_messages=error" psql -X -q -v ON_ERROR_STOP=1 -d "$DB" -f /tmp/authz_no_column_rule.sql >/dev/null
+admin "lint finds a column that gives a relation and that an editor may change" "1" \
+  "SELECT count(*) FROM authz.lint() WHERE object = 'app.files.owner_id' AND problem LIKE 'grants file.owner%add a rule such as \"update owner_id : share\"'"
+# ...and has nothing to say when nobody may update the row at all
+sed 's/^  update  *: edit$/  update : nobody/' /tmp/authz_no_column_rule.authz | grep -v "update folder_id after" > /tmp/authz_update_nobody.authz
+python3 compile_policy.py /tmp/authz_update_nobody.authz > /tmp/authz_update_nobody.sql &&
+PGOPTIONS="-c client_min_messages=error" psql -X -q -v ON_ERROR_STOP=1 -d "$DB" -f /tmp/authz_update_nobody.sql >/dev/null
+admin "...and none where the rule is \"update : nobody\"" "0" \
+  "SELECT count(*) FROM authz.lint() WHERE object LIKE 'app.files.%' AND problem LIKE 'grants %'"
+PGOPTIONS="-c client_min_messages=error" psql -X -q -v ON_ERROR_STOP=1 -d "$DB" -f /tmp/authz_governance.sql >/dev/null
 PSQL -c "GRANT TRUNCATE ON app.files TO app_user" \
      -c "CREATE VIEW app.all_files AS SELECT * FROM app.files" -c "GRANT SELECT ON app.all_files TO app_user" \
      -c "GRANT INSERT, TRUNCATE ON app.team_members TO app_user" \

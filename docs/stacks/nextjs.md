@@ -20,7 +20,8 @@ npm install --save-dev rowstile@next @rowstile/vitest@next
 npx rowstile init        # a first policy from your tables, a test file, rowstile.toml
 ```
 
-The `rowstile` package is the command, with its own Python: nothing else to install. `init` finds Next.js and
+The `rowstile` package is the command, with its own Python: nothing else to install. `init` reads your
+tables, so it needs the database, as their owner: `DATABASE_URL`, or `--db`. It finds Next.js and
 Prisma, and writes `rowstile.toml` for them. The conformance app's, with its own name for the variable that
 holds the owner's connection:
 
@@ -36,7 +37,41 @@ dir  = "prisma/migrations"
 ```
 
 Two roles connect. The owner of the tables runs the migrations (`ROWSTILE_OWNER_DSN`), and the app connects
-as the role the policy names, which row-level security applies to (`ROWSTILE_APP_URL`).
+as the role the policy names, which row-level security applies to (`ROWSTILE_APP_URL`). Prisma migrates, so
+its own configuration takes the owner's URL:
+
+```ts
+// prisma.config.ts
+import { defineConfig, env } from "prisma/config";
+
+export default defineConfig({
+  schema: "prisma/schema.prisma",
+  migrations: { path: "prisma/migrations" },
+  datasource: { url: env("ROWSTILE_OWNER_DSN") },
+});
+```
+
+The app role and what it may do are a migration like the others, written by hand. A role belongs to the
+whole server, and Prisma's shadow database runs every migration again: the role is made only where it is
+missing. Grant it what the app does: reading, and writing the tables the app writes.
+
+```sql
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'conf_app') THEN
+    CREATE ROLE conf_app LOGIN NOSUPERUSER NOBYPASSRLS PASSWORD 'app';
+  END IF;
+END $$;
+ALTER ROLE conf_app SET jit = off;
+GRANT USAGE ON SCHEMA "app" TO conf_app;
+GRANT SELECT ON ALL TABLES IN SCHEMA "app" TO conf_app;
+GRANT INSERT, UPDATE, DELETE ON "app"."notes", "app"."inbox" TO conf_app;
+GRANT USAGE ON ALL SEQUENCES IN SCHEMA "app" TO conf_app;
+```
+
+With Prisma's default schema, `public`, name the tables in the first grant: `ALL TABLES` there includes
+Prisma's own `_prisma_migrations`. The owner must also be able to switch to the app role, since the command
+looks at the data as the app does when it runs the policy's tests: an owner that isn't a superuser gives
+itself the role once, `GRANT conf_app TO conf_owner` (the command says so when it is missing, AZ618).
 
 ## The database client
 
@@ -47,6 +82,8 @@ that one: the client it was made from is refused whenever it is used, inside you
 (add them to the client `authz()` returns: they are placed before it, and each hook runs once for a call).
 Importing `@rowstile/next` keeps signed-in reads out of Next.js's caches, and `authz.gen.ts` (written by
 `rowstile client`) gives the SDK the policy's names, so a misspelled permission doesn't type-check.
+The imports below end in `.ts` and the app's own start with `@/`: `allowImportingTsExtensions`, and
+`"paths": { "@/*": ["./src/*"] }`, in `tsconfig.json`.
 
 ```ts
 import { PrismaPg } from "@prisma/adapter-pg";
@@ -190,6 +227,16 @@ npx rowstile migrate --check       # in CI: exit 1 if a policy change has no mig
 
 While you edit, `npx rowstile dev` checks, pushes to the development database, runs the tests and rewrites
 `src/authz.gen.ts` on every save (and writes the migration once you stop editing).
+
+The development database then holds what `dev` (or `rowstile push`) pushed, not what its migrations left,
+and the next `prisma migrate deploy` on it stops with AZ607, which Prisma keeps as a failed migration.
+Production and CI only ever take migrations. On the development database, once `rowstile migrate --check`
+says there is nothing to migrate (it holds the policy the newest migration makes), tell Prisma the
+migration is there; or rebuild the database from the migrations.
+
+```sh
+npx prisma migrate resolve --applied 20261006215008_authz_note_comment_view   # the migration's folder
+```
 
 ## Tests
 

@@ -13,7 +13,7 @@ type folder = app.folders
 
 rules app.folders
   select                   : view
-  insert                   : parent.edit and owner
+  insert                   : owner and (parent.edit or {parent_id is null})
   update                   : edit
   update parent_id after   : parent.edit
   update owner_id, inherit : owner

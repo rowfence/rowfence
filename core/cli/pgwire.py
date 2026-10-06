@@ -131,6 +131,7 @@ class Connection:
         self.params: dict[str, str] = {}
         self.in_error = False
         self.busy = False  # a query was sent and its answer not fully read (the connection is unusable)
+        self.tag = ""  # what the last statement of query_described did, in the server's words ("DELETE 0")
         self.on_notice: Callable[[Fields], None] | None = None  # called with each NOTICE / WARNING the server sends
         self.address: tuple[str, int] | None = None  # where connect() went, for cancel()
         self.backend: tuple[int, int] | None = None  # this session's process id and key, for cancel()
@@ -318,9 +319,12 @@ class Connection:
         rows: list[tuple[Value, ...]] = []
         cols: list[tuple[str, int]] = []
         error: PgError | None = None
+        self.tag = ""
         while True:
             kind, payload = self._read_or(error)
-            if kind == b"T":
+            if kind == b"C":
+                self.tag = payload.rstrip(b"\0").decode()
+            elif kind == b"T":
                 n = struct.unpack("!h", payload[:2])[0]
                 pos, cols = 2, []
                 for _ in range(n):
@@ -351,7 +355,7 @@ class Connection:
                 if error:
                     raise error
                 return rows, [c[0] for c in cols]
-            # 1, 2, n, C, A, S: nothing to do
+            # 1, 2, n, A, S: nothing to do
 
     def execute(self, sql: str) -> list[tuple[Value, ...]]:
         """Run a statement without parameters (BEGIN, COMMIT, ...)."""

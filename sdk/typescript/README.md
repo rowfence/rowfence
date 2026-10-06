@@ -15,7 +15,8 @@ import { authz, signedIn } from "@rowstile/prisma";
 import "@rowstile/next";                         // signed-in reads never land in a cache
 import "./authz.gen";                            // the policy's names (rowstile client)
 
-const adapter = signedIn(new PrismaPg({ connectionString: process.env.DATABASE_URL }),
+// the app's own URL, as the role the policy names: never the owner's, which Prisma migrates with
+const adapter = signedIn(new PrismaPg({ connectionString: process.env.ROWSTILE_APP_URL }),
                          { user: async () => (await auth())?.user.id });
 export const db = new PrismaClient({ adapter }).$extends(authz());
 ```

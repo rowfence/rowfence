@@ -476,7 +476,9 @@ CODES = {
         "`authz.policy_versions`. This database is somewhere else: a migration was skipped, or the database was "
         "changed with `rowstile push` or `apply` since. Apply the migrations in order; a database changed by "
         "`push` takes the migrations from the start, or `rowstile apply` of the policy the previous migration "
-        "left.",
+        "left. A development database that `rowstile dev` or `push` brought to the newest policy already holds "
+        "what this migration brings: tell the migration tool it is applied (Prisma: `prisma migrate resolve "
+        "--applied <name>`; Alembic: `alembic stamp head`), or make the database again from the migrations.",
         "",
         "",
         when="deploy",
@@ -598,7 +600,8 @@ CODES = {
         "back. The role the command connects as has to hold the app role for that. A superuser always does. Since "
         "PostgreSQL 16 a role that makes another (`CREATE ROLE app_user`) only administers it, so an owner that "
         "isn't a superuser, as on managed Postgres, gives itself the role once: `GRANT app_user TO app_owner`. It "
-        "may, because it made the role. Nothing changes for the app, which connects as the app role itself.",
+        "may, because it made the role. Where another role made both (a superuser setting up by hand), that "
+        "role runs the grant. Nothing changes for the app, which connects as the app role itself.",
         "",
         "",
         when="command",

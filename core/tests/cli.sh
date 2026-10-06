@@ -170,6 +170,10 @@ out=$(python3 cli/rowstile_cli.py --db "colour=blue" test 2>&1); case "$out" in 
 out=$(PGDATABASE=$DB python3 cli/rowstile_cli.py test 2>&1); case "$out" in *"no policy is applied"*) ok "PGDATABASE is used when --db is left out";; *) bad "env" "${out:0:200}";; esac
 out=$(python3 cli/rowstile_cli.py --db "dbname=authz_no_such_db" graph "$T/main.authz" 2>&1); case "$out" in "%% Generated"*) ok "check, graph and client of a file need no database";; *) bad "no database" "${out:0:200}";; esac
 
+# a named database that doesn't answer is said as that (unit_test.py has the case where nothing names one)
+out=$(python3 cli/rowstile_cli.py --db "host=127.0.0.1 port=1 dbname=x connect_timeout=2" lint 2>&1)
+case "$out" in "can't connect: "*"no database was named"*) bad "a named database that doesn't answer" "$out";; "can't connect: "*) ok "... and a named one that doesn't answer is only that";;
+  *) bad "a named database that doesn't answer" "$out";; esac
 echo "-- an owner that only administers the app role"
 # since PostgreSQL 16 a role that makes another gets ADMIN on it, not SET: what an owner on managed Postgres has
 # until it grants itself the role (the suites' owner has createrole_self_grant, which would hide it)
@@ -195,9 +199,23 @@ PLAIN plans --as user:1; case "$out" in *"$said"*) ok "... and plans";; *) bad "
 PLAIN bench --people 1 --rounds 1; case "$out" in *"$said"*) ok "... and bench";; *) bad "bench as a plain owner" "$out";; esac
 PLAIN explain-rule --as user:2 app.notes update 1; case "$out" in *"$said"*) ok "... and explain-rule";; *) bad "explain-rule as a plain owner" "$out";; esac
 PLAIN can --as user:1 note 1 edit; [ "$out" = yes ] && ok "the questions that don't switch role are answered" || bad "can as a plain owner" "$out"
+# the dev loop there: the policy goes in, then the tests' switch is refused. Its last line says what is left,
+# and names who else may run the grant
+mkdir -p "$T/plainp"; cp "$T/plain.authz" "$T/plainp/policy.authz"; cp "$T/plain.test.authz" "$T/plainp/t.authz"
+printf 'policy = "policy.authz"\ntests = ["t.authz"]\ndatabase = "dbname=%s"\n' "$N" > "$T/plainp/rowstile.toml"
+PLAIN push --development "$T/plain.authz"
+out=$(cd "$T/plainp" && python3 "$OLDPWD/cli/rowstile_cli.py" dev --once 2>&1); rc=$?
+case "$out" in *"nothing applied"*) bad "dev as a plain owner says nothing was applied" "$out";;
+  *"$said"*"if it made $R, else as the role that did or a superuser: GRANT"*"the policy is applied; its tests didn't run"*)
+    [ $rc -eq 1 ] && ok "dev says the policy is applied and its tests did not run, and who may grant" || bad "dev exit" "$rc";;
+  *) bad "dev as a plain owner" "$out";; esac
 psql -X -q -d "$N" -c "GRANT $R TO $PGUSER" >/dev/null
 PLAIN test "$T/plain.test.authz"; [ $rc -eq 0 ] && ok "after the grant, the tests pass" || bad "test after the grant" "$out"
 PLAIN sql --as user:2 "SELECT count(*) FROM app.notes"; case "$out" in *"0"*"as user:2; rolled back"*) ok "... and sql --as reads as the app does";; *) bad "sql --as after the grant" "$out";; esac
+PLAIN sql --as user:2 "UPDATE app.notes SET body = 'theirs' WHERE id = 1"
+[ "$out" = "UPDATE 0, as user:2; rolled back" ] && ok "... and says a write changed no row, in the server's words" || bad "sql --as, a write of no row" "$out"
+PLAIN sql --as user:1 "UPDATE app.notes SET body = 'still mine' WHERE id = 1"
+[ "$out" = "UPDATE 1, as user:1; rolled back" ] && ok "... or one" || bad "sql --as, a write" "$out"
 dropdb "$N"; psql -X -q -d postgres -c "DROP ROLE IF EXISTS $R" >/dev/null 2>&1
 
 rm -rf "$T"

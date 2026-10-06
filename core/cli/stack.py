@@ -23,6 +23,7 @@ class Stack:
     clients: dict[str, str] = field(default_factory=dict)  # {"ts": "src/authz.gen.ts"} or {"py": "app/authz_types.py"}
     npm: list[str] = field(default_factory=list)  # @rowstile/* packages to add
     pip: str = ""  # the pip requirement to add: rowstile[fastapi]
+    pip_there: bool = False  # the project depends on rowstile already: nothing to add
     setup: list[str] = field(default_factory=list)  # the change to make, in lines to print
     setup_file: str = ""  # where to make it, if found
 
@@ -59,7 +60,8 @@ def _find(root: str, exts: tuple[str, ...], pattern: str) -> str:
 
 
 def _python_names(root: str) -> set[str]:
-    """The Python packages the project depends on: names from pyproject.toml and requirements*.txt."""
+    """The Python packages the project depends on: names from pyproject.toml and requirements*.txt, and what
+    rowstile's own extras bring (`rowstile[fastapi,asyncpg]` is how the stack pages install FastAPI's part)."""
     text = (_read(root, "pyproject.toml") or "") + "\n"
     try:
         for n in sorted(os.listdir(root)):
@@ -67,10 +69,20 @@ def _python_names(root: str) -> set[str]:
                 text += (_read(root, n) or "") + "\n"
     except OSError:
         pass
-    return {m.group(1).lower().replace("_", "-") for m in re.finditer(r'(?m)^\s*"?([A-Za-z][A-Za-z0-9_.-]*)', text)} | {
-        m.group(1).lower().replace("_", "-")
-        for m in re.finditer(r'"([A-Za-z][A-Za-z0-9_.-]*)\s*(?:\[[^\]]*\])?\s*(?:[<>=!~;][^"]*)?"', text)
+    extras = {
+        x.strip().lower()
+        for m in re.finditer(r"(?i)\browstile\s*\[([^\]]*)\]", text)
+        for x in m.group(1).split(",")
+        if x.strip()
     }
+    return (
+        {m.group(1).lower().replace("_", "-") for m in re.finditer(r'(?m)^\s*"?([A-Za-z][A-Za-z0-9_.-]*)', text)}
+        | {
+            m.group(1).lower().replace("_", "-")
+            for m in re.finditer(r'"([A-Za-z][A-Za-z0-9_.-]*)\s*(?:\[[^\]]*\])?\s*(?:[<>=!~;][^"]*)?"', text)
+        }
+        | extras
+    )
 
 
 def _object(value: object) -> dict[str, object]:
@@ -152,7 +164,8 @@ def detect(root: str = ".") -> Stack:
             s.setup = [
                 'import { PrismaPg } from "@prisma/adapter-pg";',
                 'import { authz, signedIn } from "@rowstile/prisma";',
-                "const adapter = signedIn(new PrismaPg({ connectionString: process.env.DATABASE_URL }),",
+                # the app's own connection, as the app role: DATABASE_URL is Prisma's, the owner's, for migrations
+                "const adapter = signedIn(new PrismaPg({ connectionString: process.env.ROWSTILE_APP_URL }),",
                 f"                         {{ user: {user_ts} }});",
                 "export const db = new PrismaClient({ adapter }).$extends(authz());",
             ]
@@ -194,6 +207,7 @@ def detect(root: str = ".") -> Stack:
         if "sqlalchemy" in py or "sqlmodel" in py:
             s.found.insert(1 if "fastapi" in py else 0, "SQLModel" if "sqlmodel" in py else "SQLAlchemy")
         s.pip = "rowstile" + (f"[{','.join(extras)}]" if extras else "")
+        s.pip_there = "rowstile" in py
         pkg_dir = next((d for d in ("app", "src", "backend/app") if os.path.isdir(os.path.join(root, d))), ".")
         s.clients["py"] = f"{pkg_dir}/authz_types.py".lstrip("./")
         if "fastapi" in py:

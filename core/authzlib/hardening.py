@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from .compiler import MANY_EXPANSIONS, Core
-from .parse import Loc, cols
+from .parse import KEYWORDS, Cond, Loc, cols
 from .sqlutil import POLICY_MARKS, VIEW_MARKS, lit, q, qt
 
 DEF = "SECURITY DEFINER SET search_path = pg_catalog, pg_temp"
@@ -147,7 +147,8 @@ SELECT p.oid::regprocedure::text, gw.who, a.privilege_type,
         governed = sorted({r.table for r in self.rules})
         typed_tables = sorted({t.table for t in self.types.values()})
         link_tables: set[str] = set()  # tables that hold relationships (who is in what)
-        link_cols: list[tuple[str, str, str, Loc]] = []  # (table, column, what it grants, loc) for column sources
+        # (table, column, what it grants, loc, the permission lint suggests asking for) for column sources
+        link_cols: list[tuple[str, str, str, Loc, str]] = []
         # (table, columns, relation, loc): a column placing a row under another of its type
         move_cols: list[tuple[str, tuple[str, ...], str, Loc]] = []
         index_cols: list[tuple[str, str, str]] = []  # (table, column, why) that lookups go through
@@ -173,8 +174,10 @@ SELECT p.oid::regprocedure::text, gw.who, a.privilege_type,
                         )
                     elif src.kind == "column":
                         column = cols(self.source_columns(src))
+                        # the type's own `share` where it has one: a suggestion that doesn't compile helps no one
+                        ask = "share" if "share" in self.public_perms(t) or "share" in t.relations else "nobody"
                         for c in column + ((src.type_col,) if src.type_col else ()):
-                            link_cols.append((t.table, c, f"{t.name}.{r.name}", src.loc))
+                            link_cols.append((t.table, c, f"{t.name}.{r.name}", src.loc, ask))
                         # (one that reads the row's own key is "this row", `self : user = id`: not a move)
                         if any(st == t.name for st, _ in src.subjects) and column != tuple(c for c, _ in t.key):
                             move_cols.append((t.table, column, r.name, src.loc))
@@ -183,8 +186,13 @@ SELECT p.oid::regprocedure::text, gw.who, a.privilege_type,
         # columns that grant something, on tables whose updates only need the plain 'update' rule
         guarded = {(r.table, c) for r in self.rules if r.columns and r.command != "mask" for c in r.columns}
         has_update = {r.table for r in self.rules if r.command == "update" and not r.columns}
+        # (`update : nobody` lets no one change any column: there is nothing to guard)
+        nobody = Cond("cond", KEYWORDS["nobody"])
+        open_update = {r.table for r in self.rules if r.command == "update" and not r.columns and r.expr != nobody}
         unguarded = [
-            (tb, c, what, loc) for tb, c, what, loc in link_cols if tb in has_update and (tb, c) not in guarded
+            (tb, c, what, loc, ask)
+            for tb, c, what, loc, ask in link_cols
+            if tb in open_update and (tb, c) not in guarded
         ]
         # ...and those that move a row within its tree with nothing checking where it goes (an 'after' rule)
         after = {(r.table, c) for r in self.rules if r.command == "update check" for c in r.columns}
@@ -204,8 +212,8 @@ SELECT p.oid::regprocedure::text, gw.who, a.privilege_type,
             f"({lit(qt(tb))}, {lit(c)}, {lit('; '.join(dict.fromkeys(w)))})" for (tb, c), w in whys.items()
         )
         unguarded_rows = ", ".join(
-            f"({lit(qt(tb))}, {lit(c)}, {lit(what)}, {lit(self.line_key(f'relation {what} {c}', loc))})"
-            for tb, c, what, loc in unguarded
+            f"({lit(qt(tb))}, {lit(c)}, {lit(what)}, {lit(self.line_key(f'relation {what} {c}', loc))}, {lit(ask)})"
+            for tb, c, what, loc, ask in unguarded
         )
         # relations named like a type read, in a rule, like the type ("delete : user")
         shadows = [
@@ -415,13 +423,13 @@ BEGIN
     END IF;
   END LOOP;
   -- columns that grant a relation, changed by anyone who may update the row
-  FOR r IN SELECT * FROM (VALUES {unguarded_rows or "(NULL::text, NULL::text, NULL::text, NULL::text)"}) v(tbl, col, what, loc)
+  FOR r IN SELECT * FROM (VALUES {unguarded_rows or "(NULL::text, NULL::text, NULL::text, NULL::text, NULL::text)"}) v(tbl, col, what, loc, ask)
            WHERE tbl IS NOT NULL LOOP
     IF EXISTS (SELECT 1 FROM pg_attribute a WHERE a.attrelid = to_regclass(r.tbl) AND a.attname = r.col
                AND a.attnum > 0 AND NOT a.attisdropped)
        AND has_column_privilege(v_role, r.tbl, r.col, 'UPDATE') THEN
       severity := 'warning'; object := to_regclass(r.tbl)::text || '.' || r.col;
-      problem := format('grants %s (%s), and anyone who may update the row may change it: add a rule such as "update %s : share"', r.what, {self.line_sql(None, None, "r.loc")}, r.col);
+      problem := format('grants %s (%s), and anyone who may update the row may change it: add a rule such as "update %s : %s"', r.what, {self.line_sql(None, None, "r.loc")}, r.col, r.ask);
       RETURN NEXT;
     END IF;
   END LOOP;

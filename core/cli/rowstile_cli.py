@@ -154,6 +154,18 @@ def read_policy(path: str) -> tuple[str, dict[str, str]]:
     return text, collect_includes(text, read)
 
 
+def cant_connect(e: BaseException, dsn: str | None) -> str:
+    """What to say when the connection failed. When nothing named a database, the defaults were tried (a local
+    socket, the system's user): the message says that, and how to name one, rather than quote a host nobody
+    gave."""
+    if dsn or any(os.environ.get(v) for v in ("PGHOST", "PGPORT", "PGDATABASE", "PGUSER", "PGSERVICE")):
+        return f"can't connect: {e}"
+    return (
+        f"can't connect: no database was named, and the default failed ({e})\n"
+        f"name it with --db DSN, `database` in {CONFIG}, or DATABASE_URL"
+    )
+
+
 def fail(msg: str | None, code: int = 1) -> NoReturn:
     print(msg, file=sys.stderr)
     sys.exit(code)
@@ -552,6 +564,11 @@ class Dev:
         for line in lines[1:]:
             print(f"       {line}")
 
+    @staticmethod
+    def left(pushed: bool) -> str:
+        """What an error in a pass leaves in the database."""
+        return "the policy is applied; its tests didn't run" if pushed else "nothing applied"
+
     def cycle(self, why: str) -> bool:
         """One pass; True if everything passed."""
         print(f"{time.strftime('%H:%M:%S')} {why}")
@@ -581,14 +598,16 @@ class Dev:
         try:
             conn = self.connect()
         except (ValueError, OSError, pgwire.PgError, pgwire.ProtocolError) as e:
-            self.say("x", f"can't connect: {e}")
+            self.say("x", cant_connect(e, self.dsn))
             self.conn = None
             return False
+        pushed = False  # an error after the push leaves the policy in force: only the tests didn't run
         try:
             self.diff(conn, text, files)
             self.notices.clear()
             started = time.monotonic()
             state = transaction(conn, lambda db: database.push(db, text, files))
+            pushed = True
             took = time.monotonic() - started
             self.say(
                 "ok",
@@ -616,11 +635,11 @@ class Dev:
             self.say("x", str(e))
             return False
         except database.Error as e:
-            self.say("x", str(e) + (f"\n{e.hint}" if e.hint else "") + "\nnothing applied")
+            self.say("x", str(e) + (f"\n{e.hint}" if e.hint else "") + "\n" + self.left(pushed))
             return False
         except pgwire.PgError as e:
             detail = e.fields.get("D")
-            self.say("x", e.message + (f"\n{detail}" if detail else "") + "\nnothing applied")
+            self.say("x", e.message + (f"\n{detail}" if detail else "") + "\n" + self.left(pushed))
             return False
         except (OSError, pgwire.ProtocolError) as e:
             self.say("x", f"lost the database: {e}")
@@ -990,7 +1009,7 @@ def main(argv: list[str]) -> None:
     try:
         conn = pgwire.connect(**pgwire.parse_dsn(dsn))
     except (ValueError, OSError, pgwire.PgError, pgwire.ProtocolError) as e:
-        fail(f"can't connect: {e}", 2)
+        fail(cant_connect(e, dsn), 2)
     conn.on_notice = lambda f: print(
         f"{f.get('V', f.get('S', 'NOTICE'))}: {f.get('M', '')}"
         + (f"\nDETAIL: {f['D']}" if f.get("D") else "")
@@ -1509,7 +1528,9 @@ def ask(conn: pgwire.Connection, cmd: str, args: list[str], opts: dict[str, str]
                 print(table(rows, cols))
                 print(f"({len(rows)} row{'s' if len(rows) != 1 else ''}, as {who}; rolled back)")
             else:
-                print(f"done, as {who}; rolled back")
+                # the server's own words for what the statement did: "DELETE 0" is a delete the rules let
+                # through for no row, which "done" would hide
+                print(f"{conn.tag or 'done'}, as {who}; rolled back")
     finally:
         try:
             q("ROLLBACK")

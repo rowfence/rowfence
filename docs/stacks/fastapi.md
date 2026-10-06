@@ -193,7 +193,8 @@ from rowstile.alembic import include_name, include_object
 
 Alembic connects as the owner, with a sync driver: `ROWSTILE_OWNER_URL` is a `postgresql+psycopg://` URL.
 A policy's revision is one script of many statements, and asyncpg takes one statement at a time ("cannot
-insert multiple commands into a prepared statement"). The app itself stays on asyncpg.
+insert multiple commands into a prepared statement"); the revision checks, and says so in a line. The app
+itself stays on asyncpg.
 
 ```python
 engine = create_engine(os.environ["ROWSTILE_OWNER_URL"])

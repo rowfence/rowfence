@@ -171,7 +171,8 @@ def may_take(db: Db, role: str | None) -> None:
             f"{me} may not switch to the app role {role} (SET ROLE), and this looks at the data as the app "
             f"does [AZ618]",
             "42501",
-            hint=f"once, as {me}: GRANT {q(role)} TO {q(me)}",
+            hint=f"once, as {me} if it made {role}, else as the role that did or a superuser: "
+            f"GRANT {q(role)} TO {q(me)}",
         )
 
 
