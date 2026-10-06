@@ -56,7 +56,7 @@ the stock Postgres image:
 | `tests/lsp_test.py` | the language server over its protocol, as an editor uses it (no database) |
 | `tests/mcp_test.py` | the MCP server over its protocol, as a coding agent's client uses it: each tool in a project folder |
 | `tests/studio_test.py` | `rowstile why` and Studio's API: read-only unless `--write`, only for the page that has the token, on localhost |
-| `tests/cookbook.sh` | `docs/cookbook.md`: its policy applies, its tests pass, and every line the page shows is in them |
+| `tests/cookbook.sh` | `docs/cookbook.md`: its policy applies, its tests pass, and every line the page shows is in them; the same for each recipe with a page of its own (`docs/cookbook/<name>.md` and its folder) |
 | `tests/races.sh` | the full run and `--proofs`: every pair of tree writes raced in two sessions at each isolation level; the inheritance tables match a rebuild after each |
 | `tests/stress.sh` | the full run and `--proofs`: 16 clients writing a folder tree at once at each isolation level; the tables match a rebuild afterwards |
 | `tests/genpolicy.py` | the full run (12) and `--soak` (100, a new seed each night): random policies, each with its tables and data (write rules with conditions that read another table: a subquery, a function called by a quoted name, an operator), checked against the reference evaluator like the fixed ones |

@@ -113,7 +113,10 @@ User-facing docs: `README.md`, then `docs/reference/` (read them first). Terms i
   `governance.md`, `tools.md`, `migrations.md`, `review.md`, `guarantees.md`, `limits.md`),
   `installing.md` (the site's Installing page: it holds the README's install lines, `DocPages` checks),
   `getting-started.md` (run as written by `tests/docs_test.sh`), `cookbook.md` + `cookbook/` (a policy,
-  schema and tests; `tests/cookbook.sh` checks every line the page shows is in them), `troubleshooting.md`,
+  schema and tests; `tests/cookbook.sh` checks every line the page shows is in them; a recipe with a page of
+  its own is `cookbook/<name>.md` beside `cookbook/<name>/`: `schema.sql`, `policy.authz`, `tests.authz`,
+  `rows.sql` for the playground, checked the same way, listed on the site and in the playground from the
+  folder, and opened there by `/playground/#e=<name>`), `troubleshooting.md`,
   `operations.md`, `managed-postgres.md` (the setup on a managed service; Neon and Supabase, as tried),
   `signed-urls.md`, `stacks/` (a page per stack; every line of code in them is in a
   conformance app, `StackPages` in `tests/unit_test.py`), `errors/` (a page per error code, written from
@@ -125,7 +128,7 @@ User-facing docs: `README.md`, then `docs/reference/` (read them first). Terms i
 - `site/` — the docs site (VitePress; own `package.json`, like `playground/`): the Markdown stays where it is,
   `pages.mjs` says which files are pages and at which address, and turns each link (written relative to its
   file, for GitHub) into the page's address or the file on GitHub; a link to a missing file or page fails the
-  build. `build.mjs` writes `dist/`: the pages, `/playground/`, each page's Markdown (`/cookbook.md`),
+  build. `build.mjs` writes `dist/`: the pages, `/playground/`, each page's Markdown (`/getting-started.md`),
   `llms.txt` pointing to those, `llms-full.txt`. Its own pages: `index.md` and `problems/` (the SDKs' problem
   `type` URLs). A new doc page goes in `PAGES`, with its sentence in `DESCRIPTIONS` (what a search result and a
   shared link show; a page without one fails the build), and in the sidebar (`.vitepress/config.mts`). `build.mjs`

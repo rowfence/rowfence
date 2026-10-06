@@ -5,7 +5,8 @@ enforce it. The compiler (`core/authzlib`, standard library only) runs in Pyodid
 writes runs in PGlite, Postgres 18 in WebAssembly. On each change the policy is compiled, applied to a fresh
 database with the tables, and its tests run. A mistake shows its line, its code and the code's page; "Ask as
 someone" runs a statement as the app role, signed in as whoever you name, and rolls it back. "Copy link" puts
-the whole state in the link.
+the whole state in the link, and `#e=<name>` opens one of the page's own examples (each recipe of the cookbook
+with a page of its own links here that way).
 
 One thing it can't show is signed sessions. PGlite has a single session, the owner's, and rowstile believes
 the owner's settings without a signature: a statement under "Ask as someone" may `SET authz.user_id` and

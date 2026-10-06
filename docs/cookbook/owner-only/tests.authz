@@ -1,0 +1,13 @@
+-- Owner only (docs/cookbook/owner-only.md). The test brings its own rows and rolls them back.
+
+test "a note is its owner's"
+  given ann = {INSERT INTO app.users VALUES (901, 'Ann') RETURNING id}
+  given bo = {INSERT INTO app.users VALUES (902, 'Bo') RETURNING id}
+  given n = {INSERT INTO app.notes (owner_id, body) VALUES ($ann, 'mine') RETURNING id}
+  user $ann can edit note $n
+  user $bo cannot view note $n
+  as user $ann sees 1 {SELECT FROM app.notes WHERE id = $n}
+  as user $bo sees 0 {SELECT FROM app.notes WHERE id = $n}
+  as user $bo refused {INSERT INTO app.notes (owner_id, body) VALUES ($ann, 'as Ann')}
+  as user $ann refused {UPDATE app.notes SET owner_id = $bo WHERE id = $n}
+  as user $ann allowed {DELETE FROM app.notes WHERE id = $n}
