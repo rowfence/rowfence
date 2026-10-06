@@ -2701,6 +2701,26 @@ class LlmsTxt(unittest.TestCase):
         for link in ["docs/getting-started.md", "docs/stacks/nextjs.md", "docs/errors/AZ201.md"]:
             self.assertIn(f"<!-- {link} -->", full)
 
+    def test_the_docs_index_for_agents(self) -> None:
+        # context7.json says which folders an index of docs for coding agents reads, and what an agent should
+        # know first: the folders and files it names are there, and its texts fit the index's limits
+        with open(os.path.join(self.REPO, "context7.json"), encoding="utf-8") as fh:
+            index = json.load(fh)
+        self.assertLessEqual(len(index["projectTitle"]), 100)
+        self.assertLessEqual(len(index["description"]), 200)
+        for folder in index["folders"]:
+            self.assertTrue(os.path.isdir(os.path.join(self.REPO, folder)), f"context7.json reads {folder}/")
+        for name in index["excludeFiles"]:
+            self.assertTrue(os.path.isfile(os.path.join(self.REPO, name)), f"context7.json leaves out {name}")
+        for folder in index["excludeFolders"]:
+            self.assertTrue(
+                folder.startswith("**/") or glob.glob(os.path.join(self.REPO, *folder.split("/"))),
+                f"context7.json leaves out {folder}, which matches nothing",
+            )
+        self.assertLessEqual(len(index["rules"]), 50)
+        for rule in index["rules"]:
+            self.assertLessEqual(len(rule), 255, rule)
+
 
 class Licence(unittest.TestCase):
     """The Python package and the Zed extension ship the licence: their copies (sdk/python/LICENSE, what the build
