@@ -245,6 +245,21 @@ rm -rf "$TMPD"
 
 echo "-- ways around row-level security (authz.lint)"
 admin "the example has no errors or warnings" "0" "SELECT count(*) FROM authz.lint() WHERE severity IN ('error', 'warning')"
+# a rule for a command the app role has no privilege for never applies, and the statement fails with Postgres's
+# own message: a warning that says what to grant. A privilege on one column is enough for an update
+PSQL -c "REVOKE DELETE, UPDATE ON app.files FROM app_user" >/dev/null
+admin "lint finds a delete rule the app role has no privilege for" "1" \
+  "SELECT count(*) FROM authz.lint() WHERE severity = 'warning' AND object = 'app.files' AND problem LIKE 'the policy has a rule for delete, but app_user has no DELETE privilege%GRANT DELETE ON app.files TO app_user%'"
+admin "... and an update rule" "1" \
+  "SELECT count(*) FROM authz.lint() WHERE object = 'app.files' AND problem LIKE 'the policy has a rule for update,%'"
+PSQL -c "GRANT UPDATE (name) ON app.files TO app_user" >/dev/null
+admin "... not once it may update one column" "0" \
+  "SELECT count(*) FROM authz.lint() WHERE object = 'app.files' AND problem LIKE 'the policy has a rule for update,%'"
+PSQL -c "REVOKE UPDATE (name) ON app.files FROM app_user" -c "GRANT DELETE, UPDATE ON app.files TO app_user" >/dev/null
+admin "... and none with the privileges back" "0" "SELECT count(*) FROM authz.lint() WHERE problem LIKE 'the policy has a rule for %'"
+# a relation named like a type that doesn't sign in (file.folder, folder.org) is nobody's mistake: no note
+admin "lint has no note on a relation named like a type that doesn't sign in" "0" \
+  "SELECT count(*) FROM authz.lint() WHERE problem LIKE 'is named like the type%'"
 # without its column rule, whoever may edit a file may make themselves its owner: lint asks for a rule, and
 # suggests the type's own share
 grep -v "update id, owner_id, confidential" example/docs.authz > /tmp/authz_no_column_rule.authz

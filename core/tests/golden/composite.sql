@@ -6055,11 +6055,25 @@ WHERE w.who IS NOT NULL AND n.nspname !~ '^pg_(toast_)?temp_' LOOP
     problem := format('runs with JIT on: permission checks are many small subplans, and JIT can take longer to compile a read than to run it (a third of a second for a large one): ALTER ROLE %s SET jit = off', 'app_user');
     RETURN NEXT;
   END IF;
-  -- relations named like a type
-  FOR r IN SELECT * FROM (VALUES ('project', 'org', 'relation project.org'), ('project', 'folder', 'relation project.folder'), ('folder', 'org', 'relation folder.org'), ('file', 'folder', 'relation file.folder')) v(type, rel, loc)
+  -- rules for a command the app role has no privilege for (one column's is enough for a read, an insert or
+  -- an update: the app may write some columns only)
+  FOR r IN SELECT to_regclass(v.tbl) AS tbl, v.cmd FROM (VALUES ('"cx"."files"', 'delete'), ('"cx"."files"', 'insert'), ('"cx"."files"', 'select'), ('"cx"."files"', 'update'), ('"cx"."folders"', 'select'), ('"cx"."folders"', 'update')) v(tbl, cmd)
+           WHERE v.tbl IS NOT NULL LOOP
+    CONTINUE WHEN r.tbl IS NULL;
+    IF r.cmd = 'delete' THEN
+      CONTINUE WHEN has_table_privilege(v_role, r.tbl, 'DELETE');
+    ELSE
+      CONTINUE WHEN has_any_column_privilege(v_role, r.tbl, r.cmd);
+    END IF;
+    severity := 'warning'; object := r.tbl::text;
+    problem := format('the policy has a rule for %s, but %s has no %s privilege on the table: the rule never applies, and the statement fails with Postgres''s own "permission denied for table". GRANT %s ON %s TO %s, or make the rule "%s : nobody"', r.cmd, 'app_user', upper(r.cmd), upper(r.cmd), r.tbl, 'app_user', r.cmd);
+    RETURN NEXT;
+  END LOOP;
+  -- relations named like a type that signs in
+  FOR r IN SELECT * FROM (VALUES (NULL::text, NULL::text, NULL::text)) v(type, rel, loc)
            WHERE type IS NOT NULL LOOP
     severity := 'info'; object := r.type || '.' || r.rel;
-    problem := format('is named like the type %s (%s), so in rules it reads like the type: a name that says what the relation is (author, member) reads better', r.rel, coalesce((SELECT l.loc FROM authz_gen.policy_lines l WHERE l.what = r.loc), '?'));
+    problem := format('is named like the type %s (%s), which signs in: alone in a rule it reads like any %s, and it is this row''s. A name that says what the relation is (author, owner) reads better', r.rel, coalesce((SELECT l.loc FROM authz_gen.policy_lines l WHERE l.what = r.loc), '?'), r.rel);
     RETURN NEXT;
   END LOOP;
   -- columns that move a row under another, with nothing checking where it moves to
@@ -6180,16 +6194,12 @@ CREATE OR REPLACE FUNCTION authz.verify() RETURNS boolean LANGUAGE sql STABLE AS
 -- where each rule, relation and invariant is written, for messages (Core.line_sql)
 CREATE TABLE authz_gen.policy_lines (what text PRIMARY KEY, loc text NOT NULL);
 INSERT INTO authz_gen.policy_lines VALUES
-  ('relation file.folder', 'line 43'),
   ('relation file.folder org_id', 'line 43'),
   ('relation file.owner owner_id', 'line 44'),
   ('relation file.uploader uploaded_by', 'line 45'),
-  ('relation folder.org', 'line 32'),
   ('relation folder.org org_id', 'line 32'),
   ('relation folder.owner owner_id', 'line 35'),
   ('relation folder.parent org_id', 'line 33'),
-  ('relation project.folder', 'line 27'),
-  ('relation project.org', 'line 25'),
   ('rule cx.files delete', 'line 54'),
   ('rule cx.files insert', 'line 51'),
   ('rule cx.files update', 'line 52'),

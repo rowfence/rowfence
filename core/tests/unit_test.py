@@ -454,7 +454,27 @@ class LanguageForms(unittest.TestCase):
             .replace("  owner  : user   = owner_id\n", "  owner  : user   = owner_id\n  user   : user   = owner_id\n")
             .replace("  can share = owner or folder.share", "  can share = owner or user or folder.share")
         )
-        self.assertIn("('file', 'user',", Compiler(parse_policy(text)).compile("x"))
+        sql = Compiler(parse_policy(text)).compile("x")
+        self.assertIn("('file', 'user',", sql)
+        # ...when the type signs in: `user` alone in a rule reads like any user. `folder : folder = folder_id` (what
+        # init drafts and the guide writes) is only ever followed, `folder.view`, which reads as what it means
+        self.assertIn("  folder : folder = folder_id\n", text)
+        self.assertNotIn("('file', 'folder',", sql)
+
+    def test_lint_knows_the_commands_the_rules_ask_for(self) -> None:
+        # a rule for a command the app role has no privilege for never applies, and the statement fails with
+        # Postgres's own message: lint is given each table's commands that have a rule. `nobody` asks for none; a
+        # column's rule, or `after`, is an update's
+        def rows(rules: str) -> list[str]:
+            text = errors_prelude() + "  boss : user = boss_id\n  can edit = boss\nrules app.users\n" + rules
+            sql = Compiler(parse_policy(text)).compile("x")
+            return re.findall(r"""\('"app"\."users"', '(\w+)'\)""", search(r"v\(tbl, cmd\)", sql).string)
+
+        self.assertEqual(rows("  select : edit\n  update : edit\n  delete : nobody\n"), ["select", "update"])
+        self.assertEqual(
+            rows("  select : edit\n  update : edit\n  update boss_id after : edit\n"), ["select", "update"]
+        )
+        self.assertEqual(rows("  select : edit\n  update : nobody\n  insert : nobody\n"), ["select"])
 
     def test_your_own_row_is_not_a_move(self) -> None:
         # a relation from the row's own key to its type (`self : user = id`) is "this row": lint doesn't ask for an

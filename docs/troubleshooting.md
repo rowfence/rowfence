@@ -86,6 +86,14 @@ Only the policy's app role (`app role` in the policy) and its members may sign p
 Connect as that role, or `GRANT app_user TO app_backend`. Services signing in with API keys or JWTs use
 `authz.login_key()` and `authz.login_jwt()` the same way.
 
+## "permission denied for table T"
+
+That is Postgres's own message, not a rule's refusal (which says which rule, and why, and carries a code).
+The role the app connects as has no privilege for that command on the table: row-level security comes after
+the table's privileges, so the policy's rule for it is never reached. `GRANT UPDATE ON app.projects TO
+app_user` (or `INSERT`, `DELETE`, `SELECT`), in the migration that makes the table. `authz.lint()` warns of
+each rule the app role has no privilege for.
+
 ## "new row violates row-level security policy for table T"
 
 That is Postgres's own message, not rowstile's (whose refusals say which rule, and why). It comes from:

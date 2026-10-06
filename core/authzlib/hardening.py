@@ -215,13 +215,26 @@ SELECT p.oid::regprocedure::text, gw.who, a.privilege_type,
             f"({lit(qt(tb))}, {lit(c)}, {lit(what)}, {lit(self.line_key(f'relation {what} {c}', loc))}, {lit(ask)})"
             for tb, c, what, loc, ask in unguarded
         )
-        # relations named like a type read, in a rule, like the type ("delete : user")
+        # relations named like a type that signs in read, alone in a rule, like the type ("delete : user" is
+        # the row's own user, not any user). One named like another type is only ever followed
+        # ("project.edit"), which reads as what it means: `project : project = project_id` is no one's mistake
         shadows = [
             (t.name, r.name, str(r.loc))
             for t in self.types.values()
             for r in t.relations.values()
-            if r.name in self.types and not r.synthetic
+            if self.is_principal(r.name) and not r.synthetic
         ]
+        # a rule for a command the app role may not run on the table at all: it never applies, and the
+        # statement fails with Postgres's own "permission denied for table", which reads like the policy's
+        # refusal. (`nobody` asks for no privilege; a rule on a column, or `after`, is an update's.)
+        asked = sorted(
+            {
+                (r.table, "update" if r.command == "update check" else r.command)
+                for r in self.rules
+                if r.command != "mask" and r.expr != nobody
+            }
+        )
+        rule_rows = ", ".join(f"({lit(qt(tb))}, {lit(cmd)})" for tb, cmd in asked)
         # principal types nobody can make keys for (they sign in only through a backend or JWTs)
         keyless = "".join(
             f"  severity := 'info'; object := {lit(t.name)};\n"
@@ -442,11 +455,25 @@ BEGIN
     problem := format('runs with JIT on: permission checks are many small subplans, and JIT can take longer to compile a read than to run it (a third of a second for a large one): ALTER ROLE %s SET jit = off', {lit(role)});
     RETURN NEXT;
   END IF;
-  -- relations named like a type
+  -- rules for a command the app role has no privilege for (one column's is enough for a read, an insert or
+  -- an update: the app may write some columns only)
+  FOR r IN SELECT to_regclass(v.tbl) AS tbl, v.cmd FROM (VALUES {rule_rows or "(NULL::text, NULL::text)"}) v(tbl, cmd)
+           WHERE v.tbl IS NOT NULL LOOP
+    CONTINUE WHEN r.tbl IS NULL;
+    IF r.cmd = 'delete' THEN
+      CONTINUE WHEN has_table_privilege(v_role, r.tbl, 'DELETE');
+    ELSE
+      CONTINUE WHEN has_any_column_privilege(v_role, r.tbl, r.cmd);
+    END IF;
+    severity := 'warning'; object := r.tbl::text;
+    problem := format('the policy has a rule for %s, but %s has no %s privilege on the table: the rule never applies, and the statement fails with Postgres''s own "permission denied for table". GRANT %s ON %s TO %s, or make the rule "%s : nobody"', r.cmd, {lit(role)}, upper(r.cmd), upper(r.cmd), r.tbl, {lit(role)}, r.cmd);
+    RETURN NEXT;
+  END LOOP;
+  -- relations named like a type that signs in
   FOR r IN SELECT * FROM (VALUES {shadow_rows or "(NULL::text, NULL::text, NULL::text)"}) v(type, rel, loc)
            WHERE type IS NOT NULL LOOP
     severity := 'info'; object := r.type || '.' || r.rel;
-    problem := format('is named like the type %s (%s), so in rules it reads like the type: a name that says what the relation is (author, member) reads better', r.rel, {self.line_sql(None, None, "r.loc")});
+    problem := format('is named like the type %s (%s), which signs in: alone in a rule it reads like any %s, and it is this row''s. A name that says what the relation is (author, owner) reads better', r.rel, {self.line_sql(None, None, "r.loc")}, r.rel);
     RETURN NEXT;
   END LOOP;
 {keyless}{heavy}  -- columns that move a row under another, with nothing checking where it moves to
