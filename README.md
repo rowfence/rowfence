@@ -1,5 +1,9 @@
 # rowstile: access rules in a policy file, enforced by Postgres
 
+**Authorization inside your Postgres.** Sharing, groups, nested folders and tenants, written in one policy
+file and compiled to row-level security. There is no authorization service to run beside the database, and no
+permission data to copy into one and keep in step: the rules read the tables your app already has.
+
 Write who-can-do-what in one small file, next to the data it depends on. The `rowstile`
 command compiles it into plain SQL: views, trigger-maintained tables for inheritance, row-level
 security policies, and functions for app code: checks, sharing, "who has access", "why", access
@@ -35,6 +39,24 @@ SELECT authz.can('folder', 7, 'edit');                 -- ask directly
 SELECT * FROM authz.perms_of('folder', ARRAY['7', '8']);  -- a list's buttons, in one call
 COMMIT;
 ```
+
+## Is it for you?
+
+It fits when:
+
+- your app's data is in one Postgres database;
+- who may see or change a row depends on other rows: its owner, the members of a team (teams inside teams), a
+  folder or a project that passes access down, a tenant, what people share with each other;
+- you were about to add an authorization service and keep it in step with the database, or your hand-written
+  row-level security has become hard to test and to change.
+
+It doesn't when:
+
+- what decides access is in several databases, or outside Postgres;
+- a browser reads the tables through Supabase's Data API (its roles are not the app role: a backend has to
+  sign in);
+- one tree takes many moves and links a second (they wait for each other);
+- you need an outside audit or a vendor behind it today: rowstile is a 0.x preview with one maintainer.
 
 ## Status
 

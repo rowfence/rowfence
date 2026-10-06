@@ -71,7 +71,7 @@ const examples = [
 
 export default defineConfig({
   title: "rowstile",
-  description: "Access rules for Postgres: a policy file compiled into row-level security",
+  description: "Authorization for Postgres apps: access rules in a policy file, compiled into row-level security",
   srcDir: "..",
   srcExclude: notPages(),
   rewrites: PAGES,

@@ -1,7 +1,7 @@
 {
   "name": "rowstile",
   "version": "0.0.0",
-  "description": "Access rules for Postgres: the rowstile command (policies compiled to row-level security, shipped as migrations), with its own Python",
+  "description": "Authorization for Postgres apps: the rowstile command (access rules compiled to row-level security, shipped as migrations), with its own Python",
   "license": "Apache-2.0",
   "mcpName": "io.github.rowstile/rowstile",
   "homepage": "https://rowstile.dev",

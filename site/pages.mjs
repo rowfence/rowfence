@@ -71,7 +71,7 @@ export const ORIGIN = "https://rowstile.dev";
  *  (describe).
  *  @type {Record<string, string>} */
 export const DESCRIPTIONS = {
-  "index.md": "Access rules for Postgres: a policy file compiled into row-level security",
+  "index.md": "Authorization for Postgres apps: access rules in a policy file, compiled into row-level security. Sharing, groups, nested folders, tenants.",
   "installing.md": "Install the rowstile command and its SDKs with npm, pip or Docker. Nothing is installed in the Postgres database. PostgreSQL 16, 17 and 18.",
   "getting-started.md": "From a Postgres schema to a tested access policy enforced by row-level security, the edit loop and the first migration, in about fifteen minutes.",
   "cookbook/index.md": "Tested row-level security recipes for Postgres: owner-only rows, nested teams, folders that inherit, sharing and share links, tenants, bots, blocking.",
