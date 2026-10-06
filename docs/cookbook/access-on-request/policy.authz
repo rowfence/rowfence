@@ -1,0 +1,19 @@
+-- Access on request (docs/cookbook/access-on-request.md): someone asks for a document, whoever may share it
+-- decides, and what they give ends by itself.
+app role app_user
+
+type user = app.users
+
+type document = app.documents
+  owner  : user = owner_id
+  viewer : user shared by share
+
+  can share = owner
+  can view  = share or viewer
+
+rules app.documents
+  select          : view
+  insert          : owner
+  update          : share
+  update owner_id : nobody
+  delete          : share

@@ -1,0 +1,31 @@
+-- Roles per organisation (docs/cookbook/roles-per-organization.md). Each test brings its own rows and rolls them back.
+
+test "admins, members and guests"
+  given ann = {INSERT INTO app.users VALUES (901, 'Ann') RETURNING id}
+  given bo = {INSERT INTO app.users VALUES (902, 'Bo') RETURNING id}
+  given cy = {INSERT INTO app.users VALUES (903, 'Cy') RETURNING id}
+  given acme = {INSERT INTO app.orgs VALUES (901, 'Acme') RETURNING id}
+  given {INSERT INTO app.org_members VALUES ($acme, $ann, 'admin'), ($acme, $bo, 'member'), ($acme, $cy, 'guest')}
+  given mine = {INSERT INTO app.documents (org_id, owner_id, title) VALUES ($acme, $bo, 'Notes') RETURNING id}
+  given hers = {INSERT INTO app.documents (org_id, owner_id, title) VALUES ($acme, $ann, 'Handbook') RETURNING id}
+  user $bo can edit document $mine
+  user $ann can edit document $mine
+  user $bo can view document $hers
+  user $bo cannot edit document $hers
+  user $cy cannot view document $hers
+  as user $cy refused {INSERT INTO app.documents (org_id, owner_id, title) VALUES ($acme, $cy, 'A guest''s')}
+  as user $ann allowed {SELECT authz.share('document', $hers, 'viewer', 'user', $cy)}
+  user $cy can view document $hers
+  user $cy cannot view document $mine
+
+test "a role the admins make"
+  given ann = {INSERT INTO app.users VALUES (901, 'Ann') RETURNING id}
+  given bo = {INSERT INTO app.users VALUES (902, 'Bo') RETURNING id}
+  given cy = {INSERT INTO app.users VALUES (903, 'Cy') RETURNING id}
+  given acme = {INSERT INTO app.orgs VALUES (901, 'Acme') RETURNING id}
+  given {INSERT INTO app.org_members VALUES ($acme, $ann, 'admin'), ($acme, $bo, 'member'), ($acme, $cy, 'guest')}
+  given d = {INSERT INTO app.documents (org_id, owner_id, title) VALUES ($acme, $ann, 'Handbook') RETURNING id}
+  as user $bo refused {SELECT authz.create_role('org', $acme, 'document', 'reviewer', ARRAY['view'])}
+  as user $ann allowed {SELECT authz.share('document', $d, 'role:' || authz.create_role('org', $acme, 'document', 'reviewer', ARRAY['view']), 'user', $cy)}
+  user $cy can view document $d
+  user $cy cannot edit document $d
