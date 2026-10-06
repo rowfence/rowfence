@@ -64,7 +64,35 @@ function onPath() {
   return null;
 }
 
-const python = process.env.ROWSTILE_PYTHON || process.env.ROWFENCE_PYTHON || bundled() || onPath();   // ROWFENCE_PYTHON: the name before the rename
+/** On Windows, a file of the bundled Python whose path is longer than Windows loads (259 characters, unless long
+ *  paths are turned on): Python then stops with "DLL load failed ... The filename or extension is too long",
+ *  from inside node_modules. Null when every file is within the limit.
+ *  @param {string} exe @returns {string | null} */
+function tooLong(exe) {
+  if (process.platform !== "win32") return null;
+  try {
+    const dlls = path.join(path.dirname(fs.realpathSync.native(exe)), "DLLs");
+    const longest = fs.readdirSync(dlls).map((f) => path.join(dlls, f)).sort((a, b) => b.length - a.length)[0];
+    if (!longest || longest.length <= 259) return null;
+    // with long paths turned on, or when only files the command never loads are past the limit, it runs all
+    // the same: ask it for the compiled modules the command uses
+    const probe = "import unicodedata, ssl, hashlib, socket, select, zlib, decimal";
+    return spawnSync(exe, ["-E", "-s", "-c", probe]).status === 0 ? null : longest;
+  } catch {
+    return null;
+  }
+}
+
+const own = process.env.ROWSTILE_PYTHON || process.env.ROWFENCE_PYTHON ? null : bundled();   // ROWFENCE_PYTHON: the name before the rename
+const long = own && tooLong(own);
+if (long && !onPath()) {
+  console.error(`rowstile: this project's path is too long for Windows to load the Python that came with the package ` +
+    `(${long.length} characters to ${path.basename(long)}; Windows loads up to 259). Move the project to a shorter path, ` +
+    "or turn long paths on in Windows (LongPathsEnabled), or install Python 3.11 or later: rowstile then runs on that one");
+  process.exit(1);
+}
+// a Python on PATH, when the bundled one can't be loaded from here
+const python = process.env.ROWSTILE_PYTHON || process.env.ROWFENCE_PYTHON || (long ? null : own) || onPath();
 if (!python) {
   console.error(`rowstile: no Python to run on. The package for this platform (@rowstile/cli-${key}) isn't installed` +
     (PLATFORMS.includes(key) ? " (optional dependencies turned off?)" : `, and there is none for ${key}`) +

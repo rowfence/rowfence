@@ -4,6 +4,15 @@ What people run into, by what they see. Most of these were first hit while build
 messenger. A mistake in a policy ends with its code (`[AZ203]`): its page in `docs/errors/`, or
 `rowstile help AZ203`, says what it means and shows it fixed.
 
+## On Windows: "DLL load failed ... The filename or extension is too long", or "this project's path is too long"
+
+The npm package brings its own Python, inside `node_modules`, about 65 characters below your project. Windows
+loads files whose path is up to 259 characters long, so in a deep folder that Python can't start. The command
+then runs on a Python 3.11 or later from your `PATH` if there is one, and says so plainly if there is none
+(earlier versions stopped with Python's own traceback). The ways out: a shorter path for the project,
+long paths turned on in Windows (`LongPathsEnabled`), or a Python of your own (`pip install --pre rowstile`
+gives the same command).
+
 ## A `{condition}` with a subquery matches rows it shouldn't (or none)
 
 A bare column in a condition is the row's, unless a table the condition reads has one by that name: in
