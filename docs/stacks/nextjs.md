@@ -228,8 +228,9 @@ npx rowstile migrate --check       # in CI: exit 1 if a policy change has no mig
 While you edit, `npx rowstile dev` checks, pushes to the development database, runs the tests and rewrites
 `src/authz.gen.ts` on every save (and writes the migration once you stop editing).
 
-The development database then holds what `dev` (or `rowstile push`) pushed, not what its migrations left,
-and the next `prisma migrate deploy` on it stops with AZ607, which Prisma keeps as a failed migration.
+The development database then holds what `dev` (or `rowstile push`) pushed, not what its migrations left.
+The first migration, the whole policy, applies over that; a later `prisma migrate deploy` stops there with
+AZ607, which Prisma keeps as a failed migration.
 Production and CI only ever take migrations. On the development database, once `rowstile migrate --check`
 says there is nothing to migrate (it holds the policy the newest migration makes), tell Prisma the
 migration is there; or rebuild the database from the migrations.

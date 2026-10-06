@@ -96,6 +96,9 @@ test "a folder's owner edits what is inside"    -- brings its own data, rolled b
   or not (for rules on directories), and `nobody` nobody (`update id : nobody`), `{...}` is any SQL
   condition on the row (columns, subqueries, `now()`, `authz.uid()`, request context
   with `authz.ctx('mfa')`, which the app sets in the transaction: `SET LOCAL authz_ctx.mfa = 'yes'`).
+  Being SQL, a condition names a column as SQL does: one with capital letters, as Prisma makes them, takes
+  double quotes there (`{"parentId" is null}`), while a relation's source is the bare name
+  (`parent : folder = parentId`).
 - **Conditions name their row `this`**: a bare column is the row's, unless a table the condition reads has
   one by that name, as most have an `id`. In a subquery, write `this.`:
   `{exists (select 1 from app.memberships m where m.project_id = this.id)}` (with `id` alone, that would be

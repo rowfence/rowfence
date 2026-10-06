@@ -742,7 +742,8 @@ def page(code: str) -> str:
         "apply": "when the policy is applied (`rowstile push`, `apply`, a migration), against the database",
         "deploy": "when a policy migration runs",
         "command": "by the command, against a database",
-        "runtime": "to the app, by the `authz.*` functions and the policy's rules: the code is in the error's HINT (`rowstile help AZ709`), and the SDKs' errors carry it as `code`",
+        "runtime": "to the app, by the `authz.*` functions and the policy's rules: the code is in the error's HINT "
+        f"(`rowstile help {code}`), and the SDKs' errors carry it as `code`",
     }[c.when]
     out += [f"Reported {found}.", ""]
     if c.wrong:

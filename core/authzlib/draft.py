@@ -493,13 +493,17 @@ def draft(
                 "  -- no insert or delete rule: accounts are made and removed outside the app role",
             ]
         else:
-            mine = [
-                f"{{{in_sql(src)} = authz.uid()}}"
-                for rel, target, src, k in rels[n]
-                if k == "user" and not src.startswith("[")
-            ][:1]
+            # in the maker's own name: the relation, where one says it (the language page: write the relation
+            # rather than its column again)
+            mine = [rel for rel, _, src, k in rels[n] if k == "user" and not src.startswith("[")][:1]
             where = [f"{parents[0]}.edit"] if parents else []
-            insert = " and ".join(where + mine) or "signed_in"
+            # a tree of the type itself: "inside one you edit" alone lets nobody make the first row, so a row
+            # with nothing above it may be made too, in the maker's name
+            above = next((src for rel, _, src, _ in rels[n] if parents and rel == parents[0]), "")
+            if mine and parents and parent_of[n][parents[0]] == n and not above.startswith("["):
+                insert = f"{mine[0]} and ({parents[0]}.edit or {{{in_sql(above)} is null}})"
+            else:
+                insert = " and ".join(where + mine) or "signed_in"
             r += [
                 f"  insert : {insert}" + ("   -- decide: who may add one" if insert == "signed_in" or parents else ""),
                 "  update : edit",

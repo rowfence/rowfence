@@ -14,6 +14,14 @@ Each release upgrades from the one before it. How releases are numbered and made
 - A policy's Alembic revision stops in one line when Alembic is connected with asyncpg (which takes one
   statement at a time), naming the sync driver to give it, instead of the driver's error with the whole
   script in it.
+- `rowstile init`'s draft writes an insert rule with the relation (`insert : project.edit and author`), not
+  its column again (`{author_id = authz.uid()}`), and for folders inside folders lets a row with nothing
+  above it be made, in the maker's own name (`insert : owner and (parent.edit or {parent_id is null})`):
+  with "inside one you edit" alone, nobody could make the first one through the app.
+- The coverage line of `rowstile dev` and `rowstile test --coverage` names the checks that count: "7
+  branches no "can" check reaches". A statement run `as` someone passes and covers nothing.
+- The FastAPI page's install line is `uv add "rowstile[...]>=0.1.0a0"`: it takes rowstile's pre-release and
+  no other package's, where `--prerelease=allow` also brought betas of the app's own dependencies.
 - The cookbook's folders recipe lets anyone start a top-level folder of their own
   (`insert : owner and (parent.edit or {parent_id is null})`): with `parent.edit and owner` nobody could make
   the first folder through the app.
@@ -36,6 +44,10 @@ Each release upgrades from the one before it. How releases are numbered and made
   owner's URL, and what to do on a development database that `rowstile dev` pushed to before
   `prisma migrate deploy` (AZ607: `prisma migrate resolve --applied`); `rowstile help AZ607`, the
   migration's own hint and the troubleshooting page say the same for each tool.
+- `rowstile help` for a code the runtime raises (AZ701 to AZ713) ends with its own code, not AZ709's.
+- The FastAPI page shows the imports its code uses; getting started says the draft is replaced, not edited,
+  and what its Python example needs; the language page says how a condition names a column with capital
+  letters.
 
 ## 0.1.0 (alpha)
 

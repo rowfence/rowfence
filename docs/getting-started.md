@@ -71,7 +71,8 @@ is `project : project = project_id`, and a note inherits view and edit from its 
 marked `-- decide:` is a choice only you can make.
 
 Here, projects are shared: people give others access with `authz.share()`. And only the tables the app
-writes need rules. Edit the draft into this:
+writes need rules, where the draft has a type and rules for every table, the link table
+`app.team_members` too. Replace the draft with this:
 
 ```authz db/policy.authz
 app role app_backend
@@ -158,7 +159,7 @@ rowstile dev: db/policy.authz -> postgres on localhost:5432
 10:04:31 start
   ok   compiles
   ok   applied in 0.12 s (the whole policy)
-  ok   7 check(s) pass; 7 branches no test reaches (line 13: owner, line 14: share, ...)
+  ok   7 check(s) pass; 7 branches no "can" check reaches (line 13: owner, line 14: share, ...)
 ```
 
 The last line counts the branches of the policy no test makes true yet (`rowstile test --coverage` lists
@@ -225,7 +226,9 @@ rowstile sql --as user:2 "SELECT id, body FROM app.notes"
 ## 7. From your app
 
 `rowstile.toml` can name clients to write on every change (`[clients] py = "app/authz_client.py"`), or:
-`rowstile client py > authz_client.py` (or `ts`). Commit it next to your code.
+`rowstile client py > authz_client.py` (or `ts`). Commit it next to your code. The example connects with
+[psycopg](https://www.psycopg.org) (`pip install "psycopg[binary]"`); `current_user_id`, `project_id`,
+`note_id` and `body` are your request's.
 
 ```python
 import psycopg
