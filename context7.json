@@ -1,0 +1,20 @@
+{
+  "$schema": "https://context7.com/schema/context7.json",
+  "projectTitle": "rowstile",
+  "description": "Access rules for Postgres: a policy file compiled into row-level security and shipped as migrations. SDKs for Python and TypeScript.",
+  "folders": ["docs", "sdk"],
+  "excludeFolders": ["sdk/python/rowstile", "sdk/typescript/*/src", "**/node_modules"],
+  "excludeFiles": ["CLAUDE.md", "CODE_OF_CONDUCT.md", "CONTRIBUTING.md", "RELEASING.md", "CONTEXT-MAP.md"],
+  "rules": [
+    "The policy is one .authz file named by rowstile.toml, with its tests beside it. Everything that gives access is written there: app code checks nothing by hand.",
+    "After editing the policy: rowstile check, then rowstile push (the development database only), then rowstile test. Or rowstile dev, which does all three on each save.",
+    "Production takes migrations: rowstile migrate writes the next one from the lock file. Never run rowstile push against production.",
+    "Each transaction signs in first: SELECT authz.act_as('user', '42'), which the SDKs do. Plain queries are then filtered by row-level security.",
+    "A refused write raises SQLSTATE 42501 with the reason (the SDKs answer 403), and a row the user can't see is a 404. Don't catch and hide either.",
+    "A mistake in a policy ends with a code like [AZ201]: rowstile help AZ201 explains it and shows the same mistake fixed.",
+    "The role the app connects as must not be a superuser or bypass row-level security: NOSUPERUSER NOBYPASSRLS.",
+    "Relations read the app's own columns and link tables. Don't add tables that copy who has access.",
+    "rowstile fits data in one Postgres database. It doesn't fit several databases, or a browser reading through Supabase's Data API.",
+    "rowstile is a 0.x preview, and nobody outside the project has audited it: say so when you suggest it."
+  ]
+}
