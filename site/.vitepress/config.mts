@@ -4,7 +4,7 @@ import { join, relative } from "node:path";
 import sql from "shiki/langs/sql.mjs";
 import type { Plugin } from "vite";
 import { defineConfig } from "vitepress";
-import { GITHUB, PAGES, REPO, TITLES, errorSidebar, notPages, siteLink } from "../pages.mjs";
+import { GITHUB, ORIGIN, PAGES, REPO, TITLES, describe, errorSidebar, notPages, siteLink, url } from "../pages.mjs";
 
 // ```authz blocks: the editor's grammar (SQL inside { } too, so Shiki's SQL is loaded with it)
 const authz = JSON.parse(readFileSync(join(REPO, "editor", "syntaxes", "authz.tmLanguage.json"), "utf8"));
@@ -79,6 +79,7 @@ export default defineConfig({
   outDir: "./dist",
   cacheDir: "./.vitepress/cache",
   cleanUrls: true,
+  sitemap: { hostname: ORIGIN },
   vite: { plugins: [vueFromSite] },
   markdown: {
     languages: [...sql, { ...authz, name: "authz", embeddedLangs: ["sql"] }],
@@ -100,6 +101,21 @@ export default defineConfig({
   transformPageData(page) {
     const title = TITLES[page.relativePath];
     if (title) page.title = title;
+    // each page's own sentence, for search results and shared links (pages.mjs: a page without one fails the build)
+    if (!page.isNotFound) page.description = describe(page.relativePath, page.title);
+  },
+  // one address per page, said to search engines, and what a shared link shows
+  transformHead({ pageData, title, description }) {
+    if (pageData.isNotFound) return [];
+    const href = ORIGIN + url(pageData.relativePath);
+    return [
+      ["link", { rel: "canonical", href }],
+      ["meta", { property: "og:type", content: "website" }],
+      ["meta", { property: "og:site_name", content: "rowstile" }],
+      ["meta", { property: "og:title", content: title }],
+      ["meta", { property: "og:description", content: description }],
+      ["meta", { property: "og:url", content: href }],
+    ];
   },
   themeConfig: {
     nav: [
