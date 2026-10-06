@@ -1,0 +1,27 @@
+-- Sharing and links (docs/cookbook/sharing-and-links.md). Each test brings its own rows and rolls them back.
+
+test "sharing with a person and with a team"
+  given ann = {INSERT INTO app.users VALUES (901, 'Ann') RETURNING id}
+  given bo = {INSERT INTO app.users VALUES (902, 'Bo') RETURNING id}
+  given cy = {INSERT INTO app.users VALUES (903, 'Cy') RETURNING id}
+  given eng = {INSERT INTO app.teams VALUES (901, 'Engineering') RETURNING id}
+  given {INSERT INTO app.team_members VALUES ($eng, $cy)}
+  given d = {INSERT INTO app.documents (owner_id, title) VALUES ($ann, 'Plans') RETURNING id}
+  user $bo cannot view document $d
+  as user $ann allowed {SELECT authz.share('document', $d, 'viewer', 'user', $bo)}
+  user $bo can view document $d
+  user $bo cannot edit document $d
+  as user $bo refused {SELECT authz.share('document', $d, 'editor', 'user', $bo)}
+  as user $ann allowed {SELECT authz.share('document', $d, 'editor', 'team', $eng, 'member')}
+  user $cy can edit document $d
+  as user $cy allowed {UPDATE app.documents SET title = 'Plans, v2' WHERE id = $d}
+  as user $cy refused {DELETE FROM app.documents WHERE id = $d}
+
+test "a share that starts later, and a link"
+  given ann = {INSERT INTO app.users VALUES (901, 'Ann') RETURNING id}
+  given bo = {INSERT INTO app.users VALUES (902, 'Bo') RETURNING id}
+  given d = {INSERT INTO app.documents (owner_id, title) VALUES ($ann, 'Plans') RETURNING id}
+  as user $ann allowed {SELECT authz.share('document', $d, 'viewer', 'user', $bo, '', now() + interval '1 week', now() + interval '1 day')}
+  user $bo cannot view document $d
+  as user $ann allowed {SELECT authz.create_link('document', $d, 'viewer')}
+  as user $bo refused {SELECT authz.create_link('document', $d, 'viewer')}

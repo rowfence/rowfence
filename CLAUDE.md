@@ -106,17 +106,18 @@ User-facing docs: `README.md`, then `docs/reference/` (read them first). Terms i
   is unset)
 - `playground/` — rowstile in the browser: the compiler in Pyodide (a worker), the SQL in PGlite; `core.mjs` is the
   engine, `test.mjs` runs it in Node, `browser_test.mjs` the page in headless Chrome, `build.mjs` writes `dist/`
-  (its examples are read from the repository: the getting-started guide's own, the docs app, the cookbook)
+  (its examples are read from the repository: the getting-started guide's own, the docs app, the cookbook's
+  recipes)
 - `README.md` — the landing page: the pitch, installing, the docs, the folders. `core/README.md` is for working
   on the core folder (what's where, the test suites)
 - `docs/` — `reference/` (the reference by subject: `language.md`, `app-code.md`, `identity.md`,
   `governance.md`, `tools.md`, `migrations.md`, `review.md`, `guarantees.md`, `limits.md`),
   `installing.md` (the site's Installing page: it holds the README's install lines, `DocPages` checks),
-  `getting-started.md` (run as written by `tests/docs_test.sh`), `cookbook.md` + `cookbook/` (a policy,
-  schema and tests; `tests/cookbook.sh` checks every line the page shows is in them; a recipe with a page of
-  its own is `cookbook/<name>.md` beside `cookbook/<name>/`: `schema.sql`, `policy.authz`, `tests.authz`,
-  `rows.sql` for the playground, checked the same way, listed on the site and in the playground from the
-  folder, and opened there by `/playground/#e=<name>`), `troubleshooting.md`,
+  `getting-started.md` (run as written by `tests/docs_test.sh`), `cookbook.md` + `cookbook/` (the index, and
+  the recipes: each is `cookbook/<name>.md` beside `cookbook/<name>/` with `schema.sql`, `policy.authz`,
+  `tests.authz` and `rows.sql` for the playground; `tests/cookbook.sh` applies and tests each and checks
+  every line its page shows is in them; the site and the playground list them from the folders, and
+  `/playground/#e=<name>` opens one), `troubleshooting.md`,
   `operations.md`, `managed-postgres.md` (the setup on a managed service; Neon and Supabase, as tried),
   `signed-urls.md`, `stacks/` (a page per stack; every line of code in them is in a
   conformance app, `StackPages` in `tests/unit_test.py`), `errors/` (a page per error code, written from

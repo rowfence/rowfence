@@ -1,0 +1,13 @@
+-- Blocking (docs/cookbook/blocking.md). The test brings its own rows and rolls them back.
+
+test "nobody writes to someone who blocked them"
+  given ann = {INSERT INTO app.users VALUES (901, 'Ann') RETURNING id}
+  given bo = {INSERT INTO app.users VALUES (902, 'Bo') RETURNING id}
+  given cy = {INSERT INTO app.users VALUES (903, 'Cy') RETURNING id}
+  as user $ann allowed {INSERT INTO app.direct_messages (from_id, to_id, body) VALUES ($ann, $bo, 'hi')}
+  given {INSERT INTO app.blocks VALUES ($bo, $ann)}
+  as user $ann refused {INSERT INTO app.direct_messages (from_id, to_id, body) VALUES ($ann, $bo, 'hi again')}
+  as user $bo allowed {INSERT INTO app.direct_messages (from_id, to_id, body) VALUES ($bo, $ann, 'bye')}
+  as user $cy allowed {INSERT INTO app.direct_messages (from_id, to_id, body) VALUES ($cy, $bo, 'hello')}
+  as user $ann refused {INSERT INTO app.direct_messages (from_id, to_id, body) VALUES ($cy, $bo, 'as Cy')}
+  as user $cy sees 1 {SELECT FROM app.direct_messages WHERE from_id IN ($ann, $bo, $cy)}

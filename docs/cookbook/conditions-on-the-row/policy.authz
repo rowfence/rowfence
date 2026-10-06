@@ -1,0 +1,23 @@
+-- Conditions on the row (docs/cookbook/conditions-on-the-row.md): members read a channel; in an announcement
+-- channel only its admins post.
+app role app_user
+
+type user = app.users
+
+type channel = app.channels
+  member : user = app.channel_members(channel_id -> user_id)
+  admin  : user = app.channel_members(channel_id -> user_id) where {admin}
+
+  can read = member
+  can post = member and ({not announce} or admin)
+
+type post = app.posts
+  channel : channel = channel_id
+  author  : user    = author_id
+
+rules app.channels
+  select : read
+
+rules app.posts
+  select : channel.read
+  insert : channel.post and author

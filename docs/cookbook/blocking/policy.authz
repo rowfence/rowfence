@@ -1,0 +1,13 @@
+-- Blocking (docs/cookbook/blocking.md): nobody writes to someone who blocked them.
+app role app_user
+
+type user = app.users
+  has_blocked : user = app.blocks(blocker_id -> blocked_id)  -- the people this person blocked
+
+type direct_message = app.direct_messages
+  sender    : user = from_id
+  recipient : user = to_id
+
+rules app.direct_messages
+  select : sender or recipient
+  insert : sender and not recipient.has_blocked  -- nobody writes to someone who blocked them

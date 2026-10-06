@@ -74,7 +74,7 @@ export const DESCRIPTIONS = {
   "index.md": "Access rules for Postgres: a policy file compiled into row-level security",
   "installing.md": "Install the rowstile command and its SDKs with npm, pip or Docker. Nothing is installed in the Postgres database. PostgreSQL 16, 17 and 18.",
   "getting-started.md": "From a Postgres schema to a tested access policy enforced by row-level security, the edit loop and the first migration, in about fifteen minutes.",
-  "cookbook/index.md": "Tested row-level security patterns for Postgres: owner-only rows, teams inside teams, folders that inherit, sharing and share links, tenants, bots.",
+  "cookbook/index.md": "Tested row-level security recipes for Postgres: owner-only rows, nested teams, folders that inherit, sharing and share links, tenants, bots, blocking.",
   "troubleshooting.md": "What people run into with rowstile and Postgres row-level security, by what they see, and how to fix each.",
   "operations.md": "Running rowstile in production: behind PgBouncer and other poolers, deploying a policy change, upgrading, backups, retention, what to watch.",
   "managed-postgres.md": "rowstile on managed Postgres: the setup on Neon and Supabase as tried, with their poolers, connection strings and limits.",

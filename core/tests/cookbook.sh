@@ -1,8 +1,9 @@
 #!/bin/bash
-# cookbook.sh: the cookbook is tested. docs/cookbook.md's policy (docs/cookbook/policy.authz) applies to its
-# tables, its tests pass, and every line the page shows is in the policy or the tests, so the page can't drift.
-# The same for each recipe with a page of its own: docs/cookbook/<name>.md shows docs/cookbook/<name>/
-# (schema.sql, policy.authz, tests.authz; rows.sql, a few rows for the playground, must load too).
+# cookbook.sh: the cookbook is tested. Each recipe is a page, docs/cookbook/<name>.md, beside a folder,
+# docs/cookbook/<name>/: schema.sql (its tables), rows.sql (a few rows, for the playground), policy.authz and
+# tests.authz. For each: the tables and the rows load, the policy applies without a warning, its tests pass
+# (with the rows there, as in the playground), and every line the page shows is in the policy or the tests, so
+# the page can't drift. A page without its folder, or a folder without its page, fails.
 #   PGHOST=... PGUSER=postgres tests/cookbook.sh
 set -u
 cd "$(dirname "$0")/.."
@@ -11,32 +12,32 @@ fails=0
 ok() { echo "ok    $1"; }
 bad() { echo "FAIL  $1${2:+: $2}"; fails=$((fails + 1)); }
 
-# one book: its name, its page, its schema, its policy, its test files (the rest of the arguments)
-book() {
-  local name=$1 page=$2 schema=$3 policy=$4; shift 4
-  local db="authz_cookbook_${name//-/_}" out rc missing
+recipe() {
+  local name=$1 dir=$BOOK/$1 page=$BOOK/$1.md
+  local db="authz_cookbook_${name//-/_}" out rc missing f
+  for f in schema.sql rows.sql tests.authz; do [ -f "$dir/$f" ] || { bad "$name: no $f"; return; }; done
+  [ -f "$page" ] || { bad "$name: no page (docs/cookbook/$name.md)"; return; }
   CLI() { python3 cli/rowstile_cli.py --db "dbname=$db" "$@"; }
   dropdb --if-exists "$db" 2>/dev/null
   createdb "$db" || { bad "$name: createdb"; return; }
-  if ! PGOPTIONS="-c client_min_messages=warning" psql -X -q -v ON_ERROR_STOP=1 -d "$db" -f "$schema" >/dev/null; then
-    bad "$name: its tables"; return
+  if ! PGOPTIONS="-c client_min_messages=warning" psql -X -q -v ON_ERROR_STOP=1 -d "$db" -f "$dir/schema.sql" -f "$dir/rows.sql" >/dev/null; then
+    bad "$name: its tables and rows"; dropdb "$db"; return
   fi
-  out=$(CLI apply "$policy" 2>&1); case "$out" in *": applied") ok "$name: the policy applies";; *) bad "$name: apply" "$out";; esac
+  out=$(CLI apply "$dir/policy.authz" 2>&1); case "$out" in *": applied") ok "$name: the policy applies";; *) bad "$name: apply" "$out";; esac
   case "$out" in *WARNING*) bad "$name: applying warns" "$out";; *) ok "$name: ... without warnings (authz.lint included)";; esac
-  out=$(CLI test "$@" 2>&1); rc=$?
+  out=$(CLI test "$dir/tests.authz" 2>&1); rc=$?
   [ $rc -eq 0 ] && ok "$name: its tests pass ($(echo "$out" | tail -n 1))" || bad "$name: tests" "$(echo "$out" | grep -A 8 FAIL | head -40)"
-  local rows; rows="$(dirname "$schema")/rows.sql"
-  if [ "$name" != cookbook ] && [ -f "$rows" ]; then
-    psql -X -q -v ON_ERROR_STOP=1 -d "$db" -f "$rows" >/dev/null 2>&1 && ok "$name: the playground's rows load" || bad "$name: rows.sql"
-  fi
-  missing=$(python3 - "$page" "$policy" "$@" <<'PY'
+  missing=$(python3 - "$page" "$dir/policy.authz" "$dir/tests.authz" <<'PY'
 import re, sys
 page = open(sys.argv[1], encoding="utf-8").read()
 norm = lambda s: " ".join(s.split("--")[0].split())
 have = set()
 for f in sys.argv[2:]:
     have |= {norm(line) for line in open(f, encoding="utf-8")}
-for block in re.findall(r"```authz\n(.*?)```", page, re.S):
+blocks = re.findall(r"```authz\n(.*?)```", page, re.S)
+if not blocks:
+    print("(the page shows no policy)")
+for block in blocks:
     for line in block.splitlines():
         if norm(line) and norm(line) not in have:
             print(line.strip())
@@ -46,16 +47,11 @@ PY
   [ -z "${KEEP:-}" ] && dropdb "$db"
 }
 
-book cookbook "$BOOK.md" "$BOOK/schema.sql" "$BOOK/policy.authz" "$BOOK"/tests/*.authz
-
 recipes=0
 for dir in "$BOOK"/*/; do
-  name=$(basename "$dir")
   [ -f "$dir/policy.authz" ] || continue
   recipes=$((recipes + 1))
-  for f in schema.sql tests.authz; do [ -f "$dir/$f" ] || bad "$name: no $f"; done
-  [ -f "$BOOK/$name.md" ] || { bad "$name: no page (docs/cookbook/$name.md)"; continue; }
-  book "$name" "$BOOK/$name.md" "$dir/schema.sql" "$dir/policy.authz" "$dir/tests.authz"
+  recipe "$(basename "$dir")"
 done
 # a page without its folder shows lines nothing tests
 for page in "$BOOK"/*.md; do
@@ -63,6 +59,12 @@ for page in "$BOOK"/*.md; do
   name=$(basename "$page" .md)
   [ -f "$BOOK/$name/policy.authz" ] || bad "$name: a page without docs/cookbook/$name/policy.authz"
 done
-[ "$recipes" -gt 0 ] && ok "$recipes recipe(s) with a page of their own" || bad "no recipe folder was found"
+# the index names every recipe
+for dir in "$BOOK"/*/; do
+  name=$(basename "$dir")
+  [ -f "$dir/policy.authz" ] || continue
+  grep -qF "(cookbook/$name.md)" "$BOOK.md" || bad "$name: docs/cookbook.md doesn't link to it"
+done
+[ "$recipes" -ge 10 ] && ok "$recipes recipes" || bad "only $recipes recipes were found"
 
 if [ $fails -eq 0 ]; then echo "cookbook: all passed"; else echo "cookbook: $fails failed"; exit 1; fi

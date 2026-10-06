@@ -1,0 +1,18 @@
+-- Tenants (docs/cookbook/tenants.md). The test brings its own rows and rolls them back.
+
+test "a ticket is seen in its organisation, and nowhere else"
+  given ann = {INSERT INTO app.users VALUES (901, 'Ann') RETURNING id}
+  given bo = {INSERT INTO app.users VALUES (902, 'Bo') RETURNING id}
+  given cy = {INSERT INTO app.users VALUES (903, 'Cy') RETURNING id}
+  given acme = {INSERT INTO app.orgs VALUES (901, 'Acme') RETURNING id}
+  given globex = {INSERT INTO app.orgs VALUES (902, 'Globex') RETURNING id}
+  given {INSERT INTO app.org_members VALUES ($acme, $ann, 'admin'), ($acme, $bo, 'member'), ($globex, $cy, 'admin')}
+  given t = {INSERT INTO app.tickets VALUES ($acme, 1, $bo, 'Printer') RETURNING org_id, id}
+  user $bo can edit ticket $t
+  user $ann can edit ticket $t
+  user $cy cannot view ticket $t
+  as user $cy sees 0 {SELECT FROM app.tickets WHERE org_id = $acme}
+  as user $cy refused {INSERT INTO app.tickets VALUES ($acme, 2, $cy, 'Not mine to file')}
+  as user $bo refused {UPDATE app.tickets SET assignee_id = $ann WHERE (org_id, id) = ($acme, 1)}
+  as user $ann allowed {UPDATE app.tickets SET assignee_id = $ann WHERE (org_id, id) = ($acme, 1)}
+  as user $ann refused {UPDATE app.tickets SET org_id = $globex WHERE (org_id, id) = ($acme, 1)}

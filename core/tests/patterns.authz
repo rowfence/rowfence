@@ -1,5 +1,6 @@
--- The cookbook's policy (docs/cookbook.md): every pattern, on the tables in schema.sql. Its tests are in
--- tests/patterns.authz; core/tests/cookbook.sh applies it and runs them.
+-- Many patterns in one policy, on the tables in patterns_schema.sql, under an app role that isn't app_user: a
+-- fixture for adversarial.sh's catalog check. (It was the cookbook's policy; the cookbook's recipes now each
+-- have their own, in docs/cookbook/<name>/.)
 app role cb_app
 
 type user = cb.users

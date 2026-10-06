@@ -1,0 +1,24 @@
+-- Sharing and links (docs/cookbook/sharing-and-links.md): whoever may share a document gives it to a person, a
+-- team's members or whoever holds a link, for as long as they say.
+app role app_user
+
+type user = app.users
+
+type team = app.teams
+  member : user = app.team_members(team_id -> user_id)
+
+type document = app.documents
+  owner  : user = owner_id
+  viewer : user, team#member, link shared by share
+  editor : user, team#member shared by share
+
+  can share = owner
+  can edit  = share or editor
+  can view  = edit or viewer
+
+rules app.documents
+  select          : view
+  insert          : owner
+  update          : edit
+  update owner_id : nobody
+  delete          : share

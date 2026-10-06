@@ -95,7 +95,7 @@ got=$(catalog "$DB" /tmp/authz_adversarial.sql app_user)
 [ -z "$got" ] &&
   echo "ok    docs: definer functions set their search_path; the app role executes the API and nothing else; no grants to PUBLIC or others" ||
   { echo "FAIL  the catalog: $got"; fails=$((fails + 1)); }
-for p in "multi tests/multi_schema.sql tests/multi.authz app_user" "alt tests/alt_schema.sql tests/alt.authz app_user"          "composite tests/composite_schema.sql tests/composite.authz app_user"          "cookbook ../docs/cookbook/schema.sql ../docs/cookbook/policy.authz cb_app"; do
+for p in "multi tests/multi_schema.sql tests/multi.authz app_user" "alt tests/alt_schema.sql tests/alt.authz app_user"          "composite tests/composite_schema.sql tests/composite.authz app_user"          "patterns tests/patterns_schema.sql tests/patterns.authz cb_app"; do
   set -- $p; C="${DB}_catalog"
   dropdb --if-exists "$C" 2>/dev/null; createdb "$C" || exit 1
   python3 compile_policy.py "$3" > /tmp/authz_adversarial_catalog.sql &&

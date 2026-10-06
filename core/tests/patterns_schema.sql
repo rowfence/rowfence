@@ -1,4 +1,4 @@
--- The cookbook's tables (docs/cookbook.md): one small app per pattern, side by side.
+-- The tables of patterns.authz: one small app per pattern, side by side (a fixture for adversarial.sh).
 CREATE SCHEMA cb;
 CREATE TABLE cb.users (id bigint PRIMARY KEY, name text NOT NULL);
 

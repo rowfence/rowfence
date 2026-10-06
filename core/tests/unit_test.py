@@ -1943,7 +1943,7 @@ class Fmt(unittest.TestCase):
 
         for rel in list(POLICIES.values()) + [
             "example/docs.test.authz",
-            "../docs/cookbook/policy.authz",
+            "../docs/cookbook/sharing-and-links/policy.authz",
             "../examples/filemanager/db/policy.authz",
             "../examples/messenger/db/policy.authz",
         ]:

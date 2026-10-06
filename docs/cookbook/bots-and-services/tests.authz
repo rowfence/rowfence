@@ -1,0 +1,19 @@
+-- Bots and services (docs/cookbook/bots-and-services.md). The test brings its own rows and rolls them back.
+
+test "a bot posts where it was added, as itself"
+  given ann = {INSERT INTO app.users VALUES (901, 'Ann') RETURNING id}
+  given bo = {INSERT INTO app.users VALUES (902, 'Bo') RETURNING id}
+  given c = {INSERT INTO app.channels (name) VALUES ('general') RETURNING id}
+  given {INSERT INTO app.channel_members VALUES ($c, $bo)}
+  given weather = {INSERT INTO app.services (name, owner_id) VALUES ('weather', $ann) RETURNING id}
+  given other = {INSERT INTO app.services (name, owner_id) VALUES ('other', $ann) RETURNING id}
+  service $weather cannot post channel $c
+  given {INSERT INTO app.channel_bots VALUES ($c, $weather)}
+  service $weather can post channel $c
+  as service $weather allowed {INSERT INTO app.posts (channel_id, bot_id, body) VALUES ($c, $weather, 'sunny')}
+  as service $weather refused {INSERT INTO app.posts (channel_id, bot_id, body) VALUES ($c, $other, 'as another bot')}
+  as service $other refused {INSERT INTO app.posts (channel_id, bot_id, body) VALUES ($c, $other, 'not added here')}
+  as user $bo sees 1 {SELECT FROM app.posts WHERE channel_id = $c}
+  as user $bo refused {INSERT INTO app.posts (channel_id, bot_id, body) VALUES ($c, $weather, 'as the bot')}
+  user $ann can manage_keys service $weather
+  user $bo cannot manage_keys service $weather
