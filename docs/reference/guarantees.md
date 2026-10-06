@@ -49,6 +49,7 @@ The app role is not trusted: it may do what the rules allow and nothing else. Po
 the database owner and the backend that says who is signed in are trusted. What that protects,
 the attacks tried and the known limits (side channels such as `EXPLAIN ANALYZE` row counts, for
 code that can run arbitrary SQL as the app role) are in [the threat model](../threat-model.md).
+[How rowstile is checked](../how-it-is-checked.md) says which tests hold it to that.
 
 **rowstile has not been audited by anyone outside the project.** It has had self-review and the
 [tests](../../core/README.md#tested), including an adversarial suite and a parser fuzzer.

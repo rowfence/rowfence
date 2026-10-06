@@ -26,10 +26,12 @@ const vueFromSite: Plugin = {
 const guide = [
   { text: "Installing", link: "/installing" },
   { text: "Getting started", link: "/getting-started" },
+  { text: "rowstile and the alternatives", link: "/comparison" },
   { text: "Troubleshooting", link: "/troubleshooting" },
   { text: "Running rowstile", link: "/operations" },
   { text: "Managed Postgres: Neon, Supabase", link: "/managed-postgres" },
   { text: "Files in S3-compatible storage", link: "/signed-urls" },
+  { text: "How rowstile is checked", link: "/how-it-is-checked" },
   { text: "Threat model", link: "/threat-model" },
   { text: "Reporting a vulnerability", link: "/security" },
   { text: "Changelog", link: "/changelog" },
