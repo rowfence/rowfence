@@ -1133,6 +1133,25 @@ class Review(unittest.TestCase):
         self.assertEqual(len(r["deploy"]["migrations"]), 2)  # built beside, then swapped in
         self.assertTrue(r["deploy"]["migrations"][0]["builds_beside"])
 
+    def test_a_test_file_that_doesnt_parse_is_said(self) -> None:
+        # its checks are missing from the comparison, which read as "no change to what the tests claim"
+        good = (
+            'test "owners"\n  given ann = {INSERT INTO app.users (id) VALUES (1) RETURNING id}\n'
+            "  user $ann can view folder 1\n"
+        )
+        after = {"tests/a.authz": good.replace("can view", "cannot view"), "tests/b.authz": 'test "broken"\n  given\n'}
+        r = self.run_review(self.text, {"tests/a.authz": good}, after)
+        t = r["tests"]
+        # a check is on its file's line, not on a line of the policy
+        self.assertEqual([(x["test"], x["line"]) for x in t["flipped"]], [("owners", "tests/a.authz line 3")])
+        self.assertEqual([x["file"] for x in t["unread"]], ["tests/b.authz"])
+        self.assertRegex(t["unread"][0]["error"], r"^tests/b\.authz line 2: .* \[AZ106\]$")
+        self.assertIn("1 test file can't be read, so its checks aren't compared.", self.review.text(r))
+        self.assertIn("  test     can't read: tests/b.authz line 2: ", self.review.text(r))
+        self.assertIn("- can't read: tests/b.authz line 2: ", self.review.markdown(r))
+        same = self.run_review(self.text, {"tests/a.authz": good}, {"tests/a.authz": good})
+        self.assertEqual((same["tests"]["unread"], same["tests"]["flipped"], same["tests"]["count"]), ([], [], 21))
+
     def test_risk_flags(self) -> None:
         widened = replaced(
             self.text, "  viewer : user, team#member shared\n", "  viewer : user, team#member, anyone shared\n"

@@ -37,6 +37,9 @@ Each release upgrades from the one before it. How releases are numbered and made
 - `rowstile review` finds, at the base, a test file whose name has an accent or another non-ASCII character (it
   read the base as having no such file, so its checks showed as added), and reads a base file that isn't UTF-8
   with the bytes it can't read replaced (on Linux and macOS it stopped with a traceback).
+- `rowstile review` says when a test file of the pull request doesn't parse, with the mistake. It compared the
+  policies without any test file then, and said "no change to what the tests claim". A check that changed is
+  shown on its own file's line (`tests/docs.authz line 12`), no longer on a line counted from the policy's top.
 - `rowstile review` flags a relation that is newly shared once. It said so once for each kind of subject the
   relation may be shared with (`viewer : user, team#member, org#member shared`: three times, word for word).
 

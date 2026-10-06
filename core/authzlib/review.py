@@ -94,6 +94,11 @@ class Untested(TypedDict):
     line: str
 
 
+class Unread(TypedDict):
+    file: str
+    error: str
+
+
 class Failed(TypedDict):
     test: str
     line: str | None
@@ -111,6 +116,7 @@ class Tests(TypedDict):
     removed: list[Removed]
     added: list[Added]
     untested: list[Untested]
+    unread: list[Unread]
     invariants_removed: list[str]
     count: int
     run: NotRequired[TestRun]
@@ -790,28 +796,35 @@ def risk(b: Side, h: Side, worlds: int) -> list[Flag]:
 EXPECT = re.compile(r"\b(can|cannot|allowed|refused|sees\s+\d+)\b")
 
 
-def checks(pol: Policy) -> dict[tuple[str, str], tuple[str, str, str]]:
-    """{(test, check without its expectation): (expectation, text, line)}."""
+def checks(side: Side, unread: list[Unread] | None = None) -> dict[tuple[str, str], tuple[str, str, str]]:
+    """{(test, check without its expectation): (expectation, text, line)}, from the policy's own tests and the
+    test files. A test file that doesn't parse gives no checks; it is noted in unread, with why."""
     out: dict[tuple[str, str], tuple[str, str, str]] = {}
-    for t in pol.tests:
+    for t in side.pol.tests:
         text = t.text.strip()
         out[("test section", EXPECT.sub("…", text, count=1))] = ("can" if t.expect else "cannot", text, str(t.loc))
-    for sc in pol.scenarios:
+    scenarios = [(sc, None) for sc in side.pol.scenarios]
+    for name, body in sorted(side.tests.items()):
+        try:
+            scenarios += [(sc, name) for sc in parse_policy(body, name, files={}, previous=side.previous).scenarios]
+        except PolicyError as e:
+            if unread is not None:  # named with its file, as `rowstile test` names it
+                unread.append({"file": name, "error": f"{name} {e}" if str(e).startswith("line ") else str(e)})
+    for sc, file in scenarios:
         for st in sc.steps:
             if st.kind in ("check", "as"):
                 text = " ".join(st.text.split())
                 m = EXPECT.search(text)
-                out[(sc.name, EXPECT.sub("…", text, count=1))] = (m.group(1) if m else "", text, str(st.loc))
+                line = f"{file} line {st.loc.line}" if file else str(st.loc)
+                out[(sc.name, EXPECT.sub("…", text, count=1))] = (m.group(1) if m else "", text, line)
     return out
 
 
 def tests(b: Side, h: Side) -> Tests:
-    try:
-        bt = parse_policy(b.policy + "\n" + "\n".join(b.tests.values()), None, files=b.files, previous=b.previous)
-        ht = parse_policy(h.policy + "\n" + "\n".join(h.tests.values()), None, files=h.files)
-    except PolicyError:
-        bt, ht = b.pol, h.pol
-    cb, ch = checks(bt), checks(ht)
+    # the pull request's test files that don't parse are said: their checks are missing from the comparison,
+    # which would otherwise read as "no change" (the base's are the base's business)
+    unread: list[Unread] = []
+    cb, ch = checks(b), checks(h, unread)
     flipped: list[Flipped] = [
         {"test": k[0], "before": cb[k][1], "after": ch[k][1], "line": ch[k][2]}
         for k in sorted(set(cb) & set(ch))
@@ -835,6 +848,7 @@ def tests(b: Side, h: Side) -> Tests:
         "removed": removed,
         "added": added,
         "untested": untested,
+        "unread": unread,
         "invariants_removed": sorted(inv_b - inv_h),
         "count": len(ch),
     }
@@ -1038,6 +1052,8 @@ def summary(r: Review) -> dict[str, str]:
         parts.append(f"{plural(len(t['removed']), 'check')} removed")
     if t["untested"]:
         parts.append(f"{plural(len(t['untested']), 'new permission')} no test names")
+    if t["unread"]:
+        parts.append(f"{plural(len(t['unread']), 'test file')} can't be read, so its checks aren't compared")
     lines["Tests"] = ". ".join(parts) + "." if parts else "no change to what the tests claim."
     d = r["deploy"]
     if d.get("error"):
@@ -1165,9 +1181,10 @@ def risk_details(r: Review) -> list[str]:
 def tests_details(r: Review) -> list[str]:
     """The Markdown comment's Tests section: the checks that flipped, went away, are missing or fail."""
     t = r["tests"]
-    if not (t["flipped"] or t["removed"] or t["untested"] or (t.get("run") or {}).get("failed")):
+    if not (t["flipped"] or t["removed"] or t["untested"] or t["unread"] or (t.get("run") or {}).get("failed")):
         return []
     out = ["", "<details><summary>Tests</summary>", ""]
+    out += [f"- can't read: {x['error']}" for x in t["unread"]]
     out += [f"- {x['test']}: `{x['before']}` -> `{x['after']}` ({x['line']})" for x in t["flipped"]]
     out += [f"- removed from {x['test']}: `{x['check']}`" for x in t["removed"]]
     out += [f"- no test names `{x['what']}` ({x['line']})" for x in t["untested"]]
@@ -1206,6 +1223,8 @@ def text(r: Review) -> str:
     for f in r["risk"]:
         out.append(f"  risk     {f['flag']} ({f['why']}" + (f", {f['line']})" if f["line"] else ")"))
     t = r["tests"]
+    for u in t["unread"]:
+        out.append(f"  test     can't read: {u['error']}")
     for x in t["flipped"]:
         out.append(f"  test     {x['test']}: {x['before']} -> {x['after']} ({x['line']})")
     for y in t["removed"]:

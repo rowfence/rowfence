@@ -26,7 +26,8 @@ says what a change does, in plain words, for the pull request:
   the line is in. "Nothing flagged" means none of these was found in the worlds tried, not a proof.
 - **Tests**: checks whose expectation flipped (the author saying "I meant this"), checks removed, new
   permissions no test names; with `--db`, the pull request's tests run on the review data after its
-  migrations. The checks are listed whatever Meaning says.
+  migrations. The checks are listed whatever Meaning says. A test file of the pull request that doesn't parse
+  is named, with its mistake: its checks are not compared.
 - **Deploy**: the migrations the change needs (from the base branch's lock file), their statements, the
   app tables they lock and in which mode, the inheritance tables they rebuild or build beside; with
   `--db`, how long they took on the review data. A lock file behind the policy is called out. With no lock
