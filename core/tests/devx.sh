@@ -243,6 +243,19 @@ run explain-rule --as user:1 app.files insert --row '{"folder_id": 6, "owner_id"
 case "$out" in "no   insert"*"no   owner"*) ok "explain-rule --as";; *) bad "explain-rule" "$out";; esac
 [ -f "$T/i/db/policy.authz" ] && [ -f "$T/i/rowstile.toml" ] && [ -f "$T/i/db/tests/first.authz" ] && grep -q "authz.act_as" "$T/init.log" &&
   ok "init writes a policy, a test file and rowstile.toml, and says what's next" || bad "init" "$(cat "$T/init.log")"
+# the note for coding agents: written with the paths init wrote; a second init leaves it as it is, and one
+# in a project that has an AGENTS.md adds its section at the end
+grep -q "^wrote AGENTS.md" "$T/init.log" && grep -q '^- The policy is `db/policy.authz`, its tests `db/tests/\*.authz`' "$T/i/AGENTS.md" &&
+  ok "init writes AGENTS.md: where the policy is, and the loop" || bad "init AGENTS.md" "$(cat "$T/init.log" "$T/i/AGENTS.md" 2>&1)"
+before=$(cksum < "$T/i/AGENTS.md")
+out=$(cd "$T/i" && python3 "$OLDPWD/cli/rowstile_cli.py" --db "dbname=$DB" init --schema app 2>&1)
+case "$out" in *"kept AGENTS.md (it has rowstile's section already)"*) [ "$(cksum < "$T/i/AGENTS.md")" = "$before" ] &&
+  ok "... a second init changes nothing in it" || bad "init AGENTS.md twice" "$out";; *) bad "init AGENTS.md twice" "$out";; esac
+mkdir -p "$T/ag" && printf '# The app\n\nRun the tests with make.\n' > "$T/ag/AGENTS.md"
+out=$(cd "$T/ag" && python3 "$OLDPWD/cli/rowstile_cli.py" --db "dbname=$DB" init --schema app 2>&1)
+case "$out" in *"added   rowstile's section to AGENTS.md"*) [ "$(head -1 "$T/ag/AGENTS.md")" = "# The app" ] && [ "$(grep -c "rowstile:begin" "$T/ag/AGENTS.md")" = 1 ] &&
+  ok "... and an AGENTS.md that is there keeps its text, with the section added" || bad "init AGENTS.md added" "$(cat "$T/ag/AGENTS.md")";;
+  *) bad "init AGENTS.md added" "$out";; esac
 
 rm -r "$T"
 [ -z "${KEEP:-}" ] && { dropdb "$DB"; psql -X -q -d postgres -c "DROP ROLE IF EXISTS authz_devx_other" >/dev/null 2>&1; }

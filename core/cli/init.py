@@ -1,4 +1,5 @@
-"""rowstile init: a first policy drafted from the database's catalog, a test file, and rowstile.toml."""
+"""rowstile init: a first policy drafted from the database's catalog, a test file, rowstile.toml, and a note for
+the coding agents that work in the app (AGENTS.md)."""
 
 from __future__ import annotations
 
@@ -10,6 +11,8 @@ if TYPE_CHECKING:
     from rowstile_cli import Config
 
 CONFIG = "rowstile.toml"
+AGENTS = "AGENTS.md"  # the file coding agents read in a repository
+BEGIN, END = "<!-- rowstile:begin -->", "<!-- rowstile:end -->"
 
 
 def write_new(path: str, text: str, written: list[str]) -> None:
@@ -22,8 +25,55 @@ def write_new(path: str, text: str, written: list[str]) -> None:
     written.append(path)
 
 
+def agents_note(policy_path: str, tests: str, role: str) -> str:
+    """What a coding agent working in the app needs to know of rowstile (llms.txt's list, with this app's paths),
+    between two markers."""
+    return f"""{BEGIN}
+## Access rules (rowstile)
+
+Who may see or change a row is decided in Postgres, by row-level security that the `rowstile` command makes
+from a policy file. For coding agents working in this repository:
+
+- The policy is `{policy_path}`, its tests `{tests}`; `{CONFIG}` names both.
+  Everything that grants access is written in the policy: no permission checks in app code, no
+  `CREATE POLICY` by hand.
+- After editing it: `rowstile check` (the first mistake, with its line and a code such as `[AZ201]`), then
+  `rowstile push` (the development database only) and `rowstile test`. `rowstile dev` does all three on each
+  save. `rowstile help AZ201` explains a code and shows the mistake fixed.
+- Production takes migrations: `rowstile migrate` writes the next one. Never `rowstile push` there.
+- The app connects as `{role}`, never as the tables' owner, and each transaction signs in first:
+  `SELECT authz.act_as('user', '42')` (the SDKs do it). Then plain queries are filtered, a refused insert
+  raises SQLSTATE 42501 with the reason, and an UPDATE or DELETE the rules don't allow changes no row.
+- Why someone holds a permission or not: `rowstile why --as user:42 TYPE ID PERMISSION`.
+- `rowstile mcp` is an MCP server with the command's tools. The language and the rest:
+  https://rowstile.dev/llms.txt
+{END}
+"""
+
+
+def write_agents_note(note: str, folder: str = ".") -> str | None:
+    """Puts the note in the app's AGENTS.md: the file is written if there is none, the note is added at the end
+    of one that doesn't have it, and one that has it (the markers) is left as it is. Returns what was done
+    ("wrote", "added"), or None."""
+    path = os.path.join(folder, AGENTS)
+    if not os.path.exists(path):
+        with open(path, "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(note)
+        return "wrote"
+    with open(path, encoding="utf-8", newline="") as fh:
+        text = fh.read()
+    if BEGIN in text:
+        return None
+    eol = "\r\n" if "\r\n" in text else "\n"
+    gap = "" if not text.strip() else eol if text.endswith(("\n", "\r")) else eol * 2
+    with open(path, "w", encoding="utf-8", newline="") as fh:
+        fh.write(text + gap + note.replace("\n", eol))
+    return "added"
+
+
 def init(policy: str, opts: dict[str, str], cfg: Config) -> None:
-    """Writes the drafted policy, a first test file and rowstile.toml, keeping any that exist."""
+    """Writes the drafted policy, a first test file, rowstile.toml and the note for coding agents, keeping any
+    that exist."""
     out = opts.get("--out", "db")
     written: list[str] = []
     policy_path = os.path.join(out, "policy.authz")
@@ -73,6 +123,14 @@ database = "{database}"     # a DSN or URL, or env:NAME for an environment varia
         print(f"using {os.path.relpath(cfg.path)} (it is there already)")
     for path in written:
         print(f"wrote {path}")
+    tests = os.path.join(out, "tests").replace(os.sep, "/") + "/*.authz"
+    noted = write_agents_note(agents_note(policy_path.replace(os.sep, "/"), tests, role))
+    if noted == "wrote":
+        print(f"wrote {AGENTS} (for coding agents: where the policy is, and the loop)")
+    elif noted == "added":
+        print(f"added   rowstile's section to {AGENTS} (for coding agents: where the policy is, and the loop)")
+    else:
+        print(f"kept {AGENTS} (it has rowstile's section already)")
     if found.tool and CONFIG in written:
         import migrations
 

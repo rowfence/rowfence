@@ -65,6 +65,8 @@ rowstile init --schema app --role app_backend
 
 It reads your tables and foreign keys and writes three files: `db/policy.authz` (a policy that compiles),
 `db/tests/first.authz` (a first test) and `rowstile.toml` (where things are, for the other commands).
+It also leaves a short note in `AGENTS.md`, for coding agents that work in the project: where the policy
+is, and the loop.
 Tables became types, foreign keys became relations (`owner_id` is `owner : user = owner_id`; `project_id`
 is `project : project = project_id`, and a note inherits view and edit from its project), and
 `app.team_members` became `member : user = app.team_members(team_id -> user_id)` on teams. Every line
