@@ -220,11 +220,10 @@ While you edit, `rowstile dev` checks, pushes to the development database, runs 
 `app/authz_client.py` on every save (and writes the migration once you stop editing).
 
 The development database then holds what `dev` pushed, not what its migrations left. The first migration,
-the whole policy, applies over that; a later one stops there with AZ607 (`alembic upgrade head` prints it
-far above the bottom of its output). Production and CI only ever take migrations. On the
-development database, once `rowstile migrate --check` says there is nothing to migrate (it holds the policy
-the newest revision makes), `alembic stamp head` brings Alembic's history level; or rebuild it from the
-migrations.
+the whole policy, applies over that; a later one stops there with AZ607, "this database already holds what
+this migration brings" (`alembic upgrade head` prints it far above the bottom of its output). Production
+and CI only ever take migrations. On the development database, `alembic stamp head` then brings Alembic's
+history level, as the message asks; or rebuild it from the migrations.
 
 ## Tests
 

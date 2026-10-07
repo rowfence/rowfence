@@ -121,17 +121,21 @@ Applying locks the governed tables, and waits 10 s at most (unless you set `lock
 every query behind it. Apply when it is quieter. A policy whose inheritance didn't change applies in a fraction
 of a second: its tables are kept.
 
+## "rowstile: this database already holds what this migration brings" (AZ607)
+
+A development database that `rowstile dev` or `push` brought to the newest policy holds what the migration
+would make, so the migration stops. So does one that ran here before. Don't run it there: tell your
+migration tool it is applied (Prisma: `prisma migrate resolve --applied <its folder>`, which also clears
+the failed migration Prisma kept; Alembic: `alembic stamp head`), or make the database again from the
+migrations, or keep using `push` there and leave the migrations to the other databases.
+
+Migrations written by 0.1.0-alpha.6 or earlier say it in the words of the next section.
+
 ## "rowstile: this migration changes the policy the migration before it left (...), but the database has ..."
 
 A rowstile migration starts where the one before it left the database, and says so when it doesn't:
-it was applied twice or out of order, the ones before it weren't applied, or the database was changed
-since with `rowstile push` or `rowstile apply` (development databases). Apply the migrations in order.
-
-A development database that `rowstile dev` or `push` brought to the newest policy already holds what the
-migration brings (`rowstile migrate --check` says there is nothing to migrate). Tell your migration tool
-the migration is applied (Prisma: `prisma migrate resolve --applied <its folder>`, which also clears the
-failed migration Prisma kept; Alembic: `alembic stamp head`), or make the database again from the
-migrations, or keep using `push` there and leave the migrations to the other databases.
+it was applied out of order, the ones before it weren't applied, or the database was changed since with
+`rowstile push` or `rowstile apply` (development databases). Apply the migrations in order.
 
 ## `rowstile push` or `dev`: isn't marked as a development database (AZ610)
 

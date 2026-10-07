@@ -490,8 +490,10 @@ CODES = {
         "changed with `rowstile push` or `apply` since. Apply the migrations in order; a database changed by "
         "`push` takes the migrations from the start, or `rowstile apply` of the policy the previous migration "
         "left. A development database that `rowstile dev` or `push` brought to the newest policy already holds "
-        "what this migration brings: tell the migration tool it is applied (Prisma: `prisma migrate resolve "
-        "--applied <name>`; Alembic: `alembic stamp head`), or make the database again from the migrations.",
+        'what this migration brings, and the migration says so ("this database already holds what this '
+        'migration brings"): tell the migration tool it is applied (Prisma: `prisma migrate resolve '
+        "--applied <name>`, which also clears the failed migration Prisma kept; Alembic: `alembic stamp head`), "
+        "or make the database again from the migrations.",
         "",
         "",
         when="deploy",

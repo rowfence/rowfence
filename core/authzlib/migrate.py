@@ -719,6 +719,17 @@ def render(
         "SELECT pg_catalog.set_config('check_function_bodies', 'off', true);"
     )
     if old_hash:
+        # a database that holds the lock this migration makes (it ran here already, or dev or push took a
+        # development database there, where most people meet the guard) is told so, with what to tell the tool
+        there = (
+            f"""IF v_lock = {sql_lit(new_hash)} THEN
+    RAISE EXCEPTION 'rowstile: this database already holds what this migration brings (it ran here before, or rowstile dev or push took the database there): don''t run it, tell your migration tool it is applied [AZ607]'
+      USING HINT = 'Prisma: prisma migrate resolve --applied <the migration''s folder>. Alembic: alembic stamp head. '
+                   'Others, and why: rowstile help AZ607';
+  ELSIF"""
+            if new_hash != old_hash
+            else "IF"
+        )
         out.append(f"""-- this migration starts from the policy the previous one left
 DO $authz_guard$
 DECLARE v_lock text;
@@ -727,13 +738,12 @@ BEGIN
              WHERE attrelid = to_regclass('authz.policy_versions') AND attname = 'lock' AND NOT attisdropped) THEN
     EXECUTE 'SELECT lock FROM authz.policy_versions ORDER BY id DESC LIMIT 1' INTO v_lock;
   END IF;
-  IF v_lock IS DISTINCT FROM {sql_lit(old_hash)} THEN
+  {there} v_lock IS DISTINCT FROM {sql_lit(old_hash)} THEN
     RAISE EXCEPTION 'rowstile: this migration changes the policy the migration before it left (%), but the database has % [AZ607]',
       {sql_lit(old_hash)}, coalesce(v_lock, 'none')
       USING HINT = 'apply the migrations in order; a database changed with rowstile push or apply since needs the '
-                   'migrations from the start (or rowstile apply of the policy the previous migration left). '
-                   'A development database that rowstile dev pushed the newest policy to already holds what '
-                   'this migration brings: mark it as applied in your migration tool (rowstile help AZ607)';
+                   'migrations from the start (or rowstile apply of the policy the previous migration left) '
+                   '(rowstile help AZ607)';
   END IF;
 END $authz_guard$;""")
     out.append(body)
