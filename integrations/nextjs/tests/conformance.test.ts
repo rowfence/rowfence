@@ -14,7 +14,7 @@ import { eq, sql as sqlTag } from "drizzle-orm";
 import { integer, numeric, pgSchema, serial, text, varchar } from "drizzle-orm/pg-core";
 import { afterAll, beforeEach, describe, expect, test } from "vitest";
 import { actingAs, beforeSignIn, ConnectionProblem, current, errorCode, NotSignedIn, sqlstate, translate } from "@rowstile/client";
-import { idShown, verdict } from "@rowstile/client";
+import { idShown, refusal, verdict } from "@rowstile/client";
 import { describe as describePrincipal, parsePrincipal, principal } from "@rowstile/client";
 import { authzRoutes } from "@rowstile/next";
 import { authz as rowstile } from "@rowstile/pg";
@@ -323,6 +323,7 @@ test("a share made in the app's own code", async () => {
   expect(stranger.status).toBe(403);
   const why = await stranger.json();
   expect(why.detail).toBe("you cannot share project 1");
+  expect([why.code, why.table, why.command]).toEqual(["AZ705", null, null]);   // the database's code; a share has no table
   expect((await share("3", 2)).status).toBe(204);       // cy, a member, edits it
   expect(await (await fetch(`${SERVER}/api/notes`, as("2"))).json()).toEqual([1, 2, 3, 4]);
   expect((await share("2", 2)).status).toBe(403);       // a viewer still may not share
@@ -452,6 +453,19 @@ describe("without Prisma", () => {
       await expect(actingAs("3", () => a.transaction(async (c) =>
         calls(c).expect(await c.query("UPDATE notes SET body = 'x' WHERE id = 1"), "notes", "update", 1))))
         .rejects.toBeRefused("update", "note.edit");
+      // ... and it is named as the policy names it, with its schema, as a refused insert is
+      const bare = await actingAs("3", () => a.transaction(async (c) =>
+        calls(c).expect(await c.query("UPDATE notes SET body = 'x' WHERE id = 1"), "notes", "update", 1))).catch((err) => err);
+      expect([bare.table, bare.message]).toEqual(["app.notes", "permission denied: user 3 may not update row 1 of app.notes"]);
+      expect(await actingAs("1", () => db.$authz.tableName("pg_class"))).toBe("pg_catalog.pg_class");
+      expect(await actingAs("1", () => db.$authz.tableName("no_such_table"))).toBe("no_such_table");
+      // a column's rule through a driver that drops the error's fields (Prisma's): the table and the command
+      // from its words; and the database's own code for a refusal that isn't a rule's
+      const column = refusal(Object.assign(new Error("changing locked of app.notes 7 needs: folder.manage"),
+        { code: "42501", hint: "rowstile help AZ709" }));
+      expect([column?.table, column?.command, column?.code]).toEqual(["app.notes", "update", "AZ709"]);
+      const share = refusal(Object.assign(new Error("you cannot share project 1"), { code: "42501", hint: "rowstile help AZ705" }));
+      expect([share?.table, share?.command, share?.code]).toEqual([undefined, undefined, "AZ705"]);
       const e = await actingAs("1", () => a.query("SELECT * FROM public._prisma_migrations")).catch((err) => err);
       expect(sqlstate(e)).toBe("42501");
       expect(translate(e)).toBeNull();

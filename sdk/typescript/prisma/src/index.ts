@@ -256,7 +256,8 @@ export function authz(options: ExtensionOptions = {}) {
             // two answer alike). Left as Prisma's P2025 it is a 500, where an update or a delete is a 404
             if (model && isP2025(e) && (operation === "findUniqueOrThrow" || operation === "findFirstOrThrow")) {
               const key = keyOf(model, (args as { where?: Record<string, unknown> }).where);
-              throw new NotFound(tableOf(model), key === undefined ? undefined : idShown(key), { cause: e });
+              const table = await c.tableName(tableOf(model)).catch(() => tableOf(model));
+              throw new NotFound(table, key === undefined ? undefined : idShown(key), { cause: e });
             }
             throw translate(e, schemaOf) ?? e;
           }

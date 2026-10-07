@@ -503,6 +503,34 @@ def test_the_code_in_a_hint_rowfence_wrote() -> None:
     assert rowstile.error_code(Old("sign in first")) == "AZ701"
 
 
+# a refusal carries the database's own code, and names the table as the policy does
+def test_a_refusal_has_the_databases_code_and_its_name_for_the_table() -> None:
+    class Share(Exception):  # what authz.share raises for someone who may not share
+        sqlstate = "42501"
+        hint = "rowstile help AZ705"
+
+    refused = rowstile.refusal(Share("you cannot share project 1"))
+    assert refused is not None
+    assert (refused.code, refused.table, refused.command) == ("AZ705", None, None)
+    assert refused.problem()["code"] == "AZ705"
+    import rowstile.psycopg as pgp
+
+    # a table named without its schema is found on the search_path, and the refusal says app.notes, as an
+    # insert's does
+    with psycopg.connect(libpq(APP)) as conn:
+        with pytest.raises(Refused) as e, pgp.transaction(conn, 3):
+            conn.execute("SET LOCAL search_path = app")
+            cur = conn.execute("UPDATE notes SET body = 'x' WHERE id = 1")
+            pgp.expect(conn, cur.rowcount, "notes", "update", 1)
+        assert e.value.message == "permission denied: user 3 may not update row 1 of app.notes"
+        assert (e.value.table, e.value.command, e.value.code) == ("app.notes", "update", "AZ709")
+        with pytest.raises(rowstile.NotFound) as hidden, pgp.transaction(conn, 2):
+            conn.execute("SET LOCAL search_path = app")
+            cur = conn.execute("UPDATE notes SET body = 'x' WHERE id = 1")
+            pgp.expect(conn, cur.rowcount, "notes", "update", 1)
+        assert str(hidden.value) == "app.notes 1 not found"
+
+
 # the pytest helpers (rowstile.testing), with sync and async functions
 async def test_the_pytest_helpers(
     as_user: AsUser, assert_refused: AssertRefused, assert_not_found: AssertNotFound

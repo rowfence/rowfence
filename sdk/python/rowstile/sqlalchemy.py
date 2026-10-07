@@ -156,10 +156,10 @@ def why_stale_sync(exc: BaseException | None = None) -> NotFound | Refused | Non
         if isinstance(original, AsyncEngine):
             raise TypeError("an async engine's write: await rowstile.sqlalchemy.why_stale()")
         with original.connect() as conn:
-            lines, who = answer(conn.execute(_explain_sql(table, command, key)).first())
+            lines, who, named = answer(conn.execute(_explain_sql(table, command, key)).first())
             conn.rollback()
         if not _allowed(lines):
-            return verdict(table, command, key, lines, who)
+            return verdict(table, command, key, lines, who, named)
     return None
 
 
@@ -170,14 +170,14 @@ async def why_stale(exc: BaseException | None = None) -> NotFound | Refused | No
         original = _engines.get(engine, engine)
         if isinstance(original, AsyncEngine):
             async with original.connect() as aconn:
-                lines, who = answer((await aconn.execute(_explain_sql(table, command, key))).first())
+                lines, who, named = answer((await aconn.execute(_explain_sql(table, command, key))).first())
                 await aconn.rollback()
         else:
             with original.connect() as conn:
-                lines, who = answer(conn.execute(_explain_sql(table, command, key)).first())
+                lines, who, named = answer(conn.execute(_explain_sql(table, command, key)).first())
                 conn.rollback()
         if not _allowed(lines):
-            return verdict(table, command, key, lines, who)
+            return verdict(table, command, key, lines, who, named)
     return None
 
 

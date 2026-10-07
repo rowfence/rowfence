@@ -136,7 +136,7 @@ export default async function Notes() {
 ```
 
 `route()` answers a refusal with a problem body: 404 for a row the user can't see, 403 with the rule and the
-reason for one they may not change.
+reason for one they may not change (its fields: <https://rowstile.dev/problems/refused>).
 
 ```ts
 import { route } from "@rowstile/next";
