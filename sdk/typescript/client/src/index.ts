@@ -179,10 +179,13 @@ export interface Problem {
 /** The database refused a write, and said why: the rule (table and command), and the explanation. */
 export class Refused extends Error {
   readonly status = 403;
-  readonly code = "AZ709";                         // rowstile help AZ709
-  constructor(message: string, public table?: string, public command?: string, public why: string[] = [], options?: { cause?: unknown }) {
+  /** rowstile's code for it: AZ709 for a rule's refusal, the database's own for another (AZ705: a share). */
+  readonly code: string;                           // rowstile help AZ709
+  constructor(message: string, public table?: string, public command?: string, public why: string[] = [],
+              options?: { cause?: unknown; code?: string }) {
     super(message, options);
     this.name = "Refused";
+    this.code = options?.code ?? "AZ709";
   }
   problem(): Problem {
     return { type: "https://rowstile.dev/problems/refused", title: "Forbidden", status: 403, detail: this.message,
@@ -281,6 +284,14 @@ export function sqlstate(e: unknown): string | undefined {
 
 const RLS_GENERIC = /^new row violates row-level security policy (\(USING expression\) )?for table "([^"]+)"/;
 const OURS = /may not (insert|update|delete) this row (?:into|of) (\S+?)(?: to these values)?$/;
+/** The table in a column rule's refusal, "changing locked of app.notes 7 needs: folder.manage" (always an
+ *  update); undefined for any other message. Read with indexOf: a pattern here would backtrack on a long one. */
+function columnRuleTable(message: string): string | undefined {
+  const of = message.indexOf(" of "), needs = message.indexOf(" needs: ");
+  if (!message.startsWith("changing ") || of < 0 || needs < of) return undefined;
+  const named = message.slice(of + 4, needs);                   // "app.notes 7"
+  return named.split(" ", 1)[0] || undefined;
+}
 
 /** A Refused for an error that is the database refusing a write (SQLSTATE 42501, raised by rowstile's
  *  policies with the rule and why), else null. `schemaOf` qualifies a bare table name (Prisma knows it).
@@ -303,10 +314,14 @@ export function refusal(e: unknown, schemaOf?: (table: string) => string | undef
       "back (RETURNING); read it back only if the select rule allows it", table, "select", [], { cause: e });
   }
   const ours = OURS.exec(err.message);
-  if (!ours && !err.constraint?.startsWith("authz_") && errorCode(e) === undefined) return null;
-  const table = err.schema && err.table ? `${err.schema}.${err.table}` : err.table ?? ours?.[2];
-  const command = err.constraint?.startsWith("authz_") ? err.constraint.slice(6) : ours?.[1];
-  return new Refused(err.message, table, command, err.detail ? err.detail.split("\n") : [], { cause: e });
+  const code = errorCode(e);
+  if (!ours && !err.constraint?.startsWith("authz_") && code === undefined) return null;
+  // the error's own fields say which table and command; a driver that drops them (Prisma's adapters) leaves
+  // the message, which names both
+  const column = columnRuleTable(err.message);
+  const table = err.schema && err.table ? `${err.schema}.${err.table}` : err.table ?? ours?.[2] ?? column;
+  const command = err.constraint?.startsWith("authz_") ? err.constraint.slice(6) : ours?.[1] ?? (column ? "update" : undefined);
+  return new Refused(err.message, table, command, err.detail ? err.detail.split("\n") : [], { cause: e, code });
 }
 
 /** Whether e is strict sign-in's error: a query that needs to know who is asking, and nobody signed in. */
@@ -377,20 +392,26 @@ export interface AuthzCalls {
 
 // The policy names tables with their schema; a table named without one (a model that names no schema) is
 // looked up on the search_path
-const EXPLAIN_RULE = "SELECT authz.explain_rule(coalesce((SELECT n.nspname || '.' || c.relname FROM pg_catalog.pg_class c " +
+const TABLE_NAME = "coalesce((SELECT n.nspname || '.' || c.relname FROM pg_catalog.pg_class c " +
   "JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace WHERE position('.' in $1::text) = 0 " +
-  "AND c.oid = pg_catalog.to_regclass(pg_catalog.quote_ident($1::text))), $1::text), $2, $3, $4::jsonb) AS e, " +
+  "AND c.oid = pg_catalog.to_regclass(pg_catalog.quote_ident($1::text))), $1::text)";
+const EXPLAIN_RULE = "SELECT authz.explain_rule(t.tbl, $2, $3, $4::jsonb) AS e, t.tbl, " +
   // who is signed in, in the words the database's own refusals use
-  "coalesce((SELECT p.principal_type || ' ' || p.principal_id FROM authz.principal() p), 'someone not signed in') AS who";
+  "coalesce((SELECT p.principal_type || ' ' || p.principal_id FROM authz.principal() p), 'someone not signed in') AS who " +
+  `FROM (SELECT ${TABLE_NAME} AS tbl) t`;
 
 /** The runtime's functions over q (a signed-in transaction, or something that signs each query in). */
 export function calls(q: Queryable): AuthzCalls & {
   expect<R>(result: R, table: string, command: "update" | "delete", id: Id, row?: object): Promise<R>;
   /** What an UPDATE or DELETE that changed nothing was, asked of the database: the error to throw. */
   verdict(table: string, command: string, id: Id, row?: object): Promise<NotFound | Refused>;
+  /** The table as the policy names it, with its schema: a bare name (a model that names no schema) is looked
+   *  up on the search_path, once. */
+  tableName(table: string): Promise<string>;
   check(): Promise<void>;
 } {
   const one = async (text: string, values: unknown[]) => (await q.query(text, values)).rows[0];
+  const names = new Map<string, string>();        // a table as the app names it -> as the policy does
   const c = {
     can: async (type: string, id: Id, perm: string) =>
       Boolean((await one("SELECT authz.can($1, $2::text, $3) AS ok", [type, idText(id), perm])).ok),
@@ -429,7 +450,17 @@ export function calls(q: Queryable): AuthzCalls & {
     },
     verdict: async (table: string, command: string, id: Id, row?: object) => {
       const got = await one(EXPLAIN_RULE, [table, command, idText(id), row === undefined ? null : JSON.stringify(row)]);
-      return verdict(table, command, id, (got.e ?? null) as string[] | null, typeof got.who === "string" ? got.who : undefined);
+      // named as the database names it, as in a refused insert: "public.Note" for a model that says "Note"
+      if (typeof got.tbl === "string") names.set(table, got.tbl);
+      return verdict(names.get(table) ?? table, command, id, (got.e ?? null) as string[] | null,
+        typeof got.who === "string" ? got.who : undefined);
+    },
+    tableName: async (table: string) => {
+      if (!names.has(table) && !table.includes(".")) {
+        const got = await one(`SELECT ${TABLE_NAME} AS tbl`, [table]);
+        if (typeof got?.tbl === "string") names.set(table, got.tbl);
+      }
+      return names.get(table) ?? table;
     },
     /** Throws ConnectionProblem if this connection skips row-level security. As nobody: it runs at start-up,
      *  where there is no request to ask who is signed in. */

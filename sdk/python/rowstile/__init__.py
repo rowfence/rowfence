@@ -155,13 +155,20 @@ def act_as_sql(who: Who | _Unset = _UNSET) -> str:
 class Refused(Exception):
     """The database refused a write, and said why: the rule (table and command), and the explanation."""
 
-    code = "AZ709"  # rowstile help AZ709
+    code = "AZ709"  # rowstile help AZ709: a rule's refusal; the database's own for another (AZ705: a share)
 
     def __init__(
-        self, message: str, table: str | None = None, command: str | None = None, why: Sequence[str] = ()
+        self,
+        message: str,
+        table: str | None = None,
+        command: str | None = None,
+        why: Sequence[str] = (),
+        code: str | None = None,
     ) -> None:
         super().__init__(message)
         self.message, self.table, self.command, self.why = message, table, command, list(why)
+        if code:
+            self.code = code
 
     def problem(self) -> Problem:
         """An RFC 9457 problem body for a 403."""
@@ -285,6 +292,7 @@ def refusal(exc: BaseException) -> Refused | None:
         f"{schema}.{table}" if schema and table else table,
         constraint[6:] if constraint.startswith("authz_") else None,
         detail.split("\n") if detail else [],
+        error_code(exc),
     )
 
 
@@ -339,9 +347,10 @@ def explain_rule_args(table: str, command: str, key: object) -> tuple[str, str, 
 
 def explain_rule_sql(table: LiteralString, command: LiteralString, key: LiteralString) -> LiteralString:
     """SELECT authz.explain_rule($1, $2, $3, NULL) with the driver's placeholders for the table, the command and
-    the key (':t', '%(t)s', '$1'), and in a second column who is signed in, in the words the database's own
-    refusals use ('user 2', 'service 3', 'someone not signed in'). The policy names tables with their schema;
-    a table named without one (a model that names no schema) is looked up on the search_path."""
+    the key (':t', '%(t)s', '$1'), in a second column who is signed in, in the words the database's own
+    refusals use ('user 2', 'service 3', 'someone not signed in'), and in a third the table as the policy names
+    it. The policy names tables with their schema; a table named without one (a model that names no schema) is
+    looked up on the search_path."""
     found = (
         "SELECT n.nspname || '.' || c.relname FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n "
         f"ON n.oid = c.relnamespace WHERE position('.' in {table}) = 0 "
@@ -350,28 +359,41 @@ def explain_rule_sql(table: LiteralString, command: LiteralString, key: LiteralS
     who = (
         "coalesce((SELECT p.principal_type || ' ' || p.principal_id FROM authz.principal() p), 'someone not signed in')"
     )
-    return f"SELECT authz.explain_rule(coalesce(({found}), {table}), {command}, {key}, NULL), {who}"
+    return (
+        f"SELECT authz.explain_rule(t.tbl, {command}, {key}, NULL), {who}, t.tbl "
+        f"FROM (SELECT coalesce(({found}), {table}) AS tbl) t"
+    )
 
 
-def answer(row: Sequence[object] | None) -> tuple[Sequence[str] | None, str | None]:
+def answer(row: Sequence[object] | None) -> tuple[Sequence[str] | None, str | None, str | None]:
     """A row of explain_rule_sql's statement: authz.explain_rule's lines (None: the row isn't there for this
-    user) and who is signed in."""
+    user), who is signed in, and the table as the policy names it."""
     if row is None:
-        return None, None
-    lines, who = row[0], row[1] if len(row) > 1 else None
-    return (None if lines is None else [str(x) for x in cast("Iterable[object]", lines)]), None if who is None else str(
-        who
+        return None, None, None
+    lines, who, named = row[0], row[1] if len(row) > 1 else None, row[2] if len(row) > 2 else None
+    return (
+        None if lines is None else [str(x) for x in cast("Iterable[object]", lines)],
+        None if who is None else str(who),
+        None if named is None else str(named),
     )
 
 
 def verdict(
-    table: str, command: str, key: object, lines: Sequence[str] | None, who: str | None = None
+    table: str,
+    command: str,
+    key: object,
+    lines: Sequence[str] | None,
+    who: str | None = None,
+    named: str | None = None,
 ) -> NotFound | Refused:
     """What an UPDATE or DELETE that changed nothing was: NotFound when the row isn't there for this user
     (authz.explain_rule answered NULL), or when the rule allows the write (its first line says yes: the
     statement matched nothing for another reason, such as a WHERE with more than the key); Refused, with
     why, otherwise. Worded as the database words a refused insert: 'permission denied: user 2 may not update
-    row 7 of app.notes'. who: as answer() read it; left out, whoever the code acts for now."""
+    row 7 of app.notes'. who: as answer() read it; left out, whoever the code acts for now. named: the table
+    as the policy names it, as answer() read it ('public.notes' for a model that says 'notes'), so an update's
+    refusal names the table as an insert's does."""
+    table = named or table
     if lines is None or (lines and lines[0].lstrip().startswith("yes")):
         return NotFound(table, key)
     if who is None:
