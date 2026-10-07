@@ -11,6 +11,11 @@ Everything here comes from `integrations/nextjs`, the conformance suite: a small
 supported stack passes (`integrations/nextjs/test.sh`, against the production build). Drizzle, pg and
 postgres.js: [Node apps](node.md).
 
+To start from an app that runs instead of from this page: the
+[Next.js and Prisma starter](https://github.com/rowstile/starter-nextjs-prisma), a template repository.
+`docker compose up`, and documents are shared with people and teams, with the policy, its tests and the review
+in CI already there.
+
 ## Install
 
 ```sh

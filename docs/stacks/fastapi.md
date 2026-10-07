@@ -9,6 +9,10 @@ not write, and the SDK answers a refusal with 403 and a hidden row with 404.
 Everything here comes from `integrations/fastapi`, the conformance suite: a small app and the checks every
 supported stack passes (`integrations/fastapi/test.sh`).
 
+To start from an app that runs instead of from this page: the
+[FastAPI starter](https://github.com/rowstile/starter-fastapi), a template repository. `docker compose up`, and
+documents are shared with people and teams, with the policy, its tests and the review in CI already there.
+
 ## Install
 
 ```sh

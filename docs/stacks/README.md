@@ -15,4 +15,6 @@ Every line of code these pages show is in a tested app (`integrations/fastapi`, 
 conformance suites) or in `docs/getting-started.md`, which runs as written; `core/tests/unit_test.py`
 checks it, so the pages can't drift from what works.
 
-Start with [getting started](../getting-started.md) for the policy itself.
+Start with [getting started](../getting-started.md) for the policy itself. Or from an app that already
+runs, as a template repository: the [FastAPI starter](https://github.com/rowstile/starter-fastapi) and the
+[Next.js and Prisma starter](https://github.com/rowstile/starter-nextjs-prisma).

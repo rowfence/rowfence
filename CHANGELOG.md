@@ -7,11 +7,23 @@ Each release upgrades from the one before it. How releases are numbered and made
 
 ## Unreleased
 
+### Added
+
+- Two starters, as template repositories: [FastAPI, SQLAlchemy and
+  Alembic](https://github.com/rowstile/starter-fastapi) and [Next.js and
+  Prisma](https://github.com/rowstile/starter-nextjs-prisma). Each is a small app where documents are shared
+  with people and teams and no route checks a permission, with its policy, its tests, the review in CI, and
+  an open pull request that shows the review's comment. The stack pages link them.
+
 ### Changed
 
 - While only alphas are published, each release moves npm's `latest` to the alpha it publishes: a plain
   `npm i rowstile` gets the newest, and a package's page on npmjs.com shows it. `next` names it too, as
   before. From the first final release on, `latest` is a release's only.
+
+### Fixed
+
+- `rowstile review`: "2 checks changed what they expect". It said "what it expects" of several.
 
 ## 0.1.0 (alpha)
 
