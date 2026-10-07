@@ -75,7 +75,7 @@ grep -q "^-- + type file: can comment = folder.view$" "$second" && ok "... start
 out=$(migrate_db "$DB" "$P/db/migrations") && [ "$(PSQL -c "SET authz.user_id = 1" -c "SELECT authz.can('file', 11, 'comment')")" = t ] &&
   ok "it applies: the new permission is there" || bad "second applies" "$out"
 out=$(PGOPTIONS="-c client_min_messages=error" psql -X -q -1 -v ON_ERROR_STOP=1 -d "$DB" -f "$second" 2>&1)
-case "$out" in *"this migration changes the policy the migration before it left"*) ok "the same migration again is refused";; *) bad "guard" "$out";; esac
+case "$out" in *"this database already holds what this migration brings"*"tell your migration tool it is applied [AZ607]"*) ok "the same migration again is refused: the database holds it already";; *) bad "guard" "$out";; esac
 fresh "${DB}_2"
 out=$(PGOPTIONS="-c client_min_messages=error" psql -X -q -1 -v ON_ERROR_STOP=1 -d "${DB}_2" -f "$second" 2>&1)
 case "$out" in *"this migration changes the policy the migration before it left"*"none"*) ok "... and so is one without the migrations before it";; *) bad "guard on empty" "$out";; esac
@@ -100,7 +100,7 @@ CLI migrate >/dev/null 2>&1
 out=$(migrate_db "${DB}_2" "$P/db/migrations") && [ "$(PSQL -d "${DB}_2" -c "SELECT count(*) FROM authz_int.perms WHERE type = 'file' AND perm = 'print'")" = 1 ] &&
   ok "the migration for what was pushed applies to a database that took the migrations" || bad "migration after push" "$out $(ls "$P/db/migrations")"
 out=$(PGOPTIONS="-c client_min_messages=error" psql -X -q -1 -v ON_ERROR_STOP=1 -d "$DB" -f "$(ls "$P"/db/migrations/*.sql | sort | tail -n 1)" 2>&1)
-case "$out" in *"this migration changes the policy the migration before it left"*) ok "... but not to the pushed one, which is ahead of it";; *) bad "guard after push" "$out";; esac
+case "$out" in *"this database already holds what this migration brings"*"prisma migrate resolve --applied"*"alembic stamp head"*) ok "... but not to the pushed one, which holds it already: it says so, and what to tell the migration tool";; *) bad "guard after push" "$out";; esac
 # removing the policy doesn't make a database a development one: what it took is still on record
 fresh "${DB}_4"
 PGOPTIONS="-c client_min_messages=error" psql -X -q -1 -v ON_ERROR_STOP=1 -d "${DB}_4" -f "$first" >/dev/null 2>&1
