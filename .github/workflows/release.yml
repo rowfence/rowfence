@@ -6,22 +6,28 @@
 #     dry runs. PyPI and npm have no private side, so the wheel, the sdist and the unscoped launcher (a
 #     tarball) are on the GitHub release
 # Either way the GitHub release holds the wheel, the sdist, the launcher and the editor extension (.vsix); the
-# docs site is site.yml's (GitHub Pages). An alpha or a release candidate never moves npm's or the image's `latest`
-# (it is npm's `next`, and a pre-release on GitHub), nor does a
-# patch to an older line (release-X.Y). A release that stopped half-way is finished by running its jobs again: what
-# is published already is skipped.
-# Run by hand (workflow_dispatch), it builds and checks everything and publishes nothing.
+# docs site is site.yml's (GitHub Pages). An alpha or a release candidate is npm's `next` and a pre-release on
+# GitHub, and never the image's `latest`. While no final release exists it becomes npm's `latest` too, so a plain
+# install gets the newest (packaging/npm_latest.py); once one exists, only a release is `latest`. A patch to an
+# older line (release-X.Y) moves no `latest`. A release that stopped half-way is finished by running its jobs
+# again: what is published already is skipped.
+# Run by hand (workflow_dispatch), it builds and checks everything and publishes nothing. With latest=true it does
+# one thing instead, from main: npm's `latest` goes where `next` is, for a release whose own run couldn't move it
+#   gh workflow run release.yml -f latest=true
 name: release
 on:
   push:
     tags: ["v*"]
   workflow_dispatch:
+    inputs:
+      latest: {description: "only move npm's latest to where next is (publishes nothing)", type: boolean, default: false}
 
 # what a job needs beyond reading the repository, it says itself
 permissions: {contents: read}
 
 jobs:
   check:
+    if: ${{ !inputs.latest }}
     runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
     outputs:
       version: ${{ steps.v.outputs.version }}
@@ -71,7 +77,7 @@ jobs:
     needs: check
     runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
     # npm trusts this workflow only in the environment `npm` (each package's trusted publisher names it), which
-    # takes v* tags only; a dry run, on a branch, publishes nothing and goes without it
+    # takes v* tags, and main for the `latest` job; a dry run, on a branch, publishes nothing and goes without it
     environment: ${{ needs.check.outputs.publish == 'public' && 'npm' || '' }}
     permissions: {id-token: write, contents: read, packages: write}
     env:
@@ -85,6 +91,8 @@ jobs:
           node-version: "24"
           registry-url: ${{ needs.check.outputs.publish == 'public' && 'https://registry.npmjs.org' || 'https://npm.pkg.github.com' }}
           scope: "@rowstile"
+      # moving a tag by trusted publishing needs a newer npm than Node 24 brings (11.21.0 or newer)
+      - run: npm install --global npm@11.21.0
       - run: node packaging/npm/build.mjs --all
       - run: npm ci --no-audit --no-fund && npx tsc -b sdk/typescript
       # each SDK package ships its own README (in its folder: its page on npm) and the licence
@@ -119,6 +127,28 @@ jobs:
           # GitHub Packages takes scoped names only: while private, the launcher is on the GitHub release
           if [ "$PUBLISH" = public ]; then publish packaging/npm/out/rowstile; fi
           for d in sdk/typescript/*/; do publish "$d"; done
+      # while no final release exists, a plain install gets the newest alpha: npm's latest goes where next is. Each
+      # package's trusted publisher must allow it (Allow npm dist-tag); where one doesn't, this says which and
+      # the release stands. The `latest` job does it again by hand
+      - if: env.PUBLISH == 'public'
+        continue-on-error: true
+        env: {NODE_AUTH_TOKEN: ""}
+        run: python3 packaging/npm_latest.py --move
+
+  # By hand, with latest=true, and alone: npm's latest goes where next is on every package, for a release whose
+  # own run couldn't move it. It publishes nothing. From main, which the environment `npm` takes for this
+  latest:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.latest }}
+    runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
+    environment: npm
+    permissions: {id-token: write, contents: read}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020   # v7.0.0
+        with: {node-version: "24", registry-url: "https://registry.npmjs.org"}
+      - run: npm install --global npm@11.21.0
+      - env: {NODE_AUTH_TOKEN: ""}
+        run: python3 packaging/npm_latest.py --move
 
   image:
     needs: check

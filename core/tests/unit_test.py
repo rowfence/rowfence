@@ -3560,6 +3560,62 @@ class Version(unittest.TestCase):
             sys.path.pop(0)
         self.assertEqual(list(version.found()), [authzlib.__version__])
 
+    def test_npms_latest_follows_next_until_a_release(self) -> None:
+        # while only alphas and candidates are published, a plain `npm i rowstile` gets the newest: each release
+        # moves `latest` to where `next` is (packaging/npm_latest.py); a final release ends that
+        sys.path.insert(0, os.path.join(self.REPO, "packaging"))
+        try:
+            import npm_latest
+        finally:
+            sys.path.pop(0)
+        target = npm_latest.target
+        alphas = ["0.1.0-alpha.5", "0.1.0-alpha.6"]
+        self.assertEqual(target({"next": "0.1.0-alpha.6", "latest": "0.1.0-alpha.5"}, alphas)[0], "0.1.0-alpha.6")
+        self.assertEqual(target({"next": "0.1.0-alpha.6"}, alphas)[0], "0.1.0-alpha.6")
+        self.assertEqual(
+            target({"next": "0.1.0-rc.1", "latest": "0.1.0-alpha.6"}, [*alphas, "0.1.0-rc.1"])[0], "0.1.0-rc.1"
+        )
+        for tags, versions, why in (
+            ({"next": "0.1.0-alpha.6", "latest": "0.1.0-alpha.6"}, alphas, "latest is 0.1.0-alpha.6 already"),
+            ({"latest": "0.1.0-alpha.5"}, alphas, "nothing is published under next"),
+            # once released, `latest` is a release's: an alpha of the next version stays under `next`
+            ({"next": "0.2.0-alpha.1", "latest": "0.1.0"}, [*alphas, "0.1.0", "0.2.0-alpha.1"], "0.1.0 is released"),
+            ({"next": "0.1.0-rc.1", "latest": "0.1.0-alpha.6"}, [*alphas, "0.1.0-rc.1", "0.1.0"], "0.1.0 is released"),
+        ):
+            version, said = target(tags, versions)
+            self.assertIsNone(version, said)
+            self.assertIn(why, said)
+        # every package the release publishes: the launcher, one per platform it knows, the SDK's
+        names = npm_latest.names()
+        launcher = search(
+            r"const PLATFORMS = \[(.*?)\];", read("../packaging/npm/rowstile/bin/rowstile.js"), re.S
+        ).group(1)
+        platforms = [f"@rowstile/cli-{p}" for p in re.findall(r'"([a-z0-9-]+)"', launcher)]
+        sdk = glob.glob(os.path.join(self.REPO, "sdk", "typescript", "*", "package.json"))
+        self.assertEqual(names[0], "rowstile")
+        self.assertEqual(sorted(names[1 : 1 + len(platforms)]), sorted(platforms))
+        self.assertEqual(len(names), 1 + len(platforms) + len(sdk))
+        self.assertEqual(len(set(names)), len(names))
+        self.assertIn("@rowstile/prisma", names)
+        # moving a tag by trusted publishing takes a newer npm than Node brings: both jobs install one, by version
+        for npm, enough in (("11.19.0", False), ("11.21.0", True), ("11.30.1", True), ("12.0.0", False)):
+            self.assertEqual(npm_latest.new_enough(npm), enough, npm)
+        self.assertTrue(npm_latest.new_enough("12.2.0") and npm_latest.new_enough("13.0.0"))
+        release = read("../.github/workflows/release.yml")
+        installed = re.findall(r"^      - run: npm install --global npm@(\S+)$", release, re.M)
+        self.assertEqual(len(installed), 2, "the npm job and the latest job")
+        for npm in installed:
+            self.assertRegex(npm, r"^\d+\.\d+\.\d+$")
+            self.assertTrue(npm_latest.new_enough(npm), npm)
+        self.assertEqual(release.count("        run: python3 packaging/npm_latest.py --move\n"), 2)
+        # by hand with latest=true nothing else runs: every other job needs `check`, which is skipped
+        self.assertIn("  check:\n    if: ${{ !inputs.latest }}\n", release)
+        self.assertIn("  latest:\n    if: ${{ github.event_name == 'workflow_dispatch' && inputs.latest }}\n", release)
+        jobs = re.findall(r"^  ([a-z-]+):\n((?:    .*\n|\n)*)", release.split("\njobs:\n", 1)[1], re.M)
+        for job, body in jobs:
+            if job not in ("check", "latest"):
+                self.assertRegex(body, r"    needs: (check|\[check, )", job)
+
     def test_the_mcp_registrys_entry_names_the_npm_package(self) -> None:
         # the registry takes server.json only if the npm package it names says the same name back (`mcpName`), and
         # refuses a description over 100 characters; `rowstile mcp` is how the package starts the server
