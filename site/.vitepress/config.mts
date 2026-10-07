@@ -1,13 +1,9 @@
 // The docs site. The pages are the repository's Markdown, where it is (pages.mjs says which, and where each goes).
-import { readFileSync } from "node:fs";
 import { join, relative } from "node:path";
-import sql from "shiki/langs/sql.mjs";
 import type { Plugin } from "vite";
 import { defineConfig } from "vitepress";
-import { GITHUB, ORIGIN, PAGES, REPO, TITLES, describe, errorSidebar, notPages, recipeSidebar, siteLink, url } from "../pages.mjs";
-
-// ```authz blocks: the editor's grammar (SQL inside { } too, so Shiki's SQL is loaded with it)
-const authz = JSON.parse(readFileSync(join(REPO, "editor", "syntaxes", "authz.tmLanguage.json"), "utf8"));
+import { FEED, FEED_TITLE, LANGUAGES } from "../blog.mjs";
+import { GITHUB, ORIGIN, PAGES, POSTS, REPO, TITLES, blogSidebar, describe, errorSidebar, notPages, recipeSidebar, siteLink, url } from "../pages.mjs";
 
 // The pages are outside site/, and so is Vite's root (the repository), where there is no Vue: the pages' imports of
 // it are resolved from here, and the server bundle leaves Vue out (it imports it at run time, from site/.vitepress)
@@ -82,10 +78,16 @@ export default defineConfig({
   cleanUrls: true,
   sitemap: { hostname: ORIGIN },
   // the mark (site/assets/mark.svg, which build.mjs puts at the site's root): the tab's icon and the navigation's
-  head: [["link", { rel: "icon", type: "image/svg+xml", href: "/mark.svg" }]],
+  head: [
+    ["link", { rel: "icon", type: "image/svg+xml", href: "/mark.svg" }],
+    // the blog's feed, once there is a post: what a feed reader finds from any page
+    ...(POSTS.length
+      ? [["link", { rel: "alternate", type: "application/atom+xml", title: FEED_TITLE, href: "/" + FEED }] as [string, Record<string, string>]]
+      : []),
+  ],
   vite: { plugins: [vueFromSite] },
   markdown: {
-    languages: [...sql, { ...authz, name: "authz", embeddedLangs: ["sql"] }],
+    languages: LANGUAGES,
     config(md) {
       // indented code blocks (the docs use them for commands) get the fenced blocks' box, which scrolls
       md.core.ruler.push("indented_as_fenced", (state) => {
@@ -132,6 +134,7 @@ export default defineConfig({
       { text: "Reference", link: "/reference/language" },
       { text: "Stacks", link: "/stacks/" },
       { text: "Errors", link: "/errors/" },
+      ...(POSTS.length ? [{ text: "Blog", link: "/blog/" }] : []),
       { text: "Playground", link: "/playground/", target: "_self" },
     ],
     sidebar: {
@@ -143,6 +146,7 @@ export default defineConfig({
         { text: "SDKs", items: sdks },
         { text: "Reference", items: reference },
         { text: "Examples", items: examples },
+        ...(POSTS.length ? [{ text: "Blog", items: [{ text: "All posts", link: "/blog/" }, ...blogSidebar()] }] : []),
       ],
     },
     outline: [2, 3],

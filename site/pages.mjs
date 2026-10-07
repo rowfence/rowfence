@@ -14,6 +14,59 @@ const errorPages = readdirSync(join(REPO, "docs", "errors")).filter((f) => /^AZ\
 // a recipe with a page of its own: docs/cookbook/<name>.md, beside the folder that holds what it shows
 const recipePages = readdirSync(join(REPO, "docs", "cookbook")).filter((f) => /^[a-z0-9-]+\.md$/.test(f)).sort();
 
+/** A post of the blog.
+ *  @typedef {{file: string, source: string, address: string, slug: string, date: string, title: string,
+ *             author: string, summary: string}} Post */
+
+/** Markdown as plain text, for a summary: links as their words, no backticks or emphasis. @param {string} text */
+function plain(text) {
+  return text.replace(/\[([^\]]+)\]\([^)]+\)/g, "$1").replace(/[`*_]/g, "").replace(/\s+/g, " ").trim();
+}
+
+/** A post, from its file's name and text: docs/blog/2026-10-23-how-it-is-checked.md, which begins with its title,
+ *  then its byline (the author's name and the date its name has), then a first paragraph, which is its summary
+ *  (what a feed and a search result show). Its address has no date: /blog/how-it-is-checked. A file that isn't
+ *  so fails the build.
+ *  @param {string} file @param {string} text @returns {Post} */
+export function readPost(file, text) {
+  const name = file.match(/^(\d{4}-\d{2}-\d{2})-([a-z0-9]+(?:-[a-z0-9]+)*)\.md$/);
+  if (!name) throw new Error(`docs/blog/${file}: a post is named <date>-<slug>.md (2026-10-23-how-it-is-checked.md)`);
+  const [, date, slug] = name;
+  const day = new Date(`${date}T00:00:00Z`);
+  if (Number.isNaN(day.getTime()) || day.toISOString().slice(0, 10) !== date) {
+    throw new Error(`docs/blog/${file}: ${date} is not a date`);
+  }
+  const blocks = text.replace(/\r\n/g, "\n").split(/\n{2,}/).map((b) => b.trim()).filter(Boolean);
+  const title = blocks[0]?.match(/^# (.+)$/);
+  if (!title) throw new Error(`docs/blog/${file}: its first line is its title (# ...)`);
+  const byline = blocks[1]?.match(/^\*([^*,]+), (\d{4}-\d{2}-\d{2})\*$/);
+  if (!byline) throw new Error(`docs/blog/${file}: under the title, the author and the date: *Their Name, ${date}*`);
+  if (byline[2] !== date) throw new Error(`docs/blog/${file}: its byline says ${byline[2]}, its name ${date}`);
+  const first = blocks[2] ?? "";
+  if (!first || /^(#|```|\||>|[-*] |\d+\. |<)/.test(first)) {
+    throw new Error(`docs/blog/${file}: after the byline, a first paragraph (what a feed and a search result show)`);
+  }
+  return { file, source: `docs/blog/${file}`, address: `blog/${slug}.md`, slug, date, title: title[1],
+           author: byline[1].trim(), summary: plain(first) };
+}
+
+/** The blog's posts, newest first: docs/blog/<date>-<slug>.md, each listed in docs/blog/README.md (the index, on
+ *  GitHub too). With no post there is no blog: no page, no feed, nothing in the navigation.
+ *  @type {Post[]} */
+export const POSTS = (() => {
+  const folder = join(REPO, "docs", "blog");
+  if (!existsSync(folder)) return [];
+  const posts = readdirSync(folder).filter((f) => f.endsWith(".md") && f !== "README.md")
+    .map((f) => readPost(f, readFileSync(join(folder, f), "utf8")))
+    .sort((a, b) => (a.date === b.date ? a.slug.localeCompare(b.slug) : a.date < b.date ? 1 : -1));
+  const index = posts.length ? readFileSync(join(folder, "README.md"), "utf8") : "";
+  for (const p of posts) {
+    if (posts.some((q) => q !== p && q.slug === p.slug)) throw new Error(`docs/blog: two posts are named ${p.slug}`);
+    if (!index.includes(`](${p.file})`)) throw new Error(`docs/blog/README.md doesn't list ${p.file}`);
+  }
+  return posts;
+})();
+
 /** Repository path -> address in the site (the page's path, with .md). @type {Record<string, string>} */
 export const PAGES = {
   "site/index.md": "index.md",
@@ -60,6 +113,8 @@ export const PAGES = {
   "site/problems/not-found.md": "problems/not-found.md",
   "docs/errors/README.md": "errors/index.md",
   ...Object.fromEntries(errorPages.map((f) => [`docs/errors/${f}`, `errors/${f}`])),
+  ...(POSTS.length ? { "docs/blog/README.md": "blog/index.md" } : {}),
+  ...Object.fromEntries(POSTS.map((p) => [p.source, p.address])),
 };
 
 /** Titles for pages whose first heading says something else on the site. @type {Record<string, string>} */
@@ -131,6 +186,16 @@ export function describe(address, title) {
   if (/^cookbook\/[a-z0-9-]+\.md$/.test(address)) {
     return `${title}: a tested recipe for Postgres row-level security, with its tables, its policy and its tests.`;
   }
+  if (address === "blog/index.md") {
+    return "The rowstile blog: how row-level security in Postgres works at scale, how rowstile is checked, and what was measured.";
+  }
+  const post = POSTS.find((p) => p.address === address);
+  if (post) {
+    // a search result shows about 160 characters: the summary's first sentences that fit, else cut at a word
+    if (post.summary.length <= 200) return post.summary;
+    const sentences = post.summary.slice(0, 200).match(/^.*[.!?](?= )/s);
+    return sentences ? sentences[0] : post.summary.slice(0, 197).replace(/\s+\S*$/, "") + "...";
+  }
   throw new Error(`${address}: no description in site/pages.mjs (DESCRIPTIONS)`);
 }
 
@@ -179,6 +244,11 @@ export function recipeSidebar() {
     if (!title) throw new Error(`docs/cookbook/${f} has no title`);
     return { text: title[1], link: `/cookbook/${f.replace(/\.md$/, "")}` };
   });
+}
+
+/** The blog's sidebar: the posts, newest first. @returns {{text: string, link: string}[]} */
+export function blogSidebar() {
+  return POSTS.map((p) => ({ text: p.title, link: url(p.address) }));
 }
 
 /** The error pages' sidebar: the sections of docs/errors/README.md, each code with its title. */
