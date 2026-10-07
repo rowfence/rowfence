@@ -87,7 +87,11 @@ A build from `main` records its version with a hash of the compiler's sources (`
    extension, with the changelog's section as its notes. Last, the MCP server's entry in the official registry
    (`server.json`): that registry is a preview, and a failure there never fails the release (run the `mcp` job
    again). Where it publishes follows the repository: private
-   places while it is private, PyPI, npm and ghcr.io once public. The tag also deploys the docs site at
+   places while it is private, PyPI, npm and ghcr.io once public. An alpha or a candidate goes under npm's
+   `next`; while no final release exists the run then moves npm's `latest` there too, so a plain `npm i
+   rowstile` gets the newest (`packaging/npm_latest.py`). That needs **Allow npm dist-tag** ticked in each
+   package's trusted publisher on npmjs.com: where it isn't, the run says which packages and the release
+   stands. The tag also deploys the docs site at
    rowstile.dev (`.github/workflows/site.yml`), built from the tag, when the release is what a plain install
    gets, or while no final release exists: `gh workflow run site.yml -f tag=vX.Y.Z` deploys another one.
 5. **Check it** as a user would: install from the registries on Linux, macOS and Windows, then `rowstile
@@ -97,6 +101,13 @@ A build from `main` records its version with a hash of the compiler's sources (`
 
 Run by hand (Actions, **release**, **Run workflow**), the release workflow builds and checks everything and
 publishes nothing: a dry run before tagging.
+
+Run by hand with `latest`, it does one thing instead: npm's `latest` goes where `next` is on every package,
+and nothing is published. It is for a release whose own run couldn't move it, and moves nothing once a final
+release exists:
+
+    python3 packaging/npm_latest.py              # what it would move, read from the registry
+    gh workflow run release.yml -f latest=true   # moves it, from main
 
 ## The site between releases
 

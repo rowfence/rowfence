@@ -7,6 +7,12 @@ Each release upgrades from the one before it. How releases are numbered and made
 
 ## Unreleased
 
+### Changed
+
+- While only alphas are published, each release moves npm's `latest` to the alpha it publishes: a plain
+  `npm i rowstile` gets the newest, and a package's page on npmjs.com shows it. `next` names it too, as
+  before. From the first final release on, `latest` is a release's only.
+
 ## 0.1.0 (alpha)
 
 **rowfence is now rowstile**, and 0.1.0-alpha.2 is its first release under the new name (0.1.0-alpha.1 was
