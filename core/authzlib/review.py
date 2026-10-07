@@ -621,13 +621,15 @@ def grants_more(b: Side, h: Side, whats: list[str], worlds: int) -> dict[str, tu
                     tname, p = what.split(".")
                     more = set(sh.get((tname, p), ())) - set(sb.get((tname, p), ()))
                 if more:
-                    who = user or "nobody signed in"
-                    found[what] = (
-                        (who if ":" in who or who.startswith("nobody") else f"user {who}").replace(":", " "),
-                        f"{tname} {sorted(more)[0]}",
-                    )
+                    found[what] = (named(user), f"{tname} {sorted(more)[0]}")
                     left.remove(what)
     return found
+
+
+def named(user: str) -> str:
+    """Who an example is about, in words: user 1, service 3, nobody signed in."""
+    who = user or "nobody signed in"
+    return (who if ":" in who or who.startswith("nobody") else f"user {who}").replace(":", " ")
 
 
 def risk(b: Side, h: Side, worlds: int) -> list[Flag]:
@@ -1009,11 +1011,13 @@ def summary(r: Review) -> dict[str, str]:
         loses = [g for g in loses if g["what"].startswith("permission ")] or loses
 
         def say(gs: list[Group], verb: str) -> str:
+            # "1 user gains", "2 users gain"
+            does = lambda g: verb + ("s" if g["users"] == 1 else "")
             return "; ".join(
-                f"{plural(g['users'], 'user')} {verb} `{g['what'].replace('permission ', '')}` "
+                f"{plural(g['users'], 'user')} {does(g)} `{g['what'].replace('permission ', '')}` "
                 f"on {plural(g['objects'], g['type'])}"
                 if g["what"].startswith("permission ")
-                else f"{plural(g['users'], 'user')} {verb} {g['what']} in `{g['type']}` ({plural(g['objects'], 'row')})"
+                else f"{plural(g['users'], 'user')} {does(g)} {g['what']} in `{g['type']}` ({plural(g['objects'], 'row')})"
                 for g in gs[:3]
             ) + (f"; and {len(gs) - 3} more" if len(gs) > 3 else "")
 
@@ -1214,7 +1218,9 @@ def text(r: Review) -> str:
             out.append(f"  through  {t['what']}: uses {', '.join(t['via'])}")
         ce = m.get("counterexample")
         if ce:
-            out.append(f"  not a refactor: {ce['what']} differs for {ce['user']} on {ce['object']}")
+            # as the risks name their examples: user 1 on note 1 (a rule's object is a row of its table)
+            kind = ce["what"].split(".")[0] if re.fullmatch(r"\w+\.\w+", ce["what"]) else "row"
+            out.append(f"  not a refactor: {ce['what']} differs for {named(ce['user'])} on {kind} {ce['object']}")
         if m.get("unreadable"):
             out.append(
                 f"  can't tell: {', '.join(m.get('unreadable', []))} changed only in conditions the review "

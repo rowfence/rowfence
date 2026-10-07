@@ -61,6 +61,8 @@ Each release upgrades from the one before it. How releases are numbered and made
 
 ### Fixed
 
+- `rowstile review` says "1 user gains" (it said "1 user gain"), and names the difference that makes a
+  change no refactor as its risks name theirs: "differs for user 1 on note 1" (it said "for 1 on 1").
 - `rowstile why` (and Studio) tries a row in a link table for a relation with a `where`, with the values
   the condition asks (`add user 4 to app.project_members for project 1, with role = 'admin'`), or the
   change to the row that is there already (`set role = 'admin' on user 4's row of ...`). It ended with "no
