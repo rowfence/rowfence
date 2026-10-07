@@ -105,6 +105,9 @@ User-facing docs: `README.md`, then `docs/reference/` (read them first). Terms i
   (GitHub Packages, the GitHub release), to PyPI, npm and ghcr.io once public. The workflows run on the
   runner the repository variable `RUNNER` names, else `ubuntu-latest` (GitHub's runners since 2026-10-03; `RUNNER`
   is unset)
+- `demo/` — the recording at the top of the README (`demo.gif`): `record.sh` runs `demo.tape` in a terminal
+  recorder in a container, on the guide's own app (`files.py` takes it from `docs/getting-started.md`); made
+  again by hand when what the commands print changes (`Demo` in `unit_test.py` checks the tape still fits)
 - `playground/` — rowstile in the browser: the compiler in Pyodide (a worker), the SQL in PGlite; `core.mjs` is the
   engine, `test.mjs` runs it in Node, `browser_test.mjs` the page in headless Chrome, `build.mjs` writes `dist/`
   (its examples are read from the repository: the getting-started guide's own, the docs app, the cookbook's
