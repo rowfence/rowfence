@@ -1,7 +1,8 @@
 // The blog without a post to try it on: what a post's file must be (readPost), and the feed made from two
-// made-up posts (well-formed XML, the fields a reader needs, newest first).   node site/blog_test.mjs
+// made-up posts (well-formed XML, the fields a reader needs, newest first); and the comparison pages, listed
+// from their folder.   node site/blog_test.mjs
 import { feed, forFeed, postBody } from "./blog.mjs";
-import { readPost } from "./pages.mjs";
+import { DESCRIPTIONS, PAGES, compareSidebar, describe, readPost } from "./pages.mjs";
 
 let failed = 0;
 /** @param {string} label @param {unknown} ok @param {unknown} [detail] */
@@ -111,6 +112,22 @@ check(
 check("... the post whole, as escaped HTML", entries[0].includes('<content type="html">&lt;p&gt;what-a-closure-table-costs &amp;amp; more&lt;/p&gt;</content>'), entries[0]);
 check("... a title's and a summary's own characters escaped", entries[1].includes("<title>A &amp; B &lt; C</title>") &&
   entries[1].includes("<summary>One &quot;quoted&quot; line.</summary>"), entries[1]);
+
+// the comparison pages are listed from their folder too: a new one needs nothing here or in pages.mjs
+const compared = Object.keys(PAGES).filter((f) => f.startsWith("docs/compare/"));
+const beside = compareSidebar();
+check("a comparison page per file of docs/compare/, each in the sidebar", compared.length === beside.length &&
+  compared.every((f, i) => PAGES[f] === `${beside[i].link.slice(1)}.md`), JSON.stringify(beside));
+check("... named for what it is compared with", beside.every((b) => b.text && !b.text.startsWith("rowstile") &&
+  b.text[0] === b.text[0].toUpperCase()), JSON.stringify(beside));
+for (const f of compared.slice(0, 1)) {
+  const said = DESCRIPTIONS[PAGES[f]];
+  delete DESCRIPTIONS[PAGES[f]];
+  const made = refused(() => describe(PAGES[f], "")) || describe(PAGES[f], "");
+  check("... one without a sentence of its own is described by its first paragraph",
+    made.length > 40 && made.length <= 200 && !/[`*\[\]]/.test(made) && made !== said, made);
+  if (said) DESCRIPTIONS[PAGES[f]] = said;
+}
 
 console.log(failed ? `blog: ${failed} failed` : "blog: all passed");
 process.exit(failed ? 1 : 0);

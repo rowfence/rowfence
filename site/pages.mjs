@@ -13,6 +13,9 @@ const BRANCH = "main";
 const errorPages = readdirSync(join(REPO, "docs", "errors")).filter((f) => /^AZ\d+\.md$/.test(f)).sort();
 // a recipe with a page of its own: docs/cookbook/<name>.md, beside the folder that holds what it shows
 const recipePages = readdirSync(join(REPO, "docs", "cookbook")).filter((f) => /^[a-z0-9-]+\.md$/.test(f)).sort();
+// a page per alternative: docs/compare/<name>.md, titled "rowstile and <the alternative>"
+const COMPARE = join(REPO, "docs", "compare");
+const comparePages = existsSync(COMPARE) ? readdirSync(COMPARE).filter((f) => /^[a-z0-9-]+\.md$/.test(f)).sort() : [];
 
 /** A post of the blog.
  *  @typedef {{file: string, source: string, address: string, slug: string, date: string, title: string,
@@ -80,11 +83,7 @@ export const PAGES = {
   "docs/managed-postgres.md": "managed-postgres.md",
   "docs/signed-urls.md": "signed-urls.md",
   "docs/comparison.md": "comparison.md",
-  "docs/compare/openfga.md": "compare/openfga.md",
-  "docs/compare/spicedb.md": "compare/spicedb.md",
-  "docs/compare/zenstack.md": "compare/zenstack.md",
-  "docs/compare/hand-written-rls.md": "compare/hand-written-rls.md",
-  "docs/compare/app-code.md": "compare/app-code.md",
+  ...Object.fromEntries(comparePages.map((f) => [`docs/compare/${f}`, `compare/${f}`])),
   "docs/how-it-is-checked.md": "how-it-is-checked.md",
   "docs/threat-model.md": "threat-model.md",
   "SECURITY.md": "security.md",
@@ -129,8 +128,8 @@ export const TITLES = { "development.md": "Working on rowstile", "words.md": "Wo
 export const ORIGIN = "https://rowstile.dev";
 
 /** One sentence per page, for search results and shared links. It is here and not in the Markdown, which is read on
- *  GitHub too, where front matter shows as a table. An error page's and a recipe's are made from their titles
- *  (describe).
+ *  GitHub too, where front matter shows as a table. An error page's and a recipe's are made from their titles, a
+ *  post's is its first paragraph, and so is a comparison page's that has no sentence here (describe).
  *  @type {Record<string, string>} */
 export const DESCRIPTIONS = {
   "index.md": "Authorization for Postgres apps: access rules in a policy file, compiled into row-level security. Sharing, groups, nested folders, tenants.",
@@ -200,13 +199,26 @@ export function describe(address, title) {
     return "The rowstile blog: how row-level security in Postgres works at scale, how rowstile is checked, and what was measured.";
   }
   const post = POSTS.find((p) => p.address === address);
-  if (post) {
-    // a search result shows about 160 characters: the summary's first sentences that fit, else cut at a word
-    if (post.summary.length <= 200) return post.summary;
-    const sentences = post.summary.slice(0, 200).match(/^.*[.!?](?= )/s);
-    return sentences ? sentences[0] : post.summary.slice(0, 197).replace(/\s+\S*$/, "") + "...";
+  if (post) return short(post.summary);
+  const compared = address.match(/^compare\/([a-z0-9-]+\.md)$/);
+  if (compared) {
+    // a page that came after this file was last written: its first paragraph, as a post's
+    const blocks = readFileSync(join(COMPARE, compared[1]), "utf8").replace(/\r\n/g, "\n").split(/\n{2,}/);
+    const first = (blocks[1] ?? "").trim();
+    if (!first || /^(#|```|\||>|[-*] |\d+\. |<)/.test(first)) {
+      throw new Error(`docs/compare/${compared[1]}: after the title, a first paragraph (what a search result shows)`);
+    }
+    return short(plain(first));
   }
   throw new Error(`${address}: no description in site/pages.mjs (DESCRIPTIONS)`);
+}
+
+/** A summary as a description. A search result shows about 160 characters: the first sentences that fit, else cut
+ *  at a word. @param {string} summary */
+function short(summary) {
+  if (summary.length <= 200) return summary;
+  const sentences = summary.slice(0, 200).match(/^.*[.!?](?= )/s);
+  return sentences ? sentences[0] : summary.slice(0, 197).replace(/\s+\S*$/, "") + "...";
 }
 
 /** A page's URL: "/reference", "/stacks/". @param {string} address */
@@ -256,7 +268,17 @@ export function recipeSidebar() {
   });
 }
 
-/** The blog's sidebar: the posts, newest first. @returns {{text: string, link: string}[]} */
+/** The comparison pages' sidebar: what each is compared with, from its title ("# rowstile and OpenFGA").
+ *  @returns {{text: string, link: string}[]} */
+export function compareSidebar() {
+  return comparePages.map((f) => {
+    const title = readFileSync(join(COMPARE, f), "utf8").match(/^# rowstile and (.+)/);
+    if (!title) throw new Error(`docs/compare/${f}: its first line is its title, "# rowstile and <the alternative>"`);
+    return { text: title[1][0].toUpperCase() + title[1].slice(1), link: `/compare/${f.replace(/\.md$/, "")}` };
+  });
+}
+
+/** The blog's sidebar: the posts, newest first.@returns {{text: string, link: string}[]} */
 export function blogSidebar() {
   return POSTS.map((p) => ({ text: p.title, link: url(p.address) }));
 }
