@@ -1051,7 +1051,8 @@ def summary(r: Review) -> dict[str, str]:
             )
         )
     if t["flipped"]:
-        parts.append(f"{plural(len(t['flipped']), 'check')} changed what it expects")
+        expects = "it expects" if len(t["flipped"]) == 1 else "they expect"
+        parts.append(f"{plural(len(t['flipped']), 'check')} changed what {expects}")
     if t["removed"]:
         parts.append(f"{plural(len(t['removed']), 'check')} removed")
     if t["untested"]:

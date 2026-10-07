@@ -1345,6 +1345,12 @@ class Review(unittest.TestCase):
             [("user 3 can view file 11", "user 3 cannot view file 11")],
         )
         self.assertEqual([x["check"] for x in t["removed"]], ["user 3 cannot view file 12"])
+        # the summary's line counts them, one or several
+        both = {"t.authz": 'test "carol"\n  user 3 cannot view file 11\n  user 3 can view file 12\n'}
+        one = self.review.summary(self.run_review(self.text, before, after))["Tests"]
+        two = self.review.summary(self.run_review(self.text, before, both))["Tests"]
+        self.assertIn("1 check changed what it expects", one)
+        self.assertIn("2 checks changed what they expect", two)
 
     def test_a_new_permission_no_test_names(self) -> None:
         new = replaced(
