@@ -181,6 +181,13 @@ const s = (id: Id): string => Array.isArray(id)
   ? "(" + id.map((v) => '"' + String(v).replace(/["\\\\]/g, (c) => "\\\\" + c) + '"').join(",") + ")"
   : String(id);
 
+/** A key as the database writes it, for a message: 7, or (1,2) for a key of several columns. */
+const shown = (id: Id): string => Array.isArray(id)
+  ? "(" + id.map((v) => /^$|[",\\\\()\\s]/.test(String(v)) ? '"' + String(v).replace(/\\\\/g, "\\\\\\\\").replace(/"/g, '""') + '"' : String(v)).join(",") + ")"
+  : String(id);
+// who is signed in, in the words the database's own refusals use
+const WHO = "SELECT coalesce((SELECT p.principal_type || ' ' || p.principal_id FROM authz.principal() p), 'someone not signed in') AS who";
+
 /** The database refused a write (SQLSTATE 42501): its message, the table and command, and why (lines). */
 export class Refused extends Error {{
   constructor(message: string, public table?: string, public command?: string, public why: string[] = []) {{ super(message); }}
@@ -307,8 +314,9 @@ export function authz(db: Queryable) {{
         [table, command, s(id), row === undefined ? null : JSON.stringify(row)])).rows[0].e;
       // nothing there for this user, or the rule allows it (its first line says yes) and the statement matched
       // nothing for another reason, such as a WHERE with more than the key
-      if (why === null || /^\\s*yes\\b/.test(why[0] ?? "")) throw new NotFound(table, s(id));
-      throw new Refused(`permission denied: may not ${{command}} ${{table}} ${{s(id)}}`, table, command, why);
+      if (why === null || /^\\s*yes\\b/.test(why[0] ?? "")) throw new NotFound(table, shown(id));
+      const who: string = (await db.query(WHO)).rows[0].who;
+      throw new Refused(`permission denied: ${{who}} may not ${{command}} row ${{shown(id)}} of ${{table}}`, table, command, why);
     }},
     /** Which of these people (or principals of another type) hold perm: one call, for live updates. Signs each one
      *  in, so it needs what signing in needs (SET on authz.user_id). */
@@ -417,6 +425,24 @@ def _id(x: Id) -> str:
     if isinstance(x, (tuple, list)):
         return "(" + ",".join('"' + str(v).replace("\\\\", "\\\\\\\\").replace('"', '\\\\"') + '"' for v in x) + ")"
     return str(x)
+
+
+def _shown(x: Id) -> str:
+    """A key as the database writes it, for a message: 7, or (1,2) for a key of several columns."""
+    if not isinstance(x, (tuple, list)):
+        return str(x)
+
+    def field(v: object) -> str:
+        s = str(v)
+        if s == "" or any(ch in s for ch in '",\\\\()') or any(ch.isspace() for ch in s):
+            return '"' + s.replace("\\\\", "\\\\\\\\").replace('"', '""') + '"'
+        return s
+
+    return "(" + ",".join(field(v) for v in x) + ")"
+
+
+# who is signed in, in the words the database's own refusals use
+_WHO = "SELECT coalesce((SELECT p.principal_type || ' ' || p.principal_id FROM authz.principal() p), 'someone not signed in')"
 
 
 class Refused(Exception):
@@ -619,8 +645,9 @@ class Authz:
             return result
         why = self.explain_rule(table, command, id_, row)
         if why is None or (why and why[0].lstrip().startswith("yes")):
-            raise NotFound(table, _id(id_))
-        raise Refused(f"permission denied: may not {{command}} {{table}} {{_id(id_)}}", table, command, why)
+            raise NotFound(table, _shown(id_))
+        who = self._one(_WHO, ())
+        raise Refused(f"permission denied: {{who}} may not {{command}} row {{_shown(id_)}} of {{table}}", table, command, why)
 
     @staticmethod
     def refusal(error: BaseException) -> Refused | None:

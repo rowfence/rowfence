@@ -23,6 +23,7 @@ from . import (
     Who,
     _Unset,
     act_as_args,
+    answer,
     check_problems,
     explain_rule_args,
     explain_rule_sql,
@@ -103,7 +104,7 @@ def expect(conn: psycopg.Connection[Any], result: Result, table: str, command: s
         return result
     t, c, k = explain_rule_args(table, command, key)
     row = conn.execute(_EXPLAIN, {"t": t, "c": c, "k": k}).fetchone()
-    raise verdict(table, command, key, row[0] if row is not None else None)
+    raise verdict(table, command, key, *answer(row))
 
 
 async def aexpect(aconn: psycopg.AsyncConnection[Any], result: Result, table: str, command: str, key: object) -> Result:
@@ -112,7 +113,7 @@ async def aexpect(aconn: psycopg.AsyncConnection[Any], result: Result, table: st
         return result
     t, c, k = explain_rule_args(table, command, key)
     row = await (await aconn.execute(_EXPLAIN, {"t": t, "c": c, "k": k})).fetchone()
-    raise verdict(table, command, key, row[0] if row is not None else None)
+    raise verdict(table, command, key, *answer(row))
 
 
 def connection_check(conn: psycopg.Connection[Any]) -> list[tuple[str, str]]:

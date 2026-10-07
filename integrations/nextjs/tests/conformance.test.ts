@@ -14,6 +14,7 @@ import { eq, sql as sqlTag } from "drizzle-orm";
 import { integer, numeric, pgSchema, serial, text, varchar } from "drizzle-orm/pg-core";
 import { afterAll, beforeEach, describe, expect, test } from "vitest";
 import { actingAs, beforeSignIn, ConnectionProblem, current, errorCode, NotSignedIn, sqlstate, translate } from "@rowstile/client";
+import { idShown, verdict } from "@rowstile/client";
 import { describe as describePrincipal, parsePrincipal, principal } from "@rowstile/client";
 import { authzRoutes } from "@rowstile/next";
 import { authz as rowstile } from "@rowstile/pg";
@@ -189,9 +190,18 @@ test("7: hidden is 404, not allowed is 403", async () => {
   expect(why.command).toBe("update");
   expect(why.code).toBe("AZ709");                       // rowstile help AZ709
   expect(why.why.some((line: string) => line.includes("edit"))).toBe(true);
+  // worded as the database words a refused insert: who, the command, the row, the table
+  expect(why.detail).toBe("permission denied: user 3 may not update row 1 of app.notes");
   expect(mine.status).toBe(200);
   expect(gone.status).toBe(404);
   expect(no.status).toBe(403);
+  expect((await no.json()).detail).toBe("permission denied: user 3 may not delete row 1 of app.notes");
+  // a key of several columns is spelled as the database writes it, in a 403 and a 404 alike
+  expect([7, [7], [1, 2], ["a b", "x,y"], ["", 'q"t'], ["b\\s", "(1)"]].map((k) => idShown(k as never)))
+    .toEqual(["7", "7", "(1,2)", '("a b","x,y")', '("","q""t")', '("b\\\\s","(1)")']);
+  expect(verdict("app.members", "delete", [1, 2], ["no   delete : manage"], "service 3").message)
+    .toBe("permission denied: service 3 may not delete row (1,2) of app.members");
+  expect(verdict("app.members", "delete", [1, 2], null).message).toBe("app.members (1,2) not found");
   // in an interactive transaction too, and as the matchers say it
   await expect(actingAs("3", () => db.$transaction((tx) => tx.note.update({ where: { id: 1 }, data: { body: "x" } }))))
     .rejects.toBeRefused("update", "note.edit");
@@ -382,6 +392,10 @@ describe("without Prisma", () => {
       expect(editable).toEqual([{ id: 1 }]);
       await expect(a.transaction(async (tx) => drizzleExpect(tx, await tx.delete(notes).where(eq(notes.id, 1)).returning(),
         "app.notes", "delete", 1), "3")).rejects.toBeRefused("delete");
+      // who the transaction signed in as, asked of the database: not whoever the code around it acts for
+      const said = await actingAs("1", () => a.transaction(async (tx) => drizzleExpect(tx,
+        await tx.delete(notes).where(eq(notes.id, 1)).returning(), "app.notes", "delete", 1), "3")).catch((err) => err);
+      expect(said.message).toBe("permission denied: user 3 may not delete row 1 of app.notes");
       const e = await d.select().from(notes).catch((err) => err);  // outside a signed-in transaction
       expect(translate(e)).toBeInstanceOf(NotSignedIn);
     } finally {

@@ -77,5 +77,6 @@ The error's table, schema and constraint (`authz_insert`, `authz_update`) fields
 `refusal(error)` reads. An allowed write never runs this (the check is `rule OR refuse(row)`). Updates
 and deletes the rules don't allow change no rows instead (row-level security leaves them out):
 `az.expect(result, table, command, id)` then raises `NotFound` or `Refused` with `authz.explain_rule`'s
-answer.
+answer, worded like the refused insert above: `permission denied: user 3 may not update row 11 of
+app.files`. A key of several columns is written as the database writes it, `(1,2)`.
 - **TypeScript: preview.** The same calls in camelCase; may change before it is supported.

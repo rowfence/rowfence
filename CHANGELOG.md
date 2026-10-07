@@ -16,6 +16,13 @@ Each release upgrades from the one before it. How releases are numbered and made
 
 ### Changed
 
+- A refused write reads the same wherever it is said. An UPDATE or DELETE that changed nothing (the
+  SDKs' `expect`, Prisma's and SQLAlchemy's writes of a row the user may not change, the generated
+  clients) is `permission denied: user 3 may not update row 7 of app.notes`, like the database's own
+  `user 3 may not insert this row into app.notes`. It was `may not update app.notes 7`, without who. Who
+  is asked of the database, in the same transaction. A key of several columns is written as the database
+  writes it, `(1,2)`, in `Refused`, in `NotFound` and in its `id` (Python wrote `(1, 2)`, TypeScript
+  `("1","2")`). Generated clients: write yours again (`rowstile client py`).
 - `authz.lint()` notes a relation named like a type only when that type signs in (`user : user = owner_id`:
   alone in a rule, `user` reads like any user). A relation named like another type, as `rowstile init` drafts
   and getting started writes (`project : project = project_id`), is only ever followed (`project.edit`) and

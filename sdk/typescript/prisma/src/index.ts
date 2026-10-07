@@ -21,7 +21,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { Prisma } from "@prisma/client/extension";
 import {
-  actAs, calls, idText, NotFound, signingIn, translate, verdict,
+  actAs, calls, idShown, idText, NotFound, signingIn, translate,
   type AuthzCalls, type Id, type ObjectType, type Permission, type Queryable, type UserResolver,
 } from "@rowstile/client";
 
@@ -245,9 +245,8 @@ export function authz(options: ExtensionOptions = {}) {
               const table = tableOf(model);
               const key = keyOf(model, (args as { where?: Record<string, unknown> }).where);
               if (key !== undefined) {
-                const why = await c.explainRule(table, operation, key).catch(() => undefined);
-                if (why !== undefined) {
-                  const v = verdict(table, operation, key, why);
+                const v = await c.verdict(table, operation, key).catch(() => undefined);
+                if (v !== undefined) {
                   (v as { cause?: unknown }).cause = e;
                   throw v;
                 }
@@ -257,7 +256,7 @@ export function authz(options: ExtensionOptions = {}) {
             // two answer alike). Left as Prisma's P2025 it is a 500, where an update or a delete is a 404
             if (model && isP2025(e) && (operation === "findUniqueOrThrow" || operation === "findFirstOrThrow")) {
               const key = keyOf(model, (args as { where?: Record<string, unknown> }).where);
-              throw new NotFound(tableOf(model), key === undefined ? undefined : idText(key), { cause: e });
+              throw new NotFound(tableOf(model), key === undefined ? undefined : idShown(key), { cause: e });
             }
             throw translate(e, schemaOf) ?? e;
           }

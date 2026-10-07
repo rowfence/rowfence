@@ -44,6 +44,18 @@ export function idText(id: Id): string {
   return String(id);
 }
 
+/** A row's key as the database writes it, for a message: 7, or (1,2) for a composite key (a field is quoted
+ *  only where Postgres would: when it is empty or holds a comma, a quote, a parenthesis or a space). */
+export function idShown(id: Id): string {
+  if (!Array.isArray(id)) return String(id);
+  if (id.length === 1) return String(id[0]);
+  return "(" + id.map((v) => {
+    if (v === null || v === undefined) return "";
+    const text = String(v);
+    return text === "" || /[",\\()\s]/.test(text) ? '"' + text.replace(/\\/g, "\\\\").replace(/"/g, '""') + '"' : text;
+  }).join(",") + ")";
+}
+
 // --- who a transaction acts for ----------------------------------------------------------------------------
 /** A user (type "user"), another principal type the policy declares (a service, a bot), or nobody (id null:
  *  only what `anyone` may see). */
@@ -367,11 +379,15 @@ export interface AuthzCalls {
 // looked up on the search_path
 const EXPLAIN_RULE = "SELECT authz.explain_rule(coalesce((SELECT n.nspname || '.' || c.relname FROM pg_catalog.pg_class c " +
   "JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace WHERE position('.' in $1::text) = 0 " +
-  "AND c.oid = pg_catalog.to_regclass(pg_catalog.quote_ident($1::text))), $1::text), $2, $3, $4::jsonb) AS e";
+  "AND c.oid = pg_catalog.to_regclass(pg_catalog.quote_ident($1::text))), $1::text), $2, $3, $4::jsonb) AS e, " +
+  // who is signed in, in the words the database's own refusals use
+  "coalesce((SELECT p.principal_type || ' ' || p.principal_id FROM authz.principal() p), 'someone not signed in') AS who";
 
 /** The runtime's functions over q (a signed-in transaction, or something that signs each query in). */
 export function calls(q: Queryable): AuthzCalls & {
   expect<R>(result: R, table: string, command: "update" | "delete", id: Id, row?: object): Promise<R>;
+  /** What an UPDATE or DELETE that changed nothing was, asked of the database: the error to throw. */
+  verdict(table: string, command: string, id: Id, row?: object): Promise<NotFound | Refused>;
   check(): Promise<void>;
 } {
   const one = async (text: string, values: unknown[]) => (await q.query(text, values)).rows[0];
@@ -409,7 +425,11 @@ export function calls(q: Queryable): AuthzCalls & {
      *  otherwise NotFound (the user can't see the row) or Refused (they may not, and why). */
     expect: async <R>(result: R, table: string, command: "update" | "delete", id: Id, row?: object): Promise<R> => {
       if (changed(result)) return result;
-      throw verdict(table, command, id, await c.explainRule(table, command, id, row));
+      throw await c.verdict(table, command, id, row);
+    },
+    verdict: async (table: string, command: string, id: Id, row?: object) => {
+      const got = await one(EXPLAIN_RULE, [table, command, idText(id), row === undefined ? null : JSON.stringify(row)]);
+      return verdict(table, command, id, (got.e ?? null) as string[] | null, typeof got.who === "string" ? got.who : undefined);
     },
     /** Throws ConnectionProblem if this connection skips row-level security. As nobody: it runs at start-up,
      *  where there is no request to ask who is signed in. */
@@ -437,8 +457,12 @@ export function changed(result: unknown): boolean {
 
 /** What an UPDATE or DELETE that changed nothing was: NotFound when the row isn't there for this user (why is
  *  null), or when the rule allows the write (its first line says yes: the statement matched nothing for
- *  another reason, such as a where with more than the key); Refused with the reason otherwise. */
-export function verdict(table: string, command: string, id: Id, why: string[] | null): NotFound | Refused {
-  if (why === null || /^\s*yes\b/.test(why[0] ?? "")) return new NotFound(table, idText(id));
-  return new Refused(`permission denied: may not ${command} ${table} ${idText(id)}`, table, command, why);
+ *  another reason, such as a where with more than the key); Refused with the reason otherwise, worded as the
+ *  database words a refused insert: "permission denied: user 2 may not update row 7 of app.notes".
+ *  who: "user 2", as the database says it; left out, whoever the code acts for now. */
+export function verdict(table: string, command: string, id: Id, why: string[] | null, who?: string): NotFound | Refused {
+  if (why === null || /^\s*yes\b/.test(why[0] ?? "")) return new NotFound(table, idShown(id));
+  const p = current() ?? NOBODY;
+  const by = who ?? (p.id === null ? "someone not signed in" : `${p.type} ${p.id}`);
+  return new Refused(`permission denied: ${by} may not ${command} row ${idShown(id)} of ${table}`, table, command, why);
 }

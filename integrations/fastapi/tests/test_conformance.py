@@ -116,9 +116,12 @@ async def test_7_hidden_is_404_and_not_allowed_is_403(app: FastAPI) -> None:
     assert hidden.status_code == 404, hidden.text
     assert refused.status_code == 403 and refused.json()["command"] == "update", refused.text
     assert any("edit" in line for line in refused.json()["why"]), refused.json()
+    # worded as the database words a refused insert: who, the command, the row, the table
+    assert refused.json()["detail"] == "permission denied: user 3 may not update row 1 of app.notes", refused.text
     assert mine.status_code == 200, mine.text
     assert gone.status_code == 404, gone.text
     assert no.status_code == 403 and no.json()["command"] == "delete" and no.json()["why"], no.text
+    assert no.json()["detail"] == "permission denied: user 3 may not delete row 1 of app.notes", no.text
 
 
 # 8: an insert read back works when the select rule allows it, and is explained when not
@@ -279,9 +282,24 @@ def test_psycopg_transactions() -> None:
     with psycopg.connect(libpq(APP)) as conn:
         with pgp.transaction(conn, 2):
             assert [r[0] for r in conn.execute("SELECT id FROM app.notes ORDER BY id")] == [2, 3]
-        with pytest.raises(Refused), pgp.transaction(conn, 3):
+        # who the transaction signed in as, asked of the database: not whoever the code around it acts for
+        with rowstile.acting_as(1), pytest.raises(Refused) as e, pgp.transaction(conn, 3):
             cur = conn.execute("UPDATE app.notes SET body = 'x' WHERE id = 1")
             pgp.expect(conn, cur.rowcount, "app.notes", "update", 1)
+        assert e.value.message == "permission denied: user 3 may not update row 1 of app.notes"
+
+
+def test_a_key_is_spelled_as_the_database_writes_it() -> None:
+    """In a message: 7, (1,2), a field quoted only where Postgres would. One spelling, for 403 and 404."""
+    shown = [rowstile.key_shown(k) for k in (7, (7,), (1, 2), ["a b", "x,y"], ("", 'q"t'), ("b\\s", "(1)"), (1, None))]
+    assert shown == ["7", "7", "(1,2)", '("a b","x,y")', '("","q""t")', '("b\\\\s","(1)")', "(1,)"]
+    assert str(rowstile.NotFound("app.members", (1, 2))) == "app.members (1,2) not found"
+    assert rowstile.NotFound("app.members", (1, 2)).id == "(1,2)"
+    refused = rowstile.verdict("app.members", "delete", (1, 2), ["no   delete : manage"], "service 3")
+    assert str(refused) == "permission denied: service 3 may not delete row (1,2) of app.members"
+    with rowstile.acting_as(None):  # who left out: whoever the code acts for
+        nobody = rowstile.verdict("app.members", "delete", (1, 2), ["no   delete : manage"])
+    assert str(nobody) == "permission denied: someone not signed in may not delete row (1,2) of app.members"
 
 
 async def test_asyncpg_transactions() -> None:
@@ -427,7 +445,8 @@ def test_sqlalchemy_which_row_and_which_table() -> None:
                 assert first is not None and last is not None
                 first.body, last.body = "x", "y"
             verdict = authz_sa.why_stale_sync(e.value)
-            assert isinstance(verdict, Refused) and "app.notes 1" in verdict.message, verdict
+            assert isinstance(verdict, Refused), verdict
+            assert verdict.message == "permission denied: user 3 may not update row 1 of app.notes", verdict
             assert verdict.why[0].startswith("no"), verdict.why
         for who in ("50%", "a%sb", "%(x)s"):  # not a user of this app: nobody, and no error
             with rowstile.acting_as(who), Session(engine) as s:

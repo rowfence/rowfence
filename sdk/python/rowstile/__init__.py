@@ -181,8 +181,8 @@ class NotFound(Exception):
     """The row isn't there, or whoever the transaction acts for can't see it."""
 
     def __init__(self, table: str | None = None, id_: object = None) -> None:
-        super().__init__(f"{table or 'the row'} {'' if id_ is None else id_} not found".replace("  ", " "))
-        self.table, self.id = table, None if id_ is None else str(id_)
+        self.table, self.id = table, key_shown(id_)
+        super().__init__(f"{table or 'the row'}{'' if self.id is None else ' ' + self.id} not found")
 
     def problem(self) -> Problem:
         return {
@@ -313,6 +313,25 @@ def key_text(key: object) -> str | None:
     return None if key is None else str(key)
 
 
+def key_shown(key: object) -> str | None:
+    """A row's key as the database writes it, for a message: 7, or (1,2) for a composite key (a field is
+    quoted only where Postgres would: when it is empty or holds a comma, a quote, a parenthesis or a space)."""
+    if isinstance(key, (tuple, list)):
+        if len(key) != 1:
+            return "(" + ",".join(_field_shown(v) for v in key) + ")"
+        key = key[0]
+    return None if key is None else str(key)
+
+
+def _field_shown(value: object) -> str:
+    if value is None:
+        return ""
+    text = str(value)
+    if text == "" or any(ch in text for ch in '",\\()') or any(ch.isspace() for ch in text):
+        return '"' + text.replace("\\", "\\\\").replace('"', '""') + '"'
+    return text
+
+
 def explain_rule_args(table: str, command: str, key: object) -> tuple[str, str, str | None]:
     """authz.explain_rule's arguments for a row's key: one value, or several (a composite key's row text)."""
     return table, command, key_text(key)
@@ -320,25 +339,46 @@ def explain_rule_args(table: str, command: str, key: object) -> tuple[str, str, 
 
 def explain_rule_sql(table: LiteralString, command: LiteralString, key: LiteralString) -> LiteralString:
     """SELECT authz.explain_rule($1, $2, $3, NULL) with the driver's placeholders for the table, the command and
-    the key (':t', '%(t)s', '$1'). The policy names tables with their schema; a table named without one (a
-    model that names no schema) is looked up on the search_path."""
+    the key (':t', '%(t)s', '$1'), and in a second column who is signed in, in the words the database's own
+    refusals use ('user 2', 'service 3', 'someone not signed in'). The policy names tables with their schema;
+    a table named without one (a model that names no schema) is looked up on the search_path."""
     found = (
         "SELECT n.nspname || '.' || c.relname FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n "
         f"ON n.oid = c.relnamespace WHERE position('.' in {table}) = 0 "
         f"AND c.oid = pg_catalog.to_regclass(pg_catalog.quote_ident({table}))"
     )
-    return f"SELECT authz.explain_rule(coalesce(({found}), {table}), {command}, {key}, NULL)"
+    who = (
+        "coalesce((SELECT p.principal_type || ' ' || p.principal_id FROM authz.principal() p), 'someone not signed in')"
+    )
+    return f"SELECT authz.explain_rule(coalesce(({found}), {table}), {command}, {key}, NULL), {who}"
 
 
-def verdict(table: str, command: str, key: object, lines: Sequence[str] | None) -> NotFound | Refused:
+def answer(row: Sequence[object] | None) -> tuple[Sequence[str] | None, str | None]:
+    """A row of explain_rule_sql's statement: authz.explain_rule's lines (None: the row isn't there for this
+    user) and who is signed in."""
+    if row is None:
+        return None, None
+    lines, who = row[0], row[1] if len(row) > 1 else None
+    return (None if lines is None else [str(x) for x in cast("Iterable[object]", lines)]), None if who is None else str(
+        who
+    )
+
+
+def verdict(
+    table: str, command: str, key: object, lines: Sequence[str] | None, who: str | None = None
+) -> NotFound | Refused:
     """What an UPDATE or DELETE that changed nothing was: NotFound when the row isn't there for this user
     (authz.explain_rule answered NULL), or when the rule allows the write (its first line says yes: the
     statement matched nothing for another reason, such as a WHERE with more than the key); Refused, with
-    why, otherwise."""
-    key = key[0] if isinstance(key, (tuple, list)) and len(key) == 1 else key
+    why, otherwise. Worded as the database words a refused insert: 'permission denied: user 2 may not update
+    row 7 of app.notes'. who: as answer() read it; left out, whoever the code acts for now."""
     if lines is None or (lines and lines[0].lstrip().startswith("yes")):
         return NotFound(table, key)
-    return Refused(f"permission denied: may not {command} {table} {key}", table, command, lines)
+    if who is None:
+        p = current() or NOBODY
+        who = "someone not signed in" if p.id is None else f"{p.type} {p.id}"
+    message = f"permission denied: {who} may not {command} row {key_shown(key)} of {table}"
+    return Refused(message, table, command, lines)
 
 
 __all__ = [
