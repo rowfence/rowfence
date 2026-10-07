@@ -2,7 +2,7 @@
 
 | command | what |
 |---|---|
-| `rowstile init [--schema app] [--users app.users]` | a first policy drafted from your tables and foreign keys, a test file, and `rowstile.toml` |
+| `rowstile init [--schema app] [--users app.users]` | a first policy drafted from your tables and foreign keys, a test file, `rowstile.toml`, and a note for coding agents in `AGENTS.md` (see below) |
 | `rowstile dev [--once]` | on every save of the policy or its tests: check, show who gains and loses access, push, test, write the clients; a mistake stops it before applying. With `[migrations]`, it writes the migration once you stop editing. Studio runs beside it (`--no-studio`: not) |
 | `rowstile studio [--port 4983] [--write]` | Studio, a local web page: the app's tables as anyone (the rows they can't see greyed; a masked column they may not read shown empty, marked `masked`, as they get it), why they hold a permission or not and what would grant it, the policy as a graph, the policy file's access diff on this data, shares and pending requests, and a test from "Ann should see this". Read-only unless `--write` (then shares and decisions are made as the person you view as); localhost only, with a token |
 | `rowstile why --as user:42 folder 7 edit` | yes and why; or no, why not, and the smallest changes to the data that would grant it: each is tried in a savepoint and undone, and comes with what else it would grant |
@@ -63,6 +63,18 @@ below; a setting it doesn't know, or one of the wrong type, is an error.
 Your stack, step by step: [stacks](../stacks/README.md) (FastAPI, Next.js, other Node and Python apps, and the SQL any other
 language sends). To try rowstile with nothing installed, [the playground](../../playground/README.md) runs the compiler and a real Postgres in
 the browser (Pyodide and PGlite).
+
+## Coding agents: `AGENTS.md`
+
+`rowstile init` leaves a note for the coding agents that work in the app, in `AGENTS.md` at the project's
+root: where the policy and its tests are, the loop after an edit (`check`, `push` on the development
+database, `test`, or `dev`), that production takes migrations, that the app connects as the app role and
+signs each transaction in, and where the rest is ([llms.txt](../../llms.txt)). Without it an agent sees a
+route with no permission check and adds one.
+
+The note sits between `<!-- rowstile:begin -->` and `<!-- rowstile:end -->`. An `AGENTS.md` that is there
+keeps its text and gets the section at its end; one that has the markers is left as it is, so the section
+is yours to edit, and `init` run again changes nothing. Delete the section if you don't want it.
 
 ## Coding agents: `rowstile mcp`
 

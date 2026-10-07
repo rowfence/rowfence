@@ -9,6 +9,11 @@ Each release upgrades from the one before it. How releases are numbered and made
 
 ### Added
 
+- `rowstile init` leaves a note for the coding agents that work in the app, in `AGENTS.md`: where the policy
+  and its tests are, the loop after an edit, that production takes migrations, that the app connects as the
+  app role and signs each transaction in. Without it an agent sees a route with no permission check and adds
+  one. The note sits between two markers: an `AGENTS.md` that is there keeps its text and gets the section at
+  its end, and one that has the markers is left as it is.
 - Each `@rowstile/*` package has a page of its own on npm: what that package is for, its install line,
   code from the tested Next.js app, and links to its stack's page. All eight showed the SDK's one
   README.

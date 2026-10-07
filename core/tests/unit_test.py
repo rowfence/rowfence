@@ -1579,6 +1579,54 @@ class Graph(unittest.TestCase):
         self.assertEqual(len(declared), len(set(declared)))
 
 
+class AgentsNote(unittest.TestCase):
+    """rowstile init's note for the app's coding agent: written, added to a file that is there, never twice."""
+
+    def test_written_added_and_kept(self) -> None:
+        import init
+
+        note = init.agents_note("db/policy.authz", "db/tests/*.authz", "tracker_app")
+        self.assertTrue(note.startswith(init.BEGIN + "\n") and note.endswith(init.END + "\n"))
+        for said in ("`db/policy.authz`", "`db/tests/*.authz`", "`rowstile.toml`", "connects as `tracker_app`"):
+            self.assertIn(said, note)
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "AGENTS.md")
+            self.assertEqual(init.write_agents_note(note, d), "wrote")
+            with open(path, encoding="utf-8", newline="") as fh:
+                self.assertEqual(fh.read(), note)
+            self.assertIsNone(init.write_agents_note(note, d), "run twice, it changes nothing")
+            for before, after in (
+                ("# My app\n\nRun the tests with make.\n", "# My app\n\nRun the tests with make.\n\n" + note),
+                ("# My app", "# My app\n\n" + note),
+                ("", note),
+                ("# My app\r\n", "# My app\r\n\r\n" + note.replace("\n", "\r\n")),
+            ):
+                with open(path, "w", encoding="utf-8", newline="") as fh:
+                    fh.write(before)
+                self.assertEqual(init.write_agents_note(note, d), "added")
+                with open(path, encoding="utf-8", newline="") as fh:
+                    self.assertEqual(fh.read(), after)
+                self.assertIsNone(init.write_agents_note(note, d))
+            # a section someone changed is theirs: the markers are enough
+            with open(path, "w", encoding="utf-8", newline="") as fh:
+                fh.write(f"# My app\n{init.BEGIN}\nours\n{init.END}\n")
+            self.assertIsNone(init.write_agents_note(note, d))
+
+    def test_it_names_commands_the_reference_has(self) -> None:
+        """The commands the note names are in the reference's table, and its link is the site's llms.txt."""
+        import init
+
+        note = init.agents_note("db/policy.authz", "db/tests/*.authz", "app_user")
+        with open(os.path.join(os.path.dirname(ROOT), "docs", "reference", "tools.md"), encoding="utf-8") as fh:
+            tools = fh.read()
+        named = set(re.findall(r"`rowstile (\w+)", note))
+        self.assertEqual(named, {"check", "push", "test", "dev", "help", "migrate", "why", "mcp"})
+        for command in named:
+            self.assertIn(f"| `rowstile {command}", tools, f"docs/reference/tools.md has no rowstile {command}")
+        self.assertIn("https://rowstile.dev/llms.txt", note)
+        self.assertLessEqual(max(len(line) for line in note.split("\n")), 112)
+
+
 class Draft(unittest.TestCase):
     """rowstile init: the first policy, from tables whose names are not the tidy ones (tests/devx.sh applies one)."""
 
