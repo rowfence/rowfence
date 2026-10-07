@@ -36,6 +36,8 @@
 | `core/compile_policy.py p.authz --client ts\|py` | typed client helpers |
 | [`editor/`](../../editor/README.md) | the VS Code and Zed extensions: highlighting (SQL inside `{ }` too) and the language server; a Tree-sitter grammar for Helix and Neovim; other editors start `rowstile lsp` themselves |
 
+`rowstile <command> --help` prints that command's own lines, and `rowstile --help` all of them.
+
 Commands without a policy file read `rowstile.toml`, found in the current folder or a folder above it:
 
 ```toml

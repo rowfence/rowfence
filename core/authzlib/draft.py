@@ -401,8 +401,12 @@ def draft(
             continue
         target = o["ref"]
         rel = singular(n.split(".")[1])
-        prefix = type_names[target] + "_"
-        rel = rel[len(prefix) :] if rel.startswith(prefix) and len(rel) > len(prefix) else rel
+        # the type's own name is left out of it: team_members is member, and so is TeamMember
+        prefix, camel = type_names[target] + "_", type_names[target]
+        if rel.startswith(prefix) and len(rel) > len(prefix):
+            rel = rel[len(prefix) :]
+        elif rel.lower().startswith(camel) and rel[len(camel) : len(camel) + 1].isupper():
+            rel = rel[len(camel)].lower() + rel[len(camel) + 1 :]
         rel = free_name(rel if writable(rel) else "linked", {r[0] for r in rels[target]})
         source = f"{n}({cols_text(o['cols'])} -> {u['cols'][0]})"
         rels[target].append((rel, "user", source, "link"))
@@ -454,7 +458,10 @@ def draft(
         linked = [r for r, _, _, k in rels[n] if k == "link"]
         parents = [r for r, _, _, k in rels[n] if k == "parent"]
         if tname == "user":
-            me = f"{{{in_sql(t['pk'][0])} = authz.uid()}}"
+            # your own row, as a relation from the key: what the reference says to write, where a condition on
+            # authz.uid() would be a fact about the row to prove and the review
+            me = free_name("self", {r for r, _, _, _ in rels[n]})
+            out.insert(len(out) - len(notes[n]) - len(rels[n]), f"  {me} : user = {t['pk'][0]}  -- your own row")
             edit = [me] + users_edit + [f"{p}.edit" for p in parents]
             out.append(f"  can edit = {' or '.join(edit)}")
             out.append("  can view = signed_in                  -- decide: may everyone signed in see everyone?")
