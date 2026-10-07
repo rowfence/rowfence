@@ -4,6 +4,8 @@
 file and compiled to row-level security. There is no authorization service to run beside the database, and no
 permission data to copy into one and keep in step: the rules read the tables your app already has.
 
+![A policy, its tests, a one-word change and what the review says of it, a refused write that says why, and what would grant it](demo/demo.gif)
+
 Write who-can-do-what in one small file, next to the data it depends on. The `rowstile`
 command compiles it into plain SQL: views, trigger-maintained tables for inheritance, row-level
 security policies, and functions for app code: checks, sharing, "who has access", "why", access

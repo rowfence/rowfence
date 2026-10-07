@@ -2619,6 +2619,50 @@ class StackPages(unittest.TestCase):
         )
 
 
+class Demo(unittest.TestCase):
+    """demo/: the recording at the top of the README is made from the guide's own files (demo/files.py), and its
+    tape still says what those files hold. The recording itself is made by hand (demo/record.sh: containers)."""
+
+    REPO = os.path.dirname(ROOT)
+
+    def test_the_tape_fits_the_guides_files(self) -> None:
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location("demo_files", os.path.join(self.REPO, "demo", "files.py"))
+        assert spec is not None and spec.loader is not None
+        files = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(files)
+        with open(os.path.join(self.REPO, "demo", "demo.tape"), encoding="utf-8") as fh:
+            tape = fh.read()
+        with tempfile.TemporaryDirectory() as d:
+            argv, sys.argv = sys.argv, ["files.py", d, os.path.join(d, "schema.sql")]
+            try:
+                files.main()
+            finally:
+                sys.argv = argv
+            with open(os.path.join(d, "db", "policy.authz"), encoding="utf-8") as fh:
+                policy = fh.read().split("\n")
+            self.assertTrue(os.path.exists(os.path.join(d, "db", "tests", "first.authz")))
+            self.assertTrue(os.path.exists(os.path.join(d, "rowstile.toml")))
+            with open(os.path.join(d, "schema.sql"), encoding="utf-8") as fh:
+                self.assertIn("CREATE TABLE app.notes", fh.read())
+        # the lines the first scene shows: the project's relations to the note's permissions
+        first, last = (int(x) for x in search(r"sed -n '(\d+),(\d+)p' db/policy.authz", tape).groups())
+        self.assertEqual(policy[first - 1].split(), ["owner", ":", "user", "=", "owner_id"], "the first line shown")
+        self.assertEqual(policy[last - 1].strip(), "can view = edit or project.view", "the last line shown")
+        # the one word the pull request changes is there, once
+        old, new = search(r"sed -i 's/([^/]+)/([^/]+)/' db/policy.authz", tape).groups()
+        text = "\n".join(policy)
+        self.assertEqual(text.count(old), 1, f"the tape changes {old!r}, which the guide's policy has once")
+        Compiler(parse_policy(text.replace(old, new), "p.authz")).compile("p.authz")
+
+    def test_the_readme_shows_the_recording(self) -> None:
+        with open(os.path.join(self.REPO, "README.md"), encoding="utf-8") as fh:
+            self.assertIn("](demo/demo.gif)", fh.read())
+        size = os.path.getsize(os.path.join(self.REPO, "demo", "demo.gif"))
+        self.assertLess(size, 2_000_000, "demo/demo.gif: keep it light, it loads with the README")
+
+
 class SdkPackages(unittest.TestCase):
     """sdk/typescript/<package>/README.md: each package's own page on npm. It names its package, links nothing
     by a path (npm shows the file alone), and every line of code it shows is in the conformance app."""
