@@ -124,7 +124,9 @@ User-facing docs: `README.md`, then `docs/reference/` (read them first). Terms i
   checks every line its page shows is in them; the site and the playground list them from the folders,
   and `/playground/#e=<name>` opens one), `troubleshooting.md`,
   `operations.md`, `managed-postgres.md` (the setup on a managed service; Neon and Supabase, as tried),
-  `signed-urls.md`, `stacks/` (a page per stack; every line of code in them is in a
+  `signed-urls.md`, `comparison.md` and `compare/` (a page per alternative: what they say of another project
+  is quoted from its docs with the day they were read, and wants reading again each quarter; `ComparePages`
+  checks what they say of rowstile), `stacks/` (a page per stack; every line of code in them is in a
   conformance app, `StackPages` in `tests/unit_test.py`), `errors/` (a page per error code, written from
   `authzlib/errors.py` by `unit_test.py --update`)
 - `context7.json` — for an index of docs that coding agents ask (Context7): the folders it reads, and what an
