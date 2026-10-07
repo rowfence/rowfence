@@ -40,6 +40,11 @@ Each release upgrades from the one before it. How releases are numbered and made
 
 ### Fixed
 
+- `rowstile why` (and Studio) tries a row in a link table for a relation with a `where`, with the values
+  the condition asks (`add user 4 to app.project_members for project 1, with role = 'admin'`), or the
+  change to the row that is there already (`set role = 'admin' on user 4's row of ...`). It ended with "no
+  single change to shares or links grants it" where one row would. A condition that is more than columns
+  with values isn't tried, and a note names the relation left out.
 - `authz.lint()` no longer warns about a column a relation reads on a table whose rule is `update : nobody`,
   and the rule it suggests for such a column names `share` only where the type has it (`nobody` otherwise:
   the suggestion didn't compile on a type without `share`).

@@ -13,6 +13,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from .conditions import Bool, Cmp, Col, Const, In, IsNull, Node, Scalar, simple
 from .connection import Db, Value, flag, number, text
 from .parse import Expr, Loc, Ref, Relation, Source, Type
 from .sqlutil import lit, q, qt
@@ -24,6 +25,49 @@ DEPTH = 3  # how far up inheritance (rel.perm) and into groups it looks
 LINKED = 3  # how many current parents or groups of an object it follows
 TRIES = 40  # how many candidate changes (or combinations) it tries
 SHOWN = 5
+
+
+def settles(where: str) -> dict[str, Scalar] | None:
+    """The columns' values that make a relation's `where` true, when it says no more than that
+    ({role = 'admin'}, {active and kind in ('a', 'b')}); None for any other condition."""
+    node = simple(where)
+    out: dict[str, Scalar] = {}
+
+    def walk(n: Node) -> bool:
+        match n:
+            case Col(name=c):
+                out[c] = True
+            case Bool(op="not", items=(Col(name=c),)):
+                out[c] = False
+            case (
+                Cmp(op="=", left=Col(name=c), right=Const(value=v))
+                | Cmp(op="=", left=Const(value=v), right=Col(name=c))
+            ):
+                if v is None:
+                    return False
+                out[c] = v
+            case IsNull(item=Col(name=c), negated=False):
+                out[c] = None
+            case In(item=Col(name=c), values=values, negated=False):
+                if values[0] is None:
+                    return False
+                out[c] = values[0]
+            case Bool(op="and", items=items):
+                return all(walk(x) for x in items)
+            case _:
+                return False
+        return True
+
+    return out if node is not None and walk(node) else None
+
+
+def constant(v: Scalar) -> str:
+    """A condition's constant as SQL."""
+    if v is None:
+        return "NULL"
+    if isinstance(v, bool):
+        return "true" if v else "false"
+    return lit(v) if isinstance(v, str) else str(v)
 
 
 @dataclass
@@ -130,20 +174,37 @@ class Grants:
                     src.loc,
                     1,
                 )
-            if (
-                src.kind == "table"
-                and src.table
-                and isinstance(src.obj_col, str)
-                and isinstance(src.subj_col, str)
-                and not src.where
-            ):
+            if src.kind == "table" and src.table and isinstance(src.obj_col, str) and isinstance(src.subj_col, str):
                 cols, vals = [src.obj_col, src.subj_col], [lit(oid), lit(sid)]
                 if src.type_col:
                     cols.append(src.type_col)
                     vals.append(lit(st))
+                # a source with a `where`: the row must also hold what the condition asks, if it says which values
+                held = settles(src.where) if src.where else {}
+                if held is None or set(held) & set(cols):
+                    self.notes.append(
+                        f"{t.name}.{r.name} wasn't tried: it reads {src.table} where {{{src.where}}}, and it isn't "
+                        "known which values make that true"
+                    )
+                    return None
+                more = ", ".join(f"{c} = {constant(v)}" for c, v in held.items())
+                if held:
+                    # the link's row may be there already, left out by the condition: then its columns change
+                    same = " AND ".join(f"{q(c)} = {v}" for c, v in zip(cols, vals, strict=True))
+                    if self.probe(f"SELECT 1 AS x FROM {qt(src.table)} WHERE {same} LIMIT 1"):
+                        sets = ", ".join(f"{q(c)} = {constant(v)}" for c, v in held.items())
+                        return Change(
+                            "link",
+                            f"set {more} on {st} {sid}'s row of {src.table} for {t.name} {oid}",
+                            f"UPDATE {qt(src.table)} SET {sets} WHERE {same}",
+                            src.loc,
+                            2,
+                        )
+                    cols += list(held)
+                    vals += [constant(v) for v in held.values()]
                 return Change(
                     "link",
-                    f"add {st} {sid} to {src.table} for {t.name} {oid}",
+                    f"add {st} {sid} to {src.table} for {t.name} {oid}" + (f", with {more}" if held else ""),
                     f"INSERT INTO {qt(src.table)} ({', '.join(q(x) for x in cols)}) VALUES ({', '.join(vals)})",
                     src.loc,
                     2,
