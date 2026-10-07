@@ -2711,6 +2711,14 @@ class ComparePages(unittest.TestCase):
             ]
             self.assertEqual([x for x in shown if x not in have], [], f"{where}: code lines in no conformance app")
 
+    def test_the_two_services_are_compared_with_one_policy(self) -> None:
+        """The OpenFGA and the SpiceDB pages show the same model on rowstile's side: one policy, word for word."""
+        shown = []
+        for page in ("openfga.md", "spicedb.md"):
+            with open(os.path.join(self.REPO, "docs", "compare", page), encoding="utf-8") as fh:
+                shown.append(search(r"```authz\n(.*?)```", fh.read(), re.S).group(1))
+        self.assertEqual(shown[0], shown[1])
+
 
 class SdkPackages(unittest.TestCase):
     """sdk/typescript/<package>/README.md: each package's own page on npm. It names its package, links nothing
