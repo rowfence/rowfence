@@ -41,6 +41,7 @@ out=$(CLI --db "dbname=$DB" review --base main 2>&1); rc=$?
 [ $rc -eq 0 ] && ok "rowstile review runs, and exits 0 whatever it found (it reports, the tests gate)" || bad "review" "$out"
 case "$out" in *"Meaning  1 permission changed, 3 permissions and rules change through it"*) ok "Meaning: what changed, and what changes through it";; *) bad "meaning" "$out";; esac
 case "$out" in *"Access   "*"users gain \`view\` on"*"Nobody loses access."*) ok "Access: who gains what, on the review data";; *) bad "access" "$out";; esac
+case "$out" in *"not a refactor: "*" differs for user "*" on "[a-z]*" "*) ok "... and the difference that makes it no refactor names who and what, in words";; *) bad "the counterexample's wording" "$out";; esac
 case "$out" in *"folder.view\` allows more than before"*) ok "Risk: the permission widened, with an example";; *) bad "risk" "$out";; esac
 case "$out" in *"Tests    "*"checks pass, "*" fail. 1 check changed what it expects."*) ok "Tests: the tests of the pull request ran, and the flipped check is named";;
   *) bad "tests" "$out";; esac
