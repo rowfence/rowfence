@@ -132,6 +132,9 @@ record $? "apply"
 step "the rowstile command"
 tests/cli.sh
 record $? "cli"
+step "the command over tables named as Prisma names them: capital letters, in public"
+tests/capitals.sh
+record $? "capitals"
 step "policy changes as migrations: each tool's files, in order, out of order, push, trees built beside"
 tests/migrations.sh
 record $? "migrations"
