@@ -541,7 +541,7 @@ APPLY = [
     (
         "a key declared with the wrong type",
         "type doc3 = alt.docs (doc_no uuid)\n  owner : user = owner_id\n  can see = owner\n",
-        "line 10: alt.docs.doc_no is not uuid; write its type after the key",
+        "line 10: alt.docs.doc_no is bigint, not uuid: write its type after the key, (doc_no bigint) [AZ602]",
     ),
     (
         "inheritance limited by a time-zone dependent expression",

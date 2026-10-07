@@ -295,7 +295,7 @@ CREATE OR REPLACE FUNCTION authz.link_hashes() RETURNS text[] LANGUAGE sql STABL
   WHERE btrim(x) <> '' $$;
 
 DO $chk$
-DECLARE missing text := '';
+DECLARE missing text := ''; v_oid oid; v_type text;
 BEGIN
   IF to_regclass('"cx"."users"') IS NULL THEN missing := missing || E'\n  line 5: table cx.users not found [AZ601]';
   ELSIF NOT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = to_regclass('"cx"."users"')
@@ -532,38 +532,60 @@ BEGIN
                     AND attname = 'parent_id' AND attnum > 0 AND NOT attisdropped) THEN
     missing := missing || E'\n  line 59: column parent_id not found in cx.folders [AZ601]';
   END IF;
-  IF to_regclass('"cx"."users"') IS NOT NULL AND (SELECT atttypid FROM pg_attribute WHERE attrelid = to_regclass('"cx"."users"') AND attname = 'id') <> to_regtype('bigint') THEN
-    missing := missing || E'\n  line 5: cx.users.id is not bigint; write its type after the key, e.g. (id uuid) [AZ602]';
+  SELECT atttypid, replace(format_type(atttypid, NULL), 'character varying', 'varchar') INTO v_oid, v_type
+  FROM pg_attribute WHERE attrelid = to_regclass('"cx"."users"') AND attname = 'id' AND attnum > 0 AND NOT attisdropped;
+  IF FOUND AND v_oid <> to_regtype('bigint') THEN
+    missing := missing || E'\n  line 5: cx.users.id is ' || v_type || E', not bigint: write its type after the key, (id ' || v_type || ') [AZ602]';
   END IF;
-  IF to_regclass('"cx"."bots"') IS NOT NULL AND (SELECT atttypid FROM pg_attribute WHERE attrelid = to_regclass('"cx"."bots"') AND attname = 'id') <> to_regtype('bigint') THEN
-    missing := missing || E'\n  line 9: cx.bots.id is not bigint; write its type after the key, e.g. (id uuid) [AZ602]';
+  SELECT atttypid, replace(format_type(atttypid, NULL), 'character varying', 'varchar') INTO v_oid, v_type
+  FROM pg_attribute WHERE attrelid = to_regclass('"cx"."bots"') AND attname = 'id' AND attnum > 0 AND NOT attisdropped;
+  IF FOUND AND v_oid <> to_regtype('bigint') THEN
+    missing := missing || E'\n  line 9: cx.bots.id is ' || v_type || E', not bigint: write its type after the key, (id ' || v_type || ') [AZ602]';
   END IF;
-  IF to_regclass('"cx"."orgs"') IS NOT NULL AND (SELECT atttypid FROM pg_attribute WHERE attrelid = to_regclass('"cx"."orgs"') AND attname = 'id') <> to_regtype('bigint') THEN
-    missing := missing || E'\n  line 13: cx.orgs.id is not bigint; write its type after the key, e.g. (id uuid) [AZ602]';
+  SELECT atttypid, replace(format_type(atttypid, NULL), 'character varying', 'varchar') INTO v_oid, v_type
+  FROM pg_attribute WHERE attrelid = to_regclass('"cx"."orgs"') AND attname = 'id' AND attnum > 0 AND NOT attisdropped;
+  IF FOUND AND v_oid <> to_regtype('bigint') THEN
+    missing := missing || E'\n  line 13: cx.orgs.id is ' || v_type || E', not bigint: write its type after the key, (id ' || v_type || ') [AZ602]';
   END IF;
-  IF to_regclass('"cx"."teams"') IS NOT NULL AND (SELECT atttypid FROM pg_attribute WHERE attrelid = to_regclass('"cx"."teams"') AND attname = 'org_id') <> to_regtype('bigint') THEN
-    missing := missing || E'\n  line 16: cx.teams.org_id is not bigint; write its type after the key, e.g. (org_id uuid) [AZ602]';
+  SELECT atttypid, replace(format_type(atttypid, NULL), 'character varying', 'varchar') INTO v_oid, v_type
+  FROM pg_attribute WHERE attrelid = to_regclass('"cx"."teams"') AND attname = 'org_id' AND attnum > 0 AND NOT attisdropped;
+  IF FOUND AND v_oid <> to_regtype('bigint') THEN
+    missing := missing || E'\n  line 16: cx.teams.org_id is ' || v_type || E', not bigint: write its type after the key, (org_id ' || v_type || ') [AZ602]';
   END IF;
-  IF to_regclass('"cx"."teams"') IS NOT NULL AND (SELECT atttypid FROM pg_attribute WHERE attrelid = to_regclass('"cx"."teams"') AND attname = 'slug') <> to_regtype('text') THEN
-    missing := missing || E'\n  line 16: cx.teams.slug is not text; write its type after the key, e.g. (slug uuid) [AZ602]';
+  SELECT atttypid, replace(format_type(atttypid, NULL), 'character varying', 'varchar') INTO v_oid, v_type
+  FROM pg_attribute WHERE attrelid = to_regclass('"cx"."teams"') AND attname = 'slug' AND attnum > 0 AND NOT attisdropped;
+  IF FOUND AND v_oid <> to_regtype('text') THEN
+    missing := missing || E'\n  line 16: cx.teams.slug is ' || v_type || E', not text: write its type after the key, (slug ' || v_type || ') [AZ602]';
   END IF;
-  IF to_regclass('"cx"."projects"') IS NOT NULL AND (SELECT atttypid FROM pg_attribute WHERE attrelid = to_regclass('"cx"."projects"') AND attname = 'org_id') <> to_regtype('bigint') THEN
-    missing := missing || E'\n  line 24: cx.projects.org_id is not bigint; write its type after the key, e.g. (org_id uuid) [AZ602]';
+  SELECT atttypid, replace(format_type(atttypid, NULL), 'character varying', 'varchar') INTO v_oid, v_type
+  FROM pg_attribute WHERE attrelid = to_regclass('"cx"."projects"') AND attname = 'org_id' AND attnum > 0 AND NOT attisdropped;
+  IF FOUND AND v_oid <> to_regtype('bigint') THEN
+    missing := missing || E'\n  line 24: cx.projects.org_id is ' || v_type || E', not bigint: write its type after the key, (org_id ' || v_type || ') [AZ602]';
   END IF;
-  IF to_regclass('"cx"."projects"') IS NOT NULL AND (SELECT atttypid FROM pg_attribute WHERE attrelid = to_regclass('"cx"."projects"') AND attname = 'id') <> to_regtype('bigint') THEN
-    missing := missing || E'\n  line 24: cx.projects.id is not bigint; write its type after the key, e.g. (id uuid) [AZ602]';
+  SELECT atttypid, replace(format_type(atttypid, NULL), 'character varying', 'varchar') INTO v_oid, v_type
+  FROM pg_attribute WHERE attrelid = to_regclass('"cx"."projects"') AND attname = 'id' AND attnum > 0 AND NOT attisdropped;
+  IF FOUND AND v_oid <> to_regtype('bigint') THEN
+    missing := missing || E'\n  line 24: cx.projects.id is ' || v_type || E', not bigint: write its type after the key, (id ' || v_type || ') [AZ602]';
   END IF;
-  IF to_regclass('"cx"."folders"') IS NOT NULL AND (SELECT atttypid FROM pg_attribute WHERE attrelid = to_regclass('"cx"."folders"') AND attname = 'org_id') <> to_regtype('bigint') THEN
-    missing := missing || E'\n  line 31: cx.folders.org_id is not bigint; write its type after the key, e.g. (org_id uuid) [AZ602]';
+  SELECT atttypid, replace(format_type(atttypid, NULL), 'character varying', 'varchar') INTO v_oid, v_type
+  FROM pg_attribute WHERE attrelid = to_regclass('"cx"."folders"') AND attname = 'org_id' AND attnum > 0 AND NOT attisdropped;
+  IF FOUND AND v_oid <> to_regtype('bigint') THEN
+    missing := missing || E'\n  line 31: cx.folders.org_id is ' || v_type || E', not bigint: write its type after the key, (org_id ' || v_type || ') [AZ602]';
   END IF;
-  IF to_regclass('"cx"."folders"') IS NOT NULL AND (SELECT atttypid FROM pg_attribute WHERE attrelid = to_regclass('"cx"."folders"') AND attname = 'id') <> to_regtype('bigint') THEN
-    missing := missing || E'\n  line 31: cx.folders.id is not bigint; write its type after the key, e.g. (id uuid) [AZ602]';
+  SELECT atttypid, replace(format_type(atttypid, NULL), 'character varying', 'varchar') INTO v_oid, v_type
+  FROM pg_attribute WHERE attrelid = to_regclass('"cx"."folders"') AND attname = 'id' AND attnum > 0 AND NOT attisdropped;
+  IF FOUND AND v_oid <> to_regtype('bigint') THEN
+    missing := missing || E'\n  line 31: cx.folders.id is ' || v_type || E', not bigint: write its type after the key, (id ' || v_type || ') [AZ602]';
   END IF;
-  IF to_regclass('"cx"."files"') IS NOT NULL AND (SELECT atttypid FROM pg_attribute WHERE attrelid = to_regclass('"cx"."files"') AND attname = 'org_id') <> to_regtype('bigint') THEN
-    missing := missing || E'\n  line 42: cx.files.org_id is not bigint; write its type after the key, e.g. (org_id uuid) [AZ602]';
+  SELECT atttypid, replace(format_type(atttypid, NULL), 'character varying', 'varchar') INTO v_oid, v_type
+  FROM pg_attribute WHERE attrelid = to_regclass('"cx"."files"') AND attname = 'org_id' AND attnum > 0 AND NOT attisdropped;
+  IF FOUND AND v_oid <> to_regtype('bigint') THEN
+    missing := missing || E'\n  line 42: cx.files.org_id is ' || v_type || E', not bigint: write its type after the key, (org_id ' || v_type || ') [AZ602]';
   END IF;
-  IF to_regclass('"cx"."files"') IS NOT NULL AND (SELECT atttypid FROM pg_attribute WHERE attrelid = to_regclass('"cx"."files"') AND attname = 'id') <> to_regtype('bigint') THEN
-    missing := missing || E'\n  line 42: cx.files.id is not bigint; write its type after the key, e.g. (id uuid) [AZ602]';
+  SELECT atttypid, replace(format_type(atttypid, NULL), 'character varying', 'varchar') INTO v_oid, v_type
+  FROM pg_attribute WHERE attrelid = to_regclass('"cx"."files"') AND attname = 'id' AND attnum > 0 AND NOT attisdropped;
+  IF FOUND AND v_oid <> to_regtype('bigint') THEN
+    missing := missing || E'\n  line 42: cx.files.id is ' || v_type || E', not bigint: write its type after the key, (id ' || v_type || ') [AZ602]';
   END IF;
   IF missing <> '' THEN RAISE EXCEPTION 'the policy does not match this database:%', missing; END IF;
 END $chk$;
@@ -6020,7 +6042,8 @@ WHERE w.who IS NOT NULL AND n.nspname !~ '^pg_(toast_)?temp_' LOOP
     RETURN NEXT;
   END LOOP;
   -- tables holding relationships (memberships, links) the app role may change directly
-  FOR r IN SELECT to_regclass(x) AS tbl FROM unnest(ARRAY['"cx"."folder_links"', '"cx"."folder_teams"', '"cx"."org_admins"', '"cx"."team_bots"', '"cx"."team_members"', '"cx"."teams"']::text[]) x LOOP
+  FOR r IN SELECT to_regclass(v.tbl) AS tbl, v.readers, v.typed
+           FROM (VALUES ('"cx"."folder_links"', 'folder.parent', false), ('"cx"."folder_teams"', 'folder.editor', false), ('"cx"."org_admins"', 'org.admin', false), ('"cx"."team_bots"', 'team.member', false), ('"cx"."team_members"', 'team.member', false), ('"cx"."teams"', 'team.member', true)) v(tbl, readers, typed) LOOP
     CONTINUE WHEN r.tbl IS NULL;
     IF has_table_privilege(v_role, r.tbl, 'TRUNCATE') THEN
       severity := 'error'; object := r.tbl::text;
@@ -6032,6 +6055,13 @@ WHERE w.who IS NOT NULL AND n.nspname !~ '^pg_(toast_)?temp_' LOOP
        AND NOT (SELECT relrowsecurity FROM pg_class WHERE oid = r.tbl) THEN
       severity := 'error'; object := r.tbl::text;
       problem := format('%s may change it, and it decides who is in what: anyone could add themselves. Revoke the write privileges, or give it rules', 'app_user');
+      RETURN NEXT;
+    END IF;
+    -- ... or read in full: who is linked to what (a type's table without rules is named above)
+    IF NOT r.typed AND NOT (SELECT relrowsecurity FROM pg_class WHERE oid = r.tbl)
+       AND has_any_column_privilege(v_role, r.tbl, 'SELECT') THEN
+      severity := 'info'; object := r.tbl::text;
+      problem := format('%s may read every row, and the policy reads it for %s: who is linked to what is readable. Fine where that is no secret, otherwise give it a type and rules', 'app_user', r.readers);
       RETURN NEXT;
     END IF;
   END LOOP;
