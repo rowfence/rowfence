@@ -1352,6 +1352,51 @@ class Review(unittest.TestCase):
         self.assertIn("1 check changed what it expects", one)
         self.assertIn("2 checks changed what they expect", two)
 
+    def test_a_renamed_test_is_not_its_checks_removed(self) -> None:
+        # a test under a new name, with one check that changed and one more: said as a new name and the check
+        # that changed. "2 checks removed" would read as tests taken out to let the change pass
+        before = {"t.authz": 'test "carol, neither shares"\n  user 3 can view file 11\n  user 3 cannot share file 11\n'}
+        after = {
+            "t.authz": 'test "carol"\n  user 3 can view file 11\n  user 3 can share file 11\n  user 3 can edit file 11\n'
+        }
+        r = self.run_review(self.text, before, after)
+        t = r["tests"]
+        self.assertEqual(t["renamed"], [{"before": "carol, neither shares", "after": "carol"}])
+        self.assertEqual(t["removed"], [])
+        self.assertEqual(
+            [(x["test"], x["before"], x["after"]) for x in t["flipped"]],
+            [("carol", "user 3 cannot share file 11", "user 3 can share file 11")],
+        )
+        self.assertEqual([x["check"] for x in t["added"]], ["user 3 can edit file 11"])
+        self.assertIn("1 check changed what it expects. 1 test renamed.", self.review.summary(r)["Tests"])
+        self.assertIn('- renamed: "carol, neither shares" is now "carol"', self.review.markdown(r))
+        self.assertIn('  test     renamed: "carol, neither shares" is now "carol"', self.review.text(r))
+        # a name alone: nothing removed, and the name is said
+        same = {"t.authz": 'test "carol"\n  user 3 can view file 11\n  user 3 cannot share file 11\n'}
+        t = self.run_review(self.text, before, same)["tests"]
+        self.assertEqual(
+            (t["renamed"], t["removed"], t["flipped"]),
+            ([{"before": "carol, neither shares", "after": "carol"}], [], []),
+        )
+        # not a new name: a check of the old test is in no new one, or its checks are in two new tests
+        fewer = {"t.authz": 'test "carol"\n  user 3 can view file 11\n'}
+        t = self.run_review(self.text, before, fewer)["tests"]
+        self.assertEqual(t["renamed"], [])
+        self.assertEqual(len(t["removed"]), 2)
+        twice = {
+            "t.authz": 'test "a"\n  user 3 can view file 11\n  user 3 cannot share file 11\n'
+            'test "b"\n  user 3 can view file 11\n  user 3 cannot share file 11\n'
+        }
+        t = self.run_review(self.text, before, twice)["tests"]
+        self.assertEqual(t["renamed"], [])
+        self.assertEqual(len(t["removed"]), 2)
+        # two tests put into one: both names are said, nothing is removed
+        two = {"t.authz": 'test "x"\n  user 3 can view file 11\ntest "y"\n  user 3 cannot share file 11\n'}
+        one = {"t.authz": 'test "carol"\n  user 3 can view file 11\n  user 3 cannot share file 11\n'}
+        t = self.run_review(self.text, two, one)["tests"]
+        self.assertEqual([n["before"] for n in t["renamed"]], ["x", "y"])
+        self.assertEqual(t["removed"], [])
+
     def test_a_new_permission_no_test_names(self) -> None:
         new = replaced(
             self.text,

@@ -25,8 +25,9 @@ says what a change does, in plain words, for the pull request:
   removed; a scope changed. Each names its policy line; `--annotations` writes them for GitHub, on the file
   the line is in. "Nothing flagged" means none of these was found in the worlds tried, not a proof.
 - **Tests**: checks whose expectation flipped (the author saying "I meant this"), checks removed, new
-  permissions no test names; with `--db`, the pull request's tests run on the review data after its
-  migrations. The checks are listed whatever Meaning says. A test file of the pull request that doesn't parse
+  permissions no test names. A test that only changed its name is said to be renamed, and its checks are
+  compared under the new name: a new name alone removes nothing. With `--db`, the pull request's tests run
+  on the review data after its migrations. The checks are listed whatever Meaning says. A test file of the pull request that doesn't parse
   is named, with its mistake: its checks are not compared.
 - **Deploy**: the migrations the change needs (from the base branch's lock file), their statements, the
   app tables they lock and in which mode, the inheritance tables they rebuild or build beside; with
