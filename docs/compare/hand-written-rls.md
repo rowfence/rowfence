@@ -56,8 +56,9 @@ Postgres refuses the first query through it:
 ERROR:  infinite recursion detected in policy for relation "folders"
 ```
 
-A policy on a table can't read that table through the policy again. The way out is a function that reads
-past it, `SECURITY DEFINER`, with its `search_path` pinned, called for each row:
+A policy on a table can't read that table through the policy again. The way out is a `SECURITY DEFINER`
+function: it runs as its owner, the tables' owner, whom the policy doesn't apply to, so it reads past it.
+Its `search_path` is pinned, and the policy calls it for each row:
 
 ```sql
 CREATE FUNCTION app.owns_above(p_id bigint) RETURNS boolean
@@ -75,7 +76,7 @@ That works, and it walks the tree once for every row a query reads. A list of a 
 thousand walks. The usual next step is a table of every folder's ancestors, kept by triggers, with the
 locking that a move of a folder needs so that two moves at once can't make a loop.
 
-In a policy file it is one more relation and four words:
+In a policy file it is one more relation, and `or parent.view`:
 
 ```authz
 app role app_user
@@ -92,9 +93,11 @@ rules app.folders
   select : view
 ```
 
-rowstile writes the ancestors' table, its triggers and their locks, and the policy reads it with lookups
-Postgres hashes once for a query, not a function call per row. [How it works](../reference/guarantees.md)
-shows what is generated; [Speed and limits](../reference/limits.md) has the numbers.
+From it rowstile writes the ancestors' table (`authz_int.folder__parent__tree` here), the triggers on
+`app.folders` that keep it, and their lock. The policy it writes for `SELECT` looks each row up in the set
+of folders the user may see, which Postgres can compute once for a query, where the function above ran for
+each row. [How it works](../reference/guarantees.md) shows what is generated;
+[Speed and limits](../reference/limits.md) has the numbers.
 
 ## What else gets hard by hand
 
@@ -103,10 +106,12 @@ shows what is generated; [Speed and limits](../reference/limits.md) has the numb
   rowstile signs each sign-in: the settings are believed only with a signature the app's role can't make
   ([Identity](../reference/identity.md)).
 - **A write that says why.** By hand, a refused insert says
-  `new row violates row-level security policy for table "folders"`, and a refused update changes no row and
-  says nothing. rowstile's refusals name the rule and the part of it that was missing.
+  `new row violates row-level security policy for table "folders"`, and an update of a row the policy
+  hides changes no row and says nothing. rowstile's refused insert names the rule and the part of it that
+  was missing, and for an update or a delete that changed nothing, `authz.explain_rule` says the same
+  (the SDKs ask it, and answer 403 or 404).
 - **Groups inside groups, shares that end, share links.** Each is a table, a few functions and a policy
-  that must not leak. They are a line each in a policy file.
+  that must not leak. In a policy file each is a line or two.
 - **Tests.** A policy is tested by signing in as someone and reading. rowstile's tests sit beside the policy
   (`user 2 cannot view folder 7`), run on every save, and `rowstile prove` checks an invariant in many small
   worlds.

@@ -60,14 +60,17 @@ type document = app.documents
   can edit = editor or parent.edit
 
 rules app.documents
-  select : edit
-  update : edit
+  select                 : edit
+  update                 : edit
+  update folder_id after : parent.edit
 ```
 
 The two read alike, and that is no accident: both follow the same idea of relations and of permissions built
 from them. The differences are in the parts that have no twin. `= app.documents`, `= folder_id` and
 `= app.team_members(team_id -> user_id)` say where each fact already is in the app's tables: a column, or a
-link table. `rules app.documents` says what a `SELECT` and an `UPDATE` on the table need.
+link table. `rules app.documents` says what a `SELECT` and an `UPDATE` on the table need. Its last line has
+no twin either: the folder a document is in gives `edit` on it, so the policy also says where a document
+may be moved (into a folder its mover may edit).
 
 ## When a fact changes
 
@@ -125,7 +128,8 @@ Postgres joins the rules into the plan, uses the tables' indexes, sorts and page
 OpenFGA can cache. Its cache is off by default, and then every answer is consistent with its store. With
 the cache on, the default mode serves answers from it, and its docs say: "If you write a tuple and you
 immediately make a Check on a relation affected by that tuple using `MINIMIZE_LATENCY`, the tuple change
-might not be taken in consideration"; a query can ask for `HIGHER_CONSISTENCY` instead
+might not be taken in consideration if OpenFGA serves the result from the cache." A query can ask for
+`HIGHER_CONSISTENCY` instead, which skips the cache
 ([consistency](https://openfga.dev/docs/interacting/consistency)).
 
 rowstile has no cache to be behind: a rule reads the rows as the transaction sees them. Inheritance is kept
@@ -133,9 +137,11 @@ in tables by triggers, in the same transaction as the write that changes it.
 
 ## What runs
 
-OpenFGA is a server and its datastore, to deploy, scale and watch. rowstile leaves SQL in the database (row-
-level security policies, views, tables for inheritance, functions) and runs nothing beside it. The `rowstile`
-command is needed to change the policy, not to serve requests.
+OpenFGA is a server and its datastore, to deploy, scale and watch: its guide to
+[configuring a server](https://openfga.dev/docs/getting-started/setup-openfga/configure-openfga) lists Postgres,
+MySQL and SQLite as storage engines, beside one in memory. rowstile leaves SQL in the database
+(row-level security policies, views, tables for inheritance, functions) and runs nothing beside it. The
+`rowstile` command is needed to change the policy, not to serve requests.
 
 ## When OpenFGA is the better choice
 
@@ -151,6 +157,6 @@ command is needed to change the policy, not to serve requests.
 
 ## Try the same model
 
-[Folders that inherit](../cookbook/folders-that-inherit.md) and
-[teams inside teams](../cookbook/teams-inside-teams.md) are this page's model as tested recipes, each with a
-link that opens it in the playground.
+Two tested recipes hold the two halves of this page's model, each with a link that opens it in the playground:
+[folders that inherit](../cookbook/folders-that-inherit.md) and
+[teams inside teams](../cookbook/teams-inside-teams.md).
