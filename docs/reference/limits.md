@@ -72,8 +72,21 @@ above takes 290 ms instead of 32). The audit trail and change feed add about 15 
 - **Partitions go through their table**: apply turns row-level security on, with no rules
   of their own, for the partitions of a governed table and the tables that inherit from it,
   so the app role reads and writes them only through the table (whose rules and triggers
-  are on it). A partition made after apply is open until the next apply; `authz.lint()`
-  reports it. The owner writing to a partition directly skips the triggers.
+  are on it). Postgres copies a table's row triggers to its partitions, not to a table that
+  inherits from it (`CREATE TABLE ... INHERITS`): apply gives those the row triggers too, so
+  a rule on a column is checked on the rows stored there. A partition made after apply has
+  its table's rules and triggers from the start, for what is read and written through the
+  table; read directly, it is open until the next apply if the app role was given it. A table
+  that inherits, made after apply, has neither until the next apply. `authz.lint()` reports
+  both, and `rowstile apply` then applies (it does not answer `unchanged`). The owner writing to a
+  partition directly skips the triggers; so does dropping, detaching or truncating one, which
+  leaves its rows' shares until the next apply.
+- **A key handed over inside one update of a partitioned table**: a row's shares are forgotten when
+  its key changes, so a row that has the key later starts with none. Where the update also puts the
+  row in another partition, rowstile forgets the shares of every key the update left without a row;
+  if the same update gives that key to another row (two rows swapping keys, which takes a deferrable
+  key), the shares stay with the key. And the audit has no line for a relationship column changed by
+  an update that changes the row's key and its partition at once.
 - **Link rows are trusted as they are**: a row in a link table (`team_members`,
   `folder_teams`) grants what it says even when the object it names was deleted. Give link
   tables foreign keys to their objects with `ON DELETE CASCADE` (and `ON UPDATE CASCADE` for

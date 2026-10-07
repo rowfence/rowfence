@@ -37,7 +37,8 @@ Reports what would let the app role get around row-level security: being a super
 or BYPASSRLS (directly or through a role), row-level security turned off on a table with rules, owning
 a governed table without FORCE ROW LEVEL SECURITY, a policy on a governed table that rowstile didn't make (Postgres joins
 permissive policies with OR, so it lets through what the rules don't), TRUNCATE on governed or membership tables, their partitions (or tables
-inheriting from them) used directly, views over governed tables that run with their
+inheriting from them) used directly, a table inheriting from a governed one that was made since the last apply (it
+lacks the table's row triggers until the next one), views over governed tables that run with their
 owner's rights, SECURITY DEFINER functions that use them,
 membership tables the app may write, relationship columns anyone who can update the
 row may change, masked columns readable from the table, unique indexes that reveal

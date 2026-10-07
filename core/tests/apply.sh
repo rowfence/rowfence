@@ -56,6 +56,13 @@ PSQL -c "ALTER TABLE app.files DISABLE TRIGGER authz_file_forget_del" >/dev/null
 run apply "$T/docs.authz"
 [ "$out" = "$T/docs.authz: applied" ] && [ "$(PSQL -c "SELECT tgenabled FROM pg_trigger WHERE tgname = 'authz_file_forget_del'")" = O ] &&
   ok "... or disabled" || bad "apply after a disabled trigger" "$out"
+# what lint says the next apply takes back, an apply of the same text has to take back
+PSQL -c "GRANT SELECT ON authz.shares TO app_user" -c "GRANT EXECUTE ON FUNCTION authz.trim_audit(interval) TO PUBLIC" >/dev/null
+run apply "$T/docs.authz"
+case "$out" in *"took back 1 privileges on rowstile's schemas"*"$T/docs.authz: applied") true;; *) false;; esac &&
+  [ "$(PSQL -c "SELECT has_table_privilege('app_user', 'authz.shares', 'SELECT'), has_function_privilege('public', 'authz.trim_audit(interval)', 'EXECUTE')")" = "f|f" ] &&
+  ok "... or a privilege on rowstile's own schemas given since, which it takes back" || bad "apply after a grant" "$out"
+# (tables made under one with rules since, partitions and tables that inherit: tests/children.sh)
 run apply "$T/docs.authz"; [ "$out" = "$T/docs.authz: unchanged" ] && ok "... and then it is unchanged again" || bad "unchanged after repairs" "$out"
 # the app's own views and functions may call the authz.* functions: applying replaces those in place
 PSQL -c "CREATE VIEW app.my_files AS SELECT f.id, authz.can('file', f.id::text, 'edit') AS editable FROM app.files f" >/dev/null

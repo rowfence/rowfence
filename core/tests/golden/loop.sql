@@ -1113,6 +1113,9 @@ BEGIN
   IF TG_OP = 'TRUNCATE' THEN
     DELETE FROM authz.shares WHERE object_type = 'user';
     DELETE FROM authz.shares WHERE subject_type = 'user' AND subject_id <> '*';      -- '*' (every one signed in) names no row
+  ELSIF TG_OP = 'UPDATE' THEN   -- on a partitioned table (the last trigger below): the ids the update left no row with
+    DELETE FROM authz.shares WHERE object_type = 'user' AND object_id IN (SELECT o."id"::text FROM old_rows o EXCEPT SELECT n."id"::text FROM new_rows n);
+    DELETE FROM authz.shares WHERE subject_type = 'user' AND subject_id IN (SELECT o."id"::text FROM old_rows o EXCEPT SELECT n."id"::text FROM new_rows n);
   ELSE
     DELETE FROM authz.shares WHERE object_type = 'user' AND object_id IN (SELECT o."id"::text FROM old_rows o);
     DELETE FROM authz.shares WHERE subject_type = 'user' AND subject_id IN (SELECT o."id"::text FROM old_rows o);
@@ -1132,6 +1135,15 @@ CREATE TRIGGER "authz_user_forget_id" AFTER UPDATE ON "lp"."users" FOR EACH ROW
   WHEN (OLD."id" IS DISTINCT FROM NEW."id") EXECUTE FUNCTION authz_int."user__forget_id"();
 CREATE TRIGGER "authz_user_forget_trunc" AFTER TRUNCATE ON "lp"."users"
   FOR EACH STATEMENT EXECUTE FUNCTION authz_int."user__forget"();
+-- On a partitioned table, an update that puts a row in another partition is a delete there and an insert here:
+-- Postgres runs no AFTER UPDATE row trigger for it. The ids an update leaves no row with are forgotten too.
+-- @object trigger "authz_user_forget_moved" ON "lp"."users"
+-- @if partitioned
+DO $tr$ BEGIN
+  IF (SELECT relkind FROM pg_catalog.pg_class WHERE oid = '"lp"."users"'::regclass) = 'p' THEN
+    EXECUTE 'CREATE TRIGGER "authz_user_forget_moved" AFTER UPDATE ON "lp"."users" REFERENCING OLD TABLE AS old_rows NEW TABLE AS new_rows FOR EACH STATEMENT EXECUTE FUNCTION authz_int."user__forget"()';
+  END IF;
+END $tr$;
 
 -- shares on setting rows that are gone, or whose id changed, are removed
 CREATE FUNCTION authz_int."setting__forget"() RETURNS trigger
@@ -1140,6 +1152,9 @@ BEGIN
   IF TG_OP = 'TRUNCATE' THEN
     DELETE FROM authz.shares WHERE object_type = 'setting';
     DELETE FROM authz.shares WHERE subject_type = 'setting' AND subject_id <> '*';      -- '*' (every one signed in) names no row
+  ELSIF TG_OP = 'UPDATE' THEN   -- on a partitioned table (the last trigger below): the ids the update left no row with
+    DELETE FROM authz.shares WHERE object_type = 'setting' AND object_id IN (SELECT o."id"::text FROM old_rows o EXCEPT SELECT n."id"::text FROM new_rows n);
+    DELETE FROM authz.shares WHERE subject_type = 'setting' AND subject_id IN (SELECT o."id"::text FROM old_rows o EXCEPT SELECT n."id"::text FROM new_rows n);
   ELSE
     DELETE FROM authz.shares WHERE object_type = 'setting' AND object_id IN (SELECT o."id"::text FROM old_rows o);
     DELETE FROM authz.shares WHERE subject_type = 'setting' AND subject_id IN (SELECT o."id"::text FROM old_rows o);
@@ -1159,6 +1174,15 @@ CREATE TRIGGER "authz_setting_forget_id" AFTER UPDATE ON "lp"."settings" FOR EAC
   WHEN (OLD."id" IS DISTINCT FROM NEW."id") EXECUTE FUNCTION authz_int."setting__forget_id"();
 CREATE TRIGGER "authz_setting_forget_trunc" AFTER TRUNCATE ON "lp"."settings"
   FOR EACH STATEMENT EXECUTE FUNCTION authz_int."setting__forget"();
+-- On a partitioned table, an update that puts a row in another partition is a delete there and an insert here:
+-- Postgres runs no AFTER UPDATE row trigger for it. The ids an update leaves no row with are forgotten too.
+-- @object trigger "authz_setting_forget_moved" ON "lp"."settings"
+-- @if partitioned
+DO $tr$ BEGIN
+  IF (SELECT relkind FROM pg_catalog.pg_class WHERE oid = '"lp"."settings"'::regclass) = 'p' THEN
+    EXECUTE 'CREATE TRIGGER "authz_setting_forget_moved" AFTER UPDATE ON "lp"."settings" REFERENCING OLD TABLE AS old_rows NEW TABLE AS new_rows FOR EACH STATEMENT EXECUTE FUNCTION authz_int."setting__forget"()';
+  END IF;
+END $tr$;
 
 -- relationships kept in columns of lp.orgs: audited when they change; the feed hears of every row
 CREATE FUNCTION authz_int."org__col_audit_ins"() RETURNS trigger
@@ -1179,6 +1203,23 @@ CREATE FUNCTION authz_int."org__col_audit_upd"() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $f$
 BEGIN
     PERFORM authz_int.changed('org', ARRAY(SELECT n."id"::text FROM new_rows n UNION SELECT o."id"::text FROM old_rows o), 'update');
+    -- a partitioned table: the rows this update put in another partition, which the row trigger never sees
+    IF (SELECT relkind FROM pg_class WHERE oid = TG_RELID) = 'p' THEN
+      INSERT INTO authz.audit (db_role, user_id, acting_user, action, object_type, object_id, relation, subject_id, detail, reason)
+      SELECT authz_int.caller_role(), authz_int.actor(), nullif(current_setting('authz.acting_user', true), ''), 'relate', 'org', n."id"::text, 'owner', n."owner_id"::text, jsonb_build_object('column', 'owner_id', 'was', o."owner_id"), nullif(current_setting('authz_ctx.reason', true), '')
+      FROM old_rows o JOIN new_rows n ON n."id"::text = o."id"::text
+      WHERE n."owner_id" IS DISTINCT FROM o."owner_id" AND NOT EXISTS (
+        SELECT 1 FROM authz.audit a WHERE a.txid = txid_current() AND a.action = 'relate' AND a.object_type = 'org'
+          AND a.object_id = n."id"::text AND a.relation = 'owner' AND a.detail->>'column' = 'owner_id'
+          AND a.subject_id IS NOT DISTINCT FROM n."owner_id"::text AND a.detail->'was' IS NOT DISTINCT FROM to_jsonb(o."owner_id"));
+      INSERT INTO authz.audit (db_role, user_id, acting_user, action, object_type, object_id, relation, subject_id, detail, reason)
+      SELECT authz_int.caller_role(), authz_int.actor(), nullif(current_setting('authz.acting_user', true), ''), 'relate', 'org', n."id"::text, 'settings', n."settings_id"::text, jsonb_build_object('column', 'settings_id', 'was', o."settings_id"), nullif(current_setting('authz_ctx.reason', true), '')
+      FROM old_rows o JOIN new_rows n ON n."id"::text = o."id"::text
+      WHERE n."settings_id" IS DISTINCT FROM o."settings_id" AND NOT EXISTS (
+        SELECT 1 FROM authz.audit a WHERE a.txid = txid_current() AND a.action = 'relate' AND a.object_type = 'org'
+          AND a.object_id = n."id"::text AND a.relation = 'settings' AND a.detail->>'column' = 'settings_id'
+          AND a.subject_id IS NOT DISTINCT FROM n."settings_id"::text AND a.detail->'was' IS NOT DISTINCT FROM to_jsonb(o."settings_id"));
+    END IF;
   RETURN NULL;
 END $f$;
 -- @object trigger "authz_org_col_audit_upd" ON "lp"."orgs"
@@ -1260,6 +1301,16 @@ CREATE FUNCTION authz_int."setting__col_audit_upd"() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $f$
 BEGIN
     PERFORM authz_int.changed('setting', ARRAY(SELECT n."id"::text FROM new_rows n UNION SELECT o."id"::text FROM old_rows o), 'update');
+    -- a partitioned table: the rows this update put in another partition, which the row trigger never sees
+    IF (SELECT relkind FROM pg_class WHERE oid = TG_RELID) = 'p' THEN
+      INSERT INTO authz.audit (db_role, user_id, acting_user, action, object_type, object_id, relation, subject_id, detail, reason)
+      SELECT authz_int.caller_role(), authz_int.actor(), nullif(current_setting('authz.acting_user', true), ''), 'relate', 'setting', n."id"::text, 'email', n."email_id"::text, jsonb_build_object('column', 'email_id', 'was', o."email_id"), nullif(current_setting('authz_ctx.reason', true), '')
+      FROM old_rows o JOIN new_rows n ON n."id"::text = o."id"::text
+      WHERE n."email_id" IS DISTINCT FROM o."email_id" AND NOT EXISTS (
+        SELECT 1 FROM authz.audit a WHERE a.txid = txid_current() AND a.action = 'relate' AND a.object_type = 'setting'
+          AND a.object_id = n."id"::text AND a.relation = 'email' AND a.detail->>'column' = 'email_id'
+          AND a.subject_id IS NOT DISTINCT FROM n."email_id"::text AND a.detail->'was' IS NOT DISTINCT FROM to_jsonb(o."email_id"));
+    END IF;
   RETURN NULL;
 END $f$;
 -- @object trigger "authz_setting_col_audit_upd" ON "lp"."settings"
@@ -1337,6 +1388,16 @@ CREATE FUNCTION authz_int."email__col_audit_upd"() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $f$
 BEGIN
     PERFORM authz_int.changed('email', ARRAY(SELECT n."id"::text FROM new_rows n UNION SELECT o."id"::text FROM old_rows o), 'update');
+    -- a partitioned table: the rows this update put in another partition, which the row trigger never sees
+    IF (SELECT relkind FROM pg_class WHERE oid = TG_RELID) = 'p' THEN
+      INSERT INTO authz.audit (db_role, user_id, acting_user, action, object_type, object_id, relation, subject_id, detail, reason)
+      SELECT authz_int.caller_role(), authz_int.actor(), nullif(current_setting('authz.acting_user', true), ''), 'relate', 'email', n."id"::text, 'domain', n."domain_id"::text, jsonb_build_object('column', 'domain_id', 'was', o."domain_id"), nullif(current_setting('authz_ctx.reason', true), '')
+      FROM old_rows o JOIN new_rows n ON n."id"::text = o."id"::text
+      WHERE n."domain_id" IS DISTINCT FROM o."domain_id" AND NOT EXISTS (
+        SELECT 1 FROM authz.audit a WHERE a.txid = txid_current() AND a.action = 'relate' AND a.object_type = 'email'
+          AND a.object_id = n."id"::text AND a.relation = 'domain' AND a.detail->>'column' = 'domain_id'
+          AND a.subject_id IS NOT DISTINCT FROM n."domain_id"::text AND a.detail->'was' IS NOT DISTINCT FROM to_jsonb(o."domain_id"));
+    END IF;
   RETURN NULL;
 END $f$;
 -- @object trigger "authz_email_col_audit_upd" ON "lp"."emails"
@@ -1414,6 +1475,16 @@ CREATE FUNCTION authz_int."domain__col_audit_upd"() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $f$
 BEGIN
     PERFORM authz_int.changed('domain', ARRAY(SELECT n."id"::text FROM new_rows n UNION SELECT o."id"::text FROM old_rows o), 'update');
+    -- a partitioned table: the rows this update put in another partition, which the row trigger never sees
+    IF (SELECT relkind FROM pg_class WHERE oid = TG_RELID) = 'p' THEN
+      INSERT INTO authz.audit (db_role, user_id, acting_user, action, object_type, object_id, relation, subject_id, detail, reason)
+      SELECT authz_int.caller_role(), authz_int.actor(), nullif(current_setting('authz.acting_user', true), ''), 'relate', 'domain', n."id"::text, 'org', n."org_id"::text, jsonb_build_object('column', 'org_id', 'was', o."org_id"), nullif(current_setting('authz_ctx.reason', true), '')
+      FROM old_rows o JOIN new_rows n ON n."id"::text = o."id"::text
+      WHERE n."org_id" IS DISTINCT FROM o."org_id" AND NOT EXISTS (
+        SELECT 1 FROM authz.audit a WHERE a.txid = txid_current() AND a.action = 'relate' AND a.object_type = 'domain'
+          AND a.object_id = n."id"::text AND a.relation = 'org' AND a.detail->>'column' = 'org_id'
+          AND a.subject_id IS NOT DISTINCT FROM n."org_id"::text AND a.detail->'was' IS NOT DISTINCT FROM to_jsonb(o."org_id"));
+    END IF;
   RETURN NULL;
 END $f$;
 -- @object trigger "authz_domain_col_audit_upd" ON "lp"."domains"
@@ -1934,12 +2005,13 @@ BEGIN
 END $f$;
 
 -- lp.domains update org_id after (line 42): org.edit
--- checked on the row after the change, for roles that row-level security applies to
+-- checked on the row after the change, for roles that row-level security applies to on the
+-- table (not on TG_RELID: on a partition made since the policy was applied, where it is not on yet, this runs too)
 CREATE FUNCTION authz_int."domain__update_1"() RETURNS trigger
 LANGUAGE plpgsql SET search_path FROM CURRENT AS $f$
 DECLARE v_lines text;
 BEGIN
-  IF pg_catalog.row_security_active(TG_RELID)
+  IF pg_catalog.row_security_active('"lp"."domains"'::pg_catalog.regclass)
      AND NOT coalesce((SELECT EXISTS (SELECT 1 FROM authz_gen."org__edit" v WHERE v.id = "domains"."org_id") FROM (SELECT NEW.*) AS "domains"), false) THEN
     BEGIN
       v_lines := (SELECT string_agg(l, E'\n') FROM authz_gen."lp.domains:column_1:why"(NEW) l);
@@ -3524,6 +3596,29 @@ BEGIN
   RETURN n;
 END $f$;
 
+-- The row triggers above that a table inheriting from their table lacks, and the statement that makes each
+CREATE FUNCTION authz_int.child_triggers() RETURNS TABLE (child regclass, name name, stmt text)
+LANGUAGE sql STABLE SET search_path = pg_catalog, pg_temp AS $f$
+  WITH RECURSIVE below(top, oid) AS (
+    SELECT i.inhparent, i.inhrelid FROM pg_inherits i JOIN pg_class k ON k.oid = i.inhrelid WHERE NOT k.relispartition
+    UNION SELECT b.top, i.inhrelid FROM pg_inherits i JOIN below b ON i.inhparent = b.oid
+  )
+  SELECT b.oid::regclass, g.tgname,
+         overlay(d.def PLACING ' ON ' || c.name || ' ' FROM strpos(d.def, ' ON ' || p.name || ' ')
+                 FOR length(' ON ' || p.name || ' '))
+  FROM below b
+  JOIN pg_trigger g ON g.tgrelid = b.top AND NOT g.tgisinternal AND g.tgtype & 1 = 1
+  JOIN pg_proc f ON f.oid = g.tgfoid AND f.pronamespace = 'authz_int'::regnamespace
+  CROSS JOIN LATERAL (SELECT pg_get_triggerdef(g.oid) AS def) d
+  CROSS JOIN LATERAL (SELECT format('%I.%I', n.nspname, k.relname) AS name
+                      FROM pg_class k JOIN pg_namespace n ON n.oid = k.relnamespace WHERE k.oid = b.top) p
+  CROSS JOIN LATERAL (SELECT format('%I.%I', n.nspname, k.relname) AS name
+                      FROM pg_class k JOIN pg_namespace n ON n.oid = k.relnamespace WHERE k.oid = b.oid) c
+  WHERE NOT EXISTS (SELECT 1 FROM pg_description x WHERE x.objoid = g.oid AND x.classoid = 'pg_trigger'::regclass
+                    AND x.description = 'rowstile: the trigger of the table above, for the rows stored here')
+    AND NOT EXISTS (SELECT 1 FROM pg_trigger h WHERE h.tgrelid = b.oid AND h.tgname = g.tgname)
+$f$;
+
 -- The search path the functions that evaluate the policy's own SQL run with (SET search_path FROM CURRENT)
 CREATE FUNCTION authz_int.policy_path() RETURNS name[]
 LANGUAGE sql STABLE SET search_path FROM CURRENT AS $f$ SELECT pg_catalog.current_schemas(false) $f$;
@@ -3677,6 +3772,15 @@ WHERE w.who IS NOT NULL AND n.nspname !~ '^pg_(toast_)?temp_' LOOP
       problem := format('is a partition of %s (or inherits from it), and %s may use it directly, without %s''s rules or the triggers that keep inheritance and the audit current: apply the policy again (it turns row-level security on for it), or ALTER TABLE %s ENABLE ROW LEVEL SECURITY', r.tbl, 'app_user', r.tbl, r.part);
       RETURN NEXT;
     END IF;
+  END LOOP;
+  -- tables that inherit (not partitions), made since the last apply: Postgres runs a table's row triggers for
+  -- its own rows only, and applying gives them to each table under it (whatever the app role may do there:
+  -- written through the table above, their rows need no privilege of their own)
+  FOR r IN SELECT c.child, string_agg(c.name::text, ', ' ORDER BY c.name) AS names
+           FROM authz_int.child_triggers() c GROUP BY c.child LOOP
+    severity := 'error'; object := r.child::text;
+    problem := format('inherits from a table the policy has rules or a type for, and was made since the policy was last applied: Postgres runs a table''s row triggers for its own rows only, so a rule on a column is not checked on the rows stored here, and their shares stay when their key changes (missing here: %s). Apply the policy again (it makes them)', r.names);
+    RETURN NEXT;
   END LOOP;
   -- unique constraints on governed tables tell people that rows they cannot see exist
   FOR r IN SELECT i.indexrelid::regclass AS idx, i.indrelid::regclass AS tbl
@@ -3939,6 +4043,17 @@ BEGIN
     RAISE WARNING '% has no rules any more, and row-level security is still on, so the app role sees none of its rows. If that is not what you want: ALTER TABLE % DISABLE ROW LEVEL SECURITY', t.tbl, t.tbl;
   END LOOP;
 END $l$;
+
+-- Tables that inherit from a table with rules or a type (not partitions: Postgres gives those their table's row
+-- triggers itself): the row triggers made above, on each, for the rows stored there
+DO $ch$
+DECLARE r record;
+BEGIN
+  FOR r IN SELECT * FROM authz_int.child_triggers() LOOP
+    EXECUTE r.stmt;
+    EXECUTE pg_catalog.format('COMMENT ON TRIGGER %I ON %s IS %L', r.name, r.child, 'rowstile: the trigger of the table above, for the rows stored here');
+  END LOOP;
+END $ch$;
 
 -- Privileges the policy doesn't give on rowstile's schemas and what is in them are taken back
 DO $r$

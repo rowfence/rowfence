@@ -53,6 +53,31 @@ Each release upgrades from the one before it. How releases are numbered and made
 
 ### Fixed
 
+- **Rows under a governed table.** Rowstile checks a rule on a column (`update owner_id : share`) with a
+  row trigger, and forgets a row's shares when its key changes with another. Three kinds of rows escaped
+  them. An app with neither partitions nor tables that inherit was not affected.
+  - *A partition made after the policy was last applied* (by a job that makes next month's, say): the rule
+    on a column was not checked on its rows, so someone who may update a row could change a column the
+    policy keeps for others. The trigger asked whether row-level security applies to the partition, where
+    rowstile turns it on at the next apply; it now asks of the table, and the rule holds on a partition
+    from the moment it is made.
+  - *A table that inherits from a governed one* (`CREATE TABLE ... INHERITS`): Postgres runs a table's row
+    triggers for its own rows and its partitions', not for the rows stored there. No rule on a column was
+    checked on them, a key change kept their shares, and the audit had no line for a relationship column
+    changed there. Applying now gives each such table its table's row triggers, and `authz.lint()` reports
+    one made since the last apply.
+  - *A row an update puts in another partition*: Postgres runs no `AFTER UPDATE` row trigger for it. A key
+    change kept its shares, so a row that took the old key later started with them, and the audit missed
+    its changed relationship columns. A partitioned table now forgets the shares of every key an update
+    leaves without a row, and audits the rows it moves.
+
+  And `rowstile apply` applies when a partition, or a table that inherits, was made since the last apply:
+  it answered `unchanged` and left it as it was, though `authz.lint()` said to apply again.
+  **Upgrading**: apply the policy again (`rowstile apply`, or the next migration). The limits page says
+  what stays a limit.
+- `rowstile apply` also applies when someone was given a privilege on rowstile's own schemas since the last
+  apply. `authz.lint()` said "the next apply takes it back", and `apply` answered `unchanged`: only `rowstile
+  reapply` took it back.
 - With a capital letter in a governed table's name, as Prisma names tables (`"Folder"`), `rowstile push`,
   `apply` and `dev` applied the whole policy every time: `apply` never answered `unchanged`, and `dev` did
   all the work again at each save. The command looked for what the policy made under the tables' unquoted

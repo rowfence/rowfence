@@ -398,6 +398,15 @@ BEGIN
       RETURN NEXT;
     END IF;
   END LOOP;
+  -- tables that inherit (not partitions), made since the last apply: Postgres runs a table's row triggers for
+  -- its own rows only, and applying gives them to each table under it (whatever the app role may do there:
+  -- written through the table above, their rows need no privilege of their own)
+  FOR r IN SELECT c.child, string_agg(c.name::text, ', ' ORDER BY c.name) AS names
+           FROM authz_int.child_triggers() c GROUP BY c.child LOOP
+    severity := 'error'; object := r.child::text;
+    problem := format('inherits from a table the policy has rules or a type for, and was made since the policy was last applied: Postgres runs a table''s row triggers for its own rows only, so a rule on a column is not checked on the rows stored here, and their shares stay when their key changes (missing here: %s). Apply the policy again (it makes them)', r.names);
+    RETURN NEXT;
+  END LOOP;
   -- unique constraints on governed tables tell people that rows they cannot see exist
   FOR r IN SELECT i.indexrelid::regclass AS idx, i.indrelid::regclass AS tbl
            FROM pg_index i WHERE i.indisunique AND NOT i.indisprimary

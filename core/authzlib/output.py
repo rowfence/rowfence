@@ -6,13 +6,15 @@ import re
 
 from .base import BASE_SQL, GENERATED_FUNCTIONS
 from .compiler import rule_name
-from .governance import GovernanceMixin
+from .governance import GovernanceMixin, trigger_if_partitioned
 from .hardening import LintMixin, path_writers_sql
 from .identity import SESSION_OK, IdentityMixin
 from .insight import InsightMixin
 from .parse import Expr, Ref, Rule, Type, fail
 from .refusals import RefusalMixin
 from .sqlutil import (
+    CHILD_TRIGGERS,
+    CHILD_TRIGGERS_FN,
     POLICY_MARKS,
     STUB_COLUMNS,
     VIEW_MARKS,
@@ -92,6 +94,12 @@ class OutputMixin(RefusalMixin, InsightMixin, GovernanceMixin, IdentityMixin, Li
         fn = f"authz_int.{q(t.name + '__forget')}"
         fn_row = f"authz_int.{q(t.name + '__forget_id')}"
         name = lit(t.name)
+        gone = f"SELECT {self.key_text(t, 'o')} FROM old_rows o EXCEPT SELECT {self.key_text(t, 'n')} FROM new_rows n"
+        moved = trigger_if_partitioned(
+            t.table,
+            f"CREATE TRIGGER {q('authz_' + t.name + '_forget_moved')} AFTER UPDATE ON {tbl} "
+            f"REFERENCING OLD TABLE AS old_rows NEW TABLE AS new_rows FOR EACH STATEMENT EXECUTE FUNCTION {fn}()",
+        )
         return f"""-- shares on {t.name} rows that are gone, or whose id changed, are removed
 CREATE FUNCTION {fn}() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER SET search_path FROM CURRENT AS $f$
@@ -99,6 +107,9 @@ BEGIN
   IF TG_OP = 'TRUNCATE' THEN
     DELETE FROM authz.shares WHERE object_type = {name};
     DELETE FROM authz.shares WHERE subject_type = {name} AND subject_id <> '*';      -- '*' (every one signed in) names no row
+  ELSIF TG_OP = 'UPDATE' THEN   -- on a partitioned table (the last trigger below): the ids the update left no row with
+    DELETE FROM authz.shares WHERE object_type = {name} AND object_id IN ({gone});
+    DELETE FROM authz.shares WHERE subject_type = {name} AND subject_id IN ({gone});
   ELSE
     DELETE FROM authz.shares WHERE object_type = {name} AND object_id IN (SELECT {self.key_text(t, "o")} FROM old_rows o);
     DELETE FROM authz.shares WHERE subject_type = {name} AND subject_id IN (SELECT {self.key_text(t, "o")} FROM old_rows o);
@@ -117,7 +128,10 @@ CREATE TRIGGER {q("authz_" + t.name + "_forget_del")} AFTER DELETE ON {tbl}
 CREATE TRIGGER {q("authz_" + t.name + "_forget_id")} AFTER UPDATE ON {tbl} FOR EACH ROW
   WHEN ({self.key(t, "OLD")} IS DISTINCT FROM {self.key(t, "NEW")}) EXECUTE FUNCTION {fn_row}();
 CREATE TRIGGER {q("authz_" + t.name + "_forget_trunc")} AFTER TRUNCATE ON {tbl}
-  FOR EACH STATEMENT EXECUTE FUNCTION {fn}();"""
+  FOR EACH STATEMENT EXECUTE FUNCTION {fn}();
+-- On a partitioned table, an update that puts a row in another partition is a delete there and an insert here:
+-- Postgres runs no AFTER UPDATE row trigger for it. The ids an update leaves no row with are forgotten too.
+{moved}"""
 
     # --- rules on changed columns (RLS can't compare old and new rows) ----
     def column_rule_sql(self, t: Type, alias: str, rule: Rule, idx: int) -> str:
@@ -137,12 +151,13 @@ CREATE TRIGGER {q("authz_" + t.name + "_forget_trunc")} AFTER TRUNCATE ON {tbl}
 {self.rule_why_sql(t, rule.table, alias, rule, name)}
 
 -- {rule.table} update {cols}{" after" if new else ""} ({rule.loc}): {rule.src}
--- checked on the row {"after" if new else "before"} the change, for roles that row-level security applies to
+-- checked on the row {"after" if new else "before"} the change, for roles that row-level security applies to on the
+-- table (not on TG_RELID: on a partition made since the policy was applied, where it is not on yet, this runs too)
 CREATE FUNCTION {fn}() RETURNS trigger
 LANGUAGE plpgsql SET search_path FROM CURRENT AS $f$
 DECLARE v_lines text;
 BEGIN
-  IF pg_catalog.row_security_active(TG_RELID)
+  IF pg_catalog.row_security_active({lit(qt(rule.table))}::pg_catalog.regclass)
      AND NOT coalesce((SELECT {cond} FROM (SELECT {row}.*) AS {alias}), false) THEN
     BEGIN
       v_lines := (SELECT string_agg(l, E'\\n') FROM {why}({row}) l);
@@ -1224,6 +1239,7 @@ END $w$;"""
             *[("objects", "insight", x) for x in insight],
             ("objects", "identity", self.identity_api_sql()),
             ("objects", "workflow", self.workflow_sql()),
+            ("objects", "child_triggers", CHILD_TRIGGERS_FN),
             ("objects", "lint", self.lint_sql()),
             ("objects", "connection_check", self.connection_check_sql()),
             (
@@ -1238,6 +1254,8 @@ END $w$;"""
             ("full", "kept_functions", kept_functions),
             ("full", "kept_views", self.kept_views_sql()),
             ("full", "lost_rules", LOST_RULES),
+            # after every trigger is made
+            ("always", "children", CHILD_TRIGGERS),
             ("always", "revoke", self.revoke_sql()),
             ("always", "revoke", "REVOKE ALL ON ALL FUNCTIONS IN SCHEMA authz FROM PUBLIC;"),
             ("always", "grant_usage", f"GRANT USAGE ON SCHEMA authz, authz_gen TO {self.role};"),

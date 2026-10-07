@@ -1,0 +1,46 @@
+-- children.authz: a policy over tables with tables under them (tests/children_schema.sql, tests/children.sh):
+-- two partitioned tables and one whose older rows are stored in a table that inherits from it. Each has a
+-- relation that is shared, a column that says who owns the row, and a rule on that column.
+app role app_user
+
+type user = ch.users
+
+type note = ch.notes
+  owner  : user = owner_id
+  parent : note = parent_id
+  viewer : user shared by manage
+
+  can manage = owner or parent.manage
+  can view   = manage or viewer or parent.view
+
+type task = ch.tasks (id)
+  owner  : user = owner_id
+  viewer : user shared by manage
+
+  can manage = owner
+  can view   = manage or viewer
+
+type doc = ch.docs
+  owner  : user = owner_id
+  editor : user shared by own
+
+  can own  = owner
+  can edit = own or editor
+
+rules ch.notes
+  select          : view
+  insert          : owner
+  update          : view
+  update owner_id : manage
+  delete          : manage
+
+rules ch.tasks
+  select          : view
+  update          : view
+  update owner_id : manage
+
+rules ch.docs
+  select : edit
+  update : edit
+  update owner_id : own
+  delete : own
