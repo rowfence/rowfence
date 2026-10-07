@@ -2770,6 +2770,60 @@ class BlogPosts(unittest.TestCase):
                 f"{where}: plan lines in no run of its folder",
             )
 
+    @staticmethod
+    def shown(ms: float) -> str:
+        """A timing as a post writes it: three figures from a second up, whole milliseconds from a hundred, two
+        figures below."""
+        if ms >= 1000:
+            return f"{ms / 1000:.3g} s"
+        return f"{ms:.0f} ms" if ms >= 100 else f"{ms:.2g} ms"
+
+    def test_the_first_articles_numbers_are_its_runs(self) -> None:
+        """Each cell of the article's two tables is the middle one of the three timings its run holds for that
+        policy and that query, and the figures its text gives are the runs' too."""
+        import statistics
+
+        folder = os.path.join(self.REPO, "docs", "blog")
+        with open(os.path.join(folder, "2026-10-23-recursive-row-level-security.md"), encoding="utf-8") as fh:
+            text = fh.read()
+        runs: dict[str, str] = {}
+        for size, name in (("200,000 files", "run-20k-folders.txt"), ("2 million files", "run-200k-folders.txt")):
+            with open(os.path.join(folder, "recursive-row-level-security", name), encoding="utf-8") as fh:
+                runs[size] = fh.read()
+            table = search(rf"\| {size} \|[^\n]*\n\|[-|]+\|\n((?:\|[^\n]*\n){{4}})", text).group(1)
+            cells = [[c.strip() for c in row.strip("|").split("|")][1:] for row in table.strip().split("\n")]
+            sections = re.split(r"\n=== ", runs[size])[1:5]
+            self.assertEqual([s[:2] for s in sections], ["1.", "2.", "3.", "4."], name)
+            for row, section in zip(cells, sections, strict=True):
+                times = [float(x) for x in re.findall(r"Execution Time: ([\d.]+) ms", section)]
+                self.assertEqual(len(times), 9, f"{name}: three queries, three times each, for {section[:40]!r}")
+                medians = [statistics.median(times[i : i + 3]) for i in (0, 3, 6)]
+                self.assertEqual(row, [self.shown(m) for m in medians], f"{size}: {section.splitlines()[0]}")
+        small, large = runs["200,000 files"], runs["2 million files"]
+        for said, run in (
+            ("3,410 files in the\nsmall run, 54,610 in the large one", None),
+            ("88,800 rows", small),
+            ("8,728 kB", small),
+            ("1,218,200", large),
+            ("109 MB", large),
+            ("1,365 folders", large),
+            ("2,377 walks", small),
+            ("5,461 folders", large),
+        ):
+            self.assertIn(said, text)
+            if run is not None:
+                number = search(r"[\d,]+", said).group(0).replace(",", "")
+                self.assertRegex(run, rf"(?<!\d){number}(?!\d)", f"{said!r} is in no line of its run")
+        self.assertRegex(small, r"files_user_7_sees \n-+\n\s+3410\n")
+        self.assertRegex(large, r"files_user_7_sees \n-+\n\s+54610\n")
+        for run in (small, large):
+            # after the move, the table and a fresh build hold the same rows; and the policy on folders is refused
+            self.assertRegex(
+                run, r"rows_only_in_the_table \| rows_only_in_a_fresh_build \n[-+]+\n[^\n]*\|\s+0 \|\s+0\n"
+            )
+            self.assertIn('ERROR:  infinite recursion detected in policy for relation "folders"', run)
+            self.assertIn("Parallel Index Only Scan using files_folder_id_idx on files", run.split("\n=== 4.")[1])
+
 
 class SdkPackages(unittest.TestCase):
     """sdk/typescript/<package>/README.md: each package's own page on npm. It names its package, links nothing
