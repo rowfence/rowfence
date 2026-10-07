@@ -24,6 +24,10 @@ Each release upgrades from the one before it. How releases are numbered and made
 ### Fixed
 
 - `rowstile review`: "2 checks changed what they expect". It said "what it expects" of several.
+- `rowstile review` no longer reads a test's new name as its checks removed. A test that went away, whose
+  every check is in one that appeared, is said to be renamed, and its checks are compared under the new name:
+  "1 test renamed. 2 checks changed what they expect", where it said "8 checks removed". The JSON has the
+  names under `tests.renamed`.
 
 ## 0.1.0 (alpha)
 

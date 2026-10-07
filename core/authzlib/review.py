@@ -8,8 +8,9 @@ A reviewer who has never read the policy should understand the change from the r
 - Access: who gains and who loses what on the review data (a database the caller prepared: the base
   branch's migrations and review data), with an example and how it is granted.
 - Risk: what to look at twice, each on its policy line (also as annotations).
-- Tests: what the author claims: checks whose expectation flipped, tests removed, new permissions no test
-  names; with a database, the tests of the pull request run on it.
+- Tests: what the author claims: checks whose expectation flipped, checks removed (a test that only changed
+  its name is said so, and its checks compared under the new one), new permissions no test names; with a
+  database, the tests of the pull request run on it.
 - Deploy: the migrations the change needs, their statements, the tables they lock, the trees they rebuild.
 
 Everything is computed from the two policies (and a database for Access and the tests' results); review()
@@ -20,6 +21,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Iterable
 from typing import NotRequired, TypeAlias, TypedDict
 
 from . import Compiler, PolicyError, migrate, parse_policy
@@ -89,6 +91,11 @@ class Added(TypedDict):
     line: str
 
 
+class Renamed(TypedDict):
+    before: str
+    after: str
+
+
 class Untested(TypedDict):
     what: str
     line: str
@@ -115,6 +122,7 @@ class Tests(TypedDict):
     flipped: list[Flipped]
     removed: list[Removed]
     added: list[Added]
+    renamed: list[Renamed]
     untested: list[Untested]
     unread: list[Unread]
     invariants_removed: list[str]
@@ -822,11 +830,36 @@ def checks(side: Side, unread: list[Unread] | None = None) -> dict[tuple[str, st
     return out
 
 
+def renames(before: Iterable[tuple[str, str]], after: Iterable[tuple[str, str]]) -> list[Renamed]:
+    """The tests that only changed their name: one that went away, whose every check (whatever it expects) is
+    in one that appeared. Their checks are then compared under the new name, so a new name doesn't read as
+    checks removed. When the checks don't all turn up in one new test, or turn up in two, nothing is said of
+    a name: "removed" is then the honest word."""
+
+    def by_test(side: Iterable[tuple[str, str]]) -> dict[str, set[str]]:
+        out: dict[str, set[str]] = {}
+        for test, check in side:
+            if test != "test section":
+                out.setdefault(test, set()).add(check)
+        return out
+
+    old, new = by_test(before), by_test(after)
+    out: list[Renamed] = []
+    for gone in sorted(set(old) - set(new)):
+        holds = [came for came in sorted(set(new) - set(old)) if old[gone] <= new[came]]
+        if len(holds) == 1:
+            out.append({"before": gone, "after": holds[0]})
+    return out
+
+
 def tests(b: Side, h: Side) -> Tests:
     # the pull request's test files that don't parse are said: their checks are missing from the comparison,
     # which would otherwise read as "no change" (the base's are the base's business)
     unread: list[Unread] = []
     cb, ch = checks(b), checks(h, unread)
+    renamed = renames(cb, ch)
+    now = {r["before"]: r["after"] for r in renamed}
+    cb = {(now.get(test, test), check): v for (test, check), v in cb.items()}
     flipped: list[Flipped] = [
         {"test": k[0], "before": cb[k][1], "after": ch[k][1], "line": ch[k][2]}
         for k in sorted(set(cb) & set(ch))
@@ -849,6 +882,7 @@ def tests(b: Side, h: Side) -> Tests:
         "flipped": flipped,
         "removed": removed,
         "added": added,
+        "renamed": renamed,
         "untested": untested,
         "unread": unread,
         "invariants_removed": sorted(inv_b - inv_h),
@@ -1055,6 +1089,8 @@ def summary(r: Review) -> dict[str, str]:
         parts.append(f"{plural(len(t['flipped']), 'check')} changed what {expects}")
     if t["removed"]:
         parts.append(f"{plural(len(t['removed']), 'check')} removed")
+    if t["renamed"]:
+        parts.append(f"{plural(len(t['renamed']), 'test')} renamed")
     if t["untested"]:
         parts.append(f"{plural(len(t['untested']), 'new permission')} no test names")
     if t["unread"]:
@@ -1186,12 +1222,14 @@ def risk_details(r: Review) -> list[str]:
 def tests_details(r: Review) -> list[str]:
     """The Markdown comment's Tests section: the checks that flipped, went away, are missing or fail."""
     t = r["tests"]
-    if not (t["flipped"] or t["removed"] or t["untested"] or t["unread"] or (t.get("run") or {}).get("failed")):
+    said = t["flipped"] or t["removed"] or t["renamed"] or t["untested"] or t["unread"]
+    if not (said or (t.get("run") or {}).get("failed")):
         return []
     out = ["", "<details><summary>Tests</summary>", ""]
     out += [f"- can't read: {x['error']}" for x in t["unread"]]
     out += [f"- {x['test']}: `{x['before']}` -> `{x['after']}` ({x['line']})" for x in t["flipped"]]
     out += [f"- removed from {x['test']}: `{x['check']}`" for x in t["removed"]]
+    out += [f'- renamed: "{n["before"]}" is now "{n["after"]}"' for n in t["renamed"]]
     out += [f"- no test names `{x['what']}` ({x['line']})" for x in t["untested"]]
     out += [
         f"- fails: {x['test']} {x['line'] or ''}: `{(x['detail'] or '').splitlines()[0] if x['detail'] else ''}`"
@@ -1236,6 +1274,8 @@ def text(r: Review) -> str:
         out.append(f"  test     {x['test']}: {x['before']} -> {x['after']} ({x['line']})")
     for y in t["removed"]:
         out.append(f"  test     removed from {y['test']}: {y['check']}")
+    for n in t["renamed"]:
+        out.append(f'  test     renamed: "{n["before"]}" is now "{n["after"]}"')
     for z in t["untested"]:
         out.append(f"  test     no test names {z['what']} ({z['line']})")
     for failed in (t.get("run") or {}).get("failed", []):
