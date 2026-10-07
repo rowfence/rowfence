@@ -56,18 +56,32 @@ if (address === null || typeof address === "string") throw new Error("the server
 const PAGE = `http://127.0.0.1:${address.port}/`;
 
 const profile = mkdtempSync(join(tmpdir(), "pga-playground-"));
-const chrome = spawn(browser, ["--headless=new", "--disable-gpu", "--no-first-run", "--no-default-browser-check",
-  `--user-data-dir=${profile}`, "--remote-debugging-port=0", "about:blank"], { stdio: ["ignore", "ignore", "pipe"] });
-/** @type {string} */
-const wsUrl = await new Promise((resolve, reject) => {
+/** Starts the browser and waits for its DevTools address; null when it says nothing within the wait (it is
+ *  stopped then). On a shared runner a first start now and then hangs: it is tried again, not failed. */
+async function start(/** @type {string} */ exe, /** @type {string} */ dir, /** @type {number} */ wait) {
+  const child = spawn(exe, ["--headless=new", "--disable-gpu", "--no-first-run", "--no-default-browser-check",
+    `--user-data-dir=${dir}`, "--remote-debugging-port=0", "about:blank"], { stdio: ["ignore", "ignore", "pipe"] });
   let err = "";
-  chrome.stderr.on("data", (d) => {
-    err += d;
-    const m = /DevTools listening on (ws:\S+)/.exec(err);
-    if (m) resolve(m[1]);
+  /** @type {string | null} */
+  const url = await new Promise((resolve) => {
+    child.stderr.on("data", (/** @type {Buffer} */ d) => {
+      err += d;
+      const m = /DevTools listening on (ws:\S+)/.exec(err);
+      if (m) resolve(m[1]);
+    });
+    setTimeout(() => resolve(null), wait);
   });
-  setTimeout(() => reject(new Error(`the browser didn't start: ${err.slice(0, 300)}`)), 20000);
-});
+  if (url === null) child.kill();
+  return { child, url, err };
+}
+let started = await start(browser, profile, 30000);
+for (let attempt = 2; started.url === null && attempt <= 3; attempt += 1) {
+  console.log(`the browser didn't start within 30 s: attempt ${attempt}`);
+  started = await start(browser, mkdtempSync(join(tmpdir(), "pga-playground-")), 30000);
+}
+if (started.url === null) throw new Error(`the browser didn't start, three times: ${started.err.slice(0, 300)}`);
+const chrome = started.child;
+const wsUrl = started.url;
 
 // the DevTools protocol, over the WebSocket Node has built in
 const ws = new WebSocket(wsUrl);
