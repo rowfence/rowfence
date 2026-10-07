@@ -2784,7 +2784,7 @@ class BlogPosts(unittest.TestCase):
         import statistics
 
         folder = os.path.join(self.REPO, "docs", "blog")
-        with open(os.path.join(folder, "2026-10-23-recursive-row-level-security.md"), encoding="utf-8") as fh:
+        with open(os.path.join(folder, "2026-10-07-recursive-row-level-security.md"), encoding="utf-8") as fh:
             text = fh.read()
         runs: dict[str, str] = {}
         for size, name in (("200,000 files", "run-20k-folders.txt"), ("2 million files", "run-200k-folders.txt")):
