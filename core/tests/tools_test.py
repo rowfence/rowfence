@@ -122,6 +122,17 @@ def main() -> None:
         check(
             "expect, a row the user may not change: Refused, with why", bool(e.why) and e.why[0].startswith("no"), e.why
         )
+        check(
+            "... worded as the database words a refused insert: who, the command, the row, the table",
+            str(e) == "permission denied: user 3 may not update row 11 of app.files",
+            str(e),
+        )
+    shown = [authz_client._shown(k) for k in (7, (1, 2), ("a b", "x,y"), ("", 'q"t'), ("b\\s", "(1)"))]
+    check(
+        "a key in a message is as the database writes it: quoted only where Postgres would",
+        shown == ["7", "(1,2)", '("a b","x,y")', '("","q""t")', '("b\\\\s","(1)")'],
+        shown,
+    )
     check("can: carol may not edit it", a.can("file", 11, "edit") is False)
     check(
         "list: the files carol may view", sorted(a.list("file", "view")) == ["10", "11", "16"], a.list("file", "view")

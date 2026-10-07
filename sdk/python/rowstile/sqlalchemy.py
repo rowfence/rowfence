@@ -49,6 +49,7 @@ from . import (
     _writes,
     act_as_args,
     act_as_sql,
+    answer,
     current,
     explain_rule_args,
     explain_rule_sql,
@@ -155,10 +156,10 @@ def why_stale_sync(exc: BaseException | None = None) -> NotFound | Refused | Non
         if isinstance(original, AsyncEngine):
             raise TypeError("an async engine's write: await rowstile.sqlalchemy.why_stale()")
         with original.connect() as conn:
-            lines = conn.execute(_explain_sql(table, command, key)).scalar()
+            lines, who = answer(conn.execute(_explain_sql(table, command, key)).first())
             conn.rollback()
         if not _allowed(lines):
-            return verdict(table, command, key, lines)
+            return verdict(table, command, key, lines, who)
     return None
 
 
@@ -169,14 +170,14 @@ async def why_stale(exc: BaseException | None = None) -> NotFound | Refused | No
         original = _engines.get(engine, engine)
         if isinstance(original, AsyncEngine):
             async with original.connect() as aconn:
-                lines = (await aconn.execute(_explain_sql(table, command, key))).scalar()
+                lines, who = answer((await aconn.execute(_explain_sql(table, command, key))).first())
                 await aconn.rollback()
         else:
             with original.connect() as conn:
-                lines = conn.execute(_explain_sql(table, command, key)).scalar()
+                lines, who = answer(conn.execute(_explain_sql(table, command, key)).first())
                 conn.rollback()
         if not _allowed(lines):
-            return verdict(table, command, key, lines)
+            return verdict(table, command, key, lines, who)
     return None
 
 
@@ -192,14 +193,13 @@ async def expect(
     asked in the same transaction: delete(Note).where(Note.id == 7) that matched nothing, and why."""
     if getattr(result, "rowcount", 1):
         return result
-    lines = (await session.execute(_explain_sql(table, command, key))).scalar()
-    raise verdict(table, command, key, lines)
+    raise verdict(table, command, key, *answer((await session.execute(_explain_sql(table, command, key))).first()))
 
 
 def expect_sync(session: Session | Connection, result: Result, table: str, command: str, key: object) -> Result:
     if getattr(result, "rowcount", 1):
         return result
-    raise verdict(table, command, key, session.execute(_explain_sql(table, command, key)).scalar())
+    raise verdict(table, command, key, *answer(session.execute(_explain_sql(table, command, key)).first()))
 
 
 # --- queries by permission ------------------------------------------------------------------------------

@@ -18,6 +18,7 @@ from . import (
     Who,
     _Unset,
     act_as_args,
+    answer,
     check_problems,
     explain_rule_args,
     explain_rule_sql,
@@ -68,8 +69,8 @@ async def expect(conn: asyncpg.Connection[Any], result: Result, table: str, comm
     changed = result and not (isinstance(result, str) and result.split()[-1] == "0")
     if changed:
         return result
-    lines = await conn.fetchval(_EXPLAIN, *explain_rule_args(table, command, key))
-    raise verdict(table, command, key, lines)
+    row = await conn.fetchrow(_EXPLAIN, *explain_rule_args(table, command, key))
+    raise verdict(table, command, key, *answer(row))
 
 
 async def connection_check(conn: asyncpg.Connection[Any]) -> list[tuple[str, str]]:
