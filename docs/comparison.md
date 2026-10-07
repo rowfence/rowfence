@@ -37,6 +37,9 @@ isn't in Postgres at all: a service is then the one place that can know everythi
 in several languages must ask the same questions, or when you need a company behind it, with support and a
 hosted offering.
 
+The same model in both, and each point above with their docs quoted:
+[rowstile and OpenFGA](compare/openfga.md), [rowstile and SpiceDB](compare/spicedb.md).
+
 ## A policy engine: Cerbos, Open Policy Agent
 
 A policy engine holds no facts. The app gathers what it knows about the person and the thing, sends it with
@@ -63,6 +66,8 @@ a second service on the same database, a migration script that connects as the a
 **It is the better choice when** the app is TypeScript only, wants its models, its API and its rules from one
 schema, or isn't on Postgres.
 
+Their example in both, and what each stops: [rowstile and ZenStack](compare/zenstack.md).
+
 ## Row-level security by hand
 
 What rowstile writes is row-level security: the enforcement is the same. What it adds is what gets hard by
@@ -82,6 +87,9 @@ table needs no compiler.
 One note for Supabase: its Data API reaches the database as its own roles, which are not rowstile's app role.
 rowstile is for apps whose backend connects to Postgres.
 
+The same rule as `CREATE POLICY` and as a policy file, and where a tree stops being easy:
+[rowstile and row-level security by hand](compare/hand-written-rls.md).
+
 ## Checks in app code: CASL, Casbin, Pundit
 
 An `if` in each handler is where most apps start, and for a few roles it is enough. It gets hard in two
@@ -89,6 +97,8 @@ places: every new handler must remember the check, and a list must be filtered a
 written a second time as a `WHERE`.
 
 **It is the better choice** for a small app with a few roles and no sharing between users.
+
+What changes in a handler, and what it costs: [rowstile and checks in app code](compare/app-code.md).
 
 ## When not to use rowstile
 

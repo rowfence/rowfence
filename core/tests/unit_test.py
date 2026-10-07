@@ -2663,6 +2663,55 @@ class Demo(unittest.TestCase):
         self.assertLess(size, 2_000_000, "demo/demo.gif: keep it light, it loads with the README")
 
 
+class ComparePages(unittest.TestCase):
+    """docs/compare/: a page per alternative. What it says of rowstile is tested here (a whole policy compiles
+    and is laid out as `rowstile fmt` writes it; a part of one, and the app's code, are lines of a conformance
+    app); what it says of another project carries the day its docs were read, and each page says when the other
+    is the better choice."""
+
+    REPO = os.path.dirname(ROOT)
+    SKIP = StackPages.SKIP
+    lines = StackPages.lines
+    OTHERS = ("openfga.md", "spicedb.md", "zenstack.md")  # pages that quote another project's documentation
+
+    def test_what_the_pages_show_of_rowstile(self) -> None:
+        from authzlib import fmt
+
+        folder = os.path.join(self.REPO, "docs", "compare")
+        pages = sorted(f for f in os.listdir(folder) if f.endswith(".md"))
+        self.assertEqual(pages, ["app-code.md", "hand-written-rls.md", *self.OTHERS])
+        have = self.lines("integrations/fastapi") | self.lines("integrations/nextjs")
+        with open(os.path.join(self.REPO, "docs", "comparison.md"), encoding="utf-8") as fh:
+            overview = fh.read()
+        for page in pages:
+            with open(os.path.join(folder, page), encoding="utf-8") as fh:
+                text = fh.read()
+            where = f"docs/compare/{page}"
+            self.assertIn(f"](compare/{page})", overview, f"docs/comparison.md doesn't link {where}")
+            self.assertIn("](../comparison.md)", text, f"{where} doesn't link the overview")
+            self.assertRegex(text, r"\n## When .* the better choice\n", f"{where}: when the other is the better choice")
+            if page in self.OTHERS:
+                self.assertRegex(
+                    text, r"read on \d{4}-\d{2}-\d{2} and linked", f"{where}: the day their docs were read"
+                )
+            policies = re.findall(r"```authz\n(.*?)```", text, re.S)
+            self.assertTrue(policies, where)
+            for policy in policies:
+                if policy.startswith("app role "):
+                    Compiler(parse_policy(policy, where)).compile(where)
+                    self.assertEqual(fmt.format_policy(policy), policy, f"{where}: not as rowstile fmt writes it")
+                else:
+                    missing = [x for x in policy.split("\n") if x.strip() and " ".join(x.split()) not in have]
+                    self.assertEqual(missing, [], f"{where}: policy lines in no conformance app")
+            shown = [
+                " ".join(line.split())
+                for block in re.findall(r"```(?:python|ts|tsx)\n(.*?)```", text, re.S)
+                for line in block.split("\n")
+                if line.strip()
+            ]
+            self.assertEqual([x for x in shown if x not in have], [], f"{where}: code lines in no conformance app")
+
+
 class SdkPackages(unittest.TestCase):
     """sdk/typescript/<package>/README.md: each package's own page on npm. It names its package, links nothing
     by a path (npm shows the file alone), and every line of code it shows is in the conformance app."""
