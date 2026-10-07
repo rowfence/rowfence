@@ -9,6 +9,9 @@ Each release upgrades from the one before it. How releases are numbered and made
 
 ### Added
 
+- Each `@rowstile/*` package has a page of its own on npm: what that package is for, its install line,
+  code from the tested Next.js app, and links to its stack's page. All eight showed the SDK's one
+  README.
 - `authz.lint()` warns of a rule for a command the app role has no privilege for on the table (`update :
   manage` on a table it may not `UPDATE`): the rule never applies, and the statement fails with Postgres's
   own "permission denied for table", which reads like the policy refusing. It says what to grant. A privilege

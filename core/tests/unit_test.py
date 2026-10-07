@@ -2571,6 +2571,62 @@ class StackPages(unittest.TestCase):
         )
 
 
+class SdkPackages(unittest.TestCase):
+    """sdk/typescript/<package>/README.md: each package's own page on npm. It names its package, links nothing
+    by a path (npm shows the file alone), and every line of code it shows is in the conformance app."""
+
+    REPO = os.path.dirname(ROOT)
+    SKIP = StackPages.SKIP
+    lines = StackPages.lines
+
+    def test_each_package_has_a_page_of_its_own(self) -> None:
+        folder = os.path.join(self.REPO, "sdk", "typescript")
+        packages = sorted(d for d in os.listdir(folder) if os.path.exists(os.path.join(folder, d, "package.json")))
+        self.assertEqual(len(packages), 8, packages)
+        have = self.lines("integrations/nextjs")
+        for package in packages:
+            with open(os.path.join(folder, package, "package.json"), encoding="utf-8") as fh:
+                name = json.load(fh)["name"]
+            path = os.path.join(folder, package, "README.md")
+            self.assertTrue(os.path.exists(path), f"sdk/typescript/{package}/README.md: {name}'s page on npm")
+            with open(path, encoding="utf-8") as fh:
+                text = fh.read()
+            self.assertTrue(text.startswith(f"# {name}\n"), f"sdk/typescript/{package}/README.md is {name}'s")
+            self.assertIn(f"{name}@", text, f"sdk/typescript/{package}/README.md: the line that installs {name}")
+            away = [t for t in re.findall(r"\]\(([^)]+)\)", text) if not t.startswith("https://")]
+            self.assertEqual(away, [], f"sdk/typescript/{package}/README.md: links npm can't follow")
+            others = set(re.findall(r"npmjs\.com/package/(@rowstile/[\w-]+)", text))
+            self.assertEqual(
+                others,
+                {f"@rowstile/{p}" for p in packages} - {name},
+                f"sdk/typescript/{package}/README.md: the other packages it lists",
+            )
+            shown = [
+                " ".join(line.split())
+                for lang, block in re.findall(r"```(\w+)\n(.*?)```", text, re.S)
+                if lang in ("ts", "tsx")
+                for line in block.split("\n")
+                if line.strip()
+            ]
+            self.assertTrue(shown, package)
+            missing = [
+                line
+                for line in shown
+                if line not in have
+                and not (
+                    (m := re.fullmatch(r"// (\S+\.\w+)", line))
+                    and os.path.exists(os.path.join(self.REPO, "integrations", "nextjs", *m.group(1).split("/")))
+                )
+            ]
+            self.assertEqual(missing, [], f"sdk/typescript/{package}/README.md: lines not in integrations/nextjs")
+
+    def test_the_release_ships_each_packages_own_page(self) -> None:
+        with open(os.path.join(self.REPO, ".github", "workflows", "release.yml"), encoding="utf-8") as fh:
+            release = fh.read()
+        self.assertIn('for d in sdk/typescript/*/; do cp LICENSE "$d"; done', release)
+        self.assertNotIn("cp sdk/typescript/README.md", release, "it would replace each package's own page")
+
+
 def calls(text: str, opener: str) -> list[tuple[str, list[str]]]:
     """(name, arguments) for each `<opener>name(...)` in text: parentheses, brackets and quotes balanced."""
     out: list[tuple[str, list[str]]] = []
