@@ -1,14 +1,15 @@
 // Builds the docs site into site/dist/: the pages (VitePress), the playground at /playground/, each page's
 // Markdown beside it (/getting-started.md, its links pointing to the others'), llms.txt with its links pointing
-// there, and llms-full.txt. Any static host serves dist/. Plain JavaScript, typed with JSDoc and checked strictly
+// there, llms-full.txt, and the blog's feed (/blog/feed.xml) once there is a post. Any static host serves dist/. Plain JavaScript, typed with JSDoc and checked strictly
 // (site/tsconfig.json).
 //   cd site && npm ci && node build.mjs          (PYTHON=... if python3 isn't the one)
 import { spawnSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { build } from "vitepress";
-import { ORIGIN, PAGES, REPO, siteLink, url } from "./pages.mjs";
+import { build, createMarkdownRenderer } from "vitepress";
+import { FEED, LANGUAGES, feed, forFeed, postBody } from "./blog.mjs";
+import { ORIGIN, PAGES, POSTS, REPO, siteLink, url } from "./pages.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DIST = join(HERE, "dist");
@@ -56,6 +57,23 @@ if (unlisted.length) throw new Error(`sitemap.xml doesn't list ${unlisted.join("
 // the mark and the card for shared links, at the site's root (no public/ folder: see above)
 for (const f of ["mark.svg", "card.png"]) cpSync(join(HERE, "assets", f), join(DIST, f));
 writeFileSync(join(DIST, "robots.txt"), `User-agent: *\nAllow: /\n\nSitemap: ${ORIGIN}/sitemap.xml\n`);
+
+// the blog's feed: each post whole, as HTML, its links to the site's pages by their full address
+if (POSTS.length) {
+  const md = await createMarkdownRenderer(REPO, { languages: LANGUAGES });
+  /** @type {Map<string, string>} */
+  const html = new Map();
+  for (const post of POSTS) {
+    const body = postBody(readFileSync(join(REPO, post.source), "utf8")).replace(/\]\(([^)\s]+)\)/g, (_, /** @type {string} */ href) => {
+      const link = siteLink(post.source, href);
+      return `](${link.startsWith("/") ? ORIGIN + link : link})`;
+    });
+    // the renderer is the build's own, with the config's rules: they ask which file the text is from
+    html.set(post.slug, forFeed(md.render(body, { path: join(REPO, post.source) })));
+  }
+  mkdirSync(dirname(join(DIST, FEED)), { recursive: true });
+  writeFileSync(join(DIST, FEED), feed(POSTS, (post) => html.get(post.slug) ?? ""));
+}
 
 run(process.execPath, "playground/build.mjs");
 cpSync(join(REPO, "playground", "dist"), join(DIST, "playground"), { recursive: true });
