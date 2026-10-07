@@ -1,6 +1,6 @@
 # Why a recursive row-level security policy is slow, and what fixes it
 
-*Salaheddine El Hssani, 2026-10-23*
+*Salaheddine El Hssani, 2026-10-07*
 
 A Postgres row-level security policy that walks up a tree of folders does the walk for every row a query
 reads: counting two million files takes thirteen seconds. With the tree kept in a table, the same count takes
