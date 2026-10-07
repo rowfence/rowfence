@@ -22,7 +22,6 @@ const vueFromSite: Plugin = {
 const guide = [
   { text: "Installing", link: "/installing" },
   { text: "Getting started", link: "/getting-started" },
-  { text: "rowstile and the alternatives", link: "/comparison" },
   { text: "Troubleshooting", link: "/troubleshooting" },
   { text: "Running rowstile", link: "/operations" },
   { text: "Managed Postgres: Neon, Supabase", link: "/managed-postgres" },
@@ -31,6 +30,14 @@ const guide = [
   { text: "Threat model", link: "/threat-model" },
   { text: "Reporting a vulnerability", link: "/security" },
   { text: "Changelog", link: "/changelog" },
+];
+const compare = [
+  { text: "rowstile and the alternatives", link: "/comparison" },
+  { text: "OpenFGA", link: "/compare/openfga" },
+  { text: "SpiceDB", link: "/compare/spicedb" },
+  { text: "ZenStack", link: "/compare/zenstack" },
+  { text: "Row-level security by hand", link: "/compare/hand-written-rls" },
+  { text: "Checks in app code", link: "/compare/app-code" },
 ];
 const stacks = [
   { text: "Pick yours", link: "/stacks/" },
@@ -142,6 +149,7 @@ export default defineConfig({
       "/": [
         { text: "Guide", items: guide },
         { text: "Recipes", items: [{ text: "Cookbook", link: "/cookbook/" }, ...recipeSidebar()] },
+        { text: "Compare", items: compare },
         { text: "Stacks", items: stacks },
         { text: "SDKs", items: sdks },
         { text: "Reference", items: reference },
