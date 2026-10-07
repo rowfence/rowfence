@@ -265,6 +265,8 @@ test "sharing, then a refusal"
   as user $ann allowed {SELECT authz.share('folder', 1, 'viewer', 'user', 2)}
   as anyone refused {DELETE FROM app.folders}
   as bot $b sees 2 {SELECT FROM app.folders WHERE data @> '{"a": {"b": 1}}'}
+  user $ann with scope read cannot edit file 11
+  as user $ann with scope read, files refused {DELETE FROM app.folders}
 
 --------------------------------------------------------------------------------
 
@@ -310,6 +312,22 @@ test "sharing, then a refusal"
       principal: (identifier)
       who: (variable)
       (number)
+      (sql
+        (sql_text)))
+    (check
+      principal: (identifier)
+      who: (variable)
+      (limited
+        scope: (identifier))
+      permission: (identifier)
+      type: (identifier)
+      object: (value))
+    (as
+      principal: (identifier)
+      who: (variable)
+      (limited
+        scope: (identifier)
+        scope: (identifier))
       (sql
         (sql_text)))))
 

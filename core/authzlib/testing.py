@@ -83,6 +83,11 @@ class TestMixin(Core):
                         f"'{st.ptype}' doesn't sign in: a test acts as anyone or as one of {', '.join(signs_in)}",
                         "AZ502",
                     )
+                for scope in st.scopes:
+                    # 'read' is built in unless the policy says its own
+                    if scope not in self.pol.scopes and scope != "read":
+                        have = sorted({*self.pol.scopes, "read"})
+                        fail(st.loc, f"no scope '{scope}' in the policy (it has: {', '.join(have)})", "AZ503")
                 if st.kind == "check":
                     known(st.obj, st.loc, bound)
                     self.check_test_perm(st.type or "", st.perm or "", st.loc)
@@ -115,7 +120,8 @@ class TestMixin(Core):
             blocks.append(f"""  -- {sc.name}{f" ({sc.loc})" if sc.loc else ""}
   v_test := {lit(sc.name)};
   BEGIN
-    PERFORM set_config('authz.user_id', '', true), set_config('authz.principal_type', '', true);
+    PERFORM set_config('authz.user_id', '', true), set_config('authz.principal_type', '', true),
+            set_config('authz.scopes', '', true);
 {steps}    RAISE EXCEPTION USING ERRCODE = 'AZT00';     -- a test's data never stays
   EXCEPTION
     WHEN SQLSTATE 'AZT00' THEN NULL;
@@ -137,7 +143,8 @@ class TestMixin(Core):
             if others:
                 who = f"CASE {others}ELSE {who} END"
             invariants = f"""  v_test := 'invariants'; v_line := ''; v_n := 0;
-  PERFORM set_config('authz.user_id', '', true), set_config('authz.principal_type', '', true);
+  PERFORM set_config('authz.user_id', '', true), set_config('authz.principal_type', '', true),
+          set_config('authz.scopes', '', true);
   FOR v_inv IN SELECT * FROM authz.check_invariants() LOOP
     v_n := v_n + 1;
     {self.add_result("''", "false", "'invariant ' || v_inv.invariant || ': ' || " + who + " || ' can reach ' || v_inv.object_ids::text", "'invariant ' || v_inv.invariant")}
@@ -157,9 +164,11 @@ DECLARE
   v_role text := current_setting('role');
   v_me text := coalesce(current_setting('authz.user_id', true), '');
   v_pt text := coalesce(current_setting('authz.principal_type', true), '');
+  v_scopes text := coalesce(current_setting('authz.scopes', true), '');
   {" ".join(variables)}
 BEGIN
-{"".join(blocks)}{invariants}  PERFORM set_config('authz.user_id', v_me, true), set_config('authz.principal_type', v_pt, true);
+{"".join(blocks)}{invariants}  PERFORM set_config('authz.user_id', v_me, true), set_config('authz.principal_type', v_pt, true),
+          set_config('authz.scopes', v_scopes, true);
   RETURN QUERY SELECT * FROM unnest(r_test, r_line, r_ok, r_detail);
 END $authz_tests$;
 """
@@ -204,16 +213,21 @@ END $authz_tests$;
     def sign_in_sql(self, st: Step, names: dict[str, str]) -> str:
         uid = "''" if st.ptype == "anyone" else self.value_sql(st.who, names)
         pt = "''" if st.ptype in ("anyone", "user") else lit(st.ptype)
+        # the scopes a key or a token would carry (`with scope read`); none: not limited
         return (
             f"    PERFORM set_config('authz.user_id', coalesce({uid}, ''), true), "
-            f"set_config('authz.principal_type', {pt}, true);\n"
+            f"set_config('authz.principal_type', {pt}, true), "
+            f"set_config('authz.scopes', {lit(','.join(st.scopes))}, true);\n"
         )
 
     def step_sql(self, st: Step, names: dict[str, str]) -> str:
         head = f"    v_line := {lit(str(st.loc))}; v_text := {lit(st.text)};\n"
         if st.kind == "given":
             stmt = self.statement_sql(self.one_statement(st.sql) if st.var else st.sql, names)
-            reset = "    PERFORM set_config('authz.user_id', '', true), set_config('authz.principal_type', '', true);\n"
+            reset = (
+                "    PERFORM set_config('authz.user_id', '', true), set_config('authz.principal_type', '', true), "
+                "set_config('authz.scopes', '', true);\n"
+            )
             if not st.var:
                 return head + reset + f"    EXECUTE {stmt};\n"
             var = names[st.var]

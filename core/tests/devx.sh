@@ -59,6 +59,31 @@ out=$(rows "$T/w.authz" | awk -F'\t' '$1 != "invariants" {print $3}' | tr -d '\n
 [ "$out" = tttttf ] && ok "a write after WITH or a comment that changes no row is refused; a read of no row is allowed; sees takes a final ;" || bad "writes however they start" "$(rows "$T/w.authz")"
 out=$(rows "$T/w.authz" | awk -F'\t' '$3 == "f" {print $4}')
 case "$out" in *"error: "*) ok "... and an error that isn't a refusal fails 'refused' too";; *) bad "refused by another error" "$out";; esac
+# with scope: a line checked as a key or a token limited to those scopes would be (the docs app: read is
+# select and view; files is select and update on app.files, and view and edit on a file)
+cat > "$T/s.authz" <<'EOF'
+test "a key limited to a scope"
+  given ann  = {INSERT INTO app.users (id, name) VALUES (9001, 'Ann') RETURNING id}
+  given acme = {INSERT INTO app.orgs (id, name) VALUES (9001, 'Acme') RETURNING id}
+  given top  = {INSERT INTO app.folders (org_id, owner_id, name) VALUES ($acme, $ann, 'Top') RETURNING id}
+  given f    = {INSERT INTO app.files (folder_id, owner_id, name) VALUES ($top, $ann, 'a') RETURNING id}
+  user $ann can edit file $f
+  user $ann with scope read can view file $f
+  user $ann with scope read cannot edit file $f
+  as user $ann with scope read sees 1 {SELECT FROM app.files WHERE id = $f}
+  as user $ann with scope read refused {UPDATE app.files SET name = 'b' WHERE id = $f}
+  as user $ann with scope files allowed {UPDATE app.files SET name = 'b' WHERE id = $f}
+  as user $ann with scope files refused {UPDATE app.folders SET name = 'x' WHERE id = $top}
+  as user $ann with scope read, files allowed {UPDATE app.files SET name = 'c' WHERE id = $f}
+  as user $ann allowed {UPDATE app.folders SET name = 'x' WHERE id = $top}
+  user $ann can edit file $f
+EOF
+out=$(rows "$T/s.authz" | awk -F'\t' '$1 != "invariants" {print $3}' | tr -d '\n')
+[ "$out" = tttttttttt ] && ok "with scope: a line is checked as a key limited to those scopes, and the next line is not" || bad "with scope" "$(rows "$T/s.authz")"
+sed 's/with scope read cannot edit/with scope read can edit/' "$T/s.authz" > "$T/t.authz"
+out=$(rows "$T/t.authz" | awk -F'\t' '$3 == "f" {print $4}')
+case "$out" in *"with scope read can edit file"*) ok "... and a check that fails under a scope says so";; *) bad "with scope, failing" "$out";; esac
+[ -z "$(PSQL -c "SELECT current_setting('authz.scopes', true)")" ] && ok "... and nothing of it stays in the session" || bad "with scope left a setting"
 sed 's/as user $bo refused {WITH/as user $bo allowed {WITH/' "$T/w.authz" > "$T/t.authz"
 out=$(rows "$T/t.authz" | awk -F'\t' '$3 == "f" {print $4}')
 case "$out" in *"refused: it changed no rows"*) ok "... 'allowed' on one fails, and says it changed no rows";; *) bad "allowed, no rows" "$out";; esac

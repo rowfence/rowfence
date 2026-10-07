@@ -22,7 +22,8 @@ User-facing docs: `README.md`, then `docs/reference/` (read them first). Terms i
     - `hardening.py` — `authz.lint()`
     - `devtools.py` — graph (Mermaid), clients (py, ts; with `Refused`, `NotFound`, `refusal`, `expect`, `who_among`;
       `ts-sdk`: only the names, for apps on the TypeScript SDK)
-    - `testing.py` — policy tests: the unnamed section, named tests (`given`, `as user X allowed|refused|sees`), invariants,
+    - `testing.py` — policy tests: the unnamed section, named tests (`given`, `as user X allowed|refused|sees`;
+      `with scope a, b` after who: the line as a key limited to those scopes), invariants,
       compiled into one plpgsql function `pg_temp.authz_policy_tests()` returning a row per check
     - `refusals.py` — refused writes that say why, `authz.explain_rule`, `authz.who_among`
     - `draft.py` — a first policy from the catalog (`rowstile init`)

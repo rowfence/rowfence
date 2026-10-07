@@ -416,6 +416,18 @@ CODES = {
         "test \"teams\"\n  given t = {INSERT INTO app.teams (name) VALUES ('a') RETURNING id}\n  anyone cannot see team $t\n",
         when="tests",
     ),
+    "AZ503": Code(
+        "A test names a scope the policy doesn't have",
+        "`with scope` checks a line as a key or a token limited to those scopes would be. The scopes are the "
+        "policy's `scope` lines, and `read`, which is built in.",
+        "type folder = app.folders\n  owner : user = owner_id\n  can view = owner\nscope files = folder.view\n"
+        "test \"keys\"\n  given f = {INSERT INTO app.folders (owner_id, name) VALUES (1, 'a') RETURNING id}\n"
+        "  user 1 with scope file can view folder $f\n",
+        "type folder = app.folders\n  owner : user = owner_id\n  can view = owner\nscope files = folder.view\n"
+        "test \"keys\"\n  given f = {INSERT INTO app.folders (owner_id, name) VALUES (1, 'a') RETURNING id}\n"
+        "  user 1 with scope files can view folder $f\n",
+        when="tests",
+    ),
     "AZ601": Code(
         "A table or column that isn't there",
         "Applying checks the policy against the database first: each table a type or relation names, and each "

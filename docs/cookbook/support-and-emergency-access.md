@@ -50,7 +50,8 @@ test "emergency access: for a while, with a reason"
   as user $bo refused {UPDATE app.notes SET body = 'changed' WHERE id = $n}
 ```
 
-The tests check who may start a view-as, not what the session then shows: a test line signs in afresh.
+The tests check who may start a view-as, not what the session then shows: a test line signs in afresh. (What
+a key limited to a scope may do can be tested: [API keys limited to some permissions](api-keys-with-scopes.md).)
 
 ## Try it
 

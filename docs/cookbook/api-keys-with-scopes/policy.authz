@@ -1,0 +1,31 @@
+-- API keys with scopes (docs/cookbook/api-keys-with-scopes.md): a key acts for its user, limited to what its
+-- scopes name.
+app role app_user
+
+type user = app.users
+
+type project = app.projects
+  owner  : user = owner_id
+  member : user = app.project_members(project_id -> user_id)
+
+  can edit = owner or member
+  can view = edit
+
+type note = app.notes
+  project : project = project_id
+  author  : user    = author_id
+
+  can edit = author
+  can view = project.view
+
+scope inbox = app.notes.insert, project.edit
+
+rules app.projects
+  select : view
+
+rules app.notes
+  select                       : view
+  insert                       : project.edit and author
+  update                       : edit
+  update project_id, author_id : nobody
+  delete                       : edit

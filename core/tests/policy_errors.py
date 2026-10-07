@@ -665,6 +665,25 @@ TESTS = [
         12,
     ),
     ("a line that is none of a test's", 'test "t"\n  user 1 maybe share doc 1\n', "a test's lines are", 11),
+    (
+        "a scope the policy doesn't have",
+        'test "t"\n  user 1 with scope files can share doc 1\n',
+        "no scope 'files' in the policy (it has: read)",
+        11,
+    ),
+    (
+        "... also on a statement",
+        'test "t"\n  as user 1 with scope read, files sees 0 {SELECT 1}\n',
+        "no scope 'files' in the policy",
+        11,
+    ),
+    (
+        "a scope for nobody",
+        'test "t"\n  anyone with scope read can share doc 1\n',
+        "`anyone` is nobody signed in",
+        11,
+    ),
+    ("with scope and no scope", 'test "t"\n  user 1 with scope can share doc 1\n', "a test's lines are", 11),
     ("a test with no lines", 'test "t"\n', "test 't' has no lines", 10),
     (
         "two tests with one name",

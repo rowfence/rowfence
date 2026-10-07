@@ -9,6 +9,12 @@ Each release upgrades from the one before it. How releases are numbered and made
 
 ### Added
 
+- Tests can check a line as a key or a token limited to a scope would be: `with scope` after who the line is
+  about, `user 3 with scope read cannot edit file 11`, `as user 3 with scope read, files refused {UPDATE
+  ...}`. A scope the policy doesn't have is a mistake when the tests compile (AZ503). The editors' grammars
+  know the words (the VS Code extension is 0.1.2).
+- A recipe: [API keys limited to some permissions](docs/cookbook/api-keys-with-scopes.md), which those
+  tests make possible. The cookbook has nineteen.
 - `rowstile init` leaves a note for the coding agents that work in the app, in `AGENTS.md`: where the policy
   and its tests are, the loop after an edit, that production takes migrations, that the app connects as the
   app role and signs each transaction in. Without it an agent sees a route with no permission check and adds

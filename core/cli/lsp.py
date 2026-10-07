@@ -332,7 +332,10 @@ class Server:
         name = parts[i]
         stripped = s.strip()
         # a test line: user $x can PERM TYPE ID
-        m = re.match(r"(?:anyone|\S+\s+\S+)\s+(?:can|cannot)\s+(\w+)\s+(\w+)", stripped)
+        m = re.match(
+            r"(?:anyone|\S+\s+\S+(?:\s+with\s+scope\s+\w+(?:\s*,\s*\w+)*)?)\s+(?:can|cannot)\s+(\w+)\s+(\w+)",
+            stripped,
+        )
         if m and self.block(uri, line)[0] == "test" and name in (m.group(1), m.group(2)):
             t = pol.types.get(m.group(2))
             if name == m.group(2) and t:
@@ -556,7 +559,7 @@ class Server:
             if kind == "rules"
             else TYPE_WORDS
             if kind == "type"
-            else ["given", "as", "can", "cannot", "allowed", "refused", "sees"],
+            else ["given", "as", "can", "cannot", "allowed", "refused", "sees", "with", "scope"],
             C_KEYWORD,
         )
         return dedupe(items)
