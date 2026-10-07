@@ -26,6 +26,16 @@ ids, to a fixed point, and knows nothing of the SQL the compiler writes.
 - **Random policies**: [`tests/genpolicy.py`](../core/tests/genpolicy.py) writes policies at random, with
   their tables and data, and checks them the same way: twelve on each full run, and a hundred with new seeds
   every night.
+- **Random worlds**: the two above compare answers in one setting: plain tables, and the owner's session
+  switched to the app role. [`tests/around.py`](../core/tests/around.py) takes the random policies again and
+  draws what is around each one too: tables that are partitioned, or have a table that inherits from them;
+  default privileges of the owner's; a login role that is a member of the app role and signs each user in;
+  planner settings, a read-only transaction, a search path that starts with a schema of decoys; and, halfway,
+  something changed behind the policy's back (a grant on rowstile's own tables, row-level security turned
+  off, a new partition). Besides the comparisons above, asked in that session, it tries real writes as the
+  app role on every row and undoes them, checks that no share outlives its row, that a role the policy
+  doesn't name gets nothing, and that `authz.lint()` reports what changed and `rowstile apply` puts it right.
+  A few on every run, sixty with new seeds every night.
 
 ## The boundary
 

@@ -6,7 +6,7 @@
 #   ./run_tests.sh --short                                         # what depends on the Postgres version: --quick
 #                         without the checks that need no database, one random-change run, no migrate vs apply
 #   SOAK_SEED=N ./run_tests.sh --soak                              # the random checks (random policies too), long, with a new seed
-#                         (about 95 minutes; a random seed if SOAK_SEED is empty; the log says which)
+#                         (about 110 minutes; a random seed if SOAK_SEED is empty; the log says which)
 # Needs psql, createdb, dropdb and python3. Creates and drops databases named authz_*, as a non-superuser.
 # Each step's result line says how long it took.
 set -u
@@ -51,6 +51,9 @@ if [ "$MODE" = soak ]; then
   python3 tests/genpolicy.py --policies 100 --steps 10 --seed "$((SEED * 1000))" --db authz_genpolicy
   record $? "genpolicy"
   dropdb --if-exists authz_genpolicy >/dev/null 2>&1
+  step "random policies in random worlds: the catalog, the session and the role around them (60, seeds from $((SEED * 1000)))"
+  python3 tests/around.py --policies 60 --steps 8 --seed "$((SEED * 1000))" --db authz_around
+  record $? "around"
 fi
 
 if [ "$MODE" != proofs ] && [ "$MODE" != soak ]; then
@@ -194,6 +197,11 @@ if [ "$MODE" = full ]; then
   record $? "genpolicy"
   dropdb --if-exists authz_genpolicy >/dev/null 2>&1
 fi
+# what is around the policy depends on the version of Postgres more than the policy does: a few on every run
+AROUND=4; [ "$MODE" = full ] && AROUND=16
+step "random policies in random worlds: the catalog, the session and the role around them ($AROUND policies)"
+python3 tests/around.py --policies "$AROUND" --steps 6 --seed 1 --db authz_around
+record $? "around"
 fi
 
 # Tree writes under concurrency: every pair raced at each isolation level, and a concurrent stress run;
