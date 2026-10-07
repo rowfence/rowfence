@@ -32,10 +32,16 @@ run push --development; is unchanged && ok "push: unchanged too" || bad "push" "
 [ "$(PSQL -c "SELECT authz.verify()")" = t ] && ok "the inheritance tables are right" || bad "verify"
 run test; case "$out" in *"policy tests passed (12 checks)") ok "the policy's tests pass, a named test that writes to the tables among them";; *) bad "test" "$out";; esac
 
+sed 's/^type user = public.User (id int)$/type user = public.User/' tests/prisma.authz > "$T/nokey.authz"
+run apply "$T/nokey.authz"
+case "$out" in *"public.User.id is integer, not bigint: write its type after the key, (id integer) [AZ602]"*) ok "a key Prisma made an Int: applying says what to write after the key";; *) bad "AZ602" "$out";; esac
+[ "$(PSQL -c "SELECT problem FROM authz.lint() WHERE object = 'public.\"TeamMember\"'")" = "app_user may read every row, and the policy reads it for team.member: who is linked to what is readable. Fine where that is no secret, otherwise give it a type and rules" ] &&
+  ok "lint says of the link table that the app role reads it in full, and for which relation" || bad "lint, the link table" "$(PSQL -c "SELECT object, problem FROM authz.lint()")"
+
 echo "-- lint and indexes"
 [ "$(PSQL -c "SELECT count(*) FROM authz.lint() WHERE severity IN ('error', 'warning')")" = 0 ] && ok "lint: no error, no warning" || bad "lint" "$(PSQL -c "SELECT * FROM authz.lint()")"
-[ "$(PSQL -c "SELECT string_agg(object, ' ' ORDER BY object) FROM authz.lint() WHERE problem LIKE '%may read every row%'")" = 'public."Team" public."User"' ] &&
-  ok "lint names the tables without rules as Postgres writes them, and not Prisma's own" || bad "lint, tables read in full" "$(PSQL -c "SELECT object, problem FROM authz.lint()")"
+[ "$(PSQL -c "SELECT string_agg(object, ' ' ORDER BY object) FROM authz.lint() WHERE problem LIKE '%may read every row%'")" = 'public."Team" public."TeamMember" public."User"' ] &&
+  ok "lint names the tables read in full as Postgres writes them (the link table too), and not Prisma's own" || bad "lint, tables read in full" "$(PSQL -c "SELECT object, problem FROM authz.lint()")"
 run indexes; [ "$out" = "every lookup the policy makes into the app's tables has an index" ] && ok "indexes: Prisma's indexes are found" || bad "indexes" "$out"
 PSQL -c 'DROP INDEX "Note_folderId_idx"'
 run indexes --check; case "$out" in *'public.Note'*'folderId'*) [ $rc -eq 1 ] && ok "... and one that is missing is named" || bad "indexes --check exit" "$rc";; *) bad "a missing index" "$out";; esac

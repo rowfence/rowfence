@@ -295,7 +295,7 @@ CREATE OR REPLACE FUNCTION authz.link_hashes() RETURNS text[] LANGUAGE sql STABL
   WHERE btrim(x) <> '' $$;
 
 DO $chk$
-DECLARE missing text := '';
+DECLARE missing text := ''; v_oid oid; v_type text;
 BEGIN
   IF to_regclass('"alt"."users"') IS NULL THEN missing := missing || E'\n  line 4: table alt.users not found [AZ601]';
   ELSIF NOT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = to_regclass('"alt"."users"')
@@ -402,17 +402,25 @@ BEGIN
                     AND attname = 'up' AND attnum > 0 AND NOT attisdropped) THEN
     missing := missing || E'\n  line 47: column up not found in alt.docs [AZ601]';
   END IF;
-  IF to_regclass('"alt"."users"') IS NOT NULL AND (SELECT atttypid FROM pg_attribute WHERE attrelid = to_regclass('"alt"."users"') AND attname = 'id') <> to_regtype('bigint') THEN
-    missing := missing || E'\n  line 4: alt.users.id is not bigint; write its type after the key, e.g. (id uuid) [AZ602]';
+  SELECT atttypid, replace(format_type(atttypid, NULL), 'character varying', 'varchar') INTO v_oid, v_type
+  FROM pg_attribute WHERE attrelid = to_regclass('"alt"."users"') AND attname = 'id' AND attnum > 0 AND NOT attisdropped;
+  IF FOUND AND v_oid <> to_regtype('bigint') THEN
+    missing := missing || E'\n  line 4: alt.users.id is ' || v_type || E', not bigint: write its type after the key, (id ' || v_type || ') [AZ602]';
   END IF;
-  IF to_regclass('"alt"."groups"') IS NOT NULL AND (SELECT atttypid FROM pg_attribute WHERE attrelid = to_regclass('"alt"."groups"') AND attname = 'gid') <> to_regtype('bigint') THEN
-    missing := missing || E'\n  line 8: alt.groups.gid is not bigint; write its type after the key, e.g. (gid uuid) [AZ602]';
+  SELECT atttypid, replace(format_type(atttypid, NULL), 'character varying', 'varchar') INTO v_oid, v_type
+  FROM pg_attribute WHERE attrelid = to_regclass('"alt"."groups"') AND attname = 'gid' AND attnum > 0 AND NOT attisdropped;
+  IF FOUND AND v_oid <> to_regtype('bigint') THEN
+    missing := missing || E'\n  line 8: alt.groups.gid is ' || v_type || E', not bigint: write its type after the key, (gid ' || v_type || ') [AZ602]';
   END IF;
-  IF to_regclass('"alt"."projects"') IS NOT NULL AND (SELECT atttypid FROM pg_attribute WHERE attrelid = to_regclass('"alt"."projects"') AND attname = 'id') <> to_regtype('bigint') THEN
-    missing := missing || E'\n  line 14: alt.projects.id is not bigint; write its type after the key, e.g. (id uuid) [AZ602]';
+  SELECT atttypid, replace(format_type(atttypid, NULL), 'character varying', 'varchar') INTO v_oid, v_type
+  FROM pg_attribute WHERE attrelid = to_regclass('"alt"."projects"') AND attname = 'id' AND attnum > 0 AND NOT attisdropped;
+  IF FOUND AND v_oid <> to_regtype('bigint') THEN
+    missing := missing || E'\n  line 14: alt.projects.id is ' || v_type || E', not bigint: write its type after the key, (id ' || v_type || ') [AZ602]';
   END IF;
-  IF to_regclass('"alt"."docs"') IS NOT NULL AND (SELECT atttypid FROM pg_attribute WHERE attrelid = to_regclass('"alt"."docs"') AND attname = 'doc_no') <> to_regtype('bigint') THEN
-    missing := missing || E'\n  line 19: alt.docs.doc_no is not bigint; write its type after the key, e.g. (doc_no uuid) [AZ602]';
+  SELECT atttypid, replace(format_type(atttypid, NULL), 'character varying', 'varchar') INTO v_oid, v_type
+  FROM pg_attribute WHERE attrelid = to_regclass('"alt"."docs"') AND attname = 'doc_no' AND attnum > 0 AND NOT attisdropped;
+  IF FOUND AND v_oid <> to_regtype('bigint') THEN
+    missing := missing || E'\n  line 19: alt.docs.doc_no is ' || v_type || E', not bigint: write its type after the key, (doc_no ' || v_type || ') [AZ602]';
   END IF;
   IF missing <> '' THEN RAISE EXCEPTION 'the policy does not match this database:%', missing; END IF;
 END $chk$;
@@ -5671,7 +5679,8 @@ WHERE w.who IS NOT NULL AND n.nspname !~ '^pg_(toast_)?temp_' LOOP
     RETURN NEXT;
   END LOOP;
   -- tables holding relationships (memberships, links) the app role may change directly
-  FOR r IN SELECT to_regclass(x) AS tbl FROM unnest(ARRAY['"alt"."doc_links"', '"alt"."doc_projects"', '"alt"."group_members"', '"alt"."project_groups"']::text[]) x LOOP
+  FOR r IN SELECT to_regclass(v.tbl) AS tbl, v.readers, v.typed
+           FROM (VALUES ('"alt"."doc_links"', 'doc.parent', false), ('"alt"."doc_projects"', 'doc.project', false), ('"alt"."group_members"', 'grp.member', false), ('"alt"."project_groups"', 'proj.team', false)) v(tbl, readers, typed) LOOP
     CONTINUE WHEN r.tbl IS NULL;
     IF has_table_privilege(v_role, r.tbl, 'TRUNCATE') THEN
       severity := 'error'; object := r.tbl::text;
@@ -5683,6 +5692,13 @@ WHERE w.who IS NOT NULL AND n.nspname !~ '^pg_(toast_)?temp_' LOOP
        AND NOT (SELECT relrowsecurity FROM pg_class WHERE oid = r.tbl) THEN
       severity := 'error'; object := r.tbl::text;
       problem := format('%s may change it, and it decides who is in what: anyone could add themselves. Revoke the write privileges, or give it rules', 'app_user');
+      RETURN NEXT;
+    END IF;
+    -- ... or read in full: who is linked to what (a type's table without rules is named above)
+    IF NOT r.typed AND NOT (SELECT relrowsecurity FROM pg_class WHERE oid = r.tbl)
+       AND has_any_column_privilege(v_role, r.tbl, 'SELECT') THEN
+      severity := 'info'; object := r.tbl::text;
+      problem := format('%s may read every row, and the policy reads it for %s: who is linked to what is readable. Fine where that is no secret, otherwise give it a type and rules', 'app_user', r.readers);
       RETURN NEXT;
     END IF;
   END LOOP;

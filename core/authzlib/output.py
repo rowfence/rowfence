@@ -996,10 +996,12 @@ END $kv$;"""
             f"    missing := missing || E'\\n  {loc}: column {col} not found in {tbl} [AZ601]';\n  END IF;"
             for tbl, col, loc in dict.fromkeys((a, b, str(c)) for a, b, c in self.columns)
         )
+        # the column's own type, as a type line writes it (varchar for character varying): what to write
         pk_checks = "\n".join(
-            f"  IF to_regclass({lit(qt(tbl))}) IS NOT NULL AND (SELECT atttypid FROM pg_attribute WHERE attrelid = "
-            f"to_regclass({lit(qt(tbl))}) AND attname = {lit(pk)}) <> to_regtype({lit(pkt)}) THEN\n"
-            f"    missing := missing || E'\\n  {loc}: {tbl}.{pk} is not {pkt}; write its type after the key, e.g. ({pk} uuid) [AZ602]';\n"
+            f"  SELECT atttypid, replace(format_type(atttypid, NULL), 'character varying', 'varchar') INTO v_oid, v_type\n"
+            f"  FROM pg_attribute WHERE attrelid = to_regclass({lit(qt(tbl))}) AND attname = {lit(pk)} AND attnum > 0 AND NOT attisdropped;\n"
+            f"  IF FOUND AND v_oid <> to_regtype({lit(pkt)}) THEN\n"
+            f"    missing := missing || E'\\n  {loc}: {tbl}.{pk} is ' || v_type || E', not {pkt}: write its type after the key, ({pk} ' || v_type || ') [AZ602]';\n"
             f"  END IF;"
             for tbl, pk, pkt, loc in self.pk_checks
         )
@@ -1179,7 +1181,7 @@ END $w$;"""
             (
                 "changed",
                 "tables",
-                f"DO $chk$\nDECLARE missing text := '';\nBEGIN\n{checks}\n{pk_checks}\n"
+                f"DO $chk$\nDECLARE missing text := ''; v_oid oid; v_type text;\nBEGIN\n{checks}\n{pk_checks}\n"
                 f"  IF missing <> '' THEN RAISE EXCEPTION 'the policy does not match this database:%', missing; END IF;\nEND $chk$;",
             ),
             ("full", "uid_type", uid_check),

@@ -147,6 +147,7 @@ SELECT p.oid::regprocedure::text, gw.who, a.privilege_type,
         governed = sorted({r.table for r in self.rules})
         typed_tables = sorted({t.table for t in self.types.values()})
         link_tables: set[str] = set()  # tables that hold relationships (who is in what)
+        link_readers: dict[str, list[str]] = {}  # ... and the relations read from each
         # (table, column, what it grants, loc, the permission lint suggests asking for) for column sources
         link_cols: list[tuple[str, str, str, Loc, str]] = []
         # (table, columns, relation, loc): a column placing a row under another of its type
@@ -158,6 +159,8 @@ SELECT p.oid::regprocedure::text, gw.who, a.privilege_type,
                     if src.kind == "table":
                         table = self.source_table(src)
                         link_tables.add(table)
+                        if not r.synthetic:
+                            link_readers.setdefault(table, []).append(f"{t.name}.{r.name}")
                         index_cols.append(
                             (
                                 table,
@@ -205,6 +208,12 @@ SELECT p.oid::regprocedure::text, gw.who, a.privilege_type,
         ]
         arr = lambda xs: "ARRAY[" + ", ".join(lit(x) for x in xs) + "]::text[]"
         link_only = sorted(link_tables - set(governed))
+        # (table, the relations read from it, whether it is a type's table too: those have a line of their own)
+        link_rows = ", ".join(
+            f"({lit(qt(t))}, {lit(', '.join(dict.fromkeys(link_readers.get(t, []))) or 'its relations')}, "
+            f"{'true' if t in typed_tables else 'false'})"
+            for t in link_only
+        )
         whys = {}
         for tb, c, why in index_cols:
             whys.setdefault((tb, c), []).append(why)
@@ -420,7 +429,8 @@ BEGIN
     RETURN NEXT;
   END LOOP;
   -- tables holding relationships (memberships, links) the app role may change directly
-  FOR r IN SELECT to_regclass(x) AS tbl FROM unnest({arr([qt(t) for t in link_only])}) x LOOP
+  FOR r IN SELECT to_regclass(v.tbl) AS tbl, v.readers, v.typed
+           FROM (VALUES {link_rows or "(NULL::text, NULL::text, NULL::boolean)"}) v(tbl, readers, typed) LOOP
     CONTINUE WHEN r.tbl IS NULL;
     IF has_table_privilege(v_role, r.tbl, 'TRUNCATE') THEN
       severity := 'error'; object := r.tbl::text;
@@ -432,6 +442,13 @@ BEGIN
        AND NOT (SELECT relrowsecurity FROM pg_class WHERE oid = r.tbl) THEN
       severity := 'error'; object := r.tbl::text;
       problem := format('%s may change it, and it decides who is in what: anyone could add themselves. Revoke the write privileges, or give it rules', {lit(role)});
+      RETURN NEXT;
+    END IF;
+    -- ... or read in full: who is linked to what (a type's table without rules is named above)
+    IF NOT r.typed AND NOT (SELECT relrowsecurity FROM pg_class WHERE oid = r.tbl)
+       AND has_any_column_privilege(v_role, r.tbl, 'SELECT') THEN
+      severity := 'info'; object := r.tbl::text;
+      problem := format('%s may read every row, and the policy reads it for %s: who is linked to what is readable. Fine where that is no secret, otherwise give it a type and rules', {lit(role)}, r.readers);
       RETURN NEXT;
     END IF;
   END LOOP;

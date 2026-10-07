@@ -439,7 +439,8 @@ CODES = {
     ),
     "AZ602": Code(
         "A key of another type",
-        "Keys are `bigint` unless written: `type doc = app.docs (id uuid)`. The table's column has another type.",
+        "Keys are `bigint` unless written: `type doc = app.docs (id uuid)`. The table's column has another type, "
+        "which the message names with what to write: `(id integer)` for a key Prisma made an `Int`.",
         "type doc = app.docs\n  owner : user = owner_id\n  can view = owner\n",
         "type doc = app.docs (id uuid)\n  owner : user = owner_id\n  can view = owner\n",
         when="apply",

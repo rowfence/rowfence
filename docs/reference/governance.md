@@ -43,8 +43,9 @@ membership tables the app may write, relationship columns anyone who can update 
 row may change, masked columns readable from the table, unique indexes that reveal
 hidden rows, missing indexes on the columns permission checks look up, a select rule whose permissions are
 named so many times over that every read is slow to plan ([Speed and limits](limits.md)), and JIT being on. As notes, it lists
-the tables the app role may read in full: a type's table without rules, and any table in the same schemas
-that the policy doesn't name (password hashes, sessions: nothing filters them; fine for a lookup table). It also
+the tables the app role may read in full: a type's table without rules, a table the policy reads for a
+relation (who is in which team), and any table in the same schemas that the policy doesn't name (password
+hashes, sessions: nothing filters them; fine for a lookup table). It also
 reports privileges on rowstile's own schemas (`authz`, `authz_gen`, `authz_int`) that the policy doesn't
 give, and a schema on the search path of rowstile's functions that run as the owner that another role may
 create in. Applying takes the first back and refuses the second (AZ612).
