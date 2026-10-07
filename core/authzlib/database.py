@@ -491,7 +491,7 @@ def unchanged(db: Db, policy: str, files: Files) -> bool:
         # each rule on a whole row is a policy named authz_<command> (output.compile)
         made = sorted(
             {
-                (r.table, "authz_" + r.command)
+                (qt(r.table), "authz_" + r.command)
                 for r in rules
                 if r.command not in ("mask", "update check") and not r.columns
             }
@@ -519,7 +519,7 @@ def unchanged(db: Db, policy: str, files: Files) -> bool:
             [
                 text_array([t for t, _ in made]),
                 text_array([n for _, n in made]),
-                text_array(sorted({r.table for r in rules})),
+                text_array(sorted({qt(r.table) for r in rules})),
                 text_array([t for t, _ in triggers]),
                 text_array([n for _, n in triggers]),
             ],

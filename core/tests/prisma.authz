@@ -1,0 +1,63 @@
+-- prisma.authz: a policy over tables named as Prisma names them (tests/prisma_schema.sql, tests/capitals.sh):
+-- capital letters in the tables' names and in the columns', in public. Notes live in folders, folders in
+-- folders; a folder is shared with a person or a team, and what is shared reaches everything under it.
+app role app_user
+
+type user = public.User (id int)
+
+type team = public.Team (id int)
+  member : user = public.TeamMember(teamId -> userId)
+
+type folder = public.Folder (id int)
+  owner  : user   = ownerId
+  parent : folder = parentId
+  editor : user, team#member shared by manage
+  viewer : user, team#member shared by manage
+
+  can manage = owner or parent.manage
+  can edit   = manage or editor or parent.edit
+  can view   = edit or viewer or parent.view
+
+type note = public.Note (id int)
+  folder : folder = folderId
+  author : user   = authorId
+
+  can edit = (folder.edit and {not locked}) or folder.manage  -- a locked note is its managers' only
+  can view = folder.view
+
+rules public.Folder
+  select                : view
+  insert                : owner and (parent.edit or {"parentId" is null})
+  update                : edit
+  update ownerId        : manage
+  update parentId after : parent.edit
+  delete                : manage
+
+rules public.Note view public.NoteShown
+  select                : view
+  insert                : folder.edit and author
+  update                : edit
+  update folderId after : folder.edit
+  update locked         : folder.manage
+  update authorId       : nobody
+  delete                : edit
+  mask body             : edit  -- viewers see that a note is there, not its text
+
+test
+  user 1 can manage folder 3     -- ann owns the top, so what is under it
+  user 2 cannot view folder 3
+  user 4 cannot view note 2
+
+test "a share on a folder reaches the notes under it"
+  given top = {INSERT INTO public."Folder" (name, "ownerId") VALUES ('top', 1) RETURNING id}
+  given sub = {INSERT INTO public."Folder" (name, "ownerId", "parentId") VALUES ('sub', 1, $top) RETURNING id}
+  given n   = {INSERT INTO public."Note" (title, "folderId", "authorId") VALUES ('n', $sub, 1) RETURNING id}
+  user 2 cannot view note $n
+  as user 1 allowed {SELECT authz.share('folder', $top, 'viewer', 'user', 2)}
+  as user 1 allowed {SELECT authz.share('folder', $top, 'editor', 'team', 1, 'member')}
+  user 2 can view note $n
+  user 3 can edit note $n
+  as user 2 refused {UPDATE public."Note" SET title = 'by bo' WHERE id = $n}
+  as user 3 allowed {UPDATE public."Note" SET title = 'by cy' WHERE id = $n}
+  as user 3 refused {UPDATE public."Note" SET locked = true WHERE id = $n}
+  as user 2 sees 1 {SELECT FROM public."Folder" WHERE id = $sub}
