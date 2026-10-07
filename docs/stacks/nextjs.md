@@ -19,6 +19,8 @@ in CI already there.
 ## Install
 
 ```sh
+# Prisma 7 and its Postgres adapter, if the app doesn't have them yet
+npm install @prisma/client@7 @prisma/adapter-pg@7 pg && npm install --save-dev prisma@7
 # @next on each while only an alpha is published: a plain install gets an older one
 npm install @rowstile/client@next @rowstile/prisma@next @rowstile/next@next @rowstile/react@next
 npm install --save-dev rowstile@next @rowstile/vitest@next
@@ -121,6 +123,9 @@ export async function register() {
 }
 ```
 
+Next.js looks for that file beside `app/`: in an app made with `--src-dir`, where `app/` is inside `src/`, it
+is `src/instrumentation.ts`, and it imports `./db.ts`.
+
 ## Pages, route handlers and server actions
 
 A page reads as the request's user:
@@ -206,6 +211,18 @@ function Buttons() {
 `useShares` and a headless `<ShareDialog>` share and unshare as the database allows; `useAccessRequest` asks
 for access. They stay current over server-sent events.
 
+Your own code shares with `db.$authz.share`: the object, the relation, then who it is shared with (a type and
+an id; for a team's members, `"team", 7, "member"`). Who may share is the policy's (`viewer : user shared by
+edit`), so the handler checks nothing: anyone else gets a 403.
+
+```ts
+export const POST = route(async (req: Request, { params }: Params) => {
+  const { user } = (await req.json()) as { user: number };
+  await db.$authz.share("project", Number((await params).id), "viewer", "user", user);
+  return new Response(null, { status: 204 });
+});
+```
+
 ## Background jobs
 
 A job acts for a principal of its own (`type service = app.services principal` in the policy), whatever
@@ -225,24 +242,24 @@ The policy ships as Prisma migrations. `rowstile migrate` writes the next one (o
 `db/policy.lock`), and Prisma applies it with the others; Prisma's own diff then shows no change.
 
 ```sh
-npx rowstile migrate               # after changing the policy
-npx prisma migrate deploy
-npx rowstile migrate --check       # in CI: exit 1 if a policy change has no migration
+npx rowstile migrate --name note_comment_view   # after changing the policy: <time>_authz_note_comment_view
+npx prisma migrate deploy                       # a new database, CI, production
+npx rowstile migrate --check                    # in CI: exit 1 if a policy change has no migration
+
+# the development database `rowstile dev` pushed to holds that change already: there, in place of deploy
+npx prisma migrate resolve --applied 20261006215008_authz_note_comment_view   # the migration's folder
 ```
+
+Without `--name` the folder is `<time>_authz_policy`.
 
 While you edit, `npx rowstile dev` checks, pushes to the development database, runs the tests and rewrites
 `src/authz.gen.ts` on every save (and writes the migration once you stop editing).
 
 The development database then holds what `dev` (or `rowstile push`) pushed, not what its migrations left.
 The first migration, the whole policy, applies over that; a later `prisma migrate deploy` stops there with
-AZ607, which Prisma keeps as a failed migration.
-Production and CI only ever take migrations. On the development database, once `rowstile migrate --check`
-says there is nothing to migrate (it holds the policy the newest migration makes), tell Prisma the
-migration is there; or rebuild the database from the migrations.
-
-```sh
-npx prisma migrate resolve --applied 20261006215008_authz_note_comment_view   # the migration's folder
-```
+AZ607, "this database already holds what this migration brings", which Prisma keeps as a failed migration:
+`resolve --applied` is what the message asks for, and it clears that too. Or rebuild the database from the
+migrations. Production and CI only ever take migrations.
 
 ## Tests
 

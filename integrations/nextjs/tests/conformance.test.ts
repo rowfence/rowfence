@@ -315,6 +315,19 @@ test("queries by permission", async () => {
   expect(await (await fetch(`${SERVER}/api/projects/buttons`, as("3"))).json()).toEqual({ "1": ["edit", "view"], "3": ["view"] });
 });
 
+// sharing from a route handler: who may share is the policy's (viewer is shared by edit), and the database says no
+test("a share made in the app's own code", async () => {
+  const share = (as_: string, user: number) =>
+    fetch(`${SERVER}/api/projects/1/shares`, as(as_, { method: "POST", body: JSON.stringify({ user }) }));
+  const stranger = await share("2", 2);                 // bo can't see project 1
+  expect(stranger.status).toBe(403);
+  const why = await stranger.json();
+  expect(why.detail).toBe("you cannot share project 1");
+  expect((await share("3", 2)).status).toBe(204);       // cy, a member, edits it
+  expect(await (await fetch(`${SERVER}/api/notes`, as("2"))).json()).toEqual([1, 2, 3, 4]);
+  expect((await share("2", 2)).status).toBe(403);       // a viewer still may not share
+});
+
 // 15: a signed-in page is never served from a cache to another user
 test("15: signed-in pages are never cached for another user", async () => {
   for (const user of ["1", "2", "", "1", "2"]) {
