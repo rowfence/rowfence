@@ -134,6 +134,10 @@ How the project itself is run, as the OpenSSF Scorecard measures it (pinned acti
 token may do, known vulnerabilities in dependencies, review, releases):
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/rowstile/rowstile/badge)](https://scorecard.dev/viewer/?uri=github.com/rowstile/rowstile)
 
+The project's own answers to the OpenSSF Best Practices criteria, at the passing level: how it is documented,
+changed, tested and secured, each answer with where to check it:
+[![OpenSSF Best Practices](https://www.bestpractices.dev/projects/15275/badge)](https://www.bestpractices.dev/projects/15275)
+
 ## License
 
 Apache License 2.0; see [LICENSE](LICENSE). Copyright 2026 Salaheddine EL HSSANI.
