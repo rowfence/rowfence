@@ -10,7 +10,7 @@ repository = "https://github.com/rowstile/rowstile"
 # change to the grammar, commit it, then set rev to that commit (unit_test.py checks they match).
 [grammars.authz]
 repository = "https://github.com/rowstile/rowstile"
-rev = "caff74d7c26c4227a07e7d71820317fa29c9e95f"
+rev = "86c7cdee4564acbab454404d538b56789f1b3760"
 path = "editor/tree-sitter-authz"
 
 [language_servers.rowstile]
