@@ -29,6 +29,10 @@ Three ways to say who is asking, all per transaction:
    guessed from any token. The other settings: `jwt_audience`, `jwt_user_claim` (the claim that holds
    the user's id, `sub` by default) and `jwt_type_claim` (below).
 
+What a scope leaves a key able to do can be said in the policy's tests: a line with `with scope read`
+is checked as a key limited to that scope would be
+([the language's tests](language.md), [API keys with scopes](../cookbook/api-keys-with-scopes.md)).
+
 **Services** (principal types) sign in the same three ways. The backend names the type
 (`SELECT authz.act_as('service', '7')`);
 `authz.create_api_key('deploy', '', NULL, 'service', '7')` makes service 7 a key, for someone

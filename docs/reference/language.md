@@ -149,6 +149,9 @@ test "a folder's owner edits what is inside"    -- brings its own data, rolled b
   {SQL}` or `as user X sees N {SELECT ...}`, which run as the app role signed in as X. A write is
   refused if a rule or a missing privilege stops it, or if it changes no row (the rows it meant are
   hidden from X). Any other error, a unique key say, fails the check whichever was expected. Each named test runs in a transaction that is rolled back.
+  After who a line is about, `with scope read` (or several: `with scope read, files`) checks it as a key or
+  a token limited to those scopes would be: `user 3 with scope read cannot edit file 11`,
+  `as user 3 with scope read refused {UPDATE ...}`. A scope the policy doesn't have is a mistake (AZ503).
   Named tests may live in their own files (only `test "..."` blocks); `rowstile test` and
   `rowstile dev` run them, never `apply`. A failing check explains itself.
 

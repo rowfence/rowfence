@@ -122,6 +122,10 @@
           "named": true
         },
         {
+          "type": "limited",
+          "named": true
+        },
+        {
           "type": "number",
           "named": true
         },
@@ -235,6 +239,10 @@
       "types": [
         {
           "type": "anyone",
+          "named": true
+        },
+        {
+          "type": "limited",
           "named": true
         }
       ]
@@ -364,6 +372,22 @@
       "type": {
         "multiple": false,
         "required": false,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "limited",
+    "named": true,
+    "fields": {
+      "scope": {
+        "multiple": true,
+        "required": true,
         "types": [
           {
             "type": "identifier",
@@ -1460,6 +1484,10 @@
   },
   {
     "type": "where",
+    "named": false
+  },
+  {
+    "type": "with",
     "named": false
   },
   {

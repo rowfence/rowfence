@@ -65,7 +65,7 @@ rules app.folders
 - [rowstile and the alternatives](docs/comparison.md): authorization services, policy engines, rules in the ORM, row-level security by hand; when each is the better choice
 - [How rowstile is checked](docs/how-it-is-checked.md): what tests it, and what has not been done (no outside audit)
 - [Getting started](docs/getting-started.md): from a schema to a policy, tests, the dev loop and migrations (run as written by the tests)
-- [Cookbook](docs/cookbook.md): eighteen tested recipes, a page each (tenants, roles, teams inside teams, folders that inherit, sharing and links, requests, masks, soft deletes, bots, blocking, live updates)
+- [Cookbook](docs/cookbook.md): nineteen tested recipes, a page each (tenants, roles, teams inside teams, folders that inherit, sharing and links, requests, masks, soft deletes, bots, API keys with scopes, blocking, live updates)
 - [Troubleshooting](docs/troubleshooting.md): what people run into, by what they see
 - [Running rowstile](docs/operations.md): configuration, behind a pooler, deploying a change, upgrading, backups, retention, what to watch
 - [Managed Postgres](docs/managed-postgres.md): the setup on a managed service; Neon and Supabase, as tried

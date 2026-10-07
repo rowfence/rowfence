@@ -308,9 +308,12 @@ def tests_of(text: str, files: dict[str, str]) -> list[object]:
 
     pol = parse_policy(text, None, files=files)
     return [
-        *[(t.ptype, t.who, t.expect, t.perm, t.type, t.obj) for t in pol.tests],
+        *[(t.ptype, t.who, t.expect, t.perm, t.type, t.obj, t.scopes) for t in pol.tests],
         *[
-            (sc.name, [(st.kind, st.var, st.sql, st.who, st.expect, st.perm, st.type, st.obj) for st in sc.steps])
+            (
+                sc.name,
+                [(st.kind, st.var, st.sql, st.who, st.expect, st.perm, st.type, st.obj, st.scopes) for st in sc.steps],
+            )
             for sc in pol.scenarios
         ],
     ]

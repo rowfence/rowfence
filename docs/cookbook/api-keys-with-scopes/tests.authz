@@ -1,0 +1,17 @@
+-- API keys with scopes (docs/cookbook/api-keys-with-scopes.md). The test brings its own rows and rolls them back.
+
+test "a key does what its scopes say, and no more than its user"
+  given ann = {INSERT INTO app.users VALUES (901, 'Ann') RETURNING id}
+  given bo = {INSERT INTO app.users VALUES (902, 'Bo') RETURNING id}
+  given p = {INSERT INTO app.projects (owner_id, name) VALUES ($ann, 'Plans') RETURNING id}
+  given n = {INSERT INTO app.notes (project_id, author_id, body) VALUES ($p, $ann, 'ship it') RETURNING id}
+  user $ann can edit note $n
+  user $ann with scope read can view note $n
+  user $ann with scope inbox cannot view note $n
+  as user $ann with scope read sees 1 {SELECT FROM app.notes WHERE id = $n}
+  as user $ann with scope read refused {UPDATE app.notes SET body = 'x' WHERE id = $n}
+  as user $ann with scope inbox allowed {INSERT INTO app.notes (project_id, author_id, body) VALUES ($p, $ann, 'from a script')}
+  as user $ann with scope inbox sees 0 {SELECT FROM app.notes}
+  as user $ann with scope inbox refused {DELETE FROM app.notes WHERE id = $n}
+  as user $ann with scope read, inbox sees 2 {SELECT FROM app.notes WHERE project_id = $p}
+  as user $bo with scope inbox refused {INSERT INTO app.notes (project_id, author_id, body) VALUES ($p, $bo, 'not a member')}

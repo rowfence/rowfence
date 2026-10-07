@@ -54,6 +54,8 @@ column, a link table, or shares people make); a **permission** combines relation
   `authz.view_as()`, `authz.break_glass()`.
 - [Permissions for services and bots, not only users](cookbook/bots-and-services.md): principals with their
   own API keys.
+- [API keys limited to some permissions](cookbook/api-keys-with-scopes.md): scopes, and tests that check a
+  line as a key would be.
 - [Blocking a user: nobody writes to someone who blocked them](cookbook/blocking.md): following a relation to
   a person.
 

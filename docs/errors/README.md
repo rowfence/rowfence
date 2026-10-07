@@ -52,6 +52,7 @@ Every mistake rowstile reports ends with its code: `line 4: folder.owner: unknow
 
 - [AZ501](AZ501.md): A $name used before it is given
 - [AZ502](AZ502.md): A test acting as a type that doesn't sign in
+- [AZ503](AZ503.md): A test names a scope the policy doesn't have
 
 ## Applying and deploying
 

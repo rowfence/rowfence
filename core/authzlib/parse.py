@@ -211,6 +211,7 @@ class Step:
     perm: str | None = None
     type: str | None = None
     obj: str | None = None  # check: an id or a $name
+    scopes: tuple[str, ...] = ()  # check, as: `with scope a, b`: signed in limited to them, as a key with them is
 
 
 @dataclass
@@ -907,11 +908,17 @@ def parse_policy(
 
 
 VALUE = r"(\$[A-Za-z_][A-Za-z0-9_]*|'(?:[^']|'')*'|[^\s{}']+)"
+# after who a line is about: `with scope read` or `with scope read, files`
+WITH_SCOPE = rf"(?:\s+with\s+scope\s+({IDENT}(?:\s*,\s*{IDENT})*))?"
 
 
 def value(v: str) -> str:
     """A test's id: $name as written, a quoted literal unquoted, anything else as is."""
     return v[1:-1].replace("''", "'") if v.startswith("'") else v
+
+
+def scopes_of(text: str | None) -> tuple[str, ...]:
+    return tuple(x.strip() for x in text.split(",")) if text else ()
 
 
 def parse_step(s: str, loc: Loc) -> Step:
@@ -920,14 +927,16 @@ def parse_step(s: str, loc: Loc) -> Step:
         if not m.group(2).strip():
             fail(loc, "given {...} needs a statement", "AZ106")
         return Step("given", s, loc, var=m.group(1), sql=m.group(2).strip())
-    m = re.fullmatch(rf"as\s+(?:(anyone)|({IDENT})\s+{VALUE})\s+(allowed|refused|sees\s+(\d+))\s*\{{(.*)\}}", s, re.S)
+    m = re.fullmatch(
+        rf"as\s+(?:(anyone)|({IDENT})\s+{VALUE}{WITH_SCOPE})\s+(allowed|refused|sees\s+(\d+))\s*\{{(.*)\}}", s, re.S
+    )
     if m:
-        expect: str | int = int(m.group(5)) if m.group(5) else m.group(4)
-        if not m.group(6).strip():
+        expect: str | int = int(m.group(6)) if m.group(6) else m.group(5)
+        if not m.group(7).strip():
             fail(loc, "as ... {...} needs a statement", "AZ106")
         # `sees N` counts the rows of a query, which a write can't be put inside: at run time that was a bare
         # "syntax error" from Postgres
-        if isinstance(expect, int) and re.match(r"\s*(insert|update|delete|merge)\b", m.group(6), re.I):
+        if isinstance(expect, int) and re.match(r"\s*(insert|update|delete|merge)\b", m.group(7), re.I):
             fail(
                 loc,
                 "`sees N` counts the rows of a SELECT, and this statement writes: for a write that must change "
@@ -941,9 +950,12 @@ def parse_step(s: str, loc: Loc) -> Step:
             ptype=m.group(1) or m.group(2),
             who=None if m.group(1) else value(m.group(3)),
             expect=expect,
-            sql=m.group(6).strip(),
+            sql=m.group(7).strip(),
+            scopes=scopes_of(m.group(4)),
         )
-    m = re.fullmatch(rf"(?:(anyone)|({IDENT})\s+{VALUE})\s+(can|cannot)\s+({IDENT})\s+({IDENT})\s+{VALUE}", s)
+    m = re.fullmatch(
+        rf"(?:(anyone)|({IDENT})\s+{VALUE}{WITH_SCOPE})\s+(can|cannot)\s+({IDENT})\s+({IDENT})\s+{VALUE}", s
+    )
     if m:
         return Step(
             "check",
@@ -951,15 +963,23 @@ def parse_step(s: str, loc: Loc) -> Step:
             loc,
             ptype=m.group(1) or m.group(2),
             who=None if m.group(1) else value(m.group(3)),
-            expect=m.group(4) == "can",
-            perm=m.group(5),
-            type=m.group(6),
-            obj=value(m.group(7)),
+            expect=m.group(5) == "can",
+            perm=m.group(6),
+            type=m.group(7),
+            obj=value(m.group(8)),
+            scopes=scopes_of(m.group(4)),
+        )
+    if re.match(r"(?:as\s+)?anyone\s+with\b", s):
+        fail(
+            loc,
+            "`anyone` is nobody signed in, and a scope limits someone who is: write `user 3 with scope read ...`",
+            "AZ106",
         )
     fail(
         loc,
         "a test's lines are: given name = {INSERT ... RETURNING id}, user $name can view file $f, "
-        "or as user $name allowed|refused|sees N {SQL}",
+        "or as user $name allowed|refused|sees N {SQL} (after who: `with scope read`, to check as a key limited "
+        "to a scope)",
         "AZ106",
     )
 
