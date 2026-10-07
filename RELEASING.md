@@ -98,6 +98,31 @@ A build from `main` records its version with a hash of the compiler's sources (`
 Run by hand (Actions, **release**, **Run workflow**), the release workflow builds and checks everything and
 publishes nothing: a dry run before tagging.
 
+## The site between releases
+
+The site shows a release: the reference, the guide and the install lines are built from its tag, and so is
+the site's own code. An article and a comparison page describe no version, and don't wait for one. A
+**site tag** publishes them:
+
+    git fetch origin
+    git tag -a site-vN -m "the site, N" origin/main
+    git push origin site-vN
+
+- Site tags are `site-v1`, `site-v2` and on: a plain count, annotated, on a commit of `main`, and like a
+  release's never moved or deleted once pushed. A wrong page is followed by the next tag.
+- The site workflow (`.github/workflows/site.yml`) builds the site from the release it shows, with
+  `docs/blog/` and `docs/compare/` as they are at the site tag, and deploys it. `site/source.mjs` holds
+  the rule and `site/source_test.mjs` checks it; `node site/source.mjs site-vN` says what a tag is built
+  from.
+- Nothing else comes from a site tag. The landing page, the navigation, every other page and a new kind
+  of page go out with a release. A post that links to a page the release doesn't have fails the build,
+  and so does a post or a comparison page the release's site can't make: nothing is deployed, and the
+  workflow's run says which.
+- A release's tag deploys the site at its own commit, which holds every site tag before it: a release
+  needs no site tag. The count goes on after it.
+- The release workflow doesn't run on a site tag, which publishes no package (`Delivery` in
+  `core/tests/unit_test.py` checks that no pattern of its own matches one).
+
 ## Going public
 
 Dependabot is on: its monthly, grouped updates (`.github/dependabot.yml`) and its security updates (the
