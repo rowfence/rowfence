@@ -26,10 +26,21 @@ Each release upgrades from the one before it. How releases are numbered and made
   hint. That is what a development database `rowstile dev` pushed to answers to `prisma migrate deploy` or
   `alembic upgrade head`; it said "this migration changes the policy the migration before it left".
   Migrations written before keep their words.
+- A refusal's `table`, `command` and `code` say the same thing whichever rule refused (the 403's fields:
+  <https://rowstile.dev/problems/refused>). An update or delete that `expect` explains names the table as
+  the policy does, with its schema, as a refused insert always did: `public.Note` for a Prisma model `Note`,
+  where it said `Note` (so does the 404 for a hidden row: `public.Note 2 not found`). A column's rule gives
+  the table and `update` through Prisma too, which drops the error's fields. And `code` is the database's
+  own: AZ705 for a share by someone who may not share, where every refusal said AZ709. In the TypeScript
+  SDK `db.$authz.tableName("Note")` gives the policy's name for a table; in the Python SDK `answer()` returns
+  that name as a third value, and `verdict()` takes it (`named`).
+- `authz.lint()` names a table the policy reads for a relation when the app role may read every row of it
+  (a note, like the one for a type's table without rules): who is in which team is readable.
+- AZ602, a key of another type, says which: "public.User.id is integer, not bigint: write its type after
+  the key, (id integer)". It said "e.g. (id uuid)".
 - `rowstile init` drafts a user's own row as the reference says to write it, a relation: `self : user = id`
   and `can edit = self`, where it wrote `{id = authz.uid()}`. And a link table's relation leaves the type's
   name out however the table is spelled: `TeamMember` gives `member`, as `team_members` does.
-
 - While only alphas are published, each release moves npm's `latest` to the alpha it publishes: a plain
   `npm i rowstile` gets the newest, and a package's page on npmjs.com shows it. `next` names it too, as
   before. From the first final release on, `latest` is a release's only.
