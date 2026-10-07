@@ -14,8 +14,21 @@ Each release upgrades from the one before it. How releases are numbered and made
   Prisma](https://github.com/rowstile/starter-nextjs-prisma). Each is a small app where documents are shared
   with people and teams and no route checks a permission, with its policy, its tests, the review in CI, and
   an open pull request that shows the review's comment. The stack pages link them.
+- `rowstile <command> --help` prints that command's lines of the usage and where the database comes from,
+  where it printed the whole usage. `rowstile init --help` says which schema `init` reads when none is
+  named: `public`.
 
 ### Changed
+
+- A migration run on a database that already holds what it brings says so: "this database already holds
+  what this migration brings (it ran here before, or rowstile dev or push took the database there): don't
+  run it, tell your migration tool it is applied [AZ607]", with the Prisma and the Alembic command in the
+  hint. That is what a development database `rowstile dev` pushed to answers to `prisma migrate deploy` or
+  `alembic upgrade head`; it said "this migration changes the policy the migration before it left".
+  Migrations written before keep their words.
+- `rowstile init` drafts a user's own row as the reference says to write it, a relation: `self : user = id`
+  and `can edit = self`, where it wrote `{id = authz.uid()}`. And a link table's relation leaves the type's
+  name out however the table is spelled: `TeamMember` gives `member`, as `team_members` does.
 
 - While only alphas are published, each release moves npm's `latest` to the alpha it publishes: a plain
   `npm i rowstile` gets the newest, and a package's page on npmjs.com shows it. `next` names it too, as
@@ -23,6 +36,14 @@ Each release upgrades from the one before it. How releases are numbered and made
 
 ### Fixed
 
+- With a capital letter in a governed table's name, as Prisma names tables (`"Folder"`), `rowstile push`,
+  `apply` and `dev` applied the whole policy every time: `apply` never answered `unchanged`, and `dev` did
+  all the work again at each save. The command looked for what the policy made under the tables' unquoted
+  names, and found nothing. (#95)
+- The Next.js page says which Prisma to install, where `instrumentation.ts` goes when `app/` is inside
+  `src/`, how a route handler shares (`db.$authz.share`), and has the development database's step in the
+  migration commands. The stack pages and troubleshooting no longer say that `rowstile migrate --check`
+  tells what a database holds: it compares the policy with the lock file. (#99)
 - `rowstile review`: "2 checks changed what they expect". It said "what it expects" of several.
 - `rowstile review` no longer reads a test's new name as its checks removed. A test that went away, whose
   every check is in one that appeared, is said to be renamed, and its checks are compared under the new name:
