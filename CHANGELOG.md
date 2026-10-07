@@ -27,6 +27,13 @@ Each release upgrades from the one before it. How releases are numbered and made
   manage` on a table it may not `UPDATE`): the rule never applies, and the statement fails with Postgres's
   own "permission denied for table", which reads like the policy refusing. It says what to grant. A privilege
   on one column is enough; `nobody` asks for none.
+- A page per alternative, each with examples in both and a section on when the other is the better
+  choice: [OpenFGA](docs/compare/openfga.md), [SpiceDB](docs/compare/spicedb.md),
+  [ZenStack](docs/compare/zenstack.md), [row-level security by hand](docs/compare/hand-written-rls.md) and
+  [checks in app code](docs/compare/app-code.md).
+- A blog, with an Atom feed (`/blog/feed.xml`). Its first article:
+  [Why a recursive row-level security policy is slow, and what fixes
+  it](docs/blog/2026-10-07-recursive-row-level-security.md), with the experiment to run it again.
 
 ### Changed
 
