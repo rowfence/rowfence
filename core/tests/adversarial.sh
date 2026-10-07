@@ -210,7 +210,8 @@ expect "approving her own request" "42501" -c "SELECT authz.decide_request($rid,
 echo "-- partitions and inheritance children, which row-level security on the table above doesn't cover"
 PSQL -c "CREATE TABLE app.files_old () INHERITS (app.files)" -c "GRANT SELECT, INSERT, UPDATE, DELETE ON app.files_old TO app_user" \
      -c "INSERT INTO app.files_old (id, folder_id, owner_id, name) VALUES (9001, 5, 1, 'old-secret.txt')" >/dev/null
-[ "$(PSQL -c "SELECT count(*) FROM authz.lint() WHERE severity = 'error' AND object = 'app.files_old'")" = 1 ] &&
+# (two errors: the app role may use it directly, and it lacks its table's row triggers; tests/children.sh)
+[ "$(PSQL -c "SELECT count(*) FROM authz.lint() WHERE severity = 'error' AND object = 'app.files_old'")" = 2 ] &&
   echo "ok    lint reports a table made after apply that inherits from a governed one" ||
   { echo "FAIL  lint misses app.files_old"; fails=$((fails + 1)); }
 PGOPTIONS="-c client_min_messages=error" psql -X -q -v ON_ERROR_STOP=1 -d "$DB" -f /tmp/authz_adversarial.sql >/dev/null || exit 1
@@ -218,6 +219,12 @@ expect "reading it directly, once applied again" "0" -c "SELECT count(*) FROM ap
 expect "... changing it directly" "0" -c "WITH u AS (UPDATE app.files_old SET name = 'mine' RETURNING 1) SELECT count(*) FROM u"
 expect "... adding to it directly" "42501" -c "INSERT INTO app.files_old (id, folder_id, owner_id, name) VALUES (9002, 1, 3, 'x')"
 expect "... while through the table above the policy still decides" "0" -c "SELECT count(*) FROM app.files WHERE id = 9001"
+# a row stored there, in a folder bob may edit: written through the table above, where the table's own rule on a
+# column has to be checked too (Postgres runs a table's row triggers for its own rows only)
+PSQL -c "INSERT INTO app.files_old (id, folder_id, owner_id, name) VALUES (9003, 4, 1, 'old-design.md')" >/dev/null
+AS=2 expect "bob renames a file stored there, through the table above" "1" \
+  -c "WITH u AS (UPDATE app.files SET name = 'old-design-2.md' WHERE id = 9003 RETURNING 1) SELECT count(*) FROM u"
+AS=2 expect "... and can't take its ownership (the rule on the column)" "42501" -c "UPDATE app.files SET owner_id = 2 WHERE id = 9003"
 [ "$(PSQL -c "SELECT count(*) FROM authz.lint() WHERE severity = 'error' AND object = 'app.files_old'")" = 0 ] &&
   echo "ok    ... and lint has nothing more to say about it" || { echo "FAIL  lint after apply"; fails=$((fails + 1)); }
 

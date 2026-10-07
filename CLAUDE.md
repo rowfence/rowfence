@@ -209,6 +209,13 @@ For one suite, start a container and run it inside:
   change gets a case there.
 - Runtime capabilities (what apps call) are `authz.*` functions; compiling, applying, previews and tests belong to
   `authzlib/database.py`, which the command calls.
+- Triggers on the app's tables: statement triggers with transition tables see every row a statement on the
+  table changes. Row triggers don't: Postgres copies them to partitions, not to a table that inherits from the
+  table, and runs no `AFTER UPDATE` row trigger for a row an update puts in another partition. So what a row
+  trigger keeps must also hold there: `CHILD_TRIGGERS` (sqlutil.py; every apply and migration runs it) gives
+  each table that inherits the row triggers whose function is in `authz_int`, and an `AFTER UPDATE` row
+  trigger needs a statement trigger beside it for partitioned tables (`trigger_if_partitioned`, as
+  `<type>__forget` has). `tests/children.sh` checks both: a new row trigger gets a case there.
 - Tree writes take the type-wide lock.
   `tests/races.sh` and `tests/stress.sh` (`run_tests.sh --proofs`) must stay green for any locking change.
 - Two ways to evaluate a permission, which must agree (the random-change tests check): views (`set_sql`) and

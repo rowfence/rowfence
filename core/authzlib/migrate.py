@@ -35,7 +35,7 @@ from typing import TYPE_CHECKING, TypedDict
 from . import BUILD, __version__
 from .compiler import NextTree
 from .parse import read_lines
-from .sqlutil import STUB_COLUMNS
+from .sqlutil import DROP_CHILD_TRIGGERS, STUB_COLUMNS
 from .statements import drop_sql, made, references, split, unquoted
 
 if TYPE_CHECKING:
@@ -543,6 +543,8 @@ def migration(compiled_sql: str, c: Compiled, old: Lock, name: str = "policy", l
             "  END LOOP;\nEND $authz_stub$;"
         )
     if drops:
+        # (they call functions that may be among the drops; the step every migration runs makes them again)
+        parts.append(DROP_CHILD_TRIGGERS)
         parts.append("-- what goes, or is made again\n" + "\n".join(drops))
     swapped = [t for t in trees if t.name in rebuild and t.next and old.nexts.get(t.name) == t.hash]
     if rebuild:

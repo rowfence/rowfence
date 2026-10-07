@@ -32,7 +32,7 @@ from .connection import Db, Value, flag, number, text, text_or_none
 from .governance import DIFF_ROWS
 from .output import DROP_MASKED_VIEWS, DROP_OLD_POLICIES, LOST_RULES
 from .parse import KEYWORDS, Expr, Loc, braced, read_lines
-from .sqlutil import POLICY_MARKS, lit, q, qt, row_cond, sql_code, this_spans, with_uid
+from .sqlutil import IF_PARTITIONED, POLICY_MARKS, lit, q, qt, row_cond, sql_code, this_spans, with_uid
 from .testing import FN as TESTS_FN
 
 if TYPE_CHECKING:
@@ -476,7 +476,8 @@ def _push(db: Db, policy: str, files: Files, downgrade: bool = False) -> str:
 def unchanged(db: Db, policy: str, files: Files) -> bool:
     """The policy in force is this one (text and files), applied by this version of rowstile, and what it
     made is still there: its schemas, each row-level security policy its rules make, row-level security on
-    each table with rules, and each trigger it makes (enabled)."""
+    each table with rules and on what is under it (partitions, tables that inherit), each trigger it makes
+    (enabled; on the tables that inherit too), and no privilege on its schemas that the policy doesn't give."""
     if not there(db, "authz.policy_versions"):
         return False
     rows = db.rows(
@@ -496,15 +497,17 @@ def unchanged(db: Db, policy: str, files: Files) -> bool:
                 if r.command not in ("mask", "update check") and not r.columns
             }
         )
-        sql = Compiler(parse_policy(policy, None, files=files)).compile("the policy", transaction=False)
+        compiler = Compiler(parse_policy(policy, None, files=files))
+        sql = compiler.compile("the policy", transaction=False)
     except PolicyError:
         return False
+    # (table, name, only where the table is partitioned)
     triggers = [
-        (m[1].split(" ON ", 1)[1], statements.unquoted(m[1]))
+        (m[1].split(" ON ", 1)[1], statements.unquoted(m[1]), IF_PARTITIONED in c)
         for c, st in statements.split(sql)
         if (m := statements.made(st, c)) and m[0] == "trigger"
     ]
-    return flag(
+    kept = flag(
         db.rows(
             "SELECT to_regnamespace('authz_int') IS NOT NULL AND to_regnamespace('authz_gen') IS NOT NULL "
             "AND NOT EXISTS (SELECT 1 FROM unnest($1::text[], $2::text[]) m(tbl, name) WHERE NOT EXISTS ("
@@ -513,18 +516,36 @@ def unchanged(db: Db, policy: str, files: Files) -> bool:
             "  WHERE p.polrelid = to_regclass(m.tbl) AND p.polname = m.name)) "
             "AND NOT EXISTS (SELECT 1 FROM unnest($3::text[]) g(tbl) WHERE NOT coalesce("
             "  (SELECT c.relrowsecurity FROM pg_catalog.pg_class c WHERE c.oid = to_regclass(g.tbl)), false)) "
-            "AND NOT EXISTS (SELECT 1 FROM unnest($4::text[], $5::text[]) t(tbl, name) WHERE NOT EXISTS ("
-            "  SELECT 1 FROM pg_catalog.pg_trigger g WHERE g.tgrelid = to_regclass(t.tbl) AND g.tgname = t.name "
-            "  AND g.tgenabled <> 'D')) AS there",
+            "AND NOT EXISTS (SELECT 1 FROM unnest($4::text[], $5::text[], $6::boolean[]) t(tbl, name, part) "
+            "  WHERE (NOT t.part OR (SELECT c.relkind FROM pg_catalog.pg_class c WHERE c.oid = to_regclass(t.tbl)) = 'p') "
+            "  AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_trigger g WHERE g.tgrelid = to_regclass(t.tbl) "
+            "  AND g.tgname = t.name AND g.tgenabled <> 'D')) AS there",
             [
                 text_array([t for t, _ in made]),
                 text_array([n for _, n in made]),
                 text_array(sorted({qt(r.table) for r in rules})),
-                text_array([t for t, _ in triggers]),
-                text_array([n for _, n in triggers]),
+                text_array([t for t, _, _ in triggers]),
+                text_array([n for _, n, _ in triggers]),
+                text_array(["true" if p else "false" for _, _, p in triggers]),
             ],
         )[0],
         "there",
+    )
+    # ... and nothing was made or given since that applying again puts right: a partition of a table with rules,
+    # or a table that inherits from it, has row-level security on, one that inherits has the table's row
+    # triggers, and nobody holds a privilege on rowstile's own schemas that the policy doesn't give
+    return kept and flag(
+        db.rows(
+            "WITH RECURSIVE below(oid) AS ("
+            "  SELECT i.inhrelid FROM pg_catalog.pg_inherits i WHERE i.inhparent = ANY (ARRAY("
+            "    SELECT to_regclass(g.tbl) FROM unnest($1::text[]) g(tbl))::oid[]) "
+            "  UNION SELECT i.inhrelid FROM pg_catalog.pg_inherits i JOIN below b ON i.inhparent = b.oid) "
+            "SELECT NOT EXISTS (SELECT 1 FROM below b JOIN pg_catalog.pg_class c ON c.oid = b.oid "
+            "  WHERE NOT c.relrowsecurity) AND NOT EXISTS (SELECT 1 FROM authz_int.child_triggers()) "
+            f"AND NOT EXISTS ({compiler.extra_grants_sql()}) AS closed",
+            [text_array(sorted({qt(r.table) for r in rules}))],
+        )[0],
+        "closed",
     )
 
 

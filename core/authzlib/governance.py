@@ -6,7 +6,7 @@ from __future__ import annotations
 from .compiler import Core
 from .parse import Relation, Source, Type
 from .parse import cols as columns_of
-from .sqlutil import lit, on_row, q, qt
+from .sqlutil import IF_PARTITIONED, lit, on_row, q, qt
 from .statements import made
 
 DEF = "SECURITY DEFINER SET search_path = pg_catalog, pg_temp"
@@ -28,6 +28,23 @@ def trigger_if_table(table: str, trigger_sql: str, what: str) -> str:
         f"    EXECUTE '{body}';\n"
         f"  ELSE\n"
         f"    RAISE NOTICE '{qt(table).replace(chr(39), chr(39) * 2)} is not a table: changes to it are not audited or fed ({what})';\n"
+        f"  END IF;\nEND $tr$;"
+    )
+
+
+def trigger_if_partitioned(table: str, trigger_sql: str) -> str:
+    """Create a trigger only where the table is partitioned (what it is for only happens there). The comments name
+    the trigger for the migrations (statements.made) and say where it is (database.unchanged)."""
+    m = made(trigger_sql)
+    assert m is not None, "a CREATE TRIGGER makes a trigger"
+    kind, key = m
+    body = trigger_sql.replace("'", "''")
+    return (
+        f"-- @object {kind} {key}\n"
+        f"-- {IF_PARTITIONED}\n"
+        f"DO $tr$ BEGIN\n"
+        f"  IF (SELECT relkind FROM pg_catalog.pg_class WHERE oid = {lit(qt(table))}::regclass) = 'p' THEN\n"
+        f"    EXECUTE '{body}';\n"
         f"  END IF;\nEND $tr$;"
     )
 
@@ -254,10 +271,32 @@ END $f$;""")
                 for rel, col in pairs
             )
             watched = list(dict.fromkeys(col for _, col in pairs))
+            # On a partitioned table Postgres runs no AFTER UPDATE row trigger for a row an update puts in another
+            # partition (a delete there, an insert here). Those rows are audited by the statement's trigger, by
+            # their key: each change the row trigger hasn't written in this transaction. (A row whose key
+            # changed in the same update is not found.)
+            moved = "\n".join(
+                f"      INSERT INTO authz.audit (db_role, user_id, acting_user, action, object_type, object_id, "
+                f"relation, subject_id, detail, reason)\n"
+                f"      SELECT authz_int.caller_role(), authz_int.actor(), "
+                f"nullif(current_setting('authz.acting_user', true), ''), 'relate', {lit(tname)}, {kt('n')}, {lit(rel)}, "
+                f"n.{q(col)}::text, jsonb_build_object('column', {lit(col)}, 'was', o.{q(col)}), "
+                f"nullif(current_setting('authz_ctx.reason', true), '')\n"
+                f"      FROM old_rows o JOIN new_rows n ON {kt('n')} = {kt('o')}\n"
+                f"      WHERE n.{q(col)} IS DISTINCT FROM o.{q(col)} AND NOT EXISTS (\n"
+                f"        SELECT 1 FROM authz.audit a WHERE a.txid = txid_current() AND a.action = 'relate' "
+                f"AND a.object_type = {lit(tname)}\n"
+                f"          AND a.object_id = {kt('n')} AND a.relation = {lit(rel)} AND a.detail->>'column' = {lit(col)}\n"
+                f"          AND a.subject_id IS NOT DISTINCT FROM n.{q(col)}::text "
+                f"AND a.detail->'was' IS NOT DISTINCT FROM to_jsonb(o.{q(col)}));"
+                for rel, col in pairs
+            )
             bodies = {
                 "ins": f"    PERFORM authz_int.changed({lit(tname)}, ARRAY(SELECT {kt('n')} FROM new_rows n), 'insert');",
                 "upd": f"    PERFORM authz_int.changed({lit(tname)}, ARRAY(SELECT {kt('n')} FROM new_rows n "
-                f"UNION SELECT {kt('o')} FROM old_rows o), 'update');",
+                f"UNION SELECT {kt('o')} FROM old_rows o), 'update');\n"
+                f"    -- a partitioned table: the rows this update put in another partition, which the row trigger never sees\n"
+                f"    IF (SELECT relkind FROM pg_class WHERE oid = TG_RELID) = 'p' THEN\n{moved}\n    END IF;",
                 "del": f"    PERFORM authz_int.changed({lit(tname)}, ARRAY(SELECT {kt('o')} FROM old_rows o), 'delete');",
                 "trunc": f"    PERFORM authz_int.audit('truncate', {lit(tname)}, NULL, NULL, NULL, NULL, NULL, "
                 f"jsonb_build_object('table', {lit(t.table)}));\n"

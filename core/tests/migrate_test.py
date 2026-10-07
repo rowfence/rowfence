@@ -36,10 +36,12 @@ def edit(text: str, *pairs: tuple[str, str]) -> str:
 
 
 DOCS, MULTI, COMPOSITE = read("example/docs.authz"), read("tests/multi.authz"), read("tests/composite.authz")
+CHILDREN = read("tests/children.authz")
 SCHEMAS = {
     "docs": "example/app_schema.sql",
     "multi": "tests/multi_schema.sql",
     "composite": "tests/composite_schema.sql",
+    "children": "tests/children_schema.sql",
 }
 
 # (name, schema, old policy, new policy)
@@ -176,6 +178,23 @@ CASES: list[tuple[str, str, str, str]] = [
         "composite",
         COMPOSITE,
         edit(COMPOSITE, ("  can edit  = share or editor or parent.edit\n", "  can edit  = share or editor\n")),
+    ),
+    # tables with tables under them: a table that inherits has copies of its table's row triggers, which a
+    # migration drops with what they call and makes again (the step every migration runs)
+    (
+        "a rule on a column that changes, with a table that inherits and partitions",
+        "children",
+        CHILDREN,
+        edit(CHILDREN, ("  update owner_id : own\n", "  update owner_id, title : own\n")),
+    ),
+    (
+        "a new rule on a column of a partitioned table",
+        "children",
+        CHILDREN,
+        edit(
+            CHILDREN,
+            ("  update owner_id : manage\n  delete ", "  update owner_id : manage\n  update title : manage\n  delete "),
+        ),
     ),
 ]
 # functions an older build made kept "$user" on their search path; a migration changes only some functions, and
