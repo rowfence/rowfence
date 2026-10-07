@@ -1,0 +1,733 @@
+NOTICE:  database "rls_tree" does not exist, skipping
+Timing is off.
+SET
+DROP SCHEMA
+DROP ROLE
+CREATE ROLE
+CREATE SCHEMA
+GRANT
+CREATE TABLE
+CREATE TABLE
+INSERT 0 20000
+INSERT 0 200000
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+ANALYZE
+ANALYZE
+GRANT
+ALTER TABLE
+ folders | files  | deepest 
+---------+--------+---------
+   20000 | 200000 |       5
+(1 row)
+
+
+=== 1. a recursive query in the policy ===
+CREATE POLICY
+SET
+SET
+SET
+ files_user_7_sees 
+-------------------
+              3410
+(1 row)
+
+                                                QUERY PLAN                                                 
+-----------------------------------------------------------------------------------------------------------
+ Aggregate (actual rows=1 loops=1)
+   ->  Seq Scan on files (actual rows=3410 loops=1)
+         Filter: (SubPlan 2)
+         Rows Removed by Filter: 196590
+         SubPlan 2
+           ->  CTE Scan on up up_1 (actual rows=0 loops=200000)
+                 Filter: (owner_id = (current_setting('demo.user_id'::text))::bigint)
+                 Rows Removed by Filter: 4
+                 CTE up
+                   ->  Recursive Union (actual rows=4 loops=200000)
+                         ->  Index Scan using folders_pkey on folders f (actual rows=1 loops=200000)
+                               Index Cond: (id = files.folder_id)
+                         ->  Nested Loop (actual rows=1 loops=884590)
+                               ->  WorkTable Scan on up (actual rows=1 loops=884590)
+                               ->  Index Scan using folders_pkey on folders p (actual rows=1 loops=884590)
+                                     Index Cond: (id = up.parent_id)
+ Planning Time: 0.213 ms
+ Execution Time: 814.263 ms
+(18 rows)
+
+                                                QUERY PLAN                                                 
+-----------------------------------------------------------------------------------------------------------
+ Aggregate (actual rows=1 loops=1)
+   ->  Seq Scan on files (actual rows=3410 loops=1)
+         Filter: (SubPlan 2)
+         Rows Removed by Filter: 196590
+         SubPlan 2
+           ->  CTE Scan on up up_1 (actual rows=0 loops=200000)
+                 Filter: (owner_id = (current_setting('demo.user_id'::text))::bigint)
+                 Rows Removed by Filter: 4
+                 CTE up
+                   ->  Recursive Union (actual rows=4 loops=200000)
+                         ->  Index Scan using folders_pkey on folders f (actual rows=1 loops=200000)
+                               Index Cond: (id = files.folder_id)
+                         ->  Nested Loop (actual rows=1 loops=884590)
+                               ->  WorkTable Scan on up (actual rows=1 loops=884590)
+                               ->  Index Scan using folders_pkey on folders p (actual rows=1 loops=884590)
+                                     Index Cond: (id = up.parent_id)
+ Planning Time: 0.150 ms
+ Execution Time: 852.721 ms
+(18 rows)
+
+                                                QUERY PLAN                                                 
+-----------------------------------------------------------------------------------------------------------
+ Aggregate (actual rows=1 loops=1)
+   ->  Seq Scan on files (actual rows=3410 loops=1)
+         Filter: (SubPlan 2)
+         Rows Removed by Filter: 196590
+         SubPlan 2
+           ->  CTE Scan on up up_1 (actual rows=0 loops=200000)
+                 Filter: (owner_id = (current_setting('demo.user_id'::text))::bigint)
+                 Rows Removed by Filter: 4
+                 CTE up
+                   ->  Recursive Union (actual rows=4 loops=200000)
+                         ->  Index Scan using folders_pkey on folders f (actual rows=1 loops=200000)
+                               Index Cond: (id = files.folder_id)
+                         ->  Nested Loop (actual rows=1 loops=884590)
+                               ->  WorkTable Scan on up (actual rows=1 loops=884590)
+                               ->  Index Scan using folders_pkey on folders p (actual rows=1 loops=884590)
+                                     Index Cond: (id = up.parent_id)
+ Planning Time: 0.144 ms
+ Execution Time: 836.165 ms
+(18 rows)
+
+                                                QUERY PLAN                                                
+----------------------------------------------------------------------------------------------------------
+ Limit (actual rows=50 loops=1)
+   ->  Index Scan using files_name_idx on files (actual rows=50 loops=1)
+         Filter: (SubPlan 2)
+         Rows Removed by Filter: 2327
+         SubPlan 2
+           ->  CTE Scan on up up_1 (actual rows=0 loops=2377)
+                 Filter: (owner_id = (current_setting('demo.user_id'::text))::bigint)
+                 Rows Removed by Filter: 4
+                 CTE up
+                   ->  Recursive Union (actual rows=4 loops=2377)
+                         ->  Index Scan using folders_pkey on folders f (actual rows=1 loops=2377)
+                               Index Cond: (id = files.folder_id)
+                         ->  Nested Loop (actual rows=1 loops=10501)
+                               ->  WorkTable Scan on up (actual rows=1 loops=10501)
+                               ->  Index Scan using folders_pkey on folders p (actual rows=1 loops=10501)
+                                     Index Cond: (id = up.parent_id)
+ Planning Time: 0.164 ms
+ Execution Time: 12.364 ms
+(18 rows)
+
+                                                QUERY PLAN                                                
+----------------------------------------------------------------------------------------------------------
+ Limit (actual rows=50 loops=1)
+   ->  Index Scan using files_name_idx on files (actual rows=50 loops=1)
+         Filter: (SubPlan 2)
+         Rows Removed by Filter: 2327
+         SubPlan 2
+           ->  CTE Scan on up up_1 (actual rows=0 loops=2377)
+                 Filter: (owner_id = (current_setting('demo.user_id'::text))::bigint)
+                 Rows Removed by Filter: 4
+                 CTE up
+                   ->  Recursive Union (actual rows=4 loops=2377)
+                         ->  Index Scan using folders_pkey on folders f (actual rows=1 loops=2377)
+                               Index Cond: (id = files.folder_id)
+                         ->  Nested Loop (actual rows=1 loops=10501)
+                               ->  WorkTable Scan on up (actual rows=1 loops=10501)
+                               ->  Index Scan using folders_pkey on folders p (actual rows=1 loops=10501)
+                                     Index Cond: (id = up.parent_id)
+ Planning Time: 0.164 ms
+ Execution Time: 11.237 ms
+(18 rows)
+
+                                                QUERY PLAN                                                
+----------------------------------------------------------------------------------------------------------
+ Limit (actual rows=50 loops=1)
+   ->  Index Scan using files_name_idx on files (actual rows=50 loops=1)
+         Filter: (SubPlan 2)
+         Rows Removed by Filter: 2327
+         SubPlan 2
+           ->  CTE Scan on up up_1 (actual rows=0 loops=2377)
+                 Filter: (owner_id = (current_setting('demo.user_id'::text))::bigint)
+                 Rows Removed by Filter: 4
+                 CTE up
+                   ->  Recursive Union (actual rows=4 loops=2377)
+                         ->  Index Scan using folders_pkey on folders f (actual rows=1 loops=2377)
+                               Index Cond: (id = files.folder_id)
+                         ->  Nested Loop (actual rows=1 loops=10501)
+                               ->  WorkTable Scan on up (actual rows=1 loops=10501)
+                               ->  Index Scan using folders_pkey on folders p (actual rows=1 loops=10501)
+                                     Index Cond: (id = up.parent_id)
+ Planning Time: 0.275 ms
+ Execution Time: 12.020 ms
+(18 rows)
+
+                                        QUERY PLAN                                        
+------------------------------------------------------------------------------------------
+ Index Scan using files_pkey on files (actual rows=1 loops=1)
+   Index Cond: (id = 61)
+   Filter: (SubPlan 2)
+   SubPlan 2
+     ->  CTE Scan on up up_1 (actual rows=1 loops=1)
+           Filter: (owner_id = (current_setting('demo.user_id'::text))::bigint)
+           CTE up
+             ->  Recursive Union (actual rows=1 loops=1)
+                   ->  Index Scan using folders_pkey on folders f (actual rows=1 loops=1)
+                         Index Cond: (id = files.folder_id)
+                   ->  Nested Loop (never executed)
+                         ->  WorkTable Scan on up (never executed)
+                         ->  Index Scan using folders_pkey on folders p (never executed)
+                               Index Cond: (id = up.parent_id)
+ Planning Time: 0.157 ms
+ Execution Time: 0.033 ms
+(16 rows)
+
+                                        QUERY PLAN                                        
+------------------------------------------------------------------------------------------
+ Index Scan using files_pkey on files (actual rows=1 loops=1)
+   Index Cond: (id = 61)
+   Filter: (SubPlan 2)
+   SubPlan 2
+     ->  CTE Scan on up up_1 (actual rows=1 loops=1)
+           Filter: (owner_id = (current_setting('demo.user_id'::text))::bigint)
+           CTE up
+             ->  Recursive Union (actual rows=1 loops=1)
+                   ->  Index Scan using folders_pkey on folders f (actual rows=1 loops=1)
+                         Index Cond: (id = files.folder_id)
+                   ->  Nested Loop (never executed)
+                         ->  WorkTable Scan on up (never executed)
+                         ->  Index Scan using folders_pkey on folders p (never executed)
+                               Index Cond: (id = up.parent_id)
+ Planning Time: 0.094 ms
+ Execution Time: 0.028 ms
+(16 rows)
+
+                                        QUERY PLAN                                        
+------------------------------------------------------------------------------------------
+ Index Scan using files_pkey on files (actual rows=1 loops=1)
+   Index Cond: (id = 61)
+   Filter: (SubPlan 2)
+   SubPlan 2
+     ->  CTE Scan on up up_1 (actual rows=1 loops=1)
+           Filter: (owner_id = (current_setting('demo.user_id'::text))::bigint)
+           CTE up
+             ->  Recursive Union (actual rows=1 loops=1)
+                   ->  Index Scan using folders_pkey on folders f (actual rows=1 loops=1)
+                         Index Cond: (id = files.folder_id)
+                   ->  Nested Loop (never executed)
+                         ->  WorkTable Scan on up (never executed)
+                         ->  Index Scan using folders_pkey on folders p (never executed)
+                               Index Cond: (id = up.parent_id)
+ Planning Time: 0.087 ms
+ Execution Time: 0.023 ms
+(16 rows)
+
+RESET
+DROP POLICY
+
+=== 2. the walk in a function, called for each row ===
+CREATE FUNCTION
+CREATE POLICY
+SET
+SET
+SET
+                     QUERY PLAN                     
+----------------------------------------------------
+ Aggregate (actual rows=1 loops=1)
+   ->  Seq Scan on files (actual rows=3410 loops=1)
+         Filter: demo.owns_above(folder_id)
+         Rows Removed by Filter: 196590
+ Planning Time: 0.081 ms
+ Execution Time: 1549.657 ms
+(6 rows)
+
+                     QUERY PLAN                     
+----------------------------------------------------
+ Aggregate (actual rows=1 loops=1)
+   ->  Seq Scan on files (actual rows=3410 loops=1)
+         Filter: demo.owns_above(folder_id)
+         Rows Removed by Filter: 196590
+ Planning Time: 0.058 ms
+ Execution Time: 1613.089 ms
+(6 rows)
+
+                     QUERY PLAN                     
+----------------------------------------------------
+ Aggregate (actual rows=1 loops=1)
+   ->  Seq Scan on files (actual rows=3410 loops=1)
+         Filter: demo.owns_above(folder_id)
+         Rows Removed by Filter: 196590
+ Planning Time: 0.064 ms
+ Execution Time: 1581.660 ms
+(6 rows)
+
+                               QUERY PLAN                                
+-------------------------------------------------------------------------
+ Limit (actual rows=50 loops=1)
+   ->  Index Scan using files_name_idx on files (actual rows=50 loops=1)
+         Filter: demo.owns_above(folder_id)
+         Rows Removed by Filter: 2327
+ Planning Time: 0.087 ms
+ Execution Time: 21.309 ms
+(6 rows)
+
+                               QUERY PLAN                                
+-------------------------------------------------------------------------
+ Limit (actual rows=50 loops=1)
+   ->  Index Scan using files_name_idx on files (actual rows=50 loops=1)
+         Filter: demo.owns_above(folder_id)
+         Rows Removed by Filter: 2327
+ Planning Time: 0.058 ms
+ Execution Time: 21.303 ms
+(6 rows)
+
+                               QUERY PLAN                                
+-------------------------------------------------------------------------
+ Limit (actual rows=50 loops=1)
+   ->  Index Scan using files_name_idx on files (actual rows=50 loops=1)
+         Filter: demo.owns_above(folder_id)
+         Rows Removed by Filter: 2327
+ Planning Time: 0.061 ms
+ Execution Time: 26.797 ms
+(6 rows)
+
+                          QUERY PLAN                          
+--------------------------------------------------------------
+ Index Scan using files_pkey on files (actual rows=1 loops=1)
+   Index Cond: (id = 61)
+   Filter: demo.owns_above(folder_id)
+ Planning Time: 0.057 ms
+ Execution Time: 0.254 ms
+(5 rows)
+
+                          QUERY PLAN                          
+--------------------------------------------------------------
+ Index Scan using files_pkey on files (actual rows=1 loops=1)
+   Index Cond: (id = 61)
+   Filter: demo.owns_above(folder_id)
+ Planning Time: 0.025 ms
+ Execution Time: 0.190 ms
+(5 rows)
+
+                          QUERY PLAN                          
+--------------------------------------------------------------
+ Index Scan using files_pkey on files (actual rows=1 loops=1)
+   Index Cond: (id = 61)
+   Filter: demo.owns_above(folder_id)
+ Planning Time: 0.052 ms
+ Execution Time: 0.218 ms
+(5 rows)
+
+RESET
+DROP POLICY
+
+=== 3. a table of every folder with each folder above it, looked up for each row ===
+CREATE TABLE
+INSERT 0 88800
+CREATE INDEX
+ANALYZE
+GRANT
+ rows_in_the_tree_table | its_size 
+------------------------+----------
+                  88800 | 8728 kB
+(1 row)
+
+CREATE POLICY
+SET
+SET
+SET
+                                                QUERY PLAN                                                
+----------------------------------------------------------------------------------------------------------
+ Aggregate (actual rows=1 loops=1)
+   ->  Seq Scan on files (actual rows=3410 loops=1)
+         Filter: (hashed SubPlan 2)
+         Rows Removed by Filter: 196590
+         SubPlan 2
+           ->  Nested Loop (actual rows=341 loops=1)
+                 ->  Bitmap Heap Scan on folders a (actual rows=1 loops=1)
+                       Recheck Cond: (owner_id = (current_setting('demo.user_id'::text))::bigint)
+                       Heap Blocks: exact=1
+                       ->  Bitmap Index Scan on folders_owner_id_idx (actual rows=1 loops=1)
+                             Index Cond: (owner_id = (current_setting('demo.user_id'::text))::bigint)
+                 ->  Index Scan using folder_tree_ancestor_idx on folder_tree t (actual rows=341 loops=1)
+                       Index Cond: (ancestor = a.id)
+ Planning Time: 0.385 ms
+ Execution Time: 12.218 ms
+(15 rows)
+
+                                                QUERY PLAN                                                
+----------------------------------------------------------------------------------------------------------
+ Aggregate (actual rows=1 loops=1)
+   ->  Seq Scan on files (actual rows=3410 loops=1)
+         Filter: (hashed SubPlan 2)
+         Rows Removed by Filter: 196590
+         SubPlan 2
+           ->  Nested Loop (actual rows=341 loops=1)
+                 ->  Bitmap Heap Scan on folders a (actual rows=1 loops=1)
+                       Recheck Cond: (owner_id = (current_setting('demo.user_id'::text))::bigint)
+                       Heap Blocks: exact=1
+                       ->  Bitmap Index Scan on folders_owner_id_idx (actual rows=1 loops=1)
+                             Index Cond: (owner_id = (current_setting('demo.user_id'::text))::bigint)
+                 ->  Index Scan using folder_tree_ancestor_idx on folder_tree t (actual rows=341 loops=1)
+                       Index Cond: (ancestor = a.id)
+ Planning Time: 0.260 ms
+ Execution Time: 11.635 ms
+(15 rows)
+
+                                                QUERY PLAN                                                
+----------------------------------------------------------------------------------------------------------
+ Aggregate (actual rows=1 loops=1)
+   ->  Seq Scan on files (actual rows=3410 loops=1)
+         Filter: (hashed SubPlan 2)
+         Rows Removed by Filter: 196590
+         SubPlan 2
+           ->  Nested Loop (actual rows=341 loops=1)
+                 ->  Bitmap Heap Scan on folders a (actual rows=1 loops=1)
+                       Recheck Cond: (owner_id = (current_setting('demo.user_id'::text))::bigint)
+                       Heap Blocks: exact=1
+                       ->  Bitmap Index Scan on folders_owner_id_idx (actual rows=1 loops=1)
+                             Index Cond: (owner_id = (current_setting('demo.user_id'::text))::bigint)
+                 ->  Index Scan using folder_tree_ancestor_idx on folder_tree t (actual rows=341 loops=1)
+                       Index Cond: (ancestor = a.id)
+ Planning Time: 0.252 ms
+ Execution Time: 11.954 ms
+(15 rows)
+
+                                                QUERY PLAN                                                
+----------------------------------------------------------------------------------------------------------
+ Limit (actual rows=50 loops=1)
+   ->  Index Scan using files_name_idx on files (actual rows=50 loops=1)
+         Filter: (hashed SubPlan 2)
+         Rows Removed by Filter: 2327
+         SubPlan 2
+           ->  Nested Loop (actual rows=341 loops=1)
+                 ->  Bitmap Heap Scan on folders a (actual rows=1 loops=1)
+                       Recheck Cond: (owner_id = (current_setting('demo.user_id'::text))::bigint)
+                       Heap Blocks: exact=1
+                       ->  Bitmap Index Scan on folders_owner_id_idx (actual rows=1 loops=1)
+                             Index Cond: (owner_id = (current_setting('demo.user_id'::text))::bigint)
+                 ->  Index Scan using folder_tree_ancestor_idx on folder_tree t (actual rows=341 loops=1)
+                       Index Cond: (ancestor = a.id)
+ Planning Time: 0.231 ms
+ Execution Time: 1.763 ms
+(15 rows)
+
+                                                QUERY PLAN                                                
+----------------------------------------------------------------------------------------------------------
+ Limit (actual rows=50 loops=1)
+   ->  Index Scan using files_name_idx on files (actual rows=50 loops=1)
+         Filter: (hashed SubPlan 2)
+         Rows Removed by Filter: 2327
+         SubPlan 2
+           ->  Nested Loop (actual rows=341 loops=1)
+                 ->  Bitmap Heap Scan on folders a (actual rows=1 loops=1)
+                       Recheck Cond: (owner_id = (current_setting('demo.user_id'::text))::bigint)
+                       Heap Blocks: exact=1
+                       ->  Bitmap Index Scan on folders_owner_id_idx (actual rows=1 loops=1)
+                             Index Cond: (owner_id = (current_setting('demo.user_id'::text))::bigint)
+                 ->  Index Scan using folder_tree_ancestor_idx on folder_tree t (actual rows=341 loops=1)
+                       Index Cond: (ancestor = a.id)
+ Planning Time: 0.254 ms
+ Execution Time: 0.660 ms
+(15 rows)
+
+                                                QUERY PLAN                                                
+----------------------------------------------------------------------------------------------------------
+ Limit (actual rows=50 loops=1)
+   ->  Index Scan using files_name_idx on files (actual rows=50 loops=1)
+         Filter: (hashed SubPlan 2)
+         Rows Removed by Filter: 2327
+         SubPlan 2
+           ->  Nested Loop (actual rows=341 loops=1)
+                 ->  Bitmap Heap Scan on folders a (actual rows=1 loops=1)
+                       Recheck Cond: (owner_id = (current_setting('demo.user_id'::text))::bigint)
+                       Heap Blocks: exact=1
+                       ->  Bitmap Index Scan on folders_owner_id_idx (actual rows=1 loops=1)
+                             Index Cond: (owner_id = (current_setting('demo.user_id'::text))::bigint)
+                 ->  Index Scan using folder_tree_ancestor_idx on folder_tree t (actual rows=341 loops=1)
+                       Index Cond: (ancestor = a.id)
+ Planning Time: 0.223 ms
+ Execution Time: 0.610 ms
+(15 rows)
+
+                                          QUERY PLAN                                           
+-----------------------------------------------------------------------------------------------
+ Index Scan using files_pkey on files (actual rows=1 loops=1)
+   Index Cond: (id = 61)
+   Filter: (SubPlan 1)
+   SubPlan 1
+     ->  Nested Loop (actual rows=1 loops=1)
+           ->  Index Only Scan using folder_tree_pkey on folder_tree t (actual rows=1 loops=1)
+                 Index Cond: (descendant = files.folder_id)
+                 Heap Fetches: 1
+           ->  Memoize (actual rows=1 loops=1)
+                 Cache Key: t.ancestor
+                 Cache Mode: logical
+                 Hits: 0  Misses: 1  Evictions: 0  Overflows: 0  Memory Usage: 1kB
+                 ->  Index Scan using folders_pkey on folders a (actual rows=1 loops=1)
+                       Index Cond: (id = t.ancestor)
+                       Filter: (owner_id = (current_setting('demo.user_id'::text))::bigint)
+ Planning Time: 0.156 ms
+ Execution Time: 0.024 ms
+(17 rows)
+
+                                          QUERY PLAN                                           
+-----------------------------------------------------------------------------------------------
+ Index Scan using files_pkey on files (actual rows=1 loops=1)
+   Index Cond: (id = 61)
+   Filter: (SubPlan 1)
+   SubPlan 1
+     ->  Nested Loop (actual rows=1 loops=1)
+           ->  Index Only Scan using folder_tree_pkey on folder_tree t (actual rows=1 loops=1)
+                 Index Cond: (descendant = files.folder_id)
+                 Heap Fetches: 1
+           ->  Memoize (actual rows=1 loops=1)
+                 Cache Key: t.ancestor
+                 Cache Mode: logical
+                 Hits: 0  Misses: 1  Evictions: 0  Overflows: 0  Memory Usage: 1kB
+                 ->  Index Scan using folders_pkey on folders a (actual rows=1 loops=1)
+                       Index Cond: (id = t.ancestor)
+                       Filter: (owner_id = (current_setting('demo.user_id'::text))::bigint)
+ Planning Time: 0.189 ms
+ Execution Time: 0.022 ms
+(17 rows)
+
+                                          QUERY PLAN                                           
+-----------------------------------------------------------------------------------------------
+ Index Scan using files_pkey on files (actual rows=1 loops=1)
+   Index Cond: (id = 61)
+   Filter: (SubPlan 1)
+   SubPlan 1
+     ->  Nested Loop (actual rows=1 loops=1)
+           ->  Index Only Scan using folder_tree_pkey on folder_tree t (actual rows=1 loops=1)
+                 Index Cond: (descendant = files.folder_id)
+                 Heap Fetches: 1
+           ->  Memoize (actual rows=1 loops=1)
+                 Cache Key: t.ancestor
+                 Cache Mode: logical
+                 Hits: 0  Misses: 1  Evictions: 0  Overflows: 0  Memory Usage: 1kB
+                 ->  Index Scan using folders_pkey on folders a (actual rows=1 loops=1)
+                       Index Cond: (id = t.ancestor)
+                       Filter: (owner_id = (current_setting('demo.user_id'::text))::bigint)
+ Planning Time: 0.169 ms
+ Execution Time: 0.020 ms
+(17 rows)
+
+RESET
+DROP POLICY
+
+=== 4. the same table, asked once: the set of folders the user may see ===
+CREATE POLICY
+SET
+SET
+SET
+                                                      QUERY PLAN                                                      
+----------------------------------------------------------------------------------------------------------------------
+ Finalize Aggregate (actual rows=1 loops=1)
+   ->  Gather (actual rows=3 loops=1)
+         Workers Planned: 2
+         Workers Launched: 2
+         ->  Partial Aggregate (actual rows=1 loops=3)
+               ->  Parallel Index Only Scan using files_folder_id_idx on files (actual rows=1137 loops=3)
+                     Filter: (hashed SubPlan 1)
+                     Rows Removed by Filter: 65530
+                     Heap Fetches: 97
+                     SubPlan 1
+                       ->  Nested Loop (actual rows=341 loops=3)
+                             ->  Bitmap Heap Scan on folders a (actual rows=1 loops=3)
+                                   Recheck Cond: (owner_id = (current_setting('demo.user_id'::text))::bigint)
+                                   Heap Blocks: exact=1
+                                   ->  Bitmap Index Scan on folders_owner_id_idx (actual rows=1 loops=3)
+                                         Index Cond: (owner_id = (current_setting('demo.user_id'::text))::bigint)
+                             ->  Index Scan using folder_tree_ancestor_idx on folder_tree t (actual rows=341 loops=3)
+                                   Index Cond: (ancestor = a.id)
+ Planning Time: 0.186 ms
+ Execution Time: 8.560 ms
+(20 rows)
+
+                                                      QUERY PLAN                                                      
+----------------------------------------------------------------------------------------------------------------------
+ Finalize Aggregate (actual rows=1 loops=1)
+   ->  Gather (actual rows=3 loops=1)
+         Workers Planned: 2
+         Workers Launched: 2
+         ->  Partial Aggregate (actual rows=1 loops=3)
+               ->  Parallel Index Only Scan using files_folder_id_idx on files (actual rows=1137 loops=3)
+                     Filter: (hashed SubPlan 1)
+                     Rows Removed by Filter: 65530
+                     Heap Fetches: 97
+                     SubPlan 1
+                       ->  Nested Loop (actual rows=341 loops=3)
+                             ->  Bitmap Heap Scan on folders a (actual rows=1 loops=3)
+                                   Recheck Cond: (owner_id = (current_setting('demo.user_id'::text))::bigint)
+                                   Heap Blocks: exact=1
+                                   ->  Bitmap Index Scan on folders_owner_id_idx (actual rows=1 loops=3)
+                                         Index Cond: (owner_id = (current_setting('demo.user_id'::text))::bigint)
+                             ->  Index Scan using folder_tree_ancestor_idx on folder_tree t (actual rows=341 loops=3)
+                                   Index Cond: (ancestor = a.id)
+ Planning Time: 0.193 ms
+ Execution Time: 6.062 ms
+(20 rows)
+
+                                                      QUERY PLAN                                                      
+----------------------------------------------------------------------------------------------------------------------
+ Finalize Aggregate (actual rows=1 loops=1)
+   ->  Gather (actual rows=3 loops=1)
+         Workers Planned: 2
+         Workers Launched: 2
+         ->  Partial Aggregate (actual rows=1 loops=3)
+               ->  Parallel Index Only Scan using files_folder_id_idx on files (actual rows=1137 loops=3)
+                     Filter: (hashed SubPlan 1)
+                     Rows Removed by Filter: 65530
+                     Heap Fetches: 97
+                     SubPlan 1
+                       ->  Nested Loop (actual rows=341 loops=3)
+                             ->  Bitmap Heap Scan on folders a (actual rows=1 loops=3)
+                                   Recheck Cond: (owner_id = (current_setting('demo.user_id'::text))::bigint)
+                                   Heap Blocks: exact=1
+                                   ->  Bitmap Index Scan on folders_owner_id_idx (actual rows=1 loops=3)
+                                         Index Cond: (owner_id = (current_setting('demo.user_id'::text))::bigint)
+                             ->  Index Scan using folder_tree_ancestor_idx on folder_tree t (actual rows=341 loops=3)
+                                   Index Cond: (ancestor = a.id)
+ Planning Time: 0.188 ms
+ Execution Time: 6.644 ms
+(20 rows)
+
+                                                QUERY PLAN                                                
+----------------------------------------------------------------------------------------------------------
+ Limit (actual rows=50 loops=1)
+   ->  Index Scan using files_name_idx on files (actual rows=50 loops=1)
+         Filter: (hashed SubPlan 1)
+         Rows Removed by Filter: 2327
+         SubPlan 1
+           ->  Nested Loop (actual rows=341 loops=1)
+                 ->  Bitmap Heap Scan on folders a (actual rows=1 loops=1)
+                       Recheck Cond: (owner_id = (current_setting('demo.user_id'::text))::bigint)
+                       Heap Blocks: exact=1
+                       ->  Bitmap Index Scan on folders_owner_id_idx (actual rows=1 loops=1)
+                             Index Cond: (owner_id = (current_setting('demo.user_id'::text))::bigint)
+                 ->  Index Scan using folder_tree_ancestor_idx on folder_tree t (actual rows=341 loops=1)
+                       Index Cond: (ancestor = a.id)
+ Planning Time: 0.185 ms
+ Execution Time: 1.533 ms
+(15 rows)
+
+                                                QUERY PLAN                                                
+----------------------------------------------------------------------------------------------------------
+ Limit (actual rows=50 loops=1)
+   ->  Index Scan using files_name_idx on files (actual rows=50 loops=1)
+         Filter: (hashed SubPlan 1)
+         Rows Removed by Filter: 2327
+         SubPlan 1
+           ->  Nested Loop (actual rows=341 loops=1)
+                 ->  Bitmap Heap Scan on folders a (actual rows=1 loops=1)
+                       Recheck Cond: (owner_id = (current_setting('demo.user_id'::text))::bigint)
+                       Heap Blocks: exact=1
+                       ->  Bitmap Index Scan on folders_owner_id_idx (actual rows=1 loops=1)
+                             Index Cond: (owner_id = (current_setting('demo.user_id'::text))::bigint)
+                 ->  Index Scan using folder_tree_ancestor_idx on folder_tree t (actual rows=341 loops=1)
+                       Index Cond: (ancestor = a.id)
+ Planning Time: 0.134 ms
+ Execution Time: 0.699 ms
+(15 rows)
+
+                                                QUERY PLAN                                                
+----------------------------------------------------------------------------------------------------------
+ Limit (actual rows=50 loops=1)
+   ->  Index Scan using files_name_idx on files (actual rows=50 loops=1)
+         Filter: (hashed SubPlan 1)
+         Rows Removed by Filter: 2327
+         SubPlan 1
+           ->  Nested Loop (actual rows=341 loops=1)
+                 ->  Bitmap Heap Scan on folders a (actual rows=1 loops=1)
+                       Recheck Cond: (owner_id = (current_setting('demo.user_id'::text))::bigint)
+                       Heap Blocks: exact=1
+                       ->  Bitmap Index Scan on folders_owner_id_idx (actual rows=1 loops=1)
+                             Index Cond: (owner_id = (current_setting('demo.user_id'::text))::bigint)
+                 ->  Index Scan using folder_tree_ancestor_idx on folder_tree t (actual rows=341 loops=1)
+                       Index Cond: (ancestor = a.id)
+ Planning Time: 0.124 ms
+ Execution Time: 0.505 ms
+(15 rows)
+
+                                             QUERY PLAN                                             
+----------------------------------------------------------------------------------------------------
+ Index Scan using files_pkey on files (actual rows=1 loops=1)
+   Index Cond: (id = 61)
+   Filter: (hashed SubPlan 1)
+   SubPlan 1
+     ->  Nested Loop (actual rows=341 loops=1)
+           ->  Bitmap Heap Scan on folders a (actual rows=1 loops=1)
+                 Recheck Cond: (owner_id = (current_setting('demo.user_id'::text))::bigint)
+                 Heap Blocks: exact=1
+                 ->  Bitmap Index Scan on folders_owner_id_idx (actual rows=1 loops=1)
+                       Index Cond: (owner_id = (current_setting('demo.user_id'::text))::bigint)
+           ->  Index Scan using folder_tree_ancestor_idx on folder_tree t (actual rows=341 loops=1)
+                 Index Cond: (ancestor = a.id)
+ Planning Time: 0.100 ms
+ Execution Time: 0.064 ms
+(14 rows)
+
+                                             QUERY PLAN                                             
+----------------------------------------------------------------------------------------------------
+ Index Scan using files_pkey on files (actual rows=1 loops=1)
+   Index Cond: (id = 61)
+   Filter: (hashed SubPlan 1)
+   SubPlan 1
+     ->  Nested Loop (actual rows=341 loops=1)
+           ->  Bitmap Heap Scan on folders a (actual rows=1 loops=1)
+                 Recheck Cond: (owner_id = (current_setting('demo.user_id'::text))::bigint)
+                 Heap Blocks: exact=1
+                 ->  Bitmap Index Scan on folders_owner_id_idx (actual rows=1 loops=1)
+                       Index Cond: (owner_id = (current_setting('demo.user_id'::text))::bigint)
+           ->  Index Scan using folder_tree_ancestor_idx on folder_tree t (actual rows=341 loops=1)
+                 Index Cond: (ancestor = a.id)
+ Planning Time: 0.122 ms
+ Execution Time: 0.070 ms
+(14 rows)
+
+                                             QUERY PLAN                                             
+----------------------------------------------------------------------------------------------------
+ Index Scan using files_pkey on files (actual rows=1 loops=1)
+   Index Cond: (id = 61)
+   Filter: (hashed SubPlan 1)
+   SubPlan 1
+     ->  Nested Loop (actual rows=341 loops=1)
+           ->  Bitmap Heap Scan on folders a (actual rows=1 loops=1)
+                 Recheck Cond: (owner_id = (current_setting('demo.user_id'::text))::bigint)
+                 Heap Blocks: exact=1
+                 ->  Bitmap Index Scan on folders_owner_id_idx (actual rows=1 loops=1)
+                       Index Cond: (owner_id = (current_setting('demo.user_id'::text))::bigint)
+           ->  Index Scan using folder_tree_ancestor_idx on folder_tree t (actual rows=341 loops=1)
+                 Index Cond: (ancestor = a.id)
+ Planning Time: 0.120 ms
+ Execution Time: 0.070 ms
+(14 rows)
+
+RESET
+
+=== what a move costs with the table: folder 7's first child, with all below it, moved under workspace 8 ===
+ folders_below_it_and_itself 
+-----------------------------
+                          85
+(1 row)
+
+BEGIN
+Timing is on.
+UPDATE 1
+Time: 0.241 ms
+DELETE 85
+Time: 0.371 ms
+INSERT 0 85
+Time: 0.754 ms
+Timing is off.
+ rows_now | rows_if_built_again 
+----------+---------------------
+    88800 |               88800
+(1 row)
+
+ROLLBACK

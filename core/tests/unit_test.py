@@ -2720,6 +2720,57 @@ class ComparePages(unittest.TestCase):
         self.assertEqual(shown[0], shown[1])
 
 
+class BlogPosts(unittest.TestCase):
+    """docs/blog/: what a post shows can be run. Its SQL is lines of the files in the folder named like it
+    (docs/blog/<slug>/, the experiment a reader can run), a policy compiles and is laid out as `rowstile fmt`
+    writes it, and a plan's lines are lines of a run kept in that folder."""
+
+    REPO = os.path.dirname(ROOT)
+
+    def test_what_a_post_shows_is_beside_it(self) -> None:
+        from authzlib import fmt
+
+        folder = os.path.join(self.REPO, "docs", "blog")
+        posts = sorted(f for f in os.listdir(folder) if re.fullmatch(r"\d{4}-\d{2}-\d{2}-[a-z0-9-]+\.md", f))
+        for post in posts:
+            where = f"docs/blog/{post}"
+            with open(os.path.join(folder, post), encoding="utf-8") as fh:
+                text = fh.read()
+            beside = os.path.join(folder, post[11:-3])
+            have: set[str] = set()
+            runs = ""
+            if os.path.isdir(beside):
+                for name in sorted(os.listdir(beside)):
+                    with open(os.path.join(beside, name), encoding="utf-8") as fh:
+                        body = fh.read()
+                    have |= {" ".join(line.split()) for line in body.split("\n")}
+                    if name.endswith(".txt"):
+                        runs += body
+            shown = [
+                " ".join(line.split())
+                for block in re.findall(r"```sql\n(.*?)```", text, re.S)
+                for line in block.split("\n")
+                if line.strip()
+            ]
+            self.assertEqual([x for x in shown if x not in have], [], f"{where}: SQL in no file of its folder")
+            for policy in re.findall(r"```authz\n(.*?)```", text, re.S):
+                Compiler(parse_policy(policy, where)).compile(where)
+                self.assertEqual(fmt.format_policy(policy), policy, f"{where}: not as rowstile fmt writes it")
+            # a plan's lines are a run's own (a plan shown shortened leaves lines out, it changes none)
+            plans = [
+                line.strip()
+                for block in re.findall(r"```\n(.*?)```", text, re.S)
+                for line in block.split("\n")
+                if "(actual rows=" in line or line.strip().startswith(("Filter:", "Rows Removed"))
+            ]
+            said = {" ".join(line.split()) for line in runs.split("\n")}
+            self.assertEqual(
+                [x for x in plans if " ".join(x.split()) not in said],
+                [],
+                f"{where}: plan lines in no run of its folder",
+            )
+
+
 class SdkPackages(unittest.TestCase):
     """sdk/typescript/<package>/README.md: each package's own page on npm. It names its package, links nothing
     by a path (npm shows the file alone), and every line of code it shows is in the conformance app."""
