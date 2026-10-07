@@ -166,7 +166,9 @@ What changed since 0.1.0-alpha.3:
 
 ### Changed
 
-- `@rowstile/prisma`: a Prisma extension added to the client `authz()` returns is placed before `authz()`,
+- `@rowstile/prisma` (security advisory
+  [GHSA-6g93-673q-c29f](https://github.com/rowstile/rowstile/security/advisories/GHSA-6g93-673q-c29f)): a
+  Prisma extension added to the client `authz()` returns is placed before `authz()`,
   which stays the last one. Your query hooks then see the errors `authz()` makes (`Refused`, `NotFound`) where
   they saw Prisma's `P2025`.
 

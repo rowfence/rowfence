@@ -16,7 +16,18 @@ Three ways to say who is asking, all per transaction:
 3. **JWTs** from your identity provider: `authz.login_jwt(token)` checks an HS256
    signature, a required `exp` and optional `nbf`, and the issuer and the audience once the settings
    `jwt_issuer` and `jwt_audience` name them (a token that names none is then refused); a `scope` claim limits
-   the transaction.
+   the transaction. The settings are rows of `authz.settings`, which the owner writes and the app role
+   can't read:
+
+   ```sql
+   INSERT INTO authz.settings VALUES ('jwt_secret', '...'), ('jwt_issuer', 'https://id.example')
+     ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
+   ```
+
+   `jwt_secret` is required: without it `login_jwt` signs nobody in. It is the secret your identity
+   provider signs with, and HS256 asks for 32 random bytes or more (RFC 7518): a short one can be
+   guessed from any token. The other settings: `jwt_audience`, `jwt_user_claim` (the claim that holds
+   the user's id, `sub` by default) and `jwt_type_claim` (below).
 
 **Services** (principal types) sign in the same three ways. The backend names the type
 (`SELECT authz.act_as('service', '7')`);
