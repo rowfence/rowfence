@@ -3,7 +3,7 @@ import { join, relative } from "node:path";
 import type { Plugin } from "vite";
 import { defineConfig } from "vitepress";
 import { FEED, FEED_TITLE, LANGUAGES } from "../blog.mjs";
-import { GITHUB, ORIGIN, PAGES, POSTS, REPO, TITLES, blogSidebar, describe, errorSidebar, notPages, recipeSidebar, siteLink, url } from "../pages.mjs";
+import { GITHUB, ORIGIN, PAGES, POSTS, REPO, TITLES, blogSidebar, compareSidebar, describe, errorSidebar, notPages, recipeSidebar, siteLink, url } from "../pages.mjs";
 
 // The pages are outside site/, and so is Vite's root (the repository), where there is no Vue: the pages' imports of
 // it are resolved from here, and the server bundle leaves Vue out (it imports it at run time, from site/.vitepress)
@@ -31,14 +31,7 @@ const guide = [
   { text: "Reporting a vulnerability", link: "/security" },
   { text: "Changelog", link: "/changelog" },
 ];
-const compare = [
-  { text: "rowstile and the alternatives", link: "/comparison" },
-  { text: "OpenFGA", link: "/compare/openfga" },
-  { text: "SpiceDB", link: "/compare/spicedb" },
-  { text: "ZenStack", link: "/compare/zenstack" },
-  { text: "Row-level security by hand", link: "/compare/hand-written-rls" },
-  { text: "Checks in app code", link: "/compare/app-code" },
-];
+const compare = [{ text: "rowstile and the alternatives", link: "/comparison" }, ...compareSidebar()];
 const stacks = [
   { text: "Pick yours", link: "/stacks/" },
   { text: "FastAPI, SQLAlchemy, Alembic", link: "/stacks/fastapi" },
