@@ -53,7 +53,12 @@ dir  = "alembic/versions"              # where the tool keeps them (each tool ha
 
 The database is `--db` (before or after the command), else `rowstile.toml`'s, else `DATABASE_URL`, else the
 `PG*` variables (`PGHOST`, `PGPORT`, `PGUSER`, `PGPASSWORD`, `PGDATABASE`, `PGSSLMODE`, `PGSSLROOTCERT`,
-`PGCHANNELBINDING`; not a password file or a service file). A URL's `?sslmode=`, `?host=`, `?port=` and the like are read; TLS is used when
+`PGCHANNELBINDING`; not a password file or a service file). Those variables, and the one `database = "env:NAME"`
+names, may be in `.env.local` or `.env` beside `rowstile.toml` (in the current folder while there is none), where
+Next.js, Prisma and many others keep them: the environment comes first, then `.env.local`, then `.env`, and
+`rowstile dev` says when the database came from a file. Nothing else in those files is read, a file that
+is a link out of the folder isn't read at all, and with `--db` neither is: the command line named the database. Values are as dotenv writes them: quotes, `#` comments,
+`export`, and `${NAME}` filled in. A URL's `?sslmode=`, `?host=`, `?port=` and the like are read; TLS is used when
 the server has it, required with `sslmode=require`, and the server's certificate checked with `verify-ca` and
 `verify-full`. Over TLS the password exchange is bound to the server's certificate when the server offers it
 (`channel_binding=prefer`, the default, as in libpq; `require` refuses a server that doesn't, `disable` never

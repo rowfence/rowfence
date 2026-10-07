@@ -14,6 +14,12 @@ Each release upgrades from the one before it. How releases are numbered and made
   Prisma](https://github.com/rowstile/starter-nextjs-prisma). Each is a small app where documents are shared
   with people and teams and no route checks a permission, with its policy, its tests, the review in CI, and
   an open pull request that shows the review's comment. The stack pages link them.
+- The command reads `.env.local` and `.env` beside `rowstile.toml` (in the current folder while there is
+  none) for where the database is: `DATABASE_URL`, the `PG*` variables, and the variable `database =
+  "env:NAME"` names. The environment comes first, then `.env.local`, then `.env`; `rowstile dev` says when the
+  database came from a file, and so does a connection that fails. Nothing else in those files is read, a
+  file that is a link out of the folder isn't read, and with `--db` neither is. A Next.js or Prisma app
+  keeps its URLs there: `npx rowstile init` and `npx rowstile dev` failed for want of them. (#96)
 - `rowstile <command> --help` prints that command's lines of the usage and where the database comes from,
   where it printed the whole usage. `rowstile init --help` says which schema `init` reads when none is
   named: `public`.

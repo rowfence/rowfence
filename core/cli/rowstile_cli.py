@@ -79,6 +79,7 @@
 
 The database is --db DSN (host=... port=... user=... password=... dbname=..., or a postgresql:// URL), else
 rowstile.toml's `database` (in this folder or a folder above it), else DATABASE_URL, else the PG* environment variables.
+Without --db, those variables may be in .env.local or .env beside rowstile.toml: the environment first, then the files.
 rowstile.toml:
 
     policy   = "db/policy.authz"
@@ -108,7 +109,7 @@ import posixpath
 import re
 import sys
 import time
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from typing import NoReturn, TypeVar
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -155,15 +156,111 @@ def read_policy(path: str) -> tuple[str, dict[str, str]]:
     return text, collect_includes(text, read)
 
 
+ENV_FILES = (".env.local", ".env")  # read after the environment, in this order: the first that has a name wins
+# What the files may set: where the database is, and nothing else. The review in CI reads a pull request's
+# files, and a GIT_SSH_COMMAND or a PATH taken from its .env would run the pull request's code there.
+PG_NAMES = ("PGHOST", "PGPORT", "PGUSER", "PGPASSWORD", "PGDATABASE", "PGSSLMODE", "PGSSLROOTCERT", "PGCHANNELBINDING")
+ENV_NAMES = frozenset({"DATABASE_URL", *PG_NAMES})
+
+
+def parse_env(text: str) -> dict[str, str]:
+    """A .env file's variables. NAME=value lines, `export` in front allowed, # comments; a value in single quotes
+    is taken as written, one in double quotes with its backslashes read (a new line, a quote), and ${NAME} in a
+    value that isn't in single quotes is filled in from the environment or the lines above. Any other line is
+    skipped: the file is the app's, and holds more than rowstile reads."""
+    out: dict[str, str] = {}
+    for raw in text.splitlines():
+        line = raw.strip()
+        if line.startswith("export "):
+            line = line[7:].lstrip()
+        name, sep, value = line.partition("=")
+        name, value = name.strip(), value.strip()
+        if not sep or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
+            continue
+        if value.startswith("'"):
+            end = value.find("'", 1)
+            out[name] = value[1 : end if end > 0 else len(value)]
+            continue
+        if value.startswith('"'):
+            body, i = [], 1
+            while i < len(value) and value[i] != '"':
+                if value[i] == "\\" and i + 1 < len(value):
+                    i += 1
+                    body.append({"n": "\n", "r": "\r", "t": "\t"}.get(value[i], value[i]))
+                else:
+                    body.append(value[i])
+                i += 1
+            value = "".join(body)
+        else:
+            value = re.split(r"\s#", value, maxsplit=1)[0].rstrip()
+        out[name] = re.sub(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}", lambda m: os.environ.get(m[1], out.get(m[1], "")), value)
+    return out
+
+
+class EnvFiles:
+    """What .env.local and .env beside rowstile.toml say of where the database is, for what the environment
+    doesn't set. They stay in that folder, as the policy does: one that is a link out of it isn't read."""
+
+    def __init__(self) -> None:
+        self.values: dict[str, str] = {}  # every name the files set
+        self.source: dict[str, str] = {}  # ... and the file each is from
+        self.taken: set[str] = set()  # the names whose value in use is a file's
+        self.skipped: list[str] = []  # files that weren't read, and why
+        self.where = ""  # the files that named the database this command uses (".env"), once that is known
+
+    def load(self, folder: str) -> None:
+        top = os.path.realpath(folder)
+        for name in ENV_FILES:
+            path = os.path.join(folder, name)
+            if not os.path.isfile(path):
+                continue
+            if not within(top, os.path.realpath(path)):
+                self.skipped.append(f"{name} is a link out of its folder: it isn't read")
+                continue
+            try:
+                with open(path, encoding="utf-8-sig") as fh:  # a byte order mark is skipped
+                    found = parse_env(fh.read())
+            except (OSError, UnicodeDecodeError) as e:
+                self.skipped.append(f"{name} can't be read ({e})")
+                continue
+            for key, value in found.items():
+                if key not in self.values:
+                    self.values[key], self.source[key] = value, name
+        # what the command and its connection read from the environment: put there, unless it is there already
+        for key in sorted(ENV_NAMES & self.values.keys()):
+            if key not in os.environ:
+                os.environ[key] = self.values[key]
+                self.taken.add(key)
+
+    def get(self, name: str) -> str | None:
+        """A variable rowstile.toml names (database = "env:NAME"): the environment's, else the files'."""
+        if name not in os.environ and name in self.values:
+            self.taken.add(name)
+            return self.values[name]
+        return os.environ.get(name)
+
+    def files(self, names: Iterable[str]) -> str:
+        """The files these variables' values in use came from: '.env', '.env and .env.local', or ''."""
+        return " and ".join(sorted({self.source[n] for n in names if n in self.taken}))
+
+    def note(self) -> str:
+        return "".join(f"\n{line}" for line in self.skipped)
+
+
+ENV = EnvFiles()
+
+
 def cant_connect(e: BaseException, dsn: str | None) -> str:
     """What to say when the connection failed. When nothing named a database, the defaults were tried (a local
     socket, the system's user): the message says that, and how to name one, rather than quote a host nobody
-    gave."""
+    gave. A database a .env file named: which file."""
     if dsn or any(os.environ.get(v) for v in ("PGHOST", "PGPORT", "PGDATABASE", "PGUSER", "PGSERVICE")):
-        return f"can't connect: {e}"
+        named = f"\n(the database is the one {ENV.where} names)" if ENV.where else ""
+        return f"can't connect: {e}{named}{ENV.note()}"
     return (
         f"can't connect: no database was named, and the default failed ({e})\n"
-        f"name it with --db DSN, `database` in {CONFIG}, or DATABASE_URL"
+        f"name it with --db DSN, `database` in {CONFIG}, or DATABASE_URL (in the environment, .env.local or .env)"
+        + ENV.note()
     )
 
 
@@ -340,11 +437,25 @@ class Config:
     def database(self) -> str | None:
         db = self.setting(None, "database")
         if db and db.startswith("env:"):
-            value = os.environ.get(db[4:])
+            value = ENV.get(db[4:])
             if value is None:
-                fail(f'{self.path}: database = "{db}", but {db[4:]} is not set', 2)
+                fail(
+                    f'{self.path}: database = "{db}", but {db[4:]} is not set: not in the environment, and not in '
+                    f".env.local or .env beside {CONFIG}" + ENV.note(),
+                    2,
+                )
             return value
         return db
+
+    def database_from(self, given: str | None) -> str:
+        """The .env files that named the database this command uses ('' when none did): --db is the command
+        line's, a literal `database` is rowstile.toml's own."""
+        if given is not None:
+            return ""
+        db = self.setting(None, "database")
+        if db:
+            return ENV.files([db[4:]]) if db.startswith("env:") else ""
+        return ENV.files(["DATABASE_URL"] if os.environ.get("DATABASE_URL") else PG_NAMES)
 
 
 # what rowstile.toml may hold: {setting: its type in words}, top-level and per [table]
@@ -693,7 +804,10 @@ class Dev:
         if reconfigure is not None:
             reconfigure(line_buffering=True)  # a line as it happens, even into a pipe or a log
         target = pgwire.parse_dsn(self.dsn)
-        print(f"rowstile dev: {relative(self.policy)} -> {target['database']} on {target['host']}:{target['port']}")
+        print(
+            f"rowstile dev: {relative(self.policy)} -> {target['database']} on {target['host']}:{target['port']}"
+            + (f" (from {ENV.where})" if ENV.where else "")
+        )
         passed = self.cycle("start")
         if passed:
             self.index_warnings()
@@ -790,7 +904,7 @@ def command_help(cmd: str) -> str:
     start = next(i for i, line in enumerate(lines) if re.match(rf"    rowstile {re.escape(cmd)}(\s|$)", line))
     end = next(i for i in range(start + 1, len(lines)) if not lines[i].startswith("     "))
     database = next(i for i, line in enumerate(lines) if line.startswith("The database is "))
-    where = [lines[database], lines[database + 1].removesuffix("rowstile.toml:").rstrip()]
+    where = lines[database : database + 3]  # ... and that .env may hold its variables
     return "\n".join(
         [line[4:] for line in lines[start:end]] + ["", *where, "rowstile --help: every command, and rowstile.toml"]
     )
@@ -925,6 +1039,8 @@ def main(argv: list[str]) -> None:
             2,
         )
     cfg = load_config()
+    if dsn is None:  # --db names the database: no file then adds a host or a port to what the command line said
+        ENV.load(cfg.dir)
 
     if cmd == "lsp":
         from lsp import serve
@@ -1008,7 +1124,9 @@ def main(argv: list[str]) -> None:
     except RecursionError:
         fail(f"rowstile {cmd}: an expression in the policy is nested too deep to read", 1)
 
+    given = dsn
     dsn = dsn if dsn is not None else (cfg.database or os.environ.get("DATABASE_URL"))
+    ENV.where = cfg.database_from(given)
     if cmd == "dev":
         path = args[0] if args else cfg.policy
         if not path:
@@ -1174,7 +1292,7 @@ def main(argv: list[str]) -> None:
                 lambda db: database.draft(db, schemas, opts.get("--users"), opts.get("--role", "app_user")),
                 keep=False,
             )
-            init(policy, opts, cfg)
+            init(policy, opts, cfg, ENV.where)
         elif cmd == "reapply":
             transaction(conn, lambda db: database.reapply(db, rebuild="--force" in flags))
             print("applied again")
