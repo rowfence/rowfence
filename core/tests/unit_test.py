@@ -977,9 +977,22 @@ class Command(unittest.TestCase):
             self.assertEqual(p.returncode, 2, p.stderr)
             self.assertIn("git is not installed", p.stderr)
             self.assertNotIn("Traceback", p.stderr)
+            # a command's own lines of the usage, where the database comes from, and nothing of the others
             p = run("review", "--help")
             self.assertEqual(p.returncode, 0, p.stderr)
-            self.assertIn("rowstile review", p.stderr)
+            self.assertTrue(p.stdout.startswith("rowstile review  [--base REF]"), p.stdout)
+            self.assertIn("\nThe database is --db DSN", p.stdout)
+            self.assertIn("\nrowstile --help: every command, and rowstile.toml\n", p.stdout)
+            self.assertNotIn("rowstile fmt", p.stdout)
+            self.assertNotIn("policy   =", p.stdout)
+
+    def test_every_command_has_help_of_its_own(self) -> None:
+        for cmd in rowstile_cli.ARGUMENTS:
+            text = rowstile_cli.command_help(cmd)
+            self.assertTrue(text.startswith(f"rowstile {cmd}"), cmd)
+            self.assertEqual(len(re.findall(r"^rowstile \S", text, re.M)), 2, text)  # its own, and the last line
+        # init says which schema it reads when none is named: the question a first run asked of --help
+        self.assertIn("those in public", rowstile_cli.command_help("init"))
 
     def test_array_literal(self) -> None:
         self.assertEqual(database.text_array(["1", 'a"b', "c\\d"]), '{"1","a\\"b","c\\\\d"}')
@@ -1724,6 +1737,33 @@ class Draft(unittest.TestCase):
         self.assertIn(
             '  insert : owner and (parent.edit or {"parentId" is null})   -- decide', tree("parentId", "ownerId")
         )
+
+    def test_your_own_row_and_a_link_table_named_in_one_word(self) -> None:
+        # a user's own row is drafted as the reference says to write it, a relation from the key; and a link
+        # table's relation leaves the type's name out whichever way the table is spelled
+        users = lambda pk: self.table("app.User", {pk: "integer"}, [pk])
+        links = lambda name: self.table(
+            name,
+            {"teamId": "integer", "userId": "integer"},
+            ["teamId", "userId"],
+            ((["teamId"], "app.Team", ["id"]), (["userId"], "app.User", ["id"])),
+        )
+        team = self.table("app.Team", {"id": "integer"}, ["id"])
+        text = self.compiled([users("id"), team, links("app.TeamMember")])
+        self.assertIn("  self : user = id  -- your own row\n  can edit = self\n", text)
+        self.assertNotIn("authz.uid()", text)
+        self.assertIn("  member : user = app.TeamMember(teamId -> userId)\n", text)
+        self.assertIn(
+            "  member : user = app.team_members(teamId -> userId)\n",
+            self.compiled([users("id"), team, links("app.team_members")]),
+        )
+        # a key under another name, and a column of the user's own that would be called self too
+        boss = self.table(
+            "app.User", {"userId": "integer", "selfId": "integer"}, ["userId"], ((["selfId"], "app.User", ["userId"]),)
+        )
+        text = self.compiled([boss])
+        self.assertIn("  self2 : user = userId  -- your own row\n  self : user = selfId\n", text)
+        self.assertIn("  can edit = self2 or self\n", text)
 
     def test_names_the_language_or_sql_reads_another_way(self) -> None:
         users = self.table("app.users", {"id": "bigint"}, ["id"])

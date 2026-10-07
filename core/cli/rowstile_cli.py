@@ -53,7 +53,8 @@
     rowstile client  [py|ts] [POLICY.authz]        typed helpers for app code; with neither, writes the
                                                    clients rowstile.toml names
     rowstile init    [--schema app,...] [--users app.users] [--role app_user] [--out db]
-                                                   a first policy from the database's tables, and rowstile.toml
+                                                   a first policy from the database's tables (those in public,
+                                                   unless --schema names others), and rowstile.toml
     rowstile lsp                                   the language server, for editors (stdin and stdout)
     rowstile mcp                                   the MCP server, for coding agents (stdin and stdout): check,
                                                    prove, review, test, why, lint, and push to a development database
@@ -782,6 +783,19 @@ ARGUMENTS: dict[str, int | None] = {
 }
 
 
+def command_help(cmd: str) -> str:
+    """What `rowstile CMD --help` prints: that command's lines of the usage, and where the database comes from."""
+    assert __doc__ is not None
+    lines = __doc__.splitlines()
+    start = next(i for i, line in enumerate(lines) if re.match(rf"    rowstile {re.escape(cmd)}(\s|$)", line))
+    end = next(i for i in range(start + 1, len(lines)) if not lines[i].startswith("     "))
+    database = next(i for i, line in enumerate(lines) if line.startswith("The database is "))
+    where = [lines[database], lines[database + 1].removesuffix("rowstile.toml:").rstrip()]
+    return "\n".join(
+        [line[4:] for line in lines[start:end]] + ["", *where, "rowstile --help: every command, and rowstile.toml"]
+    )
+
+
 def check_row(text: str) -> None:
     """--row is a JSON object. What isn't is shown as it arrived: Windows PowerShell 5 and cmd take the double
     quotes out of '{"column": 1}' before the command sees it, and JSON's own message doesn't say so."""
@@ -886,6 +900,9 @@ def main(argv: list[str]) -> None:
             sys.stdout.write(errors.index())
         else:
             fail(f"rowstile help: no code {argv[1]} (rowstile help errors lists them)", 2)
+        return
+    if argv and argv[0] in ARGUMENTS and ("--help" in argv or "-h" in argv):
+        print(command_help(argv[0]))
         return
     if not argv or argv[0] in ("-h", "--help", "help") or "--help" in argv:
         fail(__doc__, 0 if argv else 2)
