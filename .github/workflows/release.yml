@@ -87,8 +87,8 @@ jobs:
           scope: "@rowstile"
       - run: node packaging/npm/build.mjs --all
       - run: npm ci --no-audit --no-fund && npx tsc -b sdk/typescript
-      # each SDK package ships the SDK's README and the licence (npm takes them from the package's folder)
-      - run: for d in sdk/typescript/*/; do cp LICENSE "$d" && cp sdk/typescript/README.md "$d"; done
+      # each SDK package ships its own README (in its folder: its page on npm) and the licence
+      - run: for d in sdk/typescript/*/; do cp LICENSE "$d"; done
       # every package as the public publish would send it, the launcher too
       - run: for d in packaging/npm/out/cli-* packaging/npm/out/rowstile sdk/typescript/*/; do npm publish --dry-run --tag "$TAG" --access public "$d"; done
       # npmjs.com trusts this workflow (each package's trusted publisher: rowstile/rowstile, release.yml, npm): npm
