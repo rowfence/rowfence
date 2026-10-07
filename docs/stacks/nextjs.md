@@ -28,8 +28,9 @@ npx rowstile init        # a first policy from your tables, a test file, rowstil
 ```
 
 The `rowstile` package is the command, with its own Python: nothing else to install. `init` reads your
-tables, so it needs the database, as their owner: `DATABASE_URL`, or `--db`. It finds Next.js and
-Prisma, and writes `rowstile.toml` for them. The conformance app's, with its own name for the variable that
+tables, so it needs the database, as their owner: `DATABASE_URL`, or `--db`. The command reads its
+variables from the environment, then from `.env.local` and `.env` in the project's folder, where Next.js
+and Prisma keep theirs. It finds Next.js and Prisma, and writes `rowstile.toml` for them. The conformance app's, with its own name for the variable that
 holds the owner's connection:
 
 ```toml

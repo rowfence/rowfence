@@ -143,6 +143,46 @@ out=$(TOML check 2>&1); rc=$?; rm -f "$P/rowfence.toml"
 [ $rc -eq 0 ] && case "$out" in *"rowfence.toml: rowstile was called rowfence; rename this file rowstile.toml"*) true;; *) false;; esac &&
   ok "rowfence.toml (the file's name before) is read, and the rename is asked for" || bad "rowfence.toml" "$rc ${out:0:300}"
 
+echo "-- .env beside rowstile.toml"
+# where a Next.js or Prisma app keeps its database's URL: read for what the environment doesn't set, .env.local first
+E="$T/envproj"; mkdir -p "$E/db" "$E/sub"; cp example/docs.authz "$E/db/policy.authz"
+printf 'policy = "db/policy.authz"\n' > "$E/rowstile.toml"
+CLI_PY="$PWD/cli/rowstile_cli.py"
+# runs the command in the project (or the folder named first with -C), with no DATABASE_URL of the suite's own
+envrun() { local d="$E"; [ "$1" = -C ] && { d=$2; shift 2; }; out=$(cd "$d" && env -u DATABASE_URL -u OWNER_DSN python3 "$CLI_PY" "$@" 2>&1); rc=$?; }
+envrun sql --as user:1 "SELECT 1"
+[ $rc -eq 2 ] && case "$out" in "can't connect: "*) true;; *) false;; esac && ok "without a .env, nothing names the database" || bad "no .env" "$rc $out"
+printf '# the owner\nexport DATABASE_URL="dbname=%s"   # development\nGIT_SSH_COMMAND=false\n' "$DB" > "$E/.env"
+envrun sql --as user:1 "SELECT 1"
+[ $rc -eq 0 ] && case "$out" in *"as user:1; rolled back"*) true;; *) false;; esac && ok "DATABASE_URL in .env names it" || bad ".env" "$rc $out"
+envrun -C "$E/sub" sql --as user:1 "SELECT 1"; [ $rc -eq 0 ] && ok "... from a folder below too: the .env beside rowstile.toml" || bad ".env from below" "$rc $out"
+envrun dev --once --no-studio
+case "$out" in "rowstile dev: "*" -> $DB on "*" (from .env)"*) ok "rowstile dev says the database came from .env";; *) bad "dev and .env" "$out";; esac
+printf "DATABASE_URL='dbname=authz_no_such_db'\n" > "$E/.env.local"
+envrun sql --as user:1 "SELECT 1"
+[ $rc -eq 2 ] && case "$out" in "can't connect: "*"(the database is the one .env.local names)"*) true;; *) false;; esac &&
+  ok ".env.local comes before .env, and a failed connection says which file named the database" || bad ".env.local" "$rc $out"
+out=$(cd "$E" && DATABASE_URL="dbname=$DB" python3 "$CLI_PY" sql --as user:1 "SELECT 1" 2>&1); rc=$?
+[ $rc -eq 0 ] && ok "the environment comes before both" || bad "the environment first" "$rc $out"
+if [ -z "${PGPORT:-}" ]; then  # (a port of the suite's own would come first)
+  printf 'PGPORT=1\n' > "$E/.env.local"
+  envrun sql --as user:1 "SELECT 1"; [ $rc -eq 2 ] && ok "a PG* variable in a file completes the URL (here a port nothing listens on)" || bad "PGPORT from a file" "$rc $out"
+  envrun --db "dbname=$DB" sql --as user:1 "SELECT 1"
+  [ $rc -eq 0 ] && ok "... but not what --db names: the files aren't read then" || bad "--db and .env" "$rc $out"
+fi
+rm "$E/.env.local"
+printf 'policy = "db/policy.authz"\ndatabase = "env:OWNER_DSN"\n' > "$E/rowstile.toml"
+envrun sql --as user:1 "SELECT 1"
+[ $rc -eq 2 ] && case "$out" in *'database = "env:OWNER_DSN", but OWNER_DSN is not set: not in the environment, and not in .env.local or .env beside rowstile.toml'*) true;; *) false;; esac &&
+  ok "a variable rowstile.toml names that is nowhere: said, with where it was looked for" || bad "env: missing" "$rc $out"
+printf 'OWNER_DSN=dbname=%s\n' "$DB" >> "$E/.env"
+envrun sql --as user:1 "SELECT 1"; [ $rc -eq 0 ] && ok "... and found in .env once it is there" || bad "env: from .env" "$rc $out"
+printf 'DATABASE_URL="dbname=%s"\n' "$DB" > "$T/outside.env"; rm "$E/.env"; ln -s "$T/outside.env" "$E/.env"
+printf 'policy = "db/policy.authz"\n' > "$E/rowstile.toml"
+envrun sql --as user:1 "SELECT 1"
+[ $rc -eq 2 ] && case "$out" in *".env is a link out of its folder: it isn't read"*) true;; *) false;; esac &&
+  ok "a .env that is a link out of the folder isn't read, and the failure says so" || bad "a link out" "$rc $out"
+
 echo "-- the clients rowstile.toml names"
 toml 'policy = "db/policy.authz"\n[clients]\npy = "out/c.py"\n' client
 [ $rc -eq 0 ] && [ -s "$P/out/c.py" ] && ok "rowstile client writes them" || bad "client files" "$rc $out"

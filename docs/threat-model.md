@@ -66,7 +66,10 @@ The review in CI (`rowstile review`, the GitHub action) runs on a pull request's
 opened it wrote. An include stays in the policy's folder: no `..` out of it, no absolute path, no link
 leading out (AZ108), and the policy, the tests and the lock file `rowstile.toml` names stay in the folder
 `rowstile.toml` is in, the same way; so a pull request can't make the review read one of the runner's files, or
-its environment, and print it in the job's log (`unit_test.py`, policy_errors.py, cli.sh). The review believes the pull
+its environment, and print it in the job's log (`unit_test.py`, policy_errors.py, cli.sh). A `.env` beside
+`rowstile.toml` is read the same way, for the variables that say where the database is and no other: a pull
+request's `.env` can't set `PATH` or what `git` runs. And it isn't read when `--db` names the database, as
+the review's workflow does: it can't add a host or a port to the URL the workflow gave. The review believes the pull
 request's `rowstile.toml`, as CI believes its workflow files: run it on `pull_request`, where a fork's pull
 request gets no secrets, not on `pull_request_target`.
 

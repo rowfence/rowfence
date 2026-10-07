@@ -22,7 +22,8 @@ uv run rowstile init        # a first policy from your tables, a test file, rows
 ```
 
 asyncpg is the app's driver and psycopg is Alembic's ([Migrations](#migrations) says why). `init` reads the
-tables, so it needs the database: `DATABASE_URL`, or `--db`.
+tables, so it needs the database: `DATABASE_URL`, or `--db`. The command reads the variable from the
+environment, or from a `.env` in the project's folder.
 
 `init` finds FastAPI and Alembic, and writes `rowstile.toml` for them. The conformance app's, with its own
 name for the variable that holds the owner's connection and for the client:

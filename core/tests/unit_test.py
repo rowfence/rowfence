@@ -958,6 +958,79 @@ class Command(unittest.TestCase):
         with mock.patch.dict(os.environ, {"PGHOST": "db"}):
             self.assertEqual(rowstile_cli.cant_connect(e, None), f"can't connect: {e}")
 
+    def test_env_files_are_read_for_the_database_only(self) -> None:
+        # a .env file as apps write them: comments, export, quotes, ${NAME} from the environment or the lines above
+        with mock.patch.dict(os.environ, {"FROM_ENV": "e"}, clear=True):  # (a PGHOST of the suite's would come first)
+            self.assertEqual(
+                rowstile_cli.parse_env(
+                    "# the app's own\n"
+                    "DATABASE_URL=postgresql://o:p@localhost:5432/dev   # the owner\n"
+                    "export PGHOST = db\n"
+                    'QUOTED="a \\"b\\"\\n#c"  # after\n'
+                    "SINGLE='${FROM_ENV} as written' and more\n"
+                    'URL="postgresql://${PGHOST}:${FROM_ENV}@${LATER}/d"\n'
+                    "LATER=l\n"
+                    "EMPTY=\n"
+                    "not a line\n=x\n1BAD=x\nA-B=x\n"
+                ),
+                {
+                    "DATABASE_URL": "postgresql://o:p@localhost:5432/dev",
+                    "PGHOST": "db",
+                    "QUOTED": 'a "b"\n#c',
+                    "SINGLE": "${FROM_ENV} as written",
+                    "URL": "postgresql://db:e@/d",
+                    "LATER": "l",
+                    "EMPTY": "",
+                },
+            )
+        with tempfile.TemporaryDirectory() as d:
+
+            def write(name: str, text: str) -> None:
+                with open(os.path.join(d, name), "w", encoding="utf-8") as fh:
+                    fh.write(text)
+
+            write(".env", "DATABASE_URL=from-env-file\nPGHOST=h1\nOWNER=o1\nGIT_SSH_COMMAND=evil\nPATH=/evil\n")
+            write(".env.local", "\ufeffPGHOST=h2\nOWNER=o2\nPGPORT=1\n")  # with a byte order mark
+            # the environment first, then .env.local, then .env; and of the files' names, only those that say
+            # where the database is reach the environment: a pull request's .env is read by the review in CI
+            with mock.patch.dict(os.environ, {"PGPORT": "7", "PATH": "/bin"}, clear=True):
+                e = rowstile_cli.EnvFiles()
+                e.load(d)
+                self.assertEqual(
+                    dict(os.environ), {"PGPORT": "7", "PATH": "/bin", "DATABASE_URL": "from-env-file", "PGHOST": "h2"}
+                )
+                self.assertEqual((e.get("OWNER"), e.get("PGPORT"), e.get("NOWHERE")), ("o2", "7", None))
+                self.assertEqual(e.files(["DATABASE_URL"]), ".env")
+                self.assertEqual(e.files(["PGPORT"]), "")  # the environment's own
+                self.assertEqual(e.files(["DATABASE_URL", "PGHOST", "OWNER"]), ".env and .env.local")
+                self.assertEqual(e.skipped, [])
+                # which files named the database a command uses: none for --db or a literal in rowstile.toml
+                with mock.patch.object(rowstile_cli, "ENV", e):
+                    config = lambda data: rowstile_cli.Config(os.path.join(d, "rowstile.toml"), data)
+                    self.assertEqual(config({}).database_from(None), ".env")
+                    self.assertEqual(config({}).database_from("dbname=x"), "")
+                    self.assertEqual(config({"database": "env:OWNER"}).database_from(None), ".env.local")
+                    self.assertEqual(config({"database": "env:OWNER"}).database, "o2")
+                    self.assertEqual(config({"database": "dbname=x"}).database_from(None), "")
+                    e.where = ".env"
+                    said = rowstile_cli.cant_connect(OSError("refused"), "from-env-file")
+                    self.assertEqual(said, "can't connect: refused\n(the database is the one .env names)")
+            # a .env that is a link out of the folder isn't read (as the policy isn't), and a failure says so
+            outside = os.path.join(d, "outside")
+            os.mkdir(os.path.join(d, "in"))
+            write("outside", "DATABASE_URL=theirs\n")
+            try:
+                os.symlink(outside, os.path.join(d, "in", ".env"))
+            except OSError:
+                return  # Windows without the right to make links
+            with mock.patch.dict(os.environ, {}, clear=True):
+                e = rowstile_cli.EnvFiles()
+                e.load(os.path.join(d, "in"))
+                self.assertNotIn("DATABASE_URL", os.environ)
+                self.assertEqual(e.skipped, [".env is a link out of its folder: it isn't read"])
+                with mock.patch.object(rowstile_cli, "ENV", e):
+                    self.assertTrue(rowstile_cli.cant_connect(OSError("x"), None).endswith(e.skipped[0]))
+
     def test_without_git_and_help_after_a_command(self) -> None:
         # a machine without git: the review says so, not a traceback; `rowstile review --help` is the usage
         with tempfile.TemporaryDirectory() as d:

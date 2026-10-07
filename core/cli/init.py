@@ -71,9 +71,9 @@ def write_agents_note(note: str, folder: str = ".") -> str | None:
     return "added"
 
 
-def init(policy: str, opts: dict[str, str], cfg: Config) -> None:
+def init(policy: str, opts: dict[str, str], cfg: Config, where: str = "") -> None:
     """Writes the drafted policy, a first test file, rowstile.toml and the note for coding agents, keeping any
-    that exist."""
+    that exist. where: the .env file that named the database, if one did."""
     out = opts.get("--out", "db")
     written: list[str] = []
     policy_path = os.path.join(out, "policy.authz")
@@ -100,7 +100,7 @@ test "nobody signed in sees a {example}"
 
     found = stack.detect(os.getcwd())
     if found.found:
-        via = " from DATABASE_URL" if os.environ.get("DATABASE_URL") else ""
+        via = (" from DATABASE_URL" + (f" in {where}" if where else "")) if os.environ.get("DATABASE_URL") else ""
         print(f"found   {', '.join(found.found)}, Postgres{via}")
     if cfg.path is None:
         database = "env:DATABASE_URL"
@@ -172,4 +172,4 @@ database = "{database}"     # a DSN or URL, or env:NAME for an environment varia
 Next:
   1. Read {policy_path}: every '-- decide:' is a choice only you can make.{setup}
   3. rowstile dev      applies the policy on each save, runs the tests, writes the clients
-                       (set DATABASE_URL, or database in {CONFIG}, to a development database)""")
+                       (DATABASE_URL, in the environment or in .env, or database in {CONFIG}: a development database)""")
