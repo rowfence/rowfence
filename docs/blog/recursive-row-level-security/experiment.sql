@@ -181,11 +181,34 @@ SELECT below.descendant, above.ancestor
 FROM demo.folder_tree below, demo.folder_tree above
 WHERE below.ancestor = :moved AND above.descendant = 8;
 \timing off
-SELECT count(*) AS rows_now, (SELECT count(*) FROM (
-  WITH RECURSIVE up AS (
-    SELECT id AS descendant, id AS ancestor, parent_id FROM demo.folders
-    UNION ALL
-    SELECT up.descendant, p.id, p.parent_id FROM up JOIN demo.folders p ON p.id = up.parent_id)
-  SELECT descendant, ancestor FROM up) fresh) AS rows_if_built_again
-FROM demo.folder_tree;
+-- the table against a fresh build, row by row: both differences must be empty
+WITH RECURSIVE up AS (
+  SELECT id AS descendant, id AS ancestor, parent_id FROM demo.folders
+  UNION ALL
+  SELECT up.descendant, p.id, p.parent_id FROM up JOIN demo.folders p ON p.id = up.parent_id
+), fresh AS (SELECT descendant, ancestor FROM up)
+SELECT (SELECT count(*) FROM demo.folder_tree) AS rows_now,
+       (SELECT count(*) FROM fresh) AS rows_if_built_again,
+       (SELECT count(*) FROM (SELECT * FROM demo.folder_tree EXCEPT SELECT * FROM fresh) x) AS rows_only_in_the_table,
+       (SELECT count(*) FROM (SELECT * FROM fresh EXCEPT SELECT * FROM demo.folder_tree) x) AS rows_only_in_a_fresh_build;
 ROLLBACK;
+
+\echo
+\echo '=== the same recursive policy on the folders themselves: Postgres refuses it ==='
+-- a policy on a table that reads that table through the policy again
+ALTER TABLE demo.folders ENABLE ROW LEVEL SECURITY;
+CREATE POLICY folders_select ON demo.folders FOR SELECT TO demo_app USING (
+  EXISTS (
+    WITH RECURSIVE up AS (
+      SELECT f.id, f.parent_id, f.owner_id FROM demo.folders f WHERE f.id = folders.id
+      UNION ALL
+      SELECT p.id, p.parent_id, p.owner_id FROM demo.folders p JOIN up ON p.id = up.parent_id
+    )
+    SELECT 1 FROM up WHERE up.owner_id = current_setting('demo.user_id')::bigint));
+:as_user
+\set ON_ERROR_STOP off
+SELECT count(*) FROM demo.folders;
+\set ON_ERROR_STOP on
+RESET ROLE;
+DROP POLICY folders_select ON demo.folders;
+ALTER TABLE demo.folders DISABLE ROW LEVEL SECURITY;
