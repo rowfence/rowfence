@@ -2820,6 +2820,52 @@ class Why(unittest.TestCase):
         nothing = grant.describe(grant.Answer(False, [], "view = owner  (line 3)"), "user:2", "doc", "1", "view")
         self.assertTrue(nothing.endswith("no single change to shares or links grants it"))
 
+    def test_a_where_that_names_its_values(self) -> None:
+        """A relation's `where` that only gives columns their values can be filled in; any other can't."""
+        from authzlib import grant
+
+        for where, held in (
+            ("role = 'admin'", {"role": "admin"}),
+            ("'admin' = role", {"role": "admin"}),
+            ("active and not blocked and level = 2", {"active": True, "blocked": False, "level": 2}),
+            ("kind in ('a', 'b') and ended is null", {"kind": "a", "ended": None}),
+            ("role <> 'guest'", None),
+            ("role = 'admin' or role = 'owner'", None),
+            ("ended is not null", None),
+            ("added_by = authz.uid()", None),
+            ("expires > now()", None),
+            ("role = null", None),
+        ):
+            with self.subTest(where=where):
+                self.assertEqual(grant.settles(where), held)
+        self.assertEqual(
+            [grant.constant(v) for v in ("it's", 2, 1.5, True, False, None)],
+            ["'it''s'", "2", "1.5", "true", "false", "NULL"],
+        )
+
+    def test_a_where_that_cannot_be_filled_in_is_named(self) -> None:
+        """No candidate for it, and a note that says which relation was left out."""
+        from authzlib import grant
+
+        c = Compiler(
+            parse_policy(
+                errors_prelude() + "type org = app.orgs\n"
+                "  admin : user = app.org_members(org_id -> user_id) where {expires > now()}\n"
+                "  can manage = admin\n",
+                "p.authz",
+            )
+        )
+        g = grant.Grants(c, cast("grant.Db", None), "user", "4")
+        t = c.types["org"]
+        self.assertEqual(g.relation(t, "1", t.relations["admin"], 0, frozenset()), [])
+        self.assertEqual(
+            g.notes,
+            [
+                "org.admin wasn't tried: it reads app.org_members where {expires > now()}, and it isn't known "
+                "which values make that true"
+            ],
+        )
+
 
 class LlmsTxt(unittest.TestCase):
     """llms.txt links only files that exist and its policy compiles; docs/llms_full.py (run when the docs are

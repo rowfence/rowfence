@@ -145,11 +145,35 @@ def main() -> None:
         out,
     )
     asked, out = granted_by("--as", "user:3", "folder", "3", "share")
+    ways_of_share, said_of_share = asked, out
     owner = next((w for w in asked if w.startswith("set owner_id of folder 3 to 3")), "")
     check(
         "a column: the folder's owner, with the other permissions it gives and whom it takes it from",
         "(also gives edit" in owner and "(takes share on it from 1 person)" in owner,
         out,
+    )
+    asked, out = granted_by("--as", "user:6", "folder", "2", "share")
+    check(
+        "a relation with a where: the row, with the column the condition asks",
+        any(w.startswith("add user 6 to app.org_members for org 1, with role = 'admin'") for w in asked),
+        out,
+    )
+    check(
+        "... and when the row is there, left out by the condition, its column changes",
+        any(w.startswith("set role = 'admin' on user 3's row of app.org_members for org 1") for w in ways_of_share),
+        said_of_share,
+    )
+    asked, out = granted_by("--as", "user:2", "folder", "5", "edit")
+    check(
+        "... for a group's link too",
+        any(w.startswith("set access = 'edit' on team 11's row of app.folder_team_access for folder 5") for w in asked),
+        out,
+    )
+    check(
+        "... and nothing of it stays",
+        psql(db, "SELECT role FROM app.org_members WHERE org_id = 1 AND user_id = 3") == "member"
+        and psql(db, "SELECT count(*) FROM app.org_members WHERE user_id = 6 AND org_id = 1") == "0"
+        and psql(db, "SELECT access FROM app.folder_team_access WHERE folder_id = 5") == "view",
     )
     rc, out = cli(db, "why", "--as", "user:1", "folder", "3", "edit")
     check("yes, and why", rc == 0 and out.startswith("yes: user:1 holds edit on folder 3") and "owner" in out, out)
