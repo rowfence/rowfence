@@ -147,7 +147,10 @@ User-facing docs: `README.md`, then `docs/reference/` (read them first). Terms i
   the site. `assets/` holds the mark (`mark.svg`:
   the tab's icon, the navigation's) and what is rendered from it and committed, by `node site/assets/render.mjs`
   with a headless Chrome or Edge: `card.png` (what a shared link shows, from `card.html`) and `editor/icon.png`.
-  `.github/workflows/site.yml` deploys it to GitHub Pages (rowstile.dev), built from a release tag
+  `.github/workflows/site.yml` deploys it to GitHub Pages (rowstile.dev), built from a release tag. Between
+  releases a site tag (`site-vN`) publishes `docs/blog/` and `docs/compare/` alone, on the release the site
+  shows: `source.mjs` is the rule (what a tag is built from, and the checkout), `source_test.mjs` its test,
+  `RELEASING.md` the steps
 - `.github/workflows/ci.yml` — on each push: `tests/unit_test.py` and the type checks, every suite on PG 16
   (`ci.sh`) and what depends on the version on 17 and 18 (`ci.sh --short`), the examples, the conformance suites,
   the editors, packaging, the site. `nightly.yml` (main) — every suite on 17 and 18, the proofs (`--proofs`) on
