@@ -80,7 +80,8 @@ measured (`.ci/coverage-16/`) and says:
 - for each file, how many of its lines and branches the suites run;
 - each line and branch that nothing runs;
 - what runs of the code that writes the SQL deciding access, but only in steps that never compare the database's
-  answers with the reference evaluator (difftest, genpolicy, around): its SQL was made, and never judged;
+  answers with the reference evaluator (difftest, genpolicy, around): its SQL was made, and never judged (the
+  checks that only look for a mistake in the policy, and the messages they make, are set apart);
 - each kind of rowstile's functions (`authz_gen."<table>:update:refuse"`, a tree's refresh, `authz.share`) that
   no suite ever calls, as far as Postgres can count: not a call that raises, nor one before a database's last
   apply (applying makes the functions anew), nor a plain SQL function's, which it may inline (listed apart);
