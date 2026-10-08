@@ -1572,7 +1572,8 @@ class CrossGen(Gen):
     types are partly inside the recursion and partly outside it, narrowed by a condition with a comment, dollar
     quotes and an E'' string in it; a type whose where reads another table (cx.closed); a region's chief named by
     a column and by shares; a site's wardens, the chiefs of the region a column names; an update rule with an
-    after rule on the whole row; notes, a table with rules and no select rule, whose `open` is conditions alone."""
+    after rule on the whole row; notes, a table with rules and no select rule, whose `open` is conditions alone; a
+    project's backers, folders or regions a table names with their type (one it doesn't know gives nothing)."""
 
     policy = "tests/cross.authz"
     schema = "tests/cross_schema.sql"
@@ -1610,6 +1611,7 @@ class CrossGen(Gen):
         ]
         s.append(f"INSERT INTO cx.closed VALUES ({r.randint(1, 4)});")
         s += [f"INSERT INTO cx.notes (id, author_id) VALUES ({i}, {self.maybe_user()});" for i in range(1, 5)]
+        s += [f"{self.backing()} ON CONFLICT DO NOTHING;" for _ in range(6)]
         for _ in range(4):
             for table in ("site_links", "site_regions"):
                 s.append(
@@ -1625,6 +1627,15 @@ class CrossGen(Gen):
             for t in ("folders", "projects", "regions", "sites")
         ]
         return "\n".join(s)
+
+    def backing(self) -> str:
+        """A project backed by a folder or a region (now and then by a type the policy doesn't name: nothing)."""
+        r = self.r
+        kind = r.choice(["folder", "folder", "region", "region", "desk"])
+        return (
+            f"INSERT INTO cx.backings VALUES ({r.randint(1, 4)}, {lit(kind)}, "
+            f"{r.randint(1, 10) if kind == 'folder' else r.randint(1, 4)})"
+        )
 
     def grants(self) -> str:
         return "\n".join(self.grant() for _ in range(10))
@@ -1724,6 +1735,12 @@ class CrossGen(Gen):
             # a region's chiefs by sharing, and the region whose chiefs are a site's wardens
             lambda: f"DELETE FROM authz.shares WHERE object_type = 'region' AND object_id = '{a}';",
             lambda: f"UPDATE cx.sites SET region_id = {r.choice([str(a), str(b), 'NULL'])} WHERE id = {site};",
+            # a project's backers, folders or regions by a type column
+            lambda: f"{self.backing()} ON CONFLICT DO NOTHING;",
+            lambda: f"DELETE FROM cx.backings WHERE project_id = {p} OR backer_id = {f};",
+            lambda: f"UPDATE cx.backings SET backer_type = 'region' WHERE backer_type = 'folder' AND backer_id = {a};",
+            lambda: f"UPDATE cx.backings SET backer_id = {g} WHERE project_id = {p} AND backer_type = 'folder';",
+            lambda: "TRUNCATE cx.backings;",
             # notes, which nobody may read back
             lambda: f"INSERT INTO cx.notes (author_id) VALUES ({self.maybe_user()});",
             lambda: f"UPDATE cx.notes SET author_id = {self.maybe_user()} WHERE id = {r.randint(1, 6)};",

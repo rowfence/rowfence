@@ -74,9 +74,10 @@ test "a folder's owner edits what is inside"    -- brings its own data, rolled b
 - **Relations** link rows to users or groups: from a column, from another table
   (`app.team_members(team_id -> user_id)`, or with the columns named:
   `app.team_members(object: team_id, subject: user_id)`; optionally `where {...}`), from a polymorphic pair of columns `(type_col, id_col)`,
+  in the type's table or in a link table (`app.backings(project_id -> (backer_type, backer_id))`),
   or from shares people make (`shared`). Declare a relation again to add a source. The type column of a
   polymorphic pair holds the policy's type names (`'folder'`, `'project'`): renaming a type changes what the
-  rows link to.
+  rows link to, and a row naming a type the relation doesn't list links to nothing.
 - **Shares**: a `shared` relation is given with `authz.share()` by whoever holds `share` on the object, so the
   type needs a `can share`, or the relation names another permission: `shared by edit`. `shared if {...}` is a
   condition on the share being made (`object_id`, `subject_type`, `subject_id`, `subject_relation`), which
