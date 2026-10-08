@@ -3856,6 +3856,107 @@ class Licence(unittest.TestCase):
             self.assertEqual(a.read(), b.read(), "editor/zed/LICENSE: copy the repository's LICENSE")
 
 
+class CoverageReport(unittest.TestCase):
+    """tests/coverage_report.py, which says what the suites run of authzlib and cli (ci.sh --coverage): how it reads
+    runs of lines, a diff, and which steps compare the database's answers with the reference evaluator."""
+
+    def setUp(self) -> None:
+        sys.path.insert(0, os.path.join(ROOT, "tests"))
+        import coverage_report
+
+        self.report = coverage_report
+
+    def test_runs_of_lines(self) -> None:
+        ranges = self.report.ranges
+        # a run goes on over lines that aren't statements, and stops at one that ran
+        self.assertEqual(ranges([3, 4, 6, 9, 10], [1, 3, 4, 5, 6, 8, 9, 10]), [(3, 4), (6, 6), (9, 10)])
+        self.assertEqual(ranges([3, 7], [3, 7]), [(3, 7)])
+        self.assertEqual(ranges([], [1, 2]), [])
+
+    def test_the_totals(self) -> None:
+        files = [
+            self.report.File(name="a.py", statements=[1, 2, 3, 4], missing=[4], never={}, branches=4, branches_run=1),
+            self.report.File(name="b.py", statements=[1], missing=[], never={}, branches=0, branches_run=0),
+        ]
+        self.assertEqual(self.report.summary(files), "run: 4 of 5 lines (80.0%), 1 of 4 branches (25.0%)")
+
+    def test_the_lines_a_diff_changes(self) -> None:
+        diff = (
+            "diff --git a/core/authzlib/parse.py b/core/authzlib/parse.py\n--- a/core/authzlib/parse.py\n"
+            "+++ b/core/authzlib/parse.py\n@@ -10 +12 @@ def a():\n-x\n+y\n@@ -20,2 +22,3 @@\n-a\n-b\n+c\n+d\n+e\n"
+            "@@ -40,2 +44,0 @@\n-gone\n-gone\n"
+            "diff --git a/core/cli/old.py b/core/cli/old.py\n--- a/core/cli/old.py\n+++ /dev/null\n@@ -1 +0,0 @@\n-x\n"
+            "diff --git a/docs/a.md b/docs/a.md\n--- a/docs/a.md\n+++ b/docs/a.md\n@@ -1 +1 @@\n-x\n+y\n"
+        )
+        self.assertEqual(self.report.changed(diff), {"authzlib/parse.py": {12, 22, 23, 24}})
+
+    def test_never_judged(self) -> None:
+        judged = "random changes, compared with the reference evaluator (docs, 15 changes)"
+        f = self.report.File(
+            name="authzlib/compiler.py",
+            statements=[1, 2, 3, 5, 6, 7],
+            missing=[6, 7],
+            never={},
+            branches=0,
+            branches_run=0,
+            functions=[
+                self.report.Function("Core.a", [1, 2]),
+                self.report.Function("Core.b", [5, 6]),
+                self.report.Function("Core.c", [7]),
+            ],
+            steps={1: {"unit"}, 2: {judged}, 3: {"unit", "random policies in random worlds: ..."}, 5: {"apply"}},
+        )
+        # Core.a's line 2 was judged; Core.b ran only where nothing compares answers; Core.c never ran
+        self.assertEqual(
+            self.report.never_judged(f, "a = 1\nb = 2\nc = 3\n\nd = 4\ne = 5\nf = 6\n"), ([1, 5], ["Core.b"])
+        )
+        # a policy's mistake is reported on lines no policy that compiles reaches: all of a fail(...) call's
+        self.assertEqual(
+            self.report.never_judged(f, 'a = 1\nb = 2\nc = 3\nfail(\n    "a mistake",\n    "AZ999",\n)\n'),
+            ([1], ["Core.b"]),
+        )
+        self.assertEqual(
+            self.report.mistakes("try:\n    x = 1\nexcept ValueError:\n    y = 2\nraise KeyError(\n    'k'\n)\n"),
+            {3, 4, 5, 6, 7},
+        )
+
+    def test_what_nothing_runs_is_shown_with_its_text(self) -> None:
+        f = self.report.File(
+            name="authzlib/__init__.py",
+            statements=[1, 2, 3],
+            missing=[2],
+            never={3: [-1, 5]},
+            branches=2,
+            branches_run=0,
+        )
+        lines = read("authzlib/__init__.py").split("\n")
+        two, three = self.report.text(lines, 2), self.report.text(lines, 3)
+        self.assertEqual(two, lines[1].strip())
+        self.assertEqual(
+            self.report.not_run(f),
+            [f"{2:>11}  {two}", f"{3:>11}  never to the function's end, line 5: {three}"],
+        )
+
+    def test_the_steps_that_compare_answers_are_named_so(self) -> None:
+        # the report knows them by their names in run_tests.sh: a step renamed must not leave the comparison
+        steps = re.split(r'\n\s*step "', read("run_tests.sh"))[1:]
+        self.assertGreater(len(steps), 20)
+        compares = 0
+        for text in steps:
+            label = text.split('"', 1)[0]
+            body = re.split(r"\n\s*record ", text, maxsplit=1)[0]  # the step's own commands
+            runs = re.search(r"tests/(?:difftest|genpolicy|around)\.py", body) is not None
+            compares += runs
+            self.assertEqual(bool(self.report.ORACLE.search(label)), runs, label)
+        self.assertGreaterEqual(compares, 6)
+
+    def test_the_settings_name_the_code(self) -> None:
+        settings = read("tests/coverage.ini")
+        self.assertEqual(re.findall(r"^\s+\$\{ROWSTILE_COVERAGE_CODE\}/(\S+)$", settings, re.M), ["authzlib", "cli"])
+        for name in self.report.DECIDES:
+            self.assertTrue(os.path.isfile(os.path.join(ROOT, name)), name)
+
+
 class Delivery(unittest.TestCase):
     """What the workflows run, what the packages are built from, and what this folder's README says is tested."""
 
