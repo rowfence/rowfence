@@ -296,6 +296,12 @@ grep -q "ownr_id" "$T/bad_cond.authz" || bad "the example has no files insert ru
 run apply "$T/bad_cond.authz"
 case "$out" in "policy line "*": the condition {ownr_id = authz.uid()} doesn't run: column \"ownr_id\" does not exist [AZ613]"*)
   ok "... also one that asks who is signed in";; *) bad "bad condition with authz.uid()" "$out";; esac
+# in a select rule the error comes from row-level security's own expression, where Postgres says no position
+sed "79s/: view$/: view and {nme = 'x'}/" example/docs.authz > "$T/bad_cond.authz"
+grep -q "nme = 'x'" "$T/bad_cond.authz" || bad "the example's files select rule moved: line 79 is no longer it"
+run apply "$T/bad_cond.authz"
+case "$out" in "policy line 79: the condition {nme = 'x'} doesn't run: column \"nme\" does not exist [AZ613]"*)
+  ok "... also one in a select rule, where Postgres says no position";; *) bad "bad condition in a select rule" "$out";; esac
 [ "$(PSQL -c "SELECT to_regnamespace('authz_int') IS NULL")" = t ] && ok "... and nothing of it stays" || bad "a failed apply left something"
 dropdb "$DB"
 

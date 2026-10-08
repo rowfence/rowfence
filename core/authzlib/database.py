@@ -218,15 +218,44 @@ def lock_room(db: Db, sql: str) -> None:
 
 
 def run_policy(db: Db, sql: str, policy: str, files: Files) -> None:
-    """run() for the policy's SQL (whole, or a migration): a condition Postgres refuses is named with its line."""
+    """run() for the policy's SQL (whole, or a migration): a condition Postgres refuses is named with its line. In
+    a savepoint, so that after an error that says no position the policy's conditions can still be tried."""
     lock_room(db, sql)
     try:
-        run(db, sql)
+        with savepoint(db, "authz_policy"):
+            run(db, sql)
     except db.errors as e:
-        found = condition_error(e, sql, policy, files)
+        found = condition_error(e, sql, policy, files) or failing_condition(db, e, policy, files)
         if found is None:
             raise
         raise found from e
+
+
+def failing_condition(db: Db, err: Exception, policy: str, files: Files) -> Error | None:
+    """When Postgres says no position (an error in a row-level security policy's expression, or a trigger's): the
+    policy's condition that fails the same way tried alone on its table, if one does; None otherwise. Tried after
+    the policy's SQL is undone, so a condition that only runs once the policy is in place (authz.uid() on a first
+    apply) fails another way here, and is never named for an error it doesn't make."""
+    fields = getattr(err, "fields", None)
+    if not isinstance(fields, dict) or fields.get("P") or fields.get("q"):
+        return None
+    said = str(fields.get("M", ""))
+    try:
+        c = Compiler(parse_policy(policy, None, files=files))
+    except PolicyError:
+        return None
+    for table, cond, loc in row_conditions(c):
+        alias = q(table.split(".")[1])
+        try:
+            with savepoint(db, "authz_probe"):
+                db.rows(f"SELECT ({row_cond(cond, alias)}) AS x FROM {qt(table)} AS {alias} LIMIT 0")
+        except db.errors as e:
+            got = getattr(e, "fields", None)
+            if isinstance(got, dict) and str(got.get("M", "")) == said:
+                return Error(
+                    f"policy {loc}: the condition {{{cond}}} doesn't run: {said} [AZ613]", str(fields.get("C", "42P17"))
+                )
+    return None
 
 
 def condition_error(err: Exception, sql: str, policy: str, files: Files) -> Error | None:
