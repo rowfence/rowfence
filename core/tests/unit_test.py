@@ -3547,6 +3547,54 @@ class Delivery(unittest.TestCase):
         missing = suites(read("run_tests.sh")) - {"tests/make_owner.sh"} - suites(read("README.md"))
         self.assertEqual(sorted(missing), [], "core/README.md's table: a suite run_tests.sh runs isn't in it")
 
+    def job(self, workflow: str, name: str) -> str:
+        """A job's text in a workflow."""
+        text = "\n".join(self.workflows()[f".github/workflows/{workflow}"])
+        return search(rf"^  {name}:\n(.*?)(?=^  [a-z-]+:\n|\Z)", text, re.S | re.M).group(1)
+
+    def test_the_workflows_run_every_part_of_a_run(self) -> None:
+        # run_tests.sh's parts run side by side, a job each: a part no job names would run nowhere
+        runner = read("run_tests.sh")
+        parts = {k: search(rf'^PARTS_{k}="([^"]+)"', runner, re.M).group(1).split() for k in ("SUITES", "SOAK")}
+        # ... and the script's steps are in those parts, by those names
+        self.assertEqual(set(re.findall(r"\bpart ([a-z0-9-]+);", runner)), {*parts["SUITES"], *parts["SOAK"]})
+        for workflow, name, kind in (
+            ("ci.yml", "suites", "SUITES"),
+            ("nightly.yml", "suites", "SUITES"),
+            ("nightly.yml", "soak", "SOAK"),
+        ):
+            with self.subTest(workflow=workflow, job=name):
+                body = self.job(workflow, name)
+                self.assertEqual(search(r"^        part: \[([^\]]+)\]$", body, re.M).group(1).split(", "), parts[kind])
+                self.assertIn('ROWSTILE_PART: "${{ matrix.part }}"', body)
+        # ci.sh hands the part to the run in the container
+        self.assertIn('-e ROWSTILE_PART="${ROWSTILE_PART:-}"', read("ci.sh"))
+
+    def test_a_command_on_one_line_is_one_yaml_value(self) -> None:
+        # `run: echo "a: b"` is not a string to YAML but a mapping inside one, and the whole workflow is refused
+        # when it is pushed (no job runs): a command with ": " or " #" in it goes in a block (`run: |`)
+        for path, lines in self.workflows().items():
+            for n, line in enumerate(lines, 1):
+                m = re.match(r"\s*(?:- )?run: (?![|>])(.*)$", line)
+                if m:
+                    self.assertNotRegex(m.group(1), r": | #", f"{path}:{n}")
+
+    def test_the_required_checks_fail_unless_every_part_passed(self) -> None:
+        # `main` requires a check per version ("postgres (16)"): a job that waits for the version's parts. A job
+        # that is skipped counts as passed, so it runs whatever became of them, and fails unless they passed
+        body = self.job("ci.yml", "postgres")
+        self.assertIn("    needs: suites\n", body)
+        self.assertIn("    if: always()\n", body)
+        self.assertIn('test "$SUITES" = success', body)
+        self.assertIn('SUITES: "${{ needs.suites.result }}"', body)
+        self.assertEqual(
+            re.findall(r'\{pg: "(\d+)", mode: "([^"]*)"\}', body), [("16", ""), ("17", "--short"), ("18", "--short")]
+        )
+        self.assertEqual(
+            re.findall(r'\{pg: "(\d+)", mode: "([^"]*)"\}', self.job("ci.yml", "suites")),
+            [("16", ""), ("17", "--short"), ("18", "--short")],
+        )
+
     def test_a_releases_tag(self) -> None:
         sys.path.insert(0, os.path.join(self.REPO, "packaging"))
         try:

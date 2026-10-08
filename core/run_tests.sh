@@ -7,6 +7,7 @@
 #                         without the checks that need no database, one random-change run, no migrate vs apply
 #   SOAK_SEED=N ./run_tests.sh --soak                              # the random checks (random policies too), long, with a new seed
 #                         (about 110 minutes; a random seed if SOAK_SEED is empty; the log says which)
+#   ROWSTILE_PART=command ./run_tests.sh --quick                   # one part of a run (below: the parts of each)
 # Needs psql, createdb, dropdb and python3. Creates and drops databases named authz_*, as a non-superuser.
 # Each step's result line says how long it took.
 set -u
@@ -26,7 +27,20 @@ STEPS=100; [ "$MODE" = quick ] || [ "$MODE" = short ] && STEPS=15
 every_version() { [ "$MODE" != short ]; }
 DB=authz_tests
 failed=()
-step() { echo; echo "=== $1"; STEP_START=$SECONDS; }
+# The parts of a run: CI runs them side by side, each on a runner and in a container of its own, and the run
+# is as long as its longest part. ROWSTILE_PART names the one to run (none: the whole run, one part after the
+# other). The workflows list them, and tests/unit_test.py checks they leave none out.
+PARTS_SUITES="policy command random"                      # --quick, --short and the full run
+PARTS_SOAK="changes-1 changes-2 policies around races"    # --soak
+case "$MODE" in
+  soak) PARTS=$PARTS_SOAK;; proofs) PARTS=races;; full) PARTS="$PARTS_SUITES races";; *) PARTS=$PARTS_SUITES;;
+esac
+PART=${ROWSTILE_PART:-}
+case " $PARTS " in *" ${PART:-${PARTS%% *}} "*) ;; *) echo "no part '$PART' in this run: its parts are $PARTS"; exit 2;; esac
+[ -z "$PART" ] || echo "part $PART (of: $PARTS)"
+part() { [ -z "$PART" ] || [ "$PART" = "$1" ]; }
+STEPS_RUN=0
+step() { echo; echo "=== $1"; STEP_START=$SECONDS; STEPS_RUN=$((STEPS_RUN + 1)); }
 record() {
   local took="($((SECONDS - STEP_START))s)"
   if [ "$1" -eq 0 ]; then echo "--- passed: $2 $took"; else echo "--- FAILED: $2 $took"; failed+=("$2"); fi
@@ -38,25 +52,34 @@ apply() { PGOPTIONS="-c client_min_messages=error" psql -X -q -v ON_ERROR_STOP=1
 if [ "$MODE" = soak ]; then
   SEED=${SOAK_SEED:-$RANDOM}
   echo "seed $SEED (again: SOAK_SEED=$SEED ./run_tests.sh --soak)"
+  if part policies; then
   step "broken policies are refused with a line number, never a crash (200000 cases, seed $SEED)"
   python3 tests/fuzz_parser.py --cases 200000 --seed "$SEED"
   record $? "fuzz parser"
+  fi
   for gen in docs alt multi composite loop; do
+    # two parts, about as long as each other
+    case "$gen" in docs|multi) part changes-1;; *) part changes-2;; esac || continue
     step "random changes, compared with the reference evaluator ($gen, 500 changes, seed $SEED)"
     python3 tests/difftest.py --gen "$gen" --steps 500 --seed "$SEED" --quiet --db "authz_diff_$gen"
     record $? "difftest $gen"
     dropdb --if-exists "authz_diff_$gen" >/dev/null 2>&1
   done
+  if part policies; then
   step "random policies, compared with the reference evaluator (100 policies, seeds from $((SEED * 1000)))"
   python3 tests/genpolicy.py --policies 100 --steps 10 --seed "$((SEED * 1000))" --db authz_genpolicy
   record $? "genpolicy"
   dropdb --if-exists authz_genpolicy >/dev/null 2>&1
+  fi
+  if part around; then
   step "random policies in random worlds: the catalog, the session and the role around them (60, seeds from $((SEED * 1000)))"
   python3 tests/around.py --policies 60 --steps 8 --seed "$((SEED * 1000))" --db authz_around
   record $? "around"
+  fi
 fi
 
 if [ "$MODE" != proofs ] && [ "$MODE" != soak ]; then
+if part policy; then
 if every_version; then
 step "fast checks without a database: golden SQL, included files, the command's SQL, rowstile command"
 python3 tests/unit_test.py 2>&1 | tail -n 3
@@ -129,6 +152,8 @@ if every_version; then
   record "${PIPESTATUS[0]}" "language server"
 fi
 
+fi
+if part command; then
 step "applying with the rowstile command: no extension, no superuser, includes, diff, backup and restore, remove"
 tests/apply.sh
 record $? "apply"
@@ -152,6 +177,8 @@ step "a migration leaves what applying the new policy whole leaves (each kind of
 python3 tests/migrate_test.py | grep -v "^ok"
 record "${PIPESTATUS[0]}" "migrate vs apply"
 fi
+fi
+if part policy; then
 step "prove, coverage, snapshots, indexes, plans and bench"
 python3 tests/confidence_test.py | grep -v "^ok"
 record "${PIPESTATUS[0]}" "confidence"
@@ -184,13 +211,18 @@ step "the cookbook's recipes: each one's policy applies, its tests pass, and its
 tests/cookbook.sh
 record $? "cookbook"
 
+fi
 GENS="docs alt multi composite loop"; every_version || GENS=docs
 for gen in $GENS; do
+  # five policies: three in the random part, one with each of the two others, which are shorter, so that the
+  # three parts are about as long as each other
+  case "$gen" in composite) part policy;; multi) part command;; *) part random;; esac || continue
   step "random changes, compared with the reference evaluator ($gen, $STEPS changes)"
   python3 tests/difftest.py --gen "$gen" --steps "$STEPS" --seed 7 --quiet --db "authz_diff_$gen"
   record $? "difftest $gen"
   dropdb --if-exists "authz_diff_$gen" >/dev/null 2>&1
 done
+if part random; then
 if [ "$MODE" = full ]; then
   step "random policies, compared with the reference evaluator (12 policies)"
   python3 tests/genpolicy.py --policies 12 --steps 8 --seed 1 --db authz_genpolicy
@@ -203,11 +235,12 @@ step "random policies in random worlds: the catalog, the session and the role ar
 python3 tests/around.py --policies "$AROUND" --steps 6 --seed 1 --db authz_around
 record $? "around"
 fi
+fi
 
 # Tree writes under concurrency: every pair raced at each isolation level, and a concurrent stress run;
 # the inheritance tables must stay exact throughout.
 # --proofs runs a short version on its own (--quick leaves it out, so each stays under 10 minutes).
-if [ "$MODE" = full ] || [ "$MODE" = proofs ] || [ "$MODE" = soak ]; then
+if { [ "$MODE" = full ] || [ "$MODE" = proofs ] || [ "$MODE" = soak ]; } && part races; then
   STRESS=100; [ "$MODE" = proofs ] && STRESS=15; [ "$MODE" = soak ] && STRESS=300
   step "tree writes raced in pairs"
   tests/races.sh | grep -v "^ok"
@@ -218,4 +251,5 @@ if [ "$MODE" = full ] || [ "$MODE" = proofs ] || [ "$MODE" = soak ]; then
 fi
 
 echo
+[ "$STEPS_RUN" -gt 0 ] || failed+=("no step ran")
 if [ ${#failed[@]} -eq 0 ]; then echo "ALL PASSED"; else echo "FAILED: ${failed[*]}"; exit 1; fi

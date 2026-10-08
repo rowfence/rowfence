@@ -155,8 +155,12 @@ User-facing docs: `README.md`, then `docs/reference/` (read them first). Terms i
   `RELEASING.md` the steps
 - `.github/workflows/ci.yml` — on each push: `tests/unit_test.py` and the type checks, every suite on PG 16
   (`ci.sh`) and what depends on the version on 17 and 18 (`ci.sh --short`), the examples, the conformance suites,
-  the editors, packaging, the site. `nightly.yml` (main) — every suite on 17 and 18, the proofs (`--proofs`) on
-  each version, the soak (new seeds each night, one version in turn; by hand, several at once on the three versions: `gh workflow run
+  the editors, packaging, the site. The suites run in parts, a job each, side by side (`ROWSTILE_PART`;
+  `run_tests.sh` names them and puts each step in one: a new step goes inside an `if part ...`, and a new part
+  in the workflows' lists, which `Delivery` in `unit_test.py` checks); the jobs `postgres (16)` and the like,
+  which `main` requires, only wait for their parts. `nightly.yml` (main) — every suite on 17 and 18, the proofs
+  (`--proofs`) on each version, the soak (new seeds each night, one version in turn, in five parts side by side;
+  by hand, several at once on the three versions: `gh workflow run
   nightly.yml -f only=soak -f soaks=7`), the conformance suites on 17 and 18 and on 16
   through PgBouncer (`integrations/pooler.sh`), then
   the benchmark check, last (`gh workflow run nightly.yml -f only=bench` runs it alone; it judges speed against
@@ -177,6 +181,7 @@ simplest is Docker, from the repo root (Git Bash works on Windows):
     core/ci.sh                   # run_tests.sh --quick on 16, 17 and 18, each in a fresh container
     core/ci.sh --full 16         # the full run (~15 minutes) on one version
     core/ci.sh --short 17 18     # what depends on the version (what CI runs on 17 and 18 for each push)
+    ROWSTILE_PART=command core/ci.sh 16   # one part of a run (`run_tests.sh` names them: policy, command, random)
     python3 core/tests/unit_test.py   # a second, no database; --update rewrites tests/golden/ after an intended change
 
 For one suite, start a container and run it inside:
@@ -187,6 +192,9 @@ For one suite, start a container and run it inside:
     MSYS_NO_PATHCONV=1 docker exec -e PGHOST=/var/run/postgresql -e PGUSER=authz_owner -e PGSUPERUSER=postgres -w /src/core pga16 bash tests/cli.sh
 
 - The suites run the mounted repository's code; the image only holds a copy of the command for `docker exec`.
+- `ci.sh` starts Postgres with `fsync`, `synchronous_commit` and `full_page_writes` off: the databases last as
+  long as the container. `difftest.py` asks a snapshot's questions in up to four sessions side by side
+  (`DIFFTEST_SESSIONS=1`: one), each user's in one session, two users or more to a session.
 - Everything is LF (`.gitattributes`); the repo is mounted into Linux. `core.fileMode` is off on Windows, so mark
   new scripts executable with `git update-index --chmod=+x`.
 - `tests/client_types.py` type-checks the generated TS client (CI's `javascript` job; needs `tsc`, no database);
