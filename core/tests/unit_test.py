@@ -2704,6 +2704,36 @@ class Confidence(unittest.TestCase):
         )
         self.assertEqual(r["world"], ["user: 1", "doc: 1", "doc.owner: doc 1 -> user 1"])
 
+    def test_a_counterexample_is_shrunk_through_conditions_and_roles(self) -> None:
+        # what a condition the evaluator can't read as a fact passes, and what a custom role gives, go too when the
+        # view still holds without them; and they stay when it needs them
+        cond = "exists (select 1 from app.flags)"
+        pol = parse_policy(
+            self.HEAD + f"type doc = app.docs\n  q : user = q_id\n  roles : user\n  can view = q or {{{cond}}}\n"
+            "  can edit = q or roles\n",
+            "p.authz",
+        )
+        ref = evaluate.Reference(pol)
+        ids = {"user": ["1"], "doc": ["1"]}
+        q = ("doc", "q", 0, "user", "")
+        role = ("doc", "edit", "user", "")
+        data = evaluate.Data(
+            ids=ids,
+            valid=ids,
+            pairs={q: [("1", "1")]},
+            rolepairs={role: [("1", "1", "")]},
+            cond={("doc", cond): ["1"]},
+            columns={"user": {"1": {}}, "doc": {"1": {}}},
+        )
+        small = evaluate.smallest(data, lambda d: "1" in ref.evaluate(d, "1")[("doc", "view")])
+        self.assertEqual(
+            (small.cond, small.pairs, small.rolepairs), ({("doc", cond): []}, {q: [("1", "1")]}, {role: []})
+        )
+        small = evaluate.smallest(data, lambda d: "1" in ref.evaluate(d, "1")[("doc", "edit")])
+        self.assertEqual(
+            (small.cond, small.pairs, small.rolepairs), ({("doc", cond): []}, {q: []}, {role: [("1", "1", "")]})
+        )
+
     def test_the_corners_set_a_denied_condition_false(self) -> None:
         # six conditions that must hold and two that mustn't, on one row: one row in 256 drawn row by row
         from authzlib import prove
