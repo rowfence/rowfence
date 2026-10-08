@@ -27,6 +27,7 @@ CREATE TABLE cx.frozen (folder_id bigint PRIMARY KEY);
 CREATE TABLE cx.regions (id bigserial PRIMARY KEY, chief_id bigint REFERENCES cx.users);
 CREATE TABLE cx.sites (id bigserial PRIMARY KEY, region_id bigint);   -- the region whose chiefs are its wardens
 CREATE TABLE cx.closed (site_id bigint PRIMARY KEY);   -- the closed sites, which the type's where reads
+CREATE TABLE cx.notes (id bigserial PRIMARY KEY, author_id bigint);   -- written, never read back
 CREATE TABLE cx.site_links (
   region_id bigint NOT NULL, site_id bigint NOT NULL, active boolean NOT NULL DEFAULT true,
   PRIMARY KEY (region_id, site_id)
@@ -44,4 +45,5 @@ GRANT USAGE ON SCHEMA cx TO app_user;
 GRANT SELECT ON ALL TABLES IN SCHEMA cx TO app_user;
 GRANT INSERT, UPDATE, DELETE ON cx.folders, cx.projects TO app_user;
 GRANT UPDATE ON cx.regions, cx.sites TO app_user;
+GRANT INSERT ON cx.notes TO app_user;
 GRANT USAGE ON ALL SEQUENCES IN SCHEMA cx TO app_user;

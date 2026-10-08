@@ -392,6 +392,16 @@ BEGIN
                     AND attname = 'region_id' AND attnum > 0 AND NOT attisdropped) THEN
     missing := missing || E'\n  line 41: column region_id not found in cx.sites [AZ601]';
   END IF;
+  IF to_regclass('"cx"."notes"') IS NULL THEN missing := missing || E'\n  line 45: table cx.notes not found [AZ601]';
+  ELSIF NOT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = to_regclass('"cx"."notes"')
+                    AND attname = 'id' AND attnum > 0 AND NOT attisdropped) THEN
+    missing := missing || E'\n  line 45: column id not found in cx.notes [AZ601]';
+  END IF;
+  IF to_regclass('"cx"."notes"') IS NULL THEN missing := missing || E'\n  line 46: table cx.notes not found [AZ601]';
+  ELSIF NOT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = to_regclass('"cx"."notes"')
+                    AND attname = 'author_id' AND attnum > 0 AND NOT attisdropped) THEN
+    missing := missing || E'\n  line 46: column author_id not found in cx.notes [AZ601]';
+  END IF;
   SELECT atttypid, replace(format_type(atttypid, NULL), 'character varying', 'varchar') INTO v_oid, v_type
   FROM pg_attribute WHERE attrelid = to_regclass('"cx"."users"') AND attname = 'id' AND attnum > 0 AND NOT attisdropped;
   IF FOUND AND v_oid <> to_regtype('bigint') THEN
@@ -416,6 +426,11 @@ BEGIN
   FROM pg_attribute WHERE attrelid = to_regclass('"cx"."sites"') AND attname = 'id' AND attnum > 0 AND NOT attisdropped;
   IF FOUND AND v_oid <> to_regtype('bigint') THEN
     missing := missing || E'\n  line 39: cx.sites.id is ' || v_type || E', not bigint: write its type after the key, (id ' || v_type || ') [AZ602]';
+  END IF;
+  SELECT atttypid, replace(format_type(atttypid, NULL), 'character varying', 'varchar') INTO v_oid, v_type
+  FROM pg_attribute WHERE attrelid = to_regclass('"cx"."notes"') AND attname = 'id' AND attnum > 0 AND NOT attisdropped;
+  IF FOUND AND v_oid <> to_regtype('bigint') THEN
+    missing := missing || E'\n  line 45: cx.notes.id is ' || v_type || E', not bigint: write its type after the key, (id ' || v_type || ') [AZ602]';
   END IF;
   IF missing <> '' THEN RAISE EXCEPTION 'the policy does not match this database:%', missing; END IF;
 END $chk$;
@@ -512,6 +527,8 @@ BEGIN
       IF pg_catalog.pg_input_is_valid(p_id, 'bigint') THEN RETURN p_id::bigint::text; END IF;
     WHEN 'site' THEN
       IF pg_catalog.pg_input_is_valid(p_id, 'bigint') THEN RETURN p_id::bigint::text; END IF;
+    WHEN 'note' THEN
+      IF pg_catalog.pg_input_is_valid(p_id, 'bigint') THEN RETURN p_id::bigint::text; END IF;
     ELSE NULL;
   END CASE;
   RETURN p_id;
@@ -556,7 +573,8 @@ INSERT INTO authz_int.types VALUES
   ('folder', '"cx"."folders"', 'id', 'bigint', 'bigint', 'x."id" = $1::bigint', '"id"::text', false),
   ('project', '"cx"."projects"', 'id', 'bigint', 'bigint', 'x."id" = $1::bigint', '"id"::text', false),
   ('region', '"cx"."regions"', 'id', 'bigint', 'bigint', 'x."id" = $1::bigint', '"id"::text', false),
-  ('site', '"cx"."sites"', 'id', 'bigint', 'bigint', 'x."id" = $1::bigint', '"id"::text', false);
+  ('site', '"cx"."sites"', 'id', 'bigint', 'bigint', 'x."id" = $1::bigint', '"id"::text', false),
+  ('note', '"cx"."notes"', 'id', 'bigint', 'bigint', 'x."id" = $1::bigint', '"id"::text', false);
 
 CREATE TABLE authz_int.perms (type text, perm text, PRIMARY KEY (type, perm));
 
@@ -570,7 +588,9 @@ INSERT INTO authz_int.perms VALUES
   ('region', 'run'),
   ('region', 'rename'),
   ('site', 'run'),
-  ('site', 'guard');
+  ('site', 'guard'),
+  ('note', 'write'),
+  ('note', 'open');
 
 CREATE TABLE authz_int.locks (type text PRIMARY KEY, n bigint NOT NULL);
 
@@ -614,7 +634,7 @@ DECLARE i record;
 BEGIN
   FOR i IN SELECT c.relname FROM pg_index x JOIN pg_class c ON c.oid = x.indexrelid
            WHERE x.indrelid = 'authz.shares'::regclass AND (c.relname LIKE 'shares\_obj\_%' OR c.relname LIKE 'grants\_obj\_%')
-             AND c.relname <> ALL (ARRAY['shares_obj_user_bigint', 'shares_obj_folder_bigint', 'shares_obj_project_bigint', 'shares_obj_region_bigint', 'shares_obj_site_bigint']::text[]) LOOP
+             AND c.relname <> ALL (ARRAY['shares_obj_user_bigint', 'shares_obj_folder_bigint', 'shares_obj_project_bigint', 'shares_obj_region_bigint', 'shares_obj_site_bigint', 'shares_obj_note_bigint']::text[]) LOOP
     EXECUTE format('DROP INDEX authz.%I', i.relname);
   END LOOP;
 END $gi$;
@@ -623,6 +643,7 @@ CREATE INDEX IF NOT EXISTS "shares_obj_folder_bigint" ON authz.shares ((object_i
 CREATE INDEX IF NOT EXISTS "shares_obj_project_bigint" ON authz.shares ((object_id::bigint), relation) WHERE object_type = 'project';
 CREATE INDEX IF NOT EXISTS "shares_obj_region_bigint" ON authz.shares ((object_id::bigint), relation) WHERE object_type = 'region';
 CREATE INDEX IF NOT EXISTS "shares_obj_site_bigint" ON authz.shares ((object_id::bigint), relation) WHERE object_type = 'site';
+CREATE INDEX IF NOT EXISTS "shares_obj_note_bigint" ON authz.shares ((object_id::bigint), relation) WHERE object_type = 'note';
 
 -- Scopes: what a token may do (policy 'scope' lines; 'read' is built in unless redefined)
 CREATE TABLE authz_int.scope_items (scope text, kind text, qual text, word text);
@@ -833,6 +854,8 @@ DELETE FROM authz.shares g WHERE g.object_type = 'region' AND NOT EXISTS (SELECT
 DELETE FROM authz.shares g WHERE g.subject_type = 'region' AND g.subject_id <> '*' AND NOT EXISTS (SELECT 1 FROM "cx"."regions" x WHERE x."id"::text = g.subject_id);
 DELETE FROM authz.shares g WHERE g.object_type = 'site' AND NOT EXISTS (SELECT 1 FROM "cx"."sites" x WHERE x."id"::text = g.object_id);
 DELETE FROM authz.shares g WHERE g.subject_type = 'site' AND g.subject_id <> '*' AND NOT EXISTS (SELECT 1 FROM "cx"."sites" x WHERE x."id"::text = g.subject_id);
+DELETE FROM authz.shares g WHERE g.object_type = 'note' AND NOT EXISTS (SELECT 1 FROM "cx"."notes" x WHERE x."id"::text = g.object_id);
+DELETE FROM authz.shares g WHERE g.subject_type = 'note' AND g.subject_id <> '*' AND NOT EXISTS (SELECT 1 FROM "cx"."notes" x WHERE x."id"::text = g.subject_id);
 
 DO $r$ BEGIN PERFORM set_config('authz_ctx.reason', '', true); END $r$;
 
@@ -2873,6 +2896,93 @@ DO $tr$ BEGIN
   END IF;
 END $tr$;
 
+-- relationships kept in columns of cx.notes: audited when they change; the feed hears of every row
+CREATE FUNCTION authz_int."note__col_audit_ins"() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $f$
+BEGIN
+    PERFORM authz_int.changed('note', ARRAY(SELECT n."id"::text FROM new_rows n), 'insert');
+  RETURN NULL;
+END $f$;
+-- @object trigger "authz_note_col_audit_ins" ON "cx"."notes"
+DO $tr$ BEGIN
+  IF (SELECT relkind FROM pg_class WHERE oid = '"cx"."notes"'::regclass) IN ('r', 'p') THEN
+    EXECUTE 'CREATE TRIGGER "authz_note_col_audit_ins" AFTER INSERT ON "cx"."notes" REFERENCING NEW TABLE AS new_rows FOR EACH STATEMENT EXECUTE FUNCTION authz_int."note__col_audit_ins"()';
+  ELSE
+    RAISE NOTICE '"cx"."notes" is not a table: changes to it are not audited or fed (audit)';
+  END IF;
+END $tr$;
+CREATE FUNCTION authz_int."note__col_audit_upd"() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $f$
+BEGIN
+    PERFORM authz_int.changed('note', ARRAY(SELECT n."id"::text FROM new_rows n UNION SELECT o."id"::text FROM old_rows o), 'update');
+    -- a partitioned table: the rows this update put in another partition, which the row trigger never sees
+    IF (SELECT relkind FROM pg_class WHERE oid = TG_RELID) = 'p' THEN
+      INSERT INTO authz.audit (db_role, user_id, acting_user, action, object_type, object_id, relation, subject_id, detail, reason)
+      SELECT authz_int.caller_role(), authz_int.actor(), nullif(current_setting('authz.acting_user', true), ''), 'relate', 'note', n."id"::text, 'author', n."author_id"::text, jsonb_build_object('column', 'author_id', 'was', o."author_id"), nullif(current_setting('authz_ctx.reason', true), '')
+      FROM old_rows o JOIN new_rows n ON n."id"::text = o."id"::text
+      WHERE n."author_id" IS DISTINCT FROM o."author_id" AND NOT EXISTS (
+        SELECT 1 FROM authz.audit a WHERE a.txid = txid_current() AND a.action = 'relate' AND a.object_type = 'note'
+          AND a.object_id = n."id"::text AND a.relation = 'author' AND a.detail->>'column' = 'author_id'
+          AND a.subject_id IS NOT DISTINCT FROM n."author_id"::text AND a.detail->'was' IS NOT DISTINCT FROM to_jsonb(o."author_id"));
+    END IF;
+  RETURN NULL;
+END $f$;
+-- @object trigger "authz_note_col_audit_upd" ON "cx"."notes"
+DO $tr$ BEGIN
+  IF (SELECT relkind FROM pg_class WHERE oid = '"cx"."notes"'::regclass) IN ('r', 'p') THEN
+    EXECUTE 'CREATE TRIGGER "authz_note_col_audit_upd" AFTER UPDATE ON "cx"."notes" REFERENCING OLD TABLE AS old_rows NEW TABLE AS new_rows FOR EACH STATEMENT EXECUTE FUNCTION authz_int."note__col_audit_upd"()';
+  ELSE
+    RAISE NOTICE '"cx"."notes" is not a table: changes to it are not audited or fed (audit)';
+  END IF;
+END $tr$;
+CREATE FUNCTION authz_int."note__col_audit_del"() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $f$
+BEGIN
+    PERFORM authz_int.changed('note', ARRAY(SELECT o."id"::text FROM old_rows o), 'delete');
+  RETURN NULL;
+END $f$;
+-- @object trigger "authz_note_col_audit_del" ON "cx"."notes"
+DO $tr$ BEGIN
+  IF (SELECT relkind FROM pg_class WHERE oid = '"cx"."notes"'::regclass) IN ('r', 'p') THEN
+    EXECUTE 'CREATE TRIGGER "authz_note_col_audit_del" AFTER DELETE ON "cx"."notes" REFERENCING OLD TABLE AS old_rows FOR EACH STATEMENT EXECUTE FUNCTION authz_int."note__col_audit_del"()';
+  ELSE
+    RAISE NOTICE '"cx"."notes" is not a table: changes to it are not audited or fed (audit)';
+  END IF;
+END $tr$;
+CREATE FUNCTION authz_int."note__col_audit_trunc"() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $f$
+BEGIN
+    PERFORM authz_int.audit('truncate', 'note', NULL, NULL, NULL, NULL, NULL, jsonb_build_object('table', 'cx.notes'));
+    PERFORM authz_int.changed('note', ARRAY['*'], 'truncate');
+  RETURN NULL;
+END $f$;
+-- @object trigger "authz_note_col_audit_trunc" ON "cx"."notes"
+DO $tr$ BEGIN
+  IF (SELECT relkind FROM pg_class WHERE oid = '"cx"."notes"'::regclass) IN ('r', 'p') THEN
+    EXECUTE 'CREATE TRIGGER "authz_note_col_audit_trunc" AFTER TRUNCATE ON "cx"."notes" FOR EACH STATEMENT EXECUTE FUNCTION authz_int."note__col_audit_trunc"()';
+  ELSE
+    RAISE NOTICE '"cx"."notes" is not a table: changes to it are not audited or fed (audit)';
+  END IF;
+END $tr$;
+-- one audit row per changed relationship column (a row trigger, so it also works when the key changes)
+CREATE FUNCTION authz_int."note__col_audit_row"() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $f$
+BEGIN
+  IF NEW."author_id" IS DISTINCT FROM OLD."author_id" THEN
+    INSERT INTO authz.audit (db_role, user_id, acting_user, action, object_type, object_id, relation, subject_id, detail, reason)
+    VALUES (authz_int.caller_role(), authz_int.actor(), nullif(current_setting('authz.acting_user', true), ''), 'relate', 'note', NEW."id"::text, 'author', NEW."author_id"::text, jsonb_build_object('column', 'author_id', 'was', OLD."author_id"), nullif(current_setting('authz_ctx.reason', true), ''));
+  END IF;
+  RETURN NULL;
+END $f$;
+-- @object trigger "authz_note_col_audit_row" ON "cx"."notes"
+DO $tr$ BEGIN
+  IF (SELECT relkind FROM pg_class WHERE oid = '"cx"."notes"'::regclass) IN ('r', 'p') THEN
+    EXECUTE 'CREATE TRIGGER "authz_note_col_audit_row" AFTER UPDATE ON "cx"."notes" FOR EACH ROW WHEN (OLD."author_id" IS DISTINCT FROM NEW."author_id") EXECUTE FUNCTION authz_int."note__col_audit_row"()';
+  ELSE
+    RAISE NOTICE '"cx"."notes" is not a table: changes to it are not audited or fed (audit)';
+  END IF;
+END $tr$;
+
 -- folder.owner (line 15)
 CREATE VIEW authz_int."folder__owner" AS
   SELECT x.id FROM (
@@ -3098,6 +3208,23 @@ CREATE VIEW authz_int."site__guard" AS
   WHERE EXISTS (SELECT 1 FROM "cx"."sites" w WHERE w."id" = x.id AND coalesce((not exists (select 1 from cx.closed c where c.site_id = w.id)), false));
 CREATE VIEW authz_gen."site__guard" WITH (security_barrier) AS SELECT id FROM authz_int."site__guard";
 
+-- note.author (line 46)
+CREATE VIEW authz_int."note__author" AS
+  SELECT r."id" AS id FROM "cx"."notes" r WHERE r."author_id" = (SELECT authz.uid());
+CREATE VIEW authz_gen."note__author" WITH (security_barrier) AS SELECT id FROM authz_int."note__author";
+
+-- note.write (line 47): author
+CREATE VIEW authz_int."note__write" AS
+  SELECT id FROM authz_int."note__author";
+CREATE VIEW authz_gen."note__write" WITH (security_barrier) AS SELECT id FROM authz_int."note__write";
+
+-- note.open (line 48): {author_id is null} and {id > 0}
+CREATE VIEW authz_int."note__open" AS
+  SELECT r."id" AS id FROM "cx"."notes" r
+  WHERE coalesce((author_id is null), false)
+    AND coalesce((id > 0), false);
+CREATE VIEW authz_gen."note__open" WITH (security_barrier) AS SELECT id FROM authz_int."note__open";
+
 -- folder: a condition that reads other rows, run with the policy's rights wherever it is checked
 CREATE FUNCTION authz_gen."folder__check_46a73ef441"(p_row "cx"."folders") RETURNS boolean
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path FROM CURRENT AS $f$
@@ -3175,6 +3302,84 @@ CREATE VIEW authz_int."folder__parent__file" AS
   (SELECT r."id" AS id FROM "cx"."folders" r WHERE (CASE WHEN r."parent_type" = 'project' THEN r."parent_id" END)::bigint IN (SELECT id FROM authz_int."project__file"))) x
   WHERE EXISTS (SELECT 1 FROM "cx"."folders" w WHERE w."id" = x.id AND coalesce((not archived), false));
 CREATE VIEW authz_gen."folder__parent__file" WITH (security_barrier) AS SELECT id FROM authz_int."folder__parent__file";
+
+ALTER TABLE "cx"."notes" ENABLE ROW LEVEL SECURITY;
+-- its partitions and the tables that inherit from it: row-level security on, with no policies of their own,
+-- so they are read and written through it only (read directly, they would skip its rules and triggers)
+DO $rls$
+DECLARE c regclass;
+BEGIN
+  FOR c IN WITH RECURSIVE d(oid) AS (
+             SELECT i.inhrelid FROM pg_catalog.pg_inherits i WHERE i.inhparent = '"cx"."notes"'::regclass
+             UNION SELECT i.inhrelid FROM pg_catalog.pg_inherits i JOIN d ON i.inhparent = d.oid)
+           SELECT d.oid::regclass FROM d JOIN pg_catalog.pg_class k ON k.oid = d.oid WHERE NOT k.relrowsecurity LOOP
+    EXECUTE format('ALTER TABLE %s ENABLE ROW LEVEL SECURITY', c);
+  END LOOP;
+END $rls$;
+
+CREATE FUNCTION authz_gen."cx.notes:insert:items"(p_row "cx"."notes") RETURNS boolean[]
+LANGUAGE sql STABLE
+BEGIN ATOMIC
+  SELECT ARRAY[
+    coalesce(coalesce("notes"."author_id" = (SELECT authz.uid()), false), false),
+    coalesce((SELECT authz_int.scope_cmd('cx.notes', 'insert')), false),
+    coalesce(true, false),
+    coalesce(coalesce("notes"."author_id" = (SELECT authz.uid()), false), false)]
+  FROM (SELECT (p_row).*) AS "notes";
+END;
+
+CREATE FUNCTION authz_gen."cx.notes:insert:why"(p_row "cx"."notes") RETURNS SETOF text
+LANGUAGE plpgsql STABLE SET search_path FROM CURRENT AS $f$
+#variable_conflict use_column
+DECLARE v boolean[] := authz_gen."cx.notes:insert:items"(p_row); v_t record;
+BEGIN
+  RETURN NEXT CASE WHEN v[1] THEN 'yes  ' ELSE 'no   ' END || 'insert : write  (' || coalesce((SELECT l.loc FROM authz_gen.policy_lines l WHERE l.what = 'rule cx.notes insert'), '?') || ')';
+  IF NOT v[2] THEN RETURN NEXT '  no   the sign-in''s scopes do not allow insert on cx.notes'; END IF;
+  RETURN NEXT CASE WHEN v[4] THEN '  yes  ' ELSE '  no   ' END || 'write';
+END $f$;
+
+CREATE FUNCTION authz_gen."cx.notes:insert:refuse"(p_row "cx"."notes") RETURNS boolean
+LANGUAGE plpgsql VOLATILE SET search_path FROM CURRENT AS $f$
+DECLARE v_lines text; v_who text := CASE WHEN coalesce(current_setting('authz.user_id', true), '') = '' THEN 'someone not signed in'
+  ELSE coalesce(nullif(current_setting('authz.principal_type', true), ''), 'user') || ' ' || current_setting('authz.user_id', true) END;
+BEGIN
+  BEGIN
+    v_lines := (SELECT string_agg(l, E'\n') FROM authz_gen."cx.notes:insert:why"(p_row) l);
+  EXCEPTION WHEN OTHERS THEN
+    v_lines := 'no explanation: ' || SQLERRM;
+  END;
+  RAISE EXCEPTION USING ERRCODE = 'insufficient_privilege', MESSAGE = 'permission denied: ' || v_who || ' may not ' || 'insert this row into cx.notes',
+    DETAIL = v_lines, SCHEMA = 'cx', TABLE = 'notes', CONSTRAINT = 'authz_insert',
+    HINT = 'rowstile help AZ709';
+END $f$;
+
+CREATE FUNCTION authz_gen."cx.notes:rules:explain"(p_command text, p_id text, p_row jsonb) RETURNS text[]
+LANGUAGE plpgsql STABLE SET search_path FROM CURRENT AS $f$
+DECLARE r_old "cx"."notes"; r_new "cx"."notes";
+BEGIN
+  IF p_command = 'insert' THEN
+    RETURN ARRAY(SELECT * FROM authz_gen."cx.notes:insert:why"(jsonb_populate_record(NULL::"cx"."notes", coalesce(p_row, '{}'))));
+  END IF;
+  IF p_id IS NULL THEN
+    RAISE EXCEPTION 'which row? authz.explain_rule(%, %, id)', 'cx.notes', p_command USING ERRCODE = 'invalid_parameter_value', HINT = 'rowstile help AZ710';
+  END IF;
+  SELECT x.* INTO r_old FROM "cx"."notes" x WHERE x."id" = p_id::bigint;
+  IF NOT FOUND THEN
+    RETURN NULL;          -- not there, or the signed-in user can't see it
+  END IF;
+  IF p_command = 'delete' THEN
+    RETURN ARRAY['no   there is no delete rule for cx.notes: nobody may delete its rows'];
+  END IF;
+  r_new := jsonb_populate_record(r_old, coalesce(p_row, '{}'));
+  RETURN ARRAY['no   there is no update rule for cx.notes: nobody may update its rows'];
+END $f$;
+
+-- cx.notes insert (line 51): write
+CREATE POLICY "authz_insert" ON "cx"."notes" FOR INSERT TO app_user
+  WITH CHECK (((SELECT authz_int.scope_cmd('cx.notes', 'insert')) AND coalesce("notes"."author_id" = (SELECT authz.uid()), false))
+    OR authz_gen."cx.notes:insert:refuse"(ROW("notes".*)::"cx"."notes"));
+
+COMMENT ON POLICY "authz_insert" ON "cx"."notes" IS 'rowstile';
 
 ALTER TABLE "cx"."folders" ENABLE ROW LEVEL SECURITY;
 -- its partitions and the tables that inherit from it: row-level security on, with no policies of their own,
@@ -3290,7 +3495,7 @@ BEGIN
   RETURN ARRAY(SELECT * FROM authz_gen."cx.folders:update:why"(r_old)) || CASE WHEN p_row IS NULL THEN '{}'::text[] ELSE ARRAY['after the change:'] || ARRAY(SELECT '  ' || l FROM authz_gen."cx.folders:update:why"(r_new) l) END;
 END $f$;
 
--- cx.folders select (line 46): view
+-- cx.folders select (line 54): view
 CREATE POLICY "authz_select" ON "cx"."folders" FOR SELECT TO app_user
   USING (((SELECT authz_int.scope_cmd('cx.folders', 'select')) AND ((coalesce("folders"."owner_id" = (SELECT authz.uid()), false)
     OR EXISTS (SELECT 1 FROM authz_gen."folder__viewer" v WHERE v.id = "folders"."id")
@@ -3303,7 +3508,7 @@ CREATE POLICY "authz_select" ON "cx"."folders" FOR SELECT TO app_user
 
 COMMENT ON POLICY "authz_select" ON "cx"."folders" IS 'rowstile';
 
--- cx.folders update (line 47): edit
+-- cx.folders update (line 55): edit
 CREATE POLICY "authz_update" ON "cx"."folders" FOR UPDATE TO app_user
   USING (((SELECT authz_int.scope_cmd('cx.folders', 'update')) AND ((coalesce("folders"."owner_id" = (SELECT authz.uid()), false)
     OR (authz_gen."folder__check_46a73ef441"(ROW("folders".*)::"cx"."folders")
@@ -3319,7 +3524,7 @@ CREATE POLICY "authz_update" ON "cx"."folders" FOR UPDATE TO app_user
 
 COMMENT ON POLICY "authz_update" ON "cx"."folders" IS 'rowstile';
 
--- cx.folders delete (line 48): file
+-- cx.folders delete (line 56): file
 CREATE POLICY "authz_delete" ON "cx"."folders" FOR DELETE TO app_user
   USING (((SELECT authz_int.scope_cmd('cx.folders', 'delete')) AND ((coalesce("folders"."owner_id" = (SELECT authz.uid()), false)
     OR (coalesce((owner_id is null /* this.owner_id: nobody's */ and parent_type <> $$this.id$$ and parent_type <> e'it\'s' and id <>-1), false)
@@ -3405,7 +3610,7 @@ BEGIN
   RETURN ARRAY(SELECT * FROM authz_gen."cx.regions:update:why"(r_old)) || CASE WHEN p_row IS NULL THEN '{}'::text[] ELSE ARRAY['after the change:'] || ARRAY(SELECT '  ' || l FROM authz_gen."cx.regions:update:why"(r_new) l) END;
 END $f$;
 
--- cx.regions select (line 51): run
+-- cx.regions select (line 59): run
 CREATE POLICY "authz_select" ON "cx"."regions" FOR SELECT TO app_user
   USING (((SELECT authz_int.scope_cmd('cx.regions', 'select')) AND ((coalesce("regions"."chief_id" = (SELECT authz.uid()), false)
     OR EXISTS (SELECT 1 FROM authz_gen."region__chief__ext" v WHERE v.id = "regions"."id"))
@@ -3413,7 +3618,7 @@ CREATE POLICY "authz_select" ON "cx"."regions" FOR SELECT TO app_user
 
 COMMENT ON POLICY "authz_select" ON "cx"."regions" IS 'rowstile';
 
--- cx.regions update (line 52): rename
+-- cx.regions update (line 60): rename
 CREATE POLICY "authz_update" ON "cx"."regions" FOR UPDATE TO app_user
   USING (((SELECT authz_int.scope_cmd('cx.regions', 'update')) AND (coalesce("regions"."chief_id" = (SELECT authz.uid()), false)
     OR EXISTS (SELECT 1 FROM authz_gen."region__chief__ext" v WHERE v.id = "regions"."id"))))
@@ -3501,14 +3706,14 @@ BEGIN
   RETURN ARRAY(SELECT * FROM authz_gen."cx.sites:update:why"(r_old)) || CASE WHEN p_row IS NULL THEN '{}'::text[] ELSE ARRAY['after the change:'] || ARRAY(SELECT '  ' || l FROM authz_gen."cx.sites:update:why"(r_new) l) END;
 END $f$;
 
--- cx.sites select (line 55): run
+-- cx.sites select (line 63): run
 CREATE POLICY "authz_select" ON "cx"."sites" FOR SELECT TO app_user
   USING (((SELECT authz_int.scope_cmd('cx.sites', 'select')) AND (EXISTS (SELECT 1 FROM authz_gen."site__over__run" v WHERE v.id = "sites"."id")
     AND authz_gen."site__check_77cc73ddd9"(ROW("sites".*)::"cx"."sites"))));
 
 COMMENT ON POLICY "authz_select" ON "cx"."sites" IS 'rowstile';
 
--- cx.sites update (line 56): guard
+-- cx.sites update (line 64): guard
 CREATE POLICY "authz_update" ON "cx"."sites" FOR UPDATE TO app_user
   USING (((SELECT authz_int.scope_cmd('cx.sites', 'update')) AND ((EXISTS (SELECT 1 FROM authz_gen."region__chief" v WHERE v.id = "sites"."region_id")
     OR EXISTS (SELECT 1 FROM authz_gen."site__over__run" v WHERE v.id = "sites"."id"))
@@ -3641,7 +3846,7 @@ BEGIN
   RETURN ARRAY(SELECT * FROM authz_gen."cx.projects:update:why"(r_old)) || CASE WHEN p_row IS NULL THEN '{}'::text[] ELSE ARRAY['after the change:'] || ARRAY(SELECT '  ' || l FROM authz_gen."cx.projects:update:why"(r_new) l) || ARRAY(SELECT '  ' || l FROM authz_gen."cx.projects:update_after:why"(r_new) l) END;
 END $f$;
 
--- cx.projects select (line 59): view
+-- cx.projects select (line 67): view
 CREATE POLICY "authz_select" ON "cx"."projects" FOR SELECT TO app_user
   USING (((SELECT authz_int.scope_cmd('cx.projects', 'select')) AND (coalesce("projects"."lead_id" = (SELECT authz.uid()), false)
     OR EXISTS (SELECT 1 FROM authz_gen."project__inside__view" v WHERE v.id = "projects"."id")
@@ -3649,8 +3854,8 @@ CREATE POLICY "authz_select" ON "cx"."projects" FOR SELECT TO app_user
 
 COMMENT ON POLICY "authz_select" ON "cx"."projects" IS 'rowstile';
 
--- cx.projects update (line 60): edit
--- cx.projects update after (line 61): edit
+-- cx.projects update (line 68): edit
+-- cx.projects update after (line 69): edit
 CREATE POLICY "authz_update" ON "cx"."projects" FOR UPDATE TO app_user
   USING (((SELECT authz_int.scope_cmd('cx.projects', 'update')) AND (coalesce("projects"."lead_id" = (SELECT authz.uid()), false)
     OR EXISTS (SELECT 1 FROM authz_gen."project__inside__edit" v WHERE v.id = "projects"."id")
@@ -3668,7 +3873,7 @@ DECLARE c record;
 BEGIN
   FOR c IN SELECT con.conname, con.conrelid::regclass AS child, con.confrelid::regclass AS parent
            FROM pg_constraint con
-           WHERE con.contype = 'f' AND con.confdeltype = 'c' AND con.conrelid IN ('"cx"."folders"'::regclass, '"cx"."regions"'::regclass, '"cx"."sites"'::regclass, '"cx"."projects"'::regclass) LOOP
+           WHERE con.contype = 'f' AND con.confdeltype = 'c' AND con.conrelid IN ('"cx"."notes"'::regclass, '"cx"."folders"'::regclass, '"cx"."regions"'::regclass, '"cx"."sites"'::regclass, '"cx"."projects"'::regclass) LOOP
     RAISE WARNING 'foreign key % on % is ON DELETE CASCADE: deleting a row of % also deletes rows of %, and cascades skip row-level security, so a user could remove rows they cannot see. Use ON DELETE RESTRICT unless that is intended.',
       c.conname, c.child, c.parent, c.child;
   END LOOP;
@@ -3766,6 +3971,15 @@ BEGIN
         WHEN 'guard' THEN RETURN EXISTS (SELECT 1 FROM "cx"."sites" o WHERE o."id" = v_bigint AND (((EXISTS (SELECT 1 FROM authz_gen."region__chief" v WHERE v.id = o."region_id")
     OR EXISTS (SELECT 1 FROM authz_gen."site__over__run" v WHERE v.id = o."id"))
     AND coalesce((not exists (select 1 from cx.closed c where c.site_id = o.id)), false))));
+        ELSE RAISE EXCEPTION 'no permission %.% in the policy', p_type, p_perm USING HINT = 'rowstile help AZ707';
+      END CASE;
+    WHEN 'note' THEN
+      IF NOT pg_catalog.pg_input_is_valid(p_id, 'bigint') THEN RETURN false; END IF;
+      v_bigint := p_id::bigint;
+      CASE p_perm
+        WHEN 'write' THEN RETURN EXISTS (SELECT 1 FROM "cx"."notes" o WHERE o."id" = v_bigint AND (coalesce(o."author_id" = (SELECT authz.uid()), false)));
+        WHEN 'open' THEN RETURN EXISTS (SELECT 1 FROM "cx"."notes" o WHERE o."id" = v_bigint AND ((coalesce((author_id is null), false)
+    AND coalesce((id > 0), false))));
         ELSE RAISE EXCEPTION 'no permission %.% in the policy', p_type, p_perm USING HINT = 'rowstile help AZ707';
       END CASE;
     ELSE
@@ -3999,6 +4213,35 @@ BEGIN
     AND coalesce((not exists (select 1 from cx.closed c where c.site_id = o.id)), false))
         ORDER BY o."id" LIMIT p_limit;
       END IF;
+    WHEN 'note.write' THEN
+      IF p_limit IS NULL AND p_after IS NULL THEN
+        RETURN QUERY SELECT o."id"::text FROM "cx"."notes" o
+        WHERE coalesce(o."author_id" = (SELECT authz.uid()), false);
+      ELSIF p_after IS NULL THEN
+        RETURN QUERY SELECT o."id"::text FROM "cx"."notes" o
+        WHERE coalesce(o."author_id" = (SELECT authz.uid()), false)
+        ORDER BY o."id" LIMIT p_limit;
+      ELSE
+        RETURN QUERY SELECT o."id"::text FROM "cx"."notes" o
+        WHERE o."id" > p_after::bigint AND coalesce(o."author_id" = (SELECT authz.uid()), false)
+        ORDER BY o."id" LIMIT p_limit;
+      END IF;
+    WHEN 'note.open' THEN
+      IF p_limit IS NULL AND p_after IS NULL THEN
+        RETURN QUERY SELECT o."id"::text FROM "cx"."notes" o
+        WHERE (coalesce((author_id is null), false)
+    AND coalesce((id > 0), false));
+      ELSIF p_after IS NULL THEN
+        RETURN QUERY SELECT o."id"::text FROM "cx"."notes" o
+        WHERE (coalesce((author_id is null), false)
+    AND coalesce((id > 0), false))
+        ORDER BY o."id" LIMIT p_limit;
+      ELSE
+        RETURN QUERY SELECT o."id"::text FROM "cx"."notes" o
+        WHERE o."id" > p_after::bigint AND (coalesce((author_id is null), false)
+    AND coalesce((id > 0), false))
+        ORDER BY o."id" LIMIT p_limit;
+      END IF;
     ELSE
       RAISE EXCEPTION 'no permission %.% in the policy', p_type, p_perm USING HINT = 'rowstile help AZ707';
   END CASE;
@@ -4014,6 +4257,7 @@ BEGIN
     WHEN 'project' THEN names := ARRAY['edit', 'view', 'file']::text[];
     WHEN 'region' THEN names := ARRAY['run', 'rename']::text[];
     WHEN 'site' THEN names := ARRAY['run', 'guard']::text[];
+    WHEN 'note' THEN names := ARRAY['write', 'open']::text[];
     ELSE RAISE EXCEPTION 'no type % in the policy', p_type USING HINT = 'rowstile help AZ707';
   END CASE;
   RETURN ARRAY(SELECT n FROM unnest(names) n WHERE authz.can(p_type, p_id, n));
@@ -4335,6 +4579,7 @@ BEGIN
     RAISE EXCEPTION 'explain_rule explains insert, update or delete, not %', p_command USING ERRCODE = 'invalid_parameter_value', HINT = 'rowstile help AZ710';
   END IF;
   CASE p_table
+    WHEN 'cx.notes' THEN RETURN authz_gen."cx.notes:rules:explain"(p_command, p_id, p_row);
     WHEN 'cx.folders' THEN RETURN authz_gen."cx.folders:rules:explain"(p_command, p_id, p_row);
     WHEN 'cx.regions' THEN RETURN authz_gen."cx.regions:rules:explain"(p_command, p_id, p_row);
     WHEN 'cx.sites' THEN RETURN authz_gen."cx.sites:rules:explain"(p_command, p_id, p_row);
@@ -4398,6 +4643,11 @@ $f$;
 CREATE FUNCTION authz_int."site__warden__who"(p_id bigint) RETURNS SETOF bigint
 LANGUAGE sql STABLE STRICT SECURITY DEFINER SET search_path FROM CURRENT ROWS 50 AS $f$
   SELECT x FROM "cx"."sites" r, LATERAL authz_int."region__chief__who"(r."region_id") x WHERE r."id" = p_id
+$f$;
+
+CREATE FUNCTION authz_int."note__author__who"(p_id bigint) RETURNS SETOF bigint
+LANGUAGE sql STABLE STRICT SECURITY DEFINER SET search_path FROM CURRENT ROWS 50 AS $f$
+  SELECT r."author_id" FROM "cx"."notes" r WHERE r."id" = p_id AND r."author_id" IS NOT NULL
 $f$;
 
 CREATE FUNCTION authz_int."folder__edit__who_base"(p_id bigint) RETURNS SETOF bigint
@@ -4501,6 +4751,16 @@ LANGUAGE sql STABLE STRICT SECURITY DEFINER SET search_path FROM CURRENT ROWS 50
   (SELECT x FROM authz_int."site__warden__who"(p_id) x)
   UNION ALL
   (SELECT x FROM authz_int."site__run__who"(p_id) x)
+$f$;
+
+CREATE FUNCTION authz_int."note__write__who"(p_id bigint) RETURNS SETOF bigint
+LANGUAGE sql STABLE STRICT SECURITY DEFINER SET search_path FROM CURRENT ROWS 50 AS $f$
+  SELECT x FROM authz_int."note__author__who"(p_id) x
+$f$;
+
+CREATE FUNCTION authz_int."note__open__who"(p_id bigint) RETURNS SETOF bigint
+LANGUAGE sql STABLE STRICT SECURITY DEFINER SET search_path FROM CURRENT ROWS 50 AS $f$
+  SELECT u."id" FROM "cx"."users" u
 $f$;
 
 CREATE FUNCTION authz_int."folder__parent__why"(p_id bigint, p_depth int, p_seen text[])
@@ -4987,6 +5247,50 @@ BEGIN
   END;
 END $f$;
 
+CREATE FUNCTION authz_int."note__author__why"(p_id bigint, p_depth int, p_seen text[])
+RETURNS SETOF text LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path FROM CURRENT AS $f$
+DECLARE pad text := repeat('  ', p_depth); v_t record;
+BEGIN
+  IF p_id IN (SELECT r."id" AS id FROM "cx"."notes" r WHERE r."author_id" = (SELECT authz.uid())) THEN
+    RETURN NEXT pad || 'yes  ' || 'author: author_id is you' || '';
+    RETURN;
+  END IF;
+  RETURN NEXT pad || 'no   you do not hold note.author';
+END $f$;
+
+CREATE FUNCTION authz_int."note__write__why"(p_id bigint, p_depth int, p_seen text[])
+RETURNS SETOF text LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path FROM CURRENT AS $f$
+DECLARE pad text := repeat('  ', p_depth); v_ok boolean; v_done boolean := false; v_t record;
+        v_holds boolean := p_id IN (SELECT id FROM authz_int."note__write");
+BEGIN
+  IF p_depth > 60 THEN RETURN NEXT pad || '...'; RETURN; END IF;
+  RETURN NEXT pad || 'note.write = author';
+  BEGIN
+    v_ok := (p_id) IN (SELECT id FROM authz_int."note__author");
+    RETURN NEXT pad || CASE WHEN v_ok THEN 'yes  ' ELSE 'no   ' END || 'author';
+    IF v_ok AND NOT v_done THEN v_done := true; RETURN QUERY SELECT * FROM authz_int."note__author__why"(p_id, p_depth + 1, p_seen); END IF;
+  END;
+END $f$;
+
+CREATE FUNCTION authz_int."note__open__why"(p_id bigint, p_depth int, p_seen text[])
+RETURNS SETOF text LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path FROM CURRENT AS $f$
+DECLARE pad text := repeat('  ', p_depth); v_ok boolean; v_done boolean := false; v_t record;
+        v_holds boolean := p_id IN (SELECT id FROM authz_int."note__open");
+BEGIN
+  IF p_depth > 60 THEN RETURN NEXT pad || '...'; RETURN; END IF;
+  RETURN NEXT pad || 'note.open = {author_id is null} and {id > 0}';
+  BEGIN
+    v_ok := (p_id) IN (SELECT r."id" AS id FROM "cx"."notes" r
+  WHERE coalesce((author_id is null), false)
+    AND coalesce((id > 0), false));
+    RETURN NEXT pad || CASE WHEN v_ok THEN 'yes  ' ELSE 'no   ' END || '({author_id is null} and {id > 0})';
+    v_ok := (p_id) IN (SELECT r."id" AS id FROM "cx"."notes" r WHERE coalesce((author_id is null), false));
+    RETURN NEXT pad || '  ' || CASE WHEN v_ok THEN 'yes  ' ELSE 'no   ' END || '{author_id is null}';
+    v_ok := (p_id) IN (SELECT r."id" AS id FROM "cx"."notes" r WHERE coalesce((id > 0), false));
+    RETURN NEXT pad || '  ' || CASE WHEN v_ok THEN 'yes  ' ELSE 'no   ' END || '{id > 0}';
+  END;
+END $f$;
+
 -- May the signed-in user see this object (select it)? A hidden object reads as a missing one
 CREATE FUNCTION authz_int.visible(p_type text, p_id text) RETURNS boolean
 LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path FROM CURRENT AS $f$
@@ -5022,6 +5326,9 @@ BEGIN
       RETURN EXISTS (SELECT 1 FROM "cx"."sites" "sites" WHERE "sites"."id" = p_id::bigint
         AND (SELECT authz_int.scope_cmd('cx.sites', 'select')) AND (EXISTS (SELECT 1 FROM authz_gen."site__over__run" v WHERE v.id = "sites"."id")
     AND coalesce((not exists (select 1 from cx.closed c where c.site_id = "sites".id)), false)));
+    WHEN 'note' THEN
+      RETURN EXISTS (SELECT 1 FROM "cx"."notes" "notes" WHERE "notes"."id" = p_id::bigint
+        AND false);
     ELSE RETURN false;
   END CASE;
 END $f$;
@@ -5135,6 +5442,24 @@ BEGIN
           END LOOP;
         ELSE RAISE EXCEPTION 'no permission %.% in the policy', p_type, p_perm USING HINT = 'rowstile help AZ707';
       END CASE;
+    WHEN 'note' THEN
+      IF NOT pg_catalog.pg_input_is_valid(p_id, 'bigint') THEN RETURN; END IF;
+      v_bigint := p_id::bigint;
+      CASE p_perm
+        WHEN 'write' THEN
+          FOR v_c IN SELECT DISTINCT x::text FROM authz_int."note__write__who"(v_bigint) x WHERE EXISTS (SELECT 1 FROM "cx"."users" u WHERE u."id" = x) LOOP
+            PERFORM set_config('authz.user_id', v_c, true);
+            PERFORM authz_int.sign();
+            IF authz.can(p_type, p_id, p_perm) THEN RETURN NEXT v_c; END IF;
+          END LOOP;
+        WHEN 'open' THEN
+          FOR v_c IN SELECT DISTINCT x::text FROM authz_int."note__open__who"(v_bigint) x WHERE EXISTS (SELECT 1 FROM "cx"."users" u WHERE u."id" = x) LOOP
+            PERFORM set_config('authz.user_id', v_c, true);
+            PERFORM authz_int.sign();
+            IF authz.can(p_type, p_id, p_perm) THEN RETURN NEXT v_c; END IF;
+          END LOOP;
+        ELSE RAISE EXCEPTION 'no permission %.% in the policy', p_type, p_perm USING HINT = 'rowstile help AZ707';
+      END CASE;
     ELSE
       RAISE EXCEPTION 'no type % in the policy', p_type USING HINT = 'rowstile help AZ707';
   END CASE;
@@ -5211,6 +5536,14 @@ BEGIN
       CASE p_perm
         WHEN 'run' THEN RETURN QUERY SELECT * FROM authz_int."site__run__why"(v_bigint, 1, '{}');
         WHEN 'guard' THEN RETURN QUERY SELECT * FROM authz_int."site__guard__why"(v_bigint, 1, '{}');
+        ELSE RAISE EXCEPTION 'no permission %.% in the policy', p_type, p_perm USING HINT = 'rowstile help AZ707';
+      END CASE;
+    WHEN 'note' THEN
+      IF NOT pg_catalog.pg_input_is_valid(p_id, 'bigint') THEN RETURN; END IF;
+      v_bigint := p_id::bigint;
+      CASE p_perm
+        WHEN 'write' THEN RETURN QUERY SELECT * FROM authz_int."note__write__why"(v_bigint, 1, '{}');
+        WHEN 'open' THEN RETURN QUERY SELECT * FROM authz_int."note__open__why"(v_bigint, 1, '{}');
         ELSE RAISE EXCEPTION 'no permission %.% in the policy', p_type, p_perm USING HINT = 'rowstile help AZ707';
       END CASE;
     ELSE
@@ -5881,8 +6214,8 @@ WHERE w.who IS NOT NULL AND n.nspname !~ '^pg_(toast_)?temp_' LOOP
   END LOOP;
   -- governed tables
   FOR r IN SELECT c.oid::regclass AS tbl, c.relrowsecurity, c.relforcerowsecurity, c.relowner,
-                  c.oid = ANY (SELECT to_regclass(x) FROM unnest(ARRAY['"cx"."folders"', '"cx"."projects"', '"cx"."regions"', '"cx"."sites"']::text[]) x) AS governed
-           FROM pg_class c WHERE c.oid = ANY (SELECT to_regclass(x) FROM unnest(ARRAY['"cx"."folders"', '"cx"."projects"', '"cx"."regions"', '"cx"."sites"', '"cx"."users"']::text[]) x) LOOP
+                  c.oid = ANY (SELECT to_regclass(x) FROM unnest(ARRAY['"cx"."folders"', '"cx"."notes"', '"cx"."projects"', '"cx"."regions"', '"cx"."sites"']::text[]) x) AS governed
+           FROM pg_class c WHERE c.oid = ANY (SELECT to_regclass(x) FROM unnest(ARRAY['"cx"."folders"', '"cx"."notes"', '"cx"."projects"', '"cx"."regions"', '"cx"."sites"', '"cx"."users"']::text[]) x) LOOP
     IF r.relowner = v_role OR pg_has_role(v_role, r.relowner, 'MEMBER') THEN
       IF NOT r.relforcerowsecurity THEN
         severity := 'error'; object := r.tbl::text;
@@ -5912,7 +6245,7 @@ WHERE w.who IS NOT NULL AND n.nspname !~ '^pg_(toast_)?temp_' LOOP
                                 WHEN 'd' THEN 'delete' ELSE 'every command' END AS cmd
            FROM pg_policy p
            LEFT JOIN pg_description d ON d.objoid = p.oid AND d.classoid = 'pg_policy'::regclass
-           WHERE p.polrelid = ANY (SELECT to_regclass(x) FROM unnest(ARRAY['"cx"."folders"', '"cx"."projects"', '"cx"."regions"', '"cx"."sites"']::text[]) x)
+           WHERE p.polrelid = ANY (SELECT to_regclass(x) FROM unnest(ARRAY['"cx"."folders"', '"cx"."notes"', '"cx"."projects"', '"cx"."regions"', '"cx"."sites"']::text[]) x)
              AND coalesce(d.description, '') NOT IN ('rowstile', 'rowfence', 'authzc')
              AND p.polname NOT IN ('authz_select', 'authz_insert', 'authz_update', 'authz_delete')
              AND EXISTS (SELECT 1 FROM unnest(p.polroles) o
@@ -5931,9 +6264,9 @@ WHERE w.who IS NOT NULL AND n.nspname !~ '^pg_(toast_)?temp_' LOOP
   -- tables beside the policy's (in their schemas) that it doesn't name: nothing filters what the app role reads there
   FOR r IN SELECT c.oid::regclass AS tbl FROM pg_class c
            WHERE c.relkind IN ('r', 'p') AND NOT c.relispartition AND NOT c.relrowsecurity
-             AND c.relnamespace IN (SELECT k.relnamespace FROM unnest(ARRAY['"cx"."folders"', '"cx"."projects"', '"cx"."regions"', '"cx"."sites"', '"cx"."users"', '"cx"."placements"', '"cx"."region_links"', '"cx"."site_links"', '"cx"."site_regions"']::text[]) x
+             AND c.relnamespace IN (SELECT k.relnamespace FROM unnest(ARRAY['"cx"."folders"', '"cx"."notes"', '"cx"."projects"', '"cx"."regions"', '"cx"."sites"', '"cx"."users"', '"cx"."placements"', '"cx"."region_links"', '"cx"."site_links"', '"cx"."site_regions"']::text[]) x
                                     JOIN pg_class k ON k.oid = to_regclass(x))
-             AND c.oid NOT IN (SELECT to_regclass(x)::oid FROM unnest(ARRAY['"cx"."folders"', '"cx"."projects"', '"cx"."regions"', '"cx"."sites"', '"cx"."users"', '"cx"."placements"', '"cx"."region_links"', '"cx"."site_links"', '"cx"."site_regions"']::text[]) x
+             AND c.oid NOT IN (SELECT to_regclass(x)::oid FROM unnest(ARRAY['"cx"."folders"', '"cx"."notes"', '"cx"."projects"', '"cx"."regions"', '"cx"."sites"', '"cx"."users"', '"cx"."placements"', '"cx"."region_links"', '"cx"."site_links"', '"cx"."site_regions"']::text[]) x
                                WHERE to_regclass(x) IS NOT NULL)
              AND has_any_column_privilege(v_role, c.oid, 'SELECT')
            ORDER BY c.oid::regclass::text LOOP
@@ -5945,7 +6278,7 @@ WHERE w.who IS NOT NULL AND n.nspname !~ '^pg_(toast_)?temp_' LOOP
   -- (apply turns row-level security on for the ones there are then; later ones are found here)
   FOR r IN WITH RECURSIVE d(oid, top, governed) AS (
              SELECT i.inhrelid, i.inhparent, x.governed FROM pg_inherits i
-             JOIN (SELECT to_regclass(t) AS tbl, true AS governed FROM unnest(ARRAY['"cx"."folders"', '"cx"."projects"', '"cx"."regions"', '"cx"."sites"']::text[]) t
+             JOIN (SELECT to_regclass(t) AS tbl, true AS governed FROM unnest(ARRAY['"cx"."folders"', '"cx"."notes"', '"cx"."projects"', '"cx"."regions"', '"cx"."sites"']::text[]) t
                    UNION ALL SELECT to_regclass(t), false FROM unnest(ARRAY['"cx"."placements"', '"cx"."region_links"', '"cx"."site_links"', '"cx"."site_regions"']::text[]) t) x
                ON i.inhparent = x.tbl
              UNION SELECT i.inhrelid, d.top, d.governed FROM pg_inherits i JOIN d ON i.inhparent = d.oid)
@@ -5976,7 +6309,7 @@ WHERE w.who IS NOT NULL AND n.nspname !~ '^pg_(toast_)?temp_' LOOP
   -- unique constraints on governed tables tell people that rows they cannot see exist
   FOR r IN SELECT i.indexrelid::regclass AS idx, i.indrelid::regclass AS tbl
            FROM pg_index i WHERE i.indisunique AND NOT i.indisprimary
-             AND i.indrelid = ANY (SELECT to_regclass(x) FROM unnest(ARRAY['"cx"."folders"', '"cx"."projects"', '"cx"."regions"', '"cx"."sites"']::text[]) x)
+             AND i.indrelid = ANY (SELECT to_regclass(x) FROM unnest(ARRAY['"cx"."folders"', '"cx"."notes"', '"cx"."projects"', '"cx"."regions"', '"cx"."sites"']::text[]) x)
              AND has_table_privilege(v_role, i.indrelid, 'INSERT') LOOP
     severity := 'info'; object := r.idx::text;
     problem := format('a unique index on %s: inserting a duplicate fails even when the existing row is hidden, which tells the user it exists', r.tbl);
@@ -5985,7 +6318,7 @@ WHERE w.who IS NOT NULL AND n.nspname !~ '^pg_(toast_)?temp_' LOOP
   -- primary keys the app role may choose (a column it may insert or update, not GENERATED ALWAYS): the same
   FOR r IN SELECT i.indexrelid::regclass AS idx, i.indrelid::regclass AS tbl
            FROM pg_index i WHERE i.indisprimary
-             AND i.indrelid = ANY (SELECT to_regclass(x) FROM unnest(ARRAY['"cx"."folders"', '"cx"."projects"', '"cx"."regions"', '"cx"."sites"']::text[]) x)
+             AND i.indrelid = ANY (SELECT to_regclass(x) FROM unnest(ARRAY['"cx"."folders"', '"cx"."notes"', '"cx"."projects"', '"cx"."regions"', '"cx"."sites"']::text[]) x)
              AND EXISTS (SELECT 1 FROM pg_attribute a
                          WHERE a.attrelid = i.indrelid AND a.attnum = ANY (i.indkey) AND a.attidentity <> 'a'
                            AND (has_column_privilege(v_role, i.indrelid, a.attnum, 'INSERT')
@@ -6049,7 +6382,7 @@ WHERE w.who IS NOT NULL AND n.nspname !~ '^pg_(toast_)?temp_' LOOP
   END IF;
   -- rules for a command the app role has no privilege for (one column's is enough for a read, an insert or
   -- an update: the app may write some columns only)
-  FOR r IN SELECT to_regclass(v.tbl) AS tbl, v.cmd FROM (VALUES ('"cx"."folders"', 'delete'), ('"cx"."folders"', 'select'), ('"cx"."folders"', 'update'), ('"cx"."projects"', 'select'), ('"cx"."projects"', 'update'), ('"cx"."regions"', 'select'), ('"cx"."regions"', 'update'), ('"cx"."sites"', 'select'), ('"cx"."sites"', 'update')) v(tbl, cmd)
+  FOR r IN SELECT to_regclass(v.tbl) AS tbl, v.cmd FROM (VALUES ('"cx"."folders"', 'delete'), ('"cx"."folders"', 'select'), ('"cx"."folders"', 'update'), ('"cx"."notes"', 'insert'), ('"cx"."projects"', 'select'), ('"cx"."projects"', 'update'), ('"cx"."regions"', 'select'), ('"cx"."regions"', 'update'), ('"cx"."sites"', 'select'), ('"cx"."sites"', 'update')) v(tbl, cmd)
            WHERE v.tbl IS NOT NULL LOOP
     CONTINUE WHEN r.tbl IS NULL;
     IF r.cmd = 'delete' THEN
@@ -6082,7 +6415,7 @@ WHERE w.who IS NOT NULL AND n.nspname !~ '^pg_(toast_)?temp_' LOOP
            FROM pg_depend d JOIN pg_rewrite w ON w.oid = d.objid JOIN pg_class v ON v.oid = w.ev_class
            LEFT JOIN pg_description ds ON ds.objoid = v.oid AND ds.classoid = 'pg_class'::regclass
            WHERE d.classid = 'pg_rewrite'::regclass AND d.refclassid = 'pg_class'::regclass
-             AND d.refobjid = ANY (SELECT to_regclass(x) FROM unnest(ARRAY['"cx"."folders"', '"cx"."projects"', '"cx"."regions"', '"cx"."sites"', '"cx"."users"', '"cx"."placements"', '"cx"."region_links"', '"cx"."site_links"', '"cx"."site_regions"']::text[]) x)
+             AND d.refobjid = ANY (SELECT to_regclass(x) FROM unnest(ARRAY['"cx"."folders"', '"cx"."notes"', '"cx"."projects"', '"cx"."regions"', '"cx"."sites"', '"cx"."users"', '"cx"."placements"', '"cx"."region_links"', '"cx"."site_links"', '"cx"."site_regions"']::text[]) x)
              AND v.oid <> d.refobjid AND v.relkind IN ('v', 'm')
              AND v.relnamespace NOT IN (to_regnamespace('authz_gen'), to_regnamespace('authz_int'))
              AND coalesce(ds.description, '') NOT IN ('rowstile masked view', 'rowfence masked view', 'authzc masked view')
@@ -6099,7 +6432,7 @@ WHERE w.who IS NOT NULL AND n.nspname !~ '^pg_(toast_)?temp_' LOOP
                                                        to_regnamespace('authz_gen'), 'pg_catalog'::regnamespace)
              AND has_function_privilege(v_role, p.oid, 'EXECUTE')
              AND p.prokind IN ('f', 'p')
-             AND EXISTS (SELECT 1 FROM unnest(ARRAY['cx.folders', 'cx.projects', 'cx.regions', 'cx.sites', 'cx.users', 'cx.placements', 'cx.region_links', 'cx.site_links', 'cx.site_regions']::text[]) x
+             AND EXISTS (SELECT 1 FROM unnest(ARRAY['cx.folders', 'cx.notes', 'cx.projects', 'cx.regions', 'cx.sites', 'cx.users', 'cx.placements', 'cx.region_links', 'cx.site_links', 'cx.site_regions']::text[]) x
                          WHERE lower(replace(pg_get_functiondef(p.oid), '"', '')) ~
                                ('(from|join|update|into|table|only)\s+(' || lower(split_part(x, '.', 1)) || '\.)?'
                                 || lower(split_part(x, '.', 2)) || '([^a-z0-9_$]|$)')) LOOP
@@ -6108,7 +6441,7 @@ WHERE w.who IS NOT NULL AND n.nspname !~ '^pg_(toast_)?temp_' LOOP
     RETURN NEXT;
   END LOOP;
   -- lookups the permission views make
-  FOR r IN SELECT * FROM (VALUES ('"cx"."folders"', 'parent_id', 'folder.parent: find objects by parent_id'), ('"cx"."folders"', 'owner_id', 'folder.owner: find objects by owner_id'), ('"cx"."placements"', 'project_id', 'project.inside: find the members of an object'), ('"cx"."placements"', 'folder_id', 'project.inside: find what a subject is in'), ('"cx"."projects"', 'lead_id', 'project.lead: find objects by lead_id'), ('"cx"."site_links"', 'region_id', 'region.over: find the members of an object'), ('"cx"."site_links"', 'site_id', 'region.over: find what a subject is in'), ('"cx"."region_links"', 'region_id', 'region.over: find the members of an object'), ('"cx"."region_links"', 'parent_id', 'region.over: find what a subject is in'), ('"cx"."regions"', 'chief_id', 'region.chief: find objects by chief_id'), ('"cx"."site_regions"', 'site_id', 'site.over: find the members of an object'), ('"cx"."site_regions"', 'region_id', 'site.over: find what a subject is in'), ('"cx"."sites"', 'region_id', 'site.warden: find objects by region_id')) v(tbl, col, why) WHERE tbl IS NOT NULL LOOP
+  FOR r IN SELECT * FROM (VALUES ('"cx"."folders"', 'parent_id', 'folder.parent: find objects by parent_id'), ('"cx"."folders"', 'owner_id', 'folder.owner: find objects by owner_id'), ('"cx"."placements"', 'project_id', 'project.inside: find the members of an object'), ('"cx"."placements"', 'folder_id', 'project.inside: find what a subject is in'), ('"cx"."projects"', 'lead_id', 'project.lead: find objects by lead_id'), ('"cx"."site_links"', 'region_id', 'region.over: find the members of an object'), ('"cx"."site_links"', 'site_id', 'region.over: find what a subject is in'), ('"cx"."region_links"', 'region_id', 'region.over: find the members of an object'), ('"cx"."region_links"', 'parent_id', 'region.over: find what a subject is in'), ('"cx"."regions"', 'chief_id', 'region.chief: find objects by chief_id'), ('"cx"."site_regions"', 'site_id', 'site.over: find the members of an object'), ('"cx"."site_regions"', 'region_id', 'site.over: find what a subject is in'), ('"cx"."sites"', 'region_id', 'site.warden: find objects by region_id'), ('"cx"."notes"', 'author_id', 'note.author: find objects by author_id')) v(tbl, col, why) WHERE tbl IS NOT NULL LOOP
     CONTINUE WHEN to_regclass(r.tbl) IS NULL;
     -- a plain view can't have an index: the tables under it answer the lookups
     CONTINUE WHEN (SELECT c.relkind FROM pg_class c WHERE c.oid = to_regclass(r.tbl)) = 'v';
@@ -6144,7 +6477,7 @@ BEGIN
   END IF;
   -- a table's owner (or a role with its rights) skips row-level security, unless the table forces it
   FOR r IN SELECT c.oid::regclass AS tbl FROM pg_class c
-           WHERE c.oid = ANY (SELECT to_regclass(x) FROM unnest(ARRAY['"cx"."folders"', '"cx"."projects"', '"cx"."regions"', '"cx"."sites"']::text[]) x)
+           WHERE c.oid = ANY (SELECT to_regclass(x) FROM unnest(ARRAY['"cx"."folders"', '"cx"."notes"', '"cx"."projects"', '"cx"."regions"', '"cx"."sites"']::text[]) x)
              AND NOT c.relforcerowsecurity AND pg_has_role(v_me, c.relowner, 'USAGE') LOOP
     severity := 'error';
     problem := format('%s owns %s (or has its owner''s rights): owners skip row-level security', v_me::regrole, r.tbl);
@@ -6152,7 +6485,7 @@ BEGIN
   END LOOP;
   -- a table with rules whose row-level security is off: the rules don't apply
   FOR r IN SELECT c.oid::regclass AS tbl FROM pg_class c
-           WHERE c.oid = ANY (SELECT to_regclass(x) FROM unnest(ARRAY['"cx"."folders"', '"cx"."projects"', '"cx"."regions"', '"cx"."sites"']::text[]) x) AND NOT c.relrowsecurity LOOP
+           WHERE c.oid = ANY (SELECT to_regclass(x) FROM unnest(ARRAY['"cx"."folders"', '"cx"."notes"', '"cx"."projects"', '"cx"."regions"', '"cx"."sites"']::text[]) x) AND NOT c.relrowsecurity LOOP
     severity := 'error';
     problem := format('row-level security is off on %s: the policy''s rules don''t apply to it', r.tbl);
     RETURN NEXT;
@@ -6193,12 +6526,13 @@ INSERT INTO authz_gen.policy_lines VALUES
   ('relation project.lead lead_id', 'line 26'),
   ('relation region.chief chief_id', 'line 34'),
   ('relation site.warden region_id', 'line 41'),
-  ('rule cx.folders delete', 'line 48'),
-  ('rule cx.folders update', 'line 47'),
-  ('rule cx.projects update', 'line 60'),
-  ('rule cx.projects update after', 'line 61'),
-  ('rule cx.regions update', 'line 52'),
-  ('rule cx.sites update', 'line 56'),
+  ('rule cx.folders delete', 'line 56'),
+  ('rule cx.folders update', 'line 55'),
+  ('rule cx.notes insert', 'line 51'),
+  ('rule cx.projects update', 'line 68'),
+  ('rule cx.projects update after', 'line 69'),
+  ('rule cx.regions update', 'line 60'),
+  ('rule cx.sites update', 'line 64'),
   ('share folder.viewer user', 'line 16'),
   ('share project.host folder', 'line 25'),
   ('share region.chief user', 'line 35');
