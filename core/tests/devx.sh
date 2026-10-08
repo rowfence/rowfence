@@ -107,6 +107,20 @@ out=$(as 1 "SELECT array_to_string(authz.explain_rule('app.files', 'update', '11
 case "$out" in "yes  update : edit"*) ok "an update that would be allowed: yes";; *) bad "explain update yes" "$out";; esac
 out=$(as 1 "SELECT authz.explain_rule('app.files', 'delete', '999999') IS NULL")
 [ "$out" = t ] && ok "a row that isn't there: NULL (404, not 403)" || bad "explain missing" "$out"
+out=$(as 2 "SELECT array_to_string(authz.explain_rule('app.files', 'delete', '13'), '|')")
+case "$out" in "no   delete : edit  (line "*"|  no   edit|    no   user 2 does not hold edit on file 13|"*)
+  ok "a delete the user may not make: no, and why";; *) bad "explain delete" "$out";; esac
+out=$(as 1 "SELECT authz.explain_rule('app.files', 'update')")
+case "$out" in *"22023: which row? authz.explain_rule(app.files, update, id)"*) ok "an update is explained for a row: which one?";;
+  *) bad "explain without a row" "$out";; esac
+out=$(as 1 "SELECT authz.explain_rule('app.files', 'select', '11')")
+case "$out" in *"22023: explain_rule explains insert, update or delete, not select"*) ok "... and writes only";;
+  *) bad "explain a select" "$out";; esac
+out=$(as 1 "SELECT authz.can('file', '11', 'fly')")
+case "$out" in *"P0001: no permission file.fly in the policy"*) ok "a permission the policy doesn't have is a mistake, not a no";;
+  *) bad "can, an unknown permission" "$out";; esac
+out=$(as 1 "SELECT * FROM authz.who('file', '11', 'fly')")
+case "$out" in *"P0001: no permission file.fly in the policy"*) ok "... asking who holds it too";; *) bad "who, an unknown permission" "$out";; esac
 out=$(as 6 "SELECT authz.explain_rule('app.files', 'update', '11') IS NULL")
 [ "$out" = t ] && ok "... and one the user can't see: NULL too" || bad "explain invisible" "$out"
 out=$(as 2 "SELECT array_to_string(authz.explain_rule('app.files', 'update', '12', '{\"name\": \"x\"}'), '|')")

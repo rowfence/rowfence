@@ -42,6 +42,11 @@ expect_code "read-only key: cannot share" "42501: this session is read-only (vie
   -c "SELECT authz.share('file', 11, 'viewer', 'user', 4)"
 expect_code "a read-only session cannot mint a broader key" "42501: this session is read-only (viewing as someone else, or a read-only token)" -c "BEGIN" -c "SELECT authz.login_key('$READ')" \
   -c "SELECT authz.create_api_key('sneaky', 'files')"
+expect_code "a session limited to a scope cannot make a key with another" "42501: a key cannot have more scopes than the session creating it" \
+  -c "BEGIN" -c "SELECT authz.login_key('$FILES')" -c "SELECT authz.create_api_key('wider', 'read')"
+expect_code "... nor one with every scope (none named)" "42501: a key cannot have more scopes than the session creating it" \
+  -c "BEGIN" -c "SELECT authz.login_key('$FILES')" -c "SELECT authz.create_api_key('wider')"
+expect_code "nobody signed in makes no key" "42501: sign in to create an API key" -c "SELECT authz.create_api_key('k', 'read')"
 check "files key: may edit files, and update them" "updated" \
   "BEGIN; SELECT authz.login_key('$FILES'); SELECT authz.can('file', 11, 'edit'); UPDATE app.files SET body = 'y' WHERE id = 11 RETURNING 'updated'; ROLLBACK;"
 check "files key: sees no folders (not in its scope)" "0|false" \
@@ -56,6 +61,7 @@ check "... and requests with one key don't wait for each other" "1"   "SET state
 wait
 check "... last_used_at is kept, to the minute" "t"   "RESET ROLE; SELECT last_used_at > now() - interval '1 minute' FROM authz.api_keys WHERE name = 'script';"
 KEYID=$(state -c "SET authz.user_id = 1" -c "SELECT id FROM authz.list_api_keys() WHERE name = 'laptop'")
+expect_code "bob cannot revoke alice's key" "42501: no API key $KEYID of yours" -c "SET authz.user_id = 2" -c "SELECT authz.revoke_api_key($KEYID)"
 PSQL -c "SET ROLE app_user; SET authz.user_id = 1; SELECT authz.revoke_api_key($KEYID)" >/dev/null
 expect_code "a revoked key no longer signs in" "28000: invalid API key" -c "BEGIN" -c "SELECT authz.login_key('$READ')"
 expect_code "a made-up key does not either" "28000: invalid API key" -c "BEGIN" -c "SELECT authz.login_key('ak_nope')"
@@ -65,6 +71,7 @@ PSQL -c "UPDATE authz.api_keys SET expires_at = now() - interval '1 hour' WHERE 
 expect_code "... and no longer after it" "28000: invalid API key" -c "BEGIN" -c "SELECT authz.login_key('$SHORT')"
 
 echo "-- JWT (HS256)"
+expect_code "no secret, no JWT login" "P0001: JWT login is not configured (authz.settings jwt_secret)" -c "BEGIN" -c "SELECT authz.login_jwt('a.b.c')"
 PSQL -c "INSERT INTO authz.settings VALUES ('jwt_secret', 's3cret-for-tests'), ('jwt_issuer', 'https://id.example')" >/dev/null
 jwt() { python3 - "$@" <<'PY'
 import base64, hashlib, hmac, json, sys, time
@@ -102,6 +109,8 @@ expect_code "not valid yet (nbf in an hour)" "28000: token expired or not yet va
 expect_code "an nbf that isn't a number" "28000: token expired or not yet valid" -c "BEGIN" -c "SELECT authz.login_jwt('$(jwt s3cret-for-tests 2 300 '{"nbf": "soon"}')')"
 check "valid since an hour (nbf in the past)" "2" \
   "BEGIN; SELECT authz.login_jwt('$(jwt s3cret-for-tests 2 300 "{\"nbf\": $(( $(date +%s) - 3600 ))}")'); COMMIT;"
+expect_code "a valid token for a user the database doesn't have" "28000: the token names no active user" -c "BEGIN" \
+  -c "SELECT authz.login_jwt('$(jwt s3cret-for-tests 999 300 '{}')')"
 # an audience, once the setting names one: a string or a list holding it
 PSQL -c "INSERT INTO authz.settings VALUES ('jwt_audience', 'docs-api')" >/dev/null
 expect_code "a token for no audience, once one is asked" "28000: token for another audience" -c "BEGIN" -c "SELECT authz.login_jwt('$T_OK')"
@@ -127,12 +136,19 @@ check "the audit trail has the reason" "ticket 42" \
   "RESET ROLE; SELECT reason FROM authz.audit WHERE action = 'view_as' ORDER BY id DESC LIMIT 1;"
 expect_code "carol cannot view as erin" "42501: you cannot view as user 5" -c "SET authz.user_id = 3" -c "SELECT authz.view_as('5', 'curious')"
 expect_code "a reason is required" "P0001: say why (the reason is kept in the audit trail)" -c "SET authz.user_id = 5" -c "SELECT authz.view_as('3', '')"
+expect_code "one view-as at a time" "42501: already viewing as someone" -c "BEGIN" -c "SET LOCAL authz.user_id = 5" \
+  -c "SELECT authz.view_as('3', 'ticket 42')" -c "SELECT authz.view_as('4', 'ticket 43')"
+expect_code "an administrator views as a user the database doesn't have" "P0001: there is no active user 999" -c "RESET ROLE" \
+  -c "SELECT authz.view_as('999', 'ticket 44')"
 
 echo "-- group sync (administrators)"
 check "sync Engineering to alice and carol" "1|0" \
   "RESET ROLE; SELECT added || '|' || removed FROM authz.sync_members('team', '10', 'member', ARRAY['1', '3']);"
 check "... carol is now in Engineering" "t" "SET authz.user_id = 3; SELECT authz.can('folder', 3, 'edit');"
 expect_code "the app role cannot sync" "42501: permission denied for function sync_members" -c "SELECT authz.sync_members('team', '10', 'member', ARRAY['4'])"
+expect_code "only a relation from one table of members syncs" \
+  "P0001: folder.viewer has no single table of members to sync (it needs one source: table(group -> user), without where)" \
+  -c "RESET ROLE" -c "SELECT * FROM authz.sync_members('folder', '1', 'viewer', ARRAY['4'])"
 
 dropdb "$DB"
 if [ $fails -eq 0 ]; then echo "identity: all passed"; else echo "identity: $fails failed"; exit 1; fi

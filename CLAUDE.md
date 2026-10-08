@@ -283,7 +283,9 @@ For one suite, start a container and run it inside:
   gets a code and a page in `authzlib/errors.py` (the page's mistake must give its code, its fix must compile;
   `unit_test.py --update` writes `docs/errors/`), and a case in `tests/policy_errors.py`. What the runtime raises
   (what apps see) carries its code in the HINT instead, `rowstile help AZ709`, so the message stays as the SDKs
-  read it; `ErrorCodes` in `tests/unit_test.py` finds any RAISE without a code.
+  read it; `ErrorCodes` in `tests/unit_test.py` finds any RAISE without a code. Each RAISE is asked for by its own
+  words by some check (an SQLSTATE alone can't tell which guard refused): `Guards` in `tests/unit_test.py` fails
+  when none does, and lists the few whose words another guard's message has too.
 - Types: all Python is strongly typed. `uvx ty@0.0.56 check && uvx ruff@0.15.12 check && uvx ruff@0.15.12
   format --check` from the root (CI's `unit` job): ty checks the types (`ty.toml`, every rule an error), Ruff
   the lint, that every function is annotated (`ruff.toml`, `ANN`, no exceptions), and the layout: run `uvx
