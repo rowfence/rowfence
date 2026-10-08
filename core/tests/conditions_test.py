@@ -40,8 +40,8 @@ USERS = ["1", "2", "10", None]  # who is signed in: authz.uid(); None, nobody
 # the constants a condition compares each column with: some of another kind, as SQL allows ('10' for a number)
 CONSTANTS: dict[str, list[str]] = {
     "b": ["true", "false", "TRUE", "'true'", "'t'", "'f'", "'yes'", "null"],
-    "n": ["-1", "0", "1", "9", "10", "11", "9.5", "10.0", "'10'", "'010'", "'9'", "null"],
-    "x": ["0.5", "1", "1.0", "1.50", "10", "'1.5'", "'1.50'", "null"],
+    "n": ["-1", "0", "1", "9", "10", "11", "9.5", "10.0", "'10'", "'010'", "'9'", "1e1", "'x'", "null"],
+    "x": ["0.5", "1", "1.0", "1.50", "10", "'1.5'", "'1.50'", "1e1", "1.5e0", "null"],
     "s": ["'a'", "'b'", "'A'", "'B'", "'ab'", "'it''s'", "'10'", "'9'", "''", "' a'", "10", "null"],
     "o": ["1", "2", "10", "'1'", "'10'", "9", "null"],
 }
@@ -95,9 +95,12 @@ def atom(rng: random.Random) -> str:
                 "1 = 1",
                 f"{col} = {k}::text",
                 f"lower({col}) = 'a'" if c == "s" else f"{col}::text = '1'",
+                f"{col} {word(rng, 'is')} {word(rng, 'distinct')} from {k}",
+                f"{col} is not distinct from {k}",
+                f"{col} like 'a%'" if c == "s" else f"{col} is unknown" if c == "b" else f"{col} not between 1 and 2",
             ]
         )
-    return f"{col} {rng.choice(OPS)} {k}"
+    return f"{col} {rng.choice(OPS)} {k}" + rng.choice(["", "", "  "])  # now and then with spaces after
 
 
 def condition(rng: random.Random, depth: int = 0) -> str:
