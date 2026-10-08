@@ -2428,6 +2428,27 @@ class Wire(unittest.TestCase):
         self.assertEqual(self.pgwire._saslprep("caf\u00e9"), "caf\u00e9")
 
 
+class Readers(unittest.TestCase):
+    """authzlib/connection.py's typed readers of a row: a value of another type than asked is a TypeError that says
+    which value and what was wanted (a boolean is no integer)."""
+
+    def test_a_value_of_another_type_is_said(self) -> None:
+        from authzlib import connection as c
+
+        row: Row = {"n": 1, "s": "x", "b": True, "z": None}
+        self.assertEqual(
+            (c.text(row, "s"), c.text_or_none(row, "z"), c.number(row, "n"), c.flag(row, "b")), ("x", None, 1, True)
+        )
+        for read, key, said in (
+            (c.text, "n", "n is 1, not text"),
+            (c.text_or_none, "n", "n is 1, not text or NULL"),
+            (c.number, "b", "b is True, not an integer"),
+            (c.flag, "n", "n is 1, not a boolean"),
+        ):
+            with self.assertRaisesRegex(TypeError, re.escape(said)):
+                read(row, key)
+
+
 class Fmt(unittest.TestCase):
     def test_every_policy_formats_the_same_twice_and_says_the_same(self) -> None:
         from authzlib.fmt import format
