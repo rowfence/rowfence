@@ -2,7 +2,8 @@
 # them all on 16, and only what depends on the version on 17 and 18), the race and stress tests on each, the
 # random checks long with a new seed (soak), the SDKs' conformance suites on 17 and 18, and the scale benchmark last.
 # On GitHub's runners, as ci.yml (or the one the repository variable RUNNER names). Run by hand too
-# (workflow_dispatch), all of it or one job: `gh workflow run nightly.yml -f only=bench`.
+# (workflow_dispatch), all of it or one job: `gh workflow run nightly.yml -f only=bench`. And several soaks at
+# once, each on a runner and with a seed of its own: `gh workflow run nightly.yml -f only=soak -f soaks=7`.
 name: nightly
 on:
   schedule:
@@ -12,8 +13,12 @@ on:
       only:
         description: "Run only this job (suites, proofs, soak, conformance, bench); empty: all of them"
         default: ""
+      soaks:
+        description: "How many soaks to run at once (1 to 9), each with its own seed, on 16, 17 and 18 in turn"
+        default: "1"
+# One nightly at a time. Several soaks asked for by hand are a run of their own beside it: each is on its own runner
 concurrency:
-  group: nightly
+  group: ${{ inputs.soaks > 1 && format('soaks-{0}', github.run_id) || 'nightly' }}
   cancel-in-progress: false
 # what a job needs beyond reading the repository, it says itself
 permissions: {contents: read}
@@ -61,27 +66,50 @@ jobs:
         with:
           name: proofs-pg${{ matrix.pg }}
           path: ${{ runner.temp }}/rowstile-ci-${{ matrix.pg }}.log
-  # The random checks (the parser fuzzer, every random-change run, random policies, races and stress), long and
-  # with this run's id as the seed, so each night tries new cases; on one version a night in turn. The log is
-  # kept either way: it says the seed, to run a failure again. ci.sh gives it three and a half hours.
-  soak:
+  # Which soaks this run makes: one a night, on one version in turn, with the run's id as its seed. Asked for
+  # by hand (soaks), several: each with a seed of its own (the run's id and its number), on 16, 17 and 18 in turn.
+  soak-plan:
     if: ${{ !inputs.only || inputs.only == 'soak' }}
     runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
+    outputs:
+      soaks: ${{ steps.plan.outputs.soaks }}
+    steps:
+      - id: plan
+        run: |
+          case "${SOAKS:-1}" in [1-9]) ;; *) echo "soaks: a number from 1 to 9, not '$SOAKS'"; exit 1;; esac
+          if [ "${SOAKS:-1}" = 1 ]; then
+            plan="{\"name\": \"soak\", \"pg\": $(( 16 + 10#$(date -u +%j) % 3 )), \"seed\": $GITHUB_RUN_ID}"
+          else
+            plan=$(for n in $(seq 1 "$SOAKS"); do
+              echo "{\"name\": \"soak-$n\", \"pg\": $(( 16 + n % 3 )), \"seed\": $(( GITHUB_RUN_ID * 10 + n ))}"
+            done | paste -sd, -)
+          fi
+          echo "soaks=[$plan]" | tee -a "$GITHUB_OUTPUT"
+        env: {SOAKS: "${{ inputs.soaks }}"}
+  # The random checks (the parser fuzzer, every random-change run, random policies, races and stress), long and
+  # with a new seed, so each night tries new cases. The log is kept either way: it says the seed, to run a
+  # failure again. ci.sh gives it three and a half hours.
+  soak:
+    needs: soak-plan
+    runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        soak: ${{ fromJSON(needs.soak-plan.outputs.soaks) }}
     env:
-      ROWSTILE_CI_JOB: "${{ github.run_id }}-${{ github.run_attempt }}-${{ github.job }}"
+      ROWSTILE_CI_JOB: "${{ github.run_id }}-${{ github.run_attempt }}-${{ github.job }}-${{ matrix.soak.name }}"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
       - run: |
-          pg=$(( 16 + 10#$(date -u +%j) % 3 ))
-          echo "PostgreSQL $pg, seed $SOAK_SEED"
-          bash core/ci.sh --soak "$pg"
-        env: {ROWSTILE_CI_LOGS: "${{ runner.temp }}", SOAK_SEED: "${{ github.run_id }}"}
+          echo "PostgreSQL $PG, seed $SOAK_SEED"
+          bash core/ci.sh --soak "$PG"
+        env: {ROWSTILE_CI_LOGS: "${{ runner.temp }}", SOAK_SEED: "${{ matrix.soak.seed }}", PG: "${{ matrix.soak.pg }}"}
       - if: always()
         run: docker ps -aq --filter "label=rowstile.ci=$ROWSTILE_CI_JOB" | xargs -r docker rm -f -v
       - if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a   # v7.0.1
         with:
-          name: soak
+          name: ${{ matrix.soak.name }}
           path: ${{ runner.temp }}/rowstile-ci-*.log
   # The SDKs' conformance suites on 17 and 18 (ci.yml runs them on 16), and on 16 with the app through PgBouncer in
   # transaction mode (integrations/pooler.sh), one after the other: on a self-hosted runner each holds the lock its
