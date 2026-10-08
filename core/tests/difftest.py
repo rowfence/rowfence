@@ -374,6 +374,16 @@ class Checker:
                             f"SELECT coalesce(json_agg(json_build_array(i, (SELECT e FROM authz.explain("
                             f"{lit(t.name)}, i, {lit(p)}, NULL) e LIMIT 1))), '[]') FROM unnest({ids}) i",
                         )
+                # authz.explain_rule's verdict on an update that changes nothing, and on a delete, as the app asks it
+                for table in dict.fromkeys(r.table for r in self.rules):
+                    t = self.ref.type_of_table(table)
+                    ids = "ARRAY[" + ", ".join(lit(i) for i in sample[t.name]) + "]::text[]"
+                    for cmd in ("update", "delete"):
+                        emit(
+                            [u, "explain_rule", table, cmd],
+                            f"SELECT coalesce(json_agg(json_build_array(i, (authz.explain_rule({lit(table)}, "
+                            f"{lit(cmd)}, i, NULL))[1])), '[]') FROM unnest({ids}) i",
+                        )
             for table in dict.fromkeys(r.table for r in self.rules if r.command == "select"):
                 t = self.ref.type_of_table(table)
                 emit([u, "rls", table], f"SELECT coalesce(json_agg({idsql(t)}), '[]') FROM {qt(table)}")
@@ -533,6 +543,16 @@ class Checker:
             raise LookupError(f"{table}: no {command} rule")
         return self.ref.eval_expr(state, t, rule.expr) & self.ref.ids(t) & self.ref.valid(t)
 
+    def rule_allows(self, state: evaluate.State, table: str, cmd: str, i: str) -> bool:
+        """Whether table's rules let cmd through on row i as it is: a delete by its rule; an update that changes
+        nothing by its rule on the row before and its after rule (or the update rule again) on the row after."""
+        has = {r.command for r in self.rules if r.table == table and not r.columns}
+        if cmd not in has or i not in self.expected_rule(state, table, cmd):
+            return False
+        return cmd != "update" or i in self.expected_rule(
+            state, table, "update check" if "update check" in has else cmd
+        )
+
     def visible(self, state: evaluate.State, t: Type, i: str) -> bool:
         """Whether the user may select row i of t, as explain asks (authz_int.visible): by the table's select rule;
         a table without rules is readable (its where aside); one with rules but no select rule, by nobody."""
@@ -578,6 +598,20 @@ class Checker:
                             problems.append(
                                 f"user {u}: authz.explain('{t.name}', {i}, '{p}') asked by themselves says "
                                 f"{line!r}, expected {'yes' if want else 'no'}"
+                            )
+            # explain_rule as the app asks it: nothing about a row the user can't see; on one they see, yes exactly
+            # where the rules let the command through
+            for table in dict.fromkeys(r.table for r in self.rules):
+                t = self.ref.type_of_table(table)
+                for cmd in ("update", "delete"):
+                    for i, line in snap.get((u, "explain_rule", table, cmd), []):
+                        seen = self.visible(state, t, i)
+                        want = ("yes" if self.rule_allows(state, table, cmd, i) else "no") if seen else None
+                        got = None if line is None else "yes" if line.startswith("yes") else "no"
+                        if got != want:
+                            problems.append(
+                                f"user {u}: authz.explain_rule('{table}', '{cmd}', {i}) says {line!r}, "
+                                f"expected {want or 'nothing (a row they can not see)'}"
                             )
             for t in self.types.values():
                 ids = self.ref.ids(t)

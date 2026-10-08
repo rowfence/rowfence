@@ -30,7 +30,9 @@ they would agree. So the evaluator is held to answers that neither of them wrote
   one transaction). After each change,
   `authz.can`, `authz.list`, `authz.explain`, `authz.who`, what row-level security lets each user read, every
   rule's condition and the masked views are compared with the evaluator's answer. `authz.explain` is asked by
-  each user too: about a row they can't see, it must say nothing more than about a missing one.
+  each user too: about a row they can't see, it must say nothing more than about a missing one. So is
+  `authz.explain_rule`: nothing about such a row, and on the others, for an update or a delete, the rules' own
+  answer.
 - **Random policies**: [`tests/genpolicy.py`](../core/tests/genpolicy.py) writes policies at random, with
   their tables and data, and checks them the same way: twelve on each full run, and a hundred with new seeds
   every night. A third of them name their tables and columns as an app's own may be: with capitals, with words
