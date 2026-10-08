@@ -35,6 +35,7 @@ import re
 import subprocess
 import sys
 from collections.abc import Sequence
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, ClassVar
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -62,6 +63,10 @@ COLUMN_CHECK = re.compile(r"v_row := (OLD|NEW);.*?IF NOT (authz_gen\.\"[^\"]+:ho
 # a share's end in the past, far enough that a clock set back (Docker Desktop's VM resyncing its clock, seconds at a
 # time) doesn't make it live again half way through a check, which reads the data and the answers at different times
 EXPIRED = "now() - interval '1 hour'"
+
+# How many sessions answer a snapshot's questions, side by side (DIFFTEST_SESSIONS=1: one after the other). The
+# questions are the same either way, each user's in one session from first to last: what it saves is the wait.
+SESSIONS = int(os.environ.get("DIFFTEST_SESSIONS") or min(4, os.cpu_count() or 1))
 
 
 def without_refusals(expr: str) -> str:
@@ -98,6 +103,13 @@ class DB:
 
     def rows(self, sql: str) -> list[list[str]]:
         return [line.split("\t") for line in self.run(sql)[1].splitlines() if line]
+
+    def rows_together(self, scripts: Sequence[str]) -> list[list[str]]:
+        """The rows of scripts that change nothing, each in a session of its own, all at the same time."""
+        if len(scripts) == 1:
+            return self.rows(scripts[0])
+        with ThreadPoolExecutor(len(scripts)) as pool:
+            return [row for rows in pool.map(self.rows, scripts) for row in rows]
 
     def recreate(self) -> None:
         for cmd in (["dropdb", "--if-exists", self.name], ["createdb", self.name]):
@@ -288,14 +300,21 @@ class Checker:
         )
 
     def snapshot(self) -> Snapshot:
-        """One psql run: the evaluator's inputs and the database's answers, per user."""
+        """The evaluator's inputs and the database's answers, per user. Each user's questions are a block that
+        leaves its session as it found it, so the blocks can be asked in any order, in a few sessions side by
+        side (SESSIONS). A session still answers for several users, one after the other: what it keeps from one
+        (cached plans, settings) must not show in the next one's answers, and which users share a session, and
+        in what order, changes with each snapshot."""
+        blocks: list[list[str]] = []
         lines: list[str] = []
 
         def emit(key: list[str | int], sql: str) -> None:
             lines.append(f"SELECT {lit(json.dumps(key))}, ({sql});")
 
-        lines += self.as_app_functions()
+        self.db.run("\n".join(self.as_app_functions()))
         for u in self.users:
+            lines = []
+            blocks.append(lines)
             kind, pid = evaluate.principal_of(u, self.types)
             lines.append(f"SET authz.user_id = {lit(pid)};")
             lines.append(f"SET authz.principal_type = {lit('' if kind == 'user' else kind)};")
@@ -362,11 +381,14 @@ class Checker:
                 )
             for k in self.context(u):
                 lines.append(f"RESET authz_ctx.{k};")
+            lines += ["RESET authz.user_id;", "RESET authz.principal_type;"]
         # One of them again with a scope (what a token limited to it may do), another pair each time
         scopes = sorted({"read", *self.pol.scopes})
         u, scope = self.users[self.checks % len(self.users)], scopes[self.checks // len(self.users) % len(scopes)]
         self.scoped, self.checks = (u, scope), self.checks + 1
         kind, pid = evaluate.principal_of(u, self.types)
+        lines = []
+        blocks.append(lines)
         lines += [
             f"SET authz.user_id = {lit(pid)};",
             f"SET authz.principal_type = {lit('' if kind == 'user' else kind)};",
@@ -398,6 +420,8 @@ class Checker:
         lines.append("RESET authz.user_id;")
         lines.append("RESET authz.principal_type;")
         # authz.who for a few objects of each type (as an administrator)
+        lines = []
+        blocks.append(lines)
         for t in self.types.values():
             for p in t.perms:
                 emit(
@@ -407,8 +431,12 @@ class Checker:
                     f"FROM {t.table} ORDER BY md5({idsql(t)} || 'w') LIMIT 6) s",
                 )
         lines.append("SELECT '[\"verify\"]', to_json(authz.verify());")
+        # two blocks or more to a session, where there are enough
+        random.Random(self.checks).shuffle(blocks)
+        n = max(1, min(SESSIONS, len(blocks) // 2))
+        scripts = ["\n".join(line for block in blocks[i::n] for line in block) for i in range(n)]
         out: Snapshot = {}
-        for key, val in self.db.rows("\n".join(lines)):
+        for key, val in self.db.rows_together(scripts):
             out[tuple(json.loads(key))] = json.loads(val)
         return out
 
