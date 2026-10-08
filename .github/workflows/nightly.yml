@@ -23,27 +23,29 @@ concurrency:
 # what a job needs beyond reading the repository, it says itself
 permissions: {contents: read}
 jobs:
+  # in the parts run_tests.sh names, side by side, as ci.yml runs them
   suites:
     if: ${{ !inputs.only || inputs.only == 'suites' }}
     runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
     env:
-      # the label on this job's containers: its run, attempt, job and version
-      ROWSTILE_CI_JOB: "${{ github.run_id }}-${{ github.run_attempt }}-${{ github.job }}-${{ matrix.pg }}"
+      # the label on this job's containers: its run, attempt, job, version and part
+      ROWSTILE_CI_JOB: "${{ github.run_id }}-${{ github.run_attempt }}-${{ github.job }}-${{ matrix.pg }}-${{ matrix.part }}"
     strategy:
       fail-fast: false
       matrix:
         pg: ["17", "18"]
+        part: [policy, command, random]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
       - run: bash core/ci.sh ${{ matrix.pg }}
-        env: {ROWSTILE_CI_LOGS: "${{ runner.temp }}"}
+        env: {ROWSTILE_CI_LOGS: "${{ runner.temp }}", ROWSTILE_PART: "${{ matrix.part }}"}
       # a cancelled job may stop before ci.sh removes its container: this job's own (the label names the job)
       - if: always()
         run: docker ps -aq --filter "label=rowstile.ci=$ROWSTILE_CI_JOB" | xargs -r docker rm -f -v
       - if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a   # v7.0.1
         with:
-          name: suites-pg${{ matrix.pg }}
+          name: suites-pg${{ matrix.pg }}-${{ matrix.part }}
           path: ${{ runner.temp }}/rowstile-ci-${{ matrix.pg }}.log
   proofs:
     if: ${{ !inputs.only || inputs.only == 'proofs' }}
@@ -88,28 +90,35 @@ jobs:
         env: {SOAKS: "${{ inputs.soaks }}"}
   # The random checks (the parser fuzzer, every random-change run, random policies, races and stress), long and
   # with a new seed, so each night tries new cases. The log is kept either way: it says the seed, to run a
-  # failure again. ci.sh gives it three and a half hours.
+  # failure again. Each soak in the parts run_tests.sh names, side by side, on one version and with one seed:
+  # the night's soak is over when its longest part is.
   soak:
     needs: soak-plan
+    name: ${{ matrix.soak.name }} (${{ matrix.soak.pg }}, ${{ matrix.part }})
     runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
     strategy:
       fail-fast: false
       matrix:
         soak: ${{ fromJSON(needs.soak-plan.outputs.soaks) }}
+        part: [changes-1, changes-2, policies, around, races]
     env:
-      ROWSTILE_CI_JOB: "${{ github.run_id }}-${{ github.run_attempt }}-${{ github.job }}-${{ matrix.soak.name }}"
+      ROWSTILE_CI_JOB: "${{ github.run_id }}-${{ github.run_attempt }}-${{ github.job }}-${{ matrix.soak.name }}-${{ matrix.part }}"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
       - run: |
-          echo "PostgreSQL $PG, seed $SOAK_SEED"
+          echo "PostgreSQL $PG, seed $SOAK_SEED, part $ROWSTILE_PART"
           bash core/ci.sh --soak "$PG"
-        env: {ROWSTILE_CI_LOGS: "${{ runner.temp }}", SOAK_SEED: "${{ matrix.soak.seed }}", PG: "${{ matrix.soak.pg }}"}
+        env:
+          ROWSTILE_CI_LOGS: "${{ runner.temp }}"
+          SOAK_SEED: "${{ matrix.soak.seed }}"
+          PG: "${{ matrix.soak.pg }}"
+          ROWSTILE_PART: "${{ matrix.part }}"
       - if: always()
         run: docker ps -aq --filter "label=rowstile.ci=$ROWSTILE_CI_JOB" | xargs -r docker rm -f -v
       - if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a   # v7.0.1
         with:
-          name: ${{ matrix.soak.name }}
+          name: ${{ matrix.soak.name }}-${{ matrix.part }}
           path: ${{ runner.temp }}/rowstile-ci-*.log
   # The SDKs' conformance suites on 17 and 18 (ci.yml runs them on 16), and on 16 with the app through PgBouncer in
   # transaction mode (integrations/pooler.sh), one after the other: on a self-hosted runner each holds the lock its

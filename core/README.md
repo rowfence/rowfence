@@ -19,18 +19,20 @@ From this folder:
     cli/rowstile --db "dbname=mydb" push example/docs.authz  # a development database, straight away
     ./run_tests.sh                                           # every test, from scratch (needs Postgres)
     ./ci.sh                                                  # ... on 16, 17 and 18, each in Docker
+    ROWSTILE_PART=command ./ci.sh 16                         # one part of the run (policy, command, random)
 
 ## Tested
 
 `./run_tests.sh` runs everything against fresh databases, in about 15 minutes (a few
 with `--quick`), as a non-superuser owner of the tables (started as a superuser, it makes one), on
-the stock Postgres image:
+the stock Postgres image. CI runs it in parts, each on a machine of its own, side by side
+(`run_tests.sh` names them), so a push waits for the longest part and not for their sum:
 
 | suite | what it checks |
 |---|---|
 | `tests/scenario.sql` | end-to-end checks through RLS as each user, plus the tests in `docs.authz` |
 | `tests/multi_scenario.sql` | the second policy (`tests/multi.authz` on `tests/multi_schema.sql`): UUIDs, suspension, mixed-type trees, public and link access, caveats, custom roles, the masked view |
-| `tests/difftest.py` | random data and 100 random changes per policy (moves, links, loops, nesting, shares, expiry and start times, id changes, TRUNCATE, multi-statement transactions); after each, `can`, `list`, `explain`, `who`, RLS reads, every policy expression and every column rule's condition (as the owner, and as the app role on the rows it may select) and the masked view are compared for every user (and one of them again with a scope) against a separate reference evaluator. Five policies (`--gen`: docs, alt, multi, composite, loop). |
+| `tests/difftest.py` | random data and 100 random changes per policy (moves, links, loops, nesting, shares, expiry and start times, id changes, TRUNCATE, multi-statement transactions); after each, `can`, `list`, `explain`, `who`, RLS reads, every policy expression and every column rule's condition (as the owner, and as the app role on the rows it may select) and the masked view are compared for every user (and one of them again with a scope) against a separate reference evaluator. Five policies (`--gen`: docs, alt, multi, composite, loop). The questions after a change are asked in up to four sessions side by side, each user's in one session and several users to a session (`DIFFTEST_SESSIONS=1`: in one). |
 | `tests/unit_test.py` | checks without a database, in about a second: the generated SQL against golden files (`--update` after an intended change), included files, what the command runs, its file reading, the version |
 | `tests/identity.sh` | scopes, API keys, JWTs (bad signature, expiry, missing expiry, issuer, `alg: none`), view-as, group sync |
 | `tests/governance.sh` | audit, feed, requests, break-glass, reviews, invariants, decision log, `--diff`, lint |
