@@ -393,6 +393,30 @@ class SlowPlans(unittest.TestCase):
         self.assertIn("owner", body)
         self.assertNotRegex(body, r"parent__manage\b|t5__manage\b")
 
+    def test_a_lookup_is_dropped_only_where_every_type_the_relation_names_covers_it(self) -> None:
+        # up names a folder or a drive. A folder's view includes its edit; where a drive's doesn't, up.view
+        # doesn't cover up.edit (a drive's owner would lose the notes on it), and both lookups stay
+        def see(drive_view: str) -> str:
+            policy = (
+                "app role app_user\ntype user = app.users\n"
+                "type folder = app.folders\n  owner : user = owner_id\n"
+                "  viewer : user = app.folder_viewers(folder_id -> user_id)\n"
+                "  can edit = owner\n  can view = edit or viewer\n"
+                "type drive = app.drives\n  owner : user = owner_id\n"
+                "  viewer : user = app.drive_viewers(drive_id -> user_id)\n"
+                f"  can edit = owner\n  can view = {drive_view}\n"
+                "type note = app.notes\n  up : folder, drive = (up_type, up_id)\n  can see = up.view or up.edit\n"
+                "rules app.notes\n  select : see\n"
+            )
+            sql = Compiler(parse_policy(policy)).compile("x")
+            return search(r'CREATE VIEW authz_int\."?note__see"? AS\n(.*?);\n', sql, re.S).group(1)
+
+        self.assertRegex(see("viewer"), r"note__up__view\b")
+        self.assertRegex(see("viewer"), r"note__up__edit\b")
+        # ... and where the drive's view includes its edit too, one lookup says it all
+        self.assertRegex(see("edit or viewer"), r"note__up__view\b")
+        self.assertNotRegex(see("edit or viewer"), r"note__up__edit\b")
+
 
 class LanguageForms(unittest.TestCase):
     def test_named_columns_mean_the_arrow(self) -> None:
