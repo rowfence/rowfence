@@ -1474,12 +1474,159 @@ class LoopGen(Gen):
         return r.choice(ops)()
 
 
+class CrossGen(Gen):
+    """tests/cross.authz: inheritance through two types at once, by every kind of link: a folder's column pair
+    naming a folder or a project, a table placing projects in folders (whose rows stop counting when not active),
+    and shares of a project with a folder. A condition that reads another table (cx.frozen) stops what editors pass
+    down: rows put in it, taken out and truncated must change the inheritance at once. Loops close through the
+    placements and the shares, which may loop; through the columns they are refused. Regions and sites hold each
+    other through tables only, whose where is the only thing that stops them (and a relation with two sources,
+    each naming another type)."""
+
+    policy = "tests/cross.authz"
+    schema = "tests/cross_schema.sql"
+    users: ClassVar[list[str]] = [str(i) for i in range(1, 7)]
+    expected_errors: ClassVar[tuple[str, ...]] = (
+        *Gen.expected_errors,
+        "cannot expire, start later or have a caveat",  # a share that is a link: refused, as the docs say
+    )
+
+    def maybe_user(self) -> str:
+        return self.r.choice([*self.users, "NULL"])
+
+    def initial(self) -> str:
+        r = self.r
+        s = ["INSERT INTO cx.users SELECT i, 'u' || i FROM generate_series(1, 6) i;"]
+        s += [f"INSERT INTO cx.projects (id, lead_id) VALUES ({p}, {self.maybe_user()});" for p in range(1, 5)]
+        for i in range(1, 11):
+            # a folder sits in an earlier folder or in a project: no loop through the columns to begin with
+            kind = r.choice(["folder", "project", None]) if i > 1 else r.choice(["project", None])
+            parent = r.randint(1, i - 1) if kind == "folder" else r.randint(1, 4) if kind == "project" else None
+            s.append(
+                f"INSERT INTO cx.folders (id, parent_type, parent_id, owner_id, archived) VALUES ({i}, "
+                f"{lit(kind) if kind else 'NULL'}, {parent or 'NULL'}, {self.maybe_user()}, {str(r.random() < 0.1).lower()});"
+            )
+        for _ in range(5):
+            s.append(
+                f"INSERT INTO cx.placements VALUES ({r.randint(1, 4)}, {r.randint(1, 10)}, "
+                f"{str(r.random() < 0.8).lower()}) ON CONFLICT DO NOTHING;"
+            )
+        s += [f"INSERT INTO cx.frozen VALUES ({f}) ON CONFLICT DO NOTHING;" for f in r.sample(range(1, 11), 2)]
+        s += [f"INSERT INTO cx.regions (id, chief_id) VALUES ({i}, {self.maybe_user()});" for i in range(1, 5)]
+        s.append("INSERT INTO cx.sites (id) SELECT generate_series(1, 4);")
+        for _ in range(4):
+            for table in ("site_links", "site_regions"):
+                s.append(
+                    f"INSERT INTO cx.{table} VALUES ({r.randint(1, 4)}, {r.randint(1, 4)}, "
+                    f"{str(r.random() < 0.8).lower()}) ON CONFLICT DO NOTHING;"
+                )
+        s += [
+            f"INSERT INTO cx.region_links VALUES ({r.randint(1, 4)}, {r.randint(1, 4)}) ON CONFLICT DO NOTHING;"
+            for _ in range(2)
+        ]
+        s += [
+            f"SELECT setval(pg_get_serial_sequence('cx.{t}', 'id'), 100);"
+            for t in ("folders", "projects", "regions", "sites")
+        ]
+        return "\n".join(s)
+
+    def grants(self) -> str:
+        return "\n".join(self.grant() for _ in range(10))
+
+    def grant(self, ids: Ids | None = None) -> str:
+        r = self.r
+        folders, projects = ints(ids, "folder") or list(range(1, 11)), ints(ids, "project") or list(range(1, 5))
+        if r.random() < 0.5:  # a project shared with a folder: a link, which never expires
+            return (
+                f"INSERT INTO authz.shares VALUES ('project', {r.choice(projects)}, 'host', 'folder', "
+                f"{r.choice(folders)}, '', NULL) ON CONFLICT DO NOTHING;"
+            )
+        expires = r.choice(["NULL", "NULL", EXPIRED, "now() + interval '1 day'"])
+        return (
+            f"INSERT INTO authz.shares VALUES ('folder', {r.choice(folders)}, 'viewer', 'user', "
+            f"{r.choice(self.users)}, '', {expires}) ON CONFLICT DO NOTHING;"
+        )
+
+    def change(self, ids: Ids) -> str:
+        r = self.r
+        folders, projects = ints(ids, "folder") or [1], ints(ids, "project") or [1]
+        f, g, p = r.choice(folders), r.choice(folders), r.choice(projects)
+        parent = r.choice([f"'folder', {f}", f"'project', {p}", "NULL, NULL"])  # a new folder's (type, id)
+        regions, sites = ints(ids, "region") or [1], ints(ids, "site") or [1]
+        a, b, site = r.choice(regions), r.choice(regions), r.choice(sites)
+        ops = [
+            lambda: f"UPDATE cx.folders SET parent_type = 'folder', parent_id = {g} WHERE id = {f};",
+            lambda: f"UPDATE cx.folders SET parent_type = 'project', parent_id = {p} WHERE id = {f};",
+            lambda: f"UPDATE cx.folders SET parent_type = NULL, parent_id = NULL WHERE id = {f};",
+            lambda: (
+                f"UPDATE cx.folders SET parent_type = 'folder', parent_id = {g} WHERE id IN ({f}, {r.choice(folders)});"
+            ),
+            lambda: f"UPDATE cx.folders SET archived = NOT archived WHERE id = {f};",
+            lambda: f"UPDATE cx.folders SET owner_id = {self.maybe_user()} WHERE id = {f};",
+            lambda: f"UPDATE cx.projects SET lead_id = {self.maybe_user()} WHERE id = {p};",
+            lambda: (
+                f"INSERT INTO cx.folders (parent_type, parent_id, owner_id) VALUES ({parent}, {self.maybe_user()});"
+            ),
+            lambda: f"INSERT INTO cx.projects (lead_id) VALUES ({self.maybe_user()});",
+            lambda: f"DELETE FROM cx.folders WHERE id = {f};",
+            lambda: f"DELETE FROM cx.projects WHERE id = {p};",
+            lambda: f"UPDATE cx.folders SET id = {max(folders) + r.randint(1, 50)} WHERE id = {f};",
+            lambda: f"UPDATE cx.projects SET id = {max(projects) + r.randint(1, 50)} WHERE id = {p};",
+            # the placements: a link table with a where
+            lambda: (
+                f"INSERT INTO cx.placements VALUES ({p}, {f}, {r.choice(['true', 'true', 'false'])}) ON CONFLICT DO NOTHING;"
+            ),
+            lambda: f"DELETE FROM cx.placements WHERE project_id = {p} OR folder_id = {f};",
+            lambda: f"UPDATE cx.placements SET active = NOT active WHERE project_id = {p};",
+            lambda: f"UPDATE cx.placements SET folder_id = {g} WHERE project_id = {p} AND folder_id = {f};",
+            lambda: "TRUNCATE cx.placements;",
+            # the table the condition reads
+            lambda: f"INSERT INTO cx.frozen VALUES ({f}) ON CONFLICT DO NOTHING;",
+            lambda: (
+                f"INSERT INTO cx.frozen SELECT id FROM cx.folders WHERE id % 3 = {r.randint(0, 2)} ON CONFLICT DO NOTHING;"
+            ),
+            lambda: f"DELETE FROM cx.frozen WHERE folder_id = {r.choice(folders)};",
+            lambda: f"UPDATE cx.frozen SET folder_id = {g} WHERE folder_id = {f};",
+            lambda: "TRUNCATE cx.frozen;",
+            # shares: links (project into folder), and viewers
+            lambda: self.grant(ids),
+            lambda: self.grant(ids),
+            lambda: "DELETE FROM authz.shares WHERE relation = 'host' AND random() < 0.4;",
+            lambda: f"DELETE FROM authz.shares WHERE object_type = 'folder' AND object_id = '{f}';",
+            lambda: f"UPDATE authz.shares SET expires_at = {EXPIRED} WHERE relation = 'viewer' AND random() < 0.3;",
+            lambda: (
+                f"INSERT INTO authz.shares VALUES ('project', {p}, 'host', 'folder', {f}, '', "
+                "now() + interval '1 day');"
+            ),
+            # regions and sites, through tables only
+            lambda: (
+                f"INSERT INTO cx.site_links VALUES ({a}, {site}, {r.choice(['true', 'false'])}) "
+                "ON CONFLICT (region_id, site_id) DO UPDATE SET active = NOT cx.site_links.active;"
+            ),
+            lambda: f"INSERT INTO cx.site_regions VALUES ({site}, {a}, true) ON CONFLICT DO NOTHING;",
+            lambda: f"UPDATE cx.site_regions SET active = NOT active WHERE site_id = {site};",
+            lambda: f"INSERT INTO cx.region_links VALUES ({a}, {b}) ON CONFLICT DO NOTHING;",
+            lambda: f"DELETE FROM cx.region_links WHERE region_id = {a} OR parent_id = {a};",
+            lambda: (
+                f"DELETE FROM cx.site_links WHERE site_id = {site}; DELETE FROM cx.site_regions WHERE region_id = {a};"
+            ),
+            lambda: f"UPDATE cx.regions SET chief_id = {self.maybe_user()} WHERE id = {a};",
+            lambda: f"DELETE FROM cx.regions WHERE id = {a};",
+            lambda: f"UPDATE cx.sites SET id = {max(sites) + r.randint(1, 50)} WHERE id = {site};",
+            lambda: "INSERT INTO cx.sites DEFAULT VALUES;",
+        ]
+        if r.random() < 0.15:  # several changes in one transaction
+            return "BEGIN;\n" + "\n".join(r.choice(ops)() for _ in range(r.randint(2, 4))) + "\nCOMMIT;"
+        return r.choice(ops)()
+
+
 GENERATORS: dict[str, type[Gen]] = {
     "docs": DocsGen,
     "alt": AltGen,
     "multi": MultiGen,
     "composite": CompositeGen,
     "loop": LoopGen,
+    "cross": CrossGen,
 }
 
 

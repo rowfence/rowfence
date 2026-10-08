@@ -1,0 +1,45 @@
+-- cross.authz: inheritance through two types at once (difftest --gen cross). Folders sit in folders or in
+-- projects; a project sits in folders, placed there by a table of its own or by sharing. What a folder's editors
+-- pass down stops at a frozen folder, which a condition reads from another table; an archived folder holds
+-- nothing, and a placement that isn't active places nothing.
+app role app_user
+
+type user = cx.users
+
+type folder = cx.folders where {not archived}
+  parent : folder, project = (parent_type, parent_id)          -- inside a folder or a project
+  owner  : user = owner_id
+  viewer : user  shared by view
+  can edit = owner or (parent.edit and {not exists (select 1 from cx.frozen z where z.folder_id = this.id)})
+  can view = edit or viewer or parent.view
+
+type project = cx.projects
+  inside : folder = cx.placements(project_id -> folder_id) where {active}   -- placed in folders by a table
+  host   : folder  shared by edit                                          -- or by sharing
+  lead   : user = lead_id
+  can edit = lead or inside.edit or host.edit
+  can view = edit or inside.view or host.view
+
+type region = cx.regions                                                    -- regions and sites hold each other,
+  over  : site   = cx.site_links(region_id -> site_id) where {active}        -- through tables only, and nothing
+  over  : region = cx.region_links(region_id -> parent_id)                   -- but a link's where stops them
+  chief : user   = chief_id
+  can run = chief or over.run
+
+type site = cx.sites
+  over : region = cx.site_regions(site_id -> region_id) where {active}
+  can run = over.run
+
+rules cx.folders
+  select : view
+  update : edit
+
+rules cx.regions
+  select : run
+
+rules cx.sites
+  select : run
+
+rules cx.projects
+  select : view
+  update : edit
