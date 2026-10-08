@@ -3266,45 +3266,45 @@ BEGIN
       IF NOT pg_catalog.pg_input_is_valid(p_id, 'bigint') THEN RETURN false; END IF;
       v_bigint := p_id::bigint;
       CASE p_perm
-        WHEN 'impersonate' THEN RETURN coalesce((SELECT coalesce((exists (select 1 from app.org_members a join app.org_members b on a.org_id = b.org_id where a.user_id = (SELECT authz.uid()) and a.role = 'admin' and b.user_id = o.id)), false) FROM "app"."users" o WHERE o."id" = v_bigint), false);
+        WHEN 'impersonate' THEN RETURN EXISTS (SELECT 1 FROM "app"."users" o WHERE o."id" = v_bigint AND (coalesce((exists (select 1 from app.org_members a join app.org_members b on a.org_id = b.org_id where a.user_id = (SELECT authz.uid()) and a.role = 'admin' and b.user_id = o.id)), false)));
         ELSE RAISE EXCEPTION 'no permission %.% in the policy', p_type, p_perm USING HINT = 'rowstile help AZ707';
       END CASE;
     WHEN 'folder' THEN
       IF NOT pg_catalog.pg_input_is_valid(p_id, 'bigint') THEN RETURN false; END IF;
       v_bigint := p_id::bigint;
       CASE p_perm
-        WHEN 'share' THEN RETURN coalesce((SELECT (coalesce(o."owner_id" = (SELECT authz.uid()), false)
+        WHEN 'share' THEN RETURN EXISTS (SELECT 1 FROM "app"."folders" o WHERE o."id" = v_bigint AND ((coalesce(o."owner_id" = (SELECT authz.uid()), false)
     OR EXISTS (SELECT 1 FROM authz_gen."org__admin" v WHERE v.id = o."org_id")
     OR (coalesce((inherit), false)
-    AND authz_gen."folder__share__has"(o."parent_id"))) FROM "app"."folders" o WHERE o."id" = v_bigint), false);
-        WHEN 'edit' THEN RETURN coalesce((SELECT (coalesce(o."owner_id" = (SELECT authz.uid()), false)
+    AND authz_gen."folder__share__has"(o."parent_id")))));
+        WHEN 'edit' THEN RETURN EXISTS (SELECT 1 FROM "app"."folders" o WHERE o."id" = v_bigint AND ((coalesce(o."owner_id" = (SELECT authz.uid()), false)
     OR EXISTS (SELECT 1 FROM authz_gen."org__admin" v WHERE v.id = o."org_id")
     OR EXISTS (SELECT 1 FROM authz_gen."folder__editor" v WHERE v.id = o."id")
     OR (coalesce((inherit), false)
-    AND authz_gen."folder__edit__has"(o."parent_id"))) FROM "app"."folders" o WHERE o."id" = v_bigint), false);
-        WHEN 'view' THEN RETURN coalesce((SELECT (coalesce(o."owner_id" = (SELECT authz.uid()), false)
+    AND authz_gen."folder__edit__has"(o."parent_id")))));
+        WHEN 'view' THEN RETURN EXISTS (SELECT 1 FROM "app"."folders" o WHERE o."id" = v_bigint AND ((coalesce(o."owner_id" = (SELECT authz.uid()), false)
     OR EXISTS (SELECT 1 FROM authz_gen."org__admin" v WHERE v.id = o."org_id")
     OR EXISTS (SELECT 1 FROM authz_gen."folder__editor" v WHERE v.id = o."id")
     OR EXISTS (SELECT 1 FROM authz_gen."folder__viewer" v WHERE v.id = o."id")
     OR (coalesce((inherit), false)
     AND authz_gen."folder__view__has"(o."parent_id"))
-    OR EXISTS (SELECT 1 FROM "app"."folder_links" s WHERE s."folder_id" = o."id" AND authz_gen."folder__view__has"(s."parent_id"))) FROM "app"."folders" o WHERE o."id" = v_bigint), false);
-        WHEN 'break_glass' THEN RETURN coalesce((SELECT EXISTS (SELECT 1 FROM authz_gen."org__member" v WHERE v.id = o."org_id") FROM "app"."folders" o WHERE o."id" = v_bigint), false);
+    OR EXISTS (SELECT 1 FROM "app"."folder_links" s WHERE s."folder_id" = o."id" AND authz_gen."folder__view__has"(s."parent_id")))));
+        WHEN 'break_glass' THEN RETURN EXISTS (SELECT 1 FROM "app"."folders" o WHERE o."id" = v_bigint AND (EXISTS (SELECT 1 FROM authz_gen."org__member" v WHERE v.id = o."org_id")));
         ELSE RAISE EXCEPTION 'no permission %.% in the policy', p_type, p_perm USING HINT = 'rowstile help AZ707';
       END CASE;
     WHEN 'file' THEN
       IF NOT pg_catalog.pg_input_is_valid(p_id, 'bigint') THEN RETURN false; END IF;
       v_bigint := p_id::bigint;
       CASE p_perm
-        WHEN 'share' THEN RETURN coalesce((SELECT (coalesce(o."owner_id" = (SELECT authz.uid()), false)
-    OR authz_gen."folder__share__has"(o."folder_id")) FROM "app"."files" o WHERE o."id" = v_bigint), false);
-        WHEN 'edit' THEN RETURN coalesce((SELECT (coalesce(o."owner_id" = (SELECT authz.uid()), false)
-    OR authz_gen."folder__edit__has"(o."folder_id")) FROM "app"."files" o WHERE o."id" = v_bigint), false);
-        WHEN 'view' THEN RETURN coalesce((SELECT (coalesce(o."owner_id" = (SELECT authz.uid()), false)
+        WHEN 'share' THEN RETURN EXISTS (SELECT 1 FROM "app"."files" o WHERE o."id" = v_bigint AND ((coalesce(o."owner_id" = (SELECT authz.uid()), false)
+    OR authz_gen."folder__share__has"(o."folder_id"))));
+        WHEN 'edit' THEN RETURN EXISTS (SELECT 1 FROM "app"."files" o WHERE o."id" = v_bigint AND ((coalesce(o."owner_id" = (SELECT authz.uid()), false)
+    OR authz_gen."folder__edit__has"(o."folder_id"))));
+        WHEN 'view' THEN RETURN EXISTS (SELECT 1 FROM "app"."files" o WHERE o."id" = v_bigint AND ((coalesce(o."owner_id" = (SELECT authz.uid()), false)
     OR EXISTS (SELECT 1 FROM authz_gen."file__viewer" v WHERE v.id = o."id")
     OR authz_gen."folder__edit__has"(o."folder_id")
     OR (NOT coalesce((confidential), false)
-    AND authz_gen."folder__view__has"(o."folder_id"))) FROM "app"."files" o WHERE o."id" = v_bigint), false);
+    AND authz_gen."folder__view__has"(o."folder_id")))));
         ELSE RAISE EXCEPTION 'no permission %.% in the policy', p_type, p_perm USING HINT = 'rowstile help AZ707';
       END CASE;
     ELSE

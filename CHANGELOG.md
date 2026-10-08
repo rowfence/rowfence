@@ -60,6 +60,11 @@ Each release upgrades from the one before it. How releases are numbered and made
 
 ### Fixed
 
+- `authz.can` failed with Postgres's "more than one row returned by a subquery used as an expression" for a
+  key two rows hold: a governed table's primary key doesn't cover the rows of a table that inherits from it,
+  so a key changed or inserted in one can be in the other too. So did `authz.perms`, `explain` and `who`,
+  which ask it. A permission now holds on such a key where it holds on either row, as `authz.list` and the
+  rules already said. Nothing was let through. **Upgrading**: apply the policy again (or the next migration).
 - `rowstile prove` and the review's refactor check could read the column values of a world they had
   already left, kept under its address once another world took it: an invariant found broken that the
   world doesn't break (prove stopped on an internal check), or a world's answer missed. And a world where

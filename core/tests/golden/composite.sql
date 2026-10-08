@@ -3849,69 +3849,69 @@ BEGIN
       IF NOT pg_catalog.pg_input_is_valid(p_id, 'bigint') THEN RETURN false; END IF;
       v_bigint := p_id::bigint;
       CASE p_perm
-        WHEN 'oversee' THEN RETURN coalesce((SELECT (coalesce(o."manager_id" = (SELECT authz.uid()), false)
-    OR authz_gen."user__oversee__has"(o."manager_id")) FROM "cx"."users" o WHERE o."id" = v_bigint), false);
+        WHEN 'oversee' THEN RETURN EXISTS (SELECT 1 FROM "cx"."users" o WHERE o."id" = v_bigint AND ((coalesce(o."manager_id" = (SELECT authz.uid()), false)
+    OR authz_gen."user__oversee__has"(o."manager_id"))));
         ELSE RAISE EXCEPTION 'no permission %.% in the policy', p_type, p_perm USING HINT = 'rowstile help AZ707';
       END CASE;
     WHEN 'bot' THEN
       IF NOT pg_catalog.pg_input_is_valid(p_id, 'bigint') THEN RETURN false; END IF;
       v_bigint := p_id::bigint;
       CASE p_perm
-        WHEN 'manage_keys' THEN RETURN coalesce((SELECT (coalesce(o."owner_id" = (SELECT authz.uid()), false)
-    AND coalesce((o.active), false)) FROM "cx"."bots" o WHERE o."id" = v_bigint), false);
+        WHEN 'manage_keys' THEN RETURN EXISTS (SELECT 1 FROM "cx"."bots" o WHERE o."id" = v_bigint AND ((coalesce(o."owner_id" = (SELECT authz.uid()), false)
+    AND coalesce((o.active), false))));
         ELSE RAISE EXCEPTION 'no permission %.% in the policy', p_type, p_perm USING HINT = 'rowstile help AZ707';
       END CASE;
     WHEN 'team' THEN
       IF NOT pg_catalog.pg_input_is_valid(p_id, 'authz_gen."team__key"') THEN RETURN false; END IF;
       v_text := p_id::authz_gen."team__key"::text;
       CASE p_perm
-        WHEN 'share' THEN RETURN coalesce((SELECT (coalesce(o."lead_id" = (SELECT authz.uid()), false)
-    AND coalesce((not disbanded), false)) FROM "cx"."teams" o WHERE (o."org_id", o."slug") = (((v_text)::authz_gen."team__key")."org_id", ((v_text)::authz_gen."team__key")."slug")), false);
+        WHEN 'share' THEN RETURN EXISTS (SELECT 1 FROM "cx"."teams" o WHERE (o."org_id", o."slug") = (((v_text)::authz_gen."team__key")."org_id", ((v_text)::authz_gen."team__key")."slug") AND ((coalesce(o."lead_id" = (SELECT authz.uid()), false)
+    AND coalesce((not disbanded), false))));
         ELSE RAISE EXCEPTION 'no permission %.% in the policy', p_type, p_perm USING HINT = 'rowstile help AZ707';
       END CASE;
     WHEN 'project' THEN
       IF NOT pg_catalog.pg_input_is_valid(p_id, 'authz_gen."project__key"') THEN RETURN false; END IF;
       v_text := p_id::authz_gen."project__key"::text;
       CASE p_perm
-        WHEN 'edit' THEN RETURN coalesce((SELECT (coalesce(o."lead_id" = (SELECT authz.uid()), false)
-    OR EXISTS (SELECT 1 FROM authz_gen."org__admin" v WHERE v.id = o."org_id")) FROM "cx"."projects" o WHERE (o."org_id", o."id") = (((v_text)::authz_gen."project__key")."org_id", ((v_text)::authz_gen."project__key")."id")), false);
-        WHEN 'view' THEN RETURN coalesce((SELECT (coalesce(o."lead_id" = (SELECT authz.uid()), false)
+        WHEN 'edit' THEN RETURN EXISTS (SELECT 1 FROM "cx"."projects" o WHERE (o."org_id", o."id") = (((v_text)::authz_gen."project__key")."org_id", ((v_text)::authz_gen."project__key")."id") AND ((coalesce(o."lead_id" = (SELECT authz.uid()), false)
+    OR EXISTS (SELECT 1 FROM authz_gen."org__admin" v WHERE v.id = o."org_id"))));
+        WHEN 'view' THEN RETURN EXISTS (SELECT 1 FROM "cx"."projects" o WHERE (o."org_id", o."id") = (((v_text)::authz_gen."project__key")."org_id", ((v_text)::authz_gen."project__key")."id") AND ((coalesce(o."lead_id" = (SELECT authz.uid()), false)
     OR EXISTS (SELECT 1 FROM authz_gen."org__admin" v WHERE v.id = o."org_id")
-    OR EXISTS (SELECT 1 FROM authz_gen."folder__view" v WHERE v.id = (CASE WHEN (o."org_id", o."folder_id") IS NOT NULL THEN ROW(o."org_id"::bigint, o."folder_id"::bigint)::text END))) FROM "cx"."projects" o WHERE (o."org_id", o."id") = (((v_text)::authz_gen."project__key")."org_id", ((v_text)::authz_gen."project__key")."id")), false);
+    OR EXISTS (SELECT 1 FROM authz_gen."folder__view" v WHERE v.id = (CASE WHEN (o."org_id", o."folder_id") IS NOT NULL THEN ROW(o."org_id"::bigint, o."folder_id"::bigint)::text END)))));
         ELSE RAISE EXCEPTION 'no permission %.% in the policy', p_type, p_perm USING HINT = 'rowstile help AZ707';
       END CASE;
     WHEN 'folder' THEN
       IF NOT pg_catalog.pg_input_is_valid(p_id, 'authz_gen."folder__key"') THEN RETURN false; END IF;
       v_text := p_id::authz_gen."folder__key"::text;
       CASE p_perm
-        WHEN 'share' THEN RETURN coalesce((SELECT (coalesce(o."owner_id" = (SELECT authz.uid()), false)
-    OR EXISTS (SELECT 1 FROM authz_gen."org__admin" v WHERE v.id = o."org_id")) FROM "cx"."folders" o WHERE (o."org_id", o."id") = (((v_text)::authz_gen."folder__key")."org_id", ((v_text)::authz_gen."folder__key")."id")), false);
-        WHEN 'edit' THEN RETURN coalesce((SELECT (coalesce(o."owner_id" = (SELECT authz.uid()), false)
+        WHEN 'share' THEN RETURN EXISTS (SELECT 1 FROM "cx"."folders" o WHERE (o."org_id", o."id") = (((v_text)::authz_gen."folder__key")."org_id", ((v_text)::authz_gen."folder__key")."id") AND ((coalesce(o."owner_id" = (SELECT authz.uid()), false)
+    OR EXISTS (SELECT 1 FROM authz_gen."org__admin" v WHERE v.id = o."org_id"))));
+        WHEN 'edit' THEN RETURN EXISTS (SELECT 1 FROM "cx"."folders" o WHERE (o."org_id", o."id") = (((v_text)::authz_gen."folder__key")."org_id", ((v_text)::authz_gen."folder__key")."id") AND ((coalesce(o."owner_id" = (SELECT authz.uid()), false)
     OR EXISTS (SELECT 1 FROM authz_gen."org__admin" v WHERE v.id = o."org_id")
     OR EXISTS (SELECT 1 FROM authz_gen."folder__editor" v WHERE v.id = ROW(o."org_id"::bigint, o."id"::bigint)::text)
     OR (authz_gen."folder__edit__has"((CASE WHEN o."parent_type" = 'folder' THEN (CASE WHEN (o."org_id", o."parent_id") IS NOT NULL THEN ROW(o."org_id"::bigint, o."parent_id"::bigint)::text END) END))
     OR EXISTS (SELECT 1 FROM authz_gen."project__edit" v WHERE v.id = (CASE WHEN o."parent_type" = 'project' THEN (CASE WHEN (o."org_id", o."parent_id") IS NOT NULL THEN ROW(o."org_id"::bigint, o."parent_id"::bigint)::text END) END))
-    OR EXISTS (SELECT 1 FROM authz_gen."folder__parent__edit__ext" v WHERE v.id = ROW(o."org_id"::bigint, o."id"::bigint)::text))) FROM "cx"."folders" o WHERE (o."org_id", o."id") = (((v_text)::authz_gen."folder__key")."org_id", ((v_text)::authz_gen."folder__key")."id")), false);
-        WHEN 'view' THEN RETURN coalesce((SELECT (coalesce(o."owner_id" = (SELECT authz.uid()), false)
+    OR EXISTS (SELECT 1 FROM authz_gen."folder__parent__edit__ext" v WHERE v.id = ROW(o."org_id"::bigint, o."id"::bigint)::text)))));
+        WHEN 'view' THEN RETURN EXISTS (SELECT 1 FROM "cx"."folders" o WHERE (o."org_id", o."id") = (((v_text)::authz_gen."folder__key")."org_id", ((v_text)::authz_gen."folder__key")."id") AND ((coalesce(o."owner_id" = (SELECT authz.uid()), false)
     OR EXISTS (SELECT 1 FROM authz_gen."org__admin" v WHERE v.id = o."org_id")
     OR EXISTS (SELECT 1 FROM authz_gen."folder__editor" v WHERE v.id = ROW(o."org_id"::bigint, o."id"::bigint)::text)
     OR EXISTS (SELECT 1 FROM authz_gen."folder__viewer" v WHERE v.id = ROW(o."org_id"::bigint, o."id"::bigint)::text)
     OR (EXISTS (SELECT 1 FROM authz_gen."folder__view" v WHERE v.id = (CASE WHEN o."parent_type" = 'folder' THEN (CASE WHEN (o."org_id", o."parent_id") IS NOT NULL THEN ROW(o."org_id"::bigint, o."parent_id"::bigint)::text END) END))
     OR EXISTS (SELECT 1 FROM authz_gen."project__view" v WHERE v.id = (CASE WHEN o."parent_type" = 'project' THEN (CASE WHEN (o."org_id", o."parent_id") IS NOT NULL THEN ROW(o."org_id"::bigint, o."parent_id"::bigint)::text END) END))
-    OR EXISTS (SELECT 1 FROM authz_gen."folder__parent__view__ext" v WHERE v.id = ROW(o."org_id"::bigint, o."id"::bigint)::text))) FROM "cx"."folders" o WHERE (o."org_id", o."id") = (((v_text)::authz_gen."folder__key")."org_id", ((v_text)::authz_gen."folder__key")."id")), false);
+    OR EXISTS (SELECT 1 FROM authz_gen."folder__parent__view__ext" v WHERE v.id = ROW(o."org_id"::bigint, o."id"::bigint)::text)))));
         ELSE RAISE EXCEPTION 'no permission %.% in the policy', p_type, p_perm USING HINT = 'rowstile help AZ707';
       END CASE;
     WHEN 'file' THEN
       IF NOT pg_catalog.pg_input_is_valid(p_id, 'authz_gen."file__key"') THEN RETURN false; END IF;
       v_text := p_id::authz_gen."file__key"::text;
       CASE p_perm
-        WHEN 'edit' THEN RETURN coalesce((SELECT (coalesce(o."owner_id" = (SELECT authz.uid()), false)
+        WHEN 'edit' THEN RETURN EXISTS (SELECT 1 FROM "cx"."files" o WHERE (o."org_id", o."id") = (((v_text)::authz_gen."file__key")."org_id", ((v_text)::authz_gen."file__key")."id") AND ((coalesce(o."owner_id" = (SELECT authz.uid()), false)
     OR coalesce(o."uploaded_by" = (SELECT authz_int."bot__me"()), false)
-    OR authz_gen."folder__edit__has"((CASE WHEN (o."org_id", o."folder_id") IS NOT NULL THEN ROW(o."org_id"::bigint, o."folder_id"::bigint)::text END))) FROM "cx"."files" o WHERE (o."org_id", o."id") = (((v_text)::authz_gen."file__key")."org_id", ((v_text)::authz_gen."file__key")."id")), false);
-        WHEN 'view' THEN RETURN coalesce((SELECT (coalesce(o."owner_id" = (SELECT authz.uid()), false)
+    OR authz_gen."folder__edit__has"((CASE WHEN (o."org_id", o."folder_id") IS NOT NULL THEN ROW(o."org_id"::bigint, o."folder_id"::bigint)::text END)))));
+        WHEN 'view' THEN RETURN EXISTS (SELECT 1 FROM "cx"."files" o WHERE (o."org_id", o."id") = (((v_text)::authz_gen."file__key")."org_id", ((v_text)::authz_gen."file__key")."id") AND ((coalesce(o."owner_id" = (SELECT authz.uid()), false)
     OR coalesce(o."uploaded_by" = (SELECT authz_int."bot__me"()), false)
     OR EXISTS (SELECT 1 FROM authz_gen."folder__view" v WHERE v.id = (CASE WHEN (o."org_id", o."folder_id") IS NOT NULL THEN ROW(o."org_id"::bigint, o."folder_id"::bigint)::text END))
-    OR authz_gen."user__oversee__has"(o."owner_id")) FROM "cx"."files" o WHERE (o."org_id", o."id") = (((v_text)::authz_gen."file__key")."org_id", ((v_text)::authz_gen."file__key")."id")), false);
+    OR authz_gen."user__oversee__has"(o."owner_id"))));
         ELSE RAISE EXCEPTION 'no permission %.% in the policy', p_type, p_perm USING HINT = 'rowstile help AZ707';
       END CASE;
     ELSE

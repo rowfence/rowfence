@@ -2562,45 +2562,45 @@ BEGIN
       IF NOT pg_catalog.pg_input_is_valid(p_id, 'bigint') THEN RETURN false; END IF;
       v_bigint := p_id::bigint;
       CASE p_perm
-        WHEN 'manage_roles' THEN RETURN coalesce((SELECT (EXISTS (SELECT 1 FROM authz_gen."org__admin" v WHERE v.id = o."id")
-    AND coalesce((not suspended), false)) FROM "mt"."orgs" o WHERE o."id" = v_bigint), false);
-        WHEN 'view' THEN RETURN coalesce((SELECT ((EXISTS (SELECT 1 FROM authz_gen."org__member" v WHERE v.id = o."id")
+        WHEN 'manage_roles' THEN RETURN EXISTS (SELECT 1 FROM "mt"."orgs" o WHERE o."id" = v_bigint AND ((EXISTS (SELECT 1 FROM authz_gen."org__admin" v WHERE v.id = o."id")
+    AND coalesce((not suspended), false))));
+        WHEN 'view' THEN RETURN EXISTS (SELECT 1 FROM "mt"."orgs" o WHERE o."id" = v_bigint AND (((EXISTS (SELECT 1 FROM authz_gen."org__member" v WHERE v.id = o."id")
     OR EXISTS (SELECT 1 FROM authz_gen."org__admin" v WHERE v.id = o."id"))
-    AND coalesce((not suspended), false)) FROM "mt"."orgs" o WHERE o."id" = v_bigint), false);
+    AND coalesce((not suspended), false))));
         ELSE RAISE EXCEPTION 'no permission %.% in the policy', p_type, p_perm USING HINT = 'rowstile help AZ707';
       END CASE;
     WHEN 'team' THEN
       IF NOT pg_catalog.pg_input_is_valid(p_id, 'bigint') THEN RETURN false; END IF;
       v_bigint := p_id::bigint;
       CASE p_perm
-        WHEN 'manage' THEN RETURN coalesce((SELECT coalesce(o."id" = ANY ((SELECT authz_gen."team__member__ids"())::bigint[]), false) FROM "mt"."teams" o WHERE o."id" = v_bigint), false);
+        WHEN 'manage' THEN RETURN EXISTS (SELECT 1 FROM "mt"."teams" o WHERE o."id" = v_bigint AND (coalesce(o."id" = ANY ((SELECT authz_gen."team__member__ids"())::bigint[]), false)));
         ELSE RAISE EXCEPTION 'no permission %.% in the policy', p_type, p_perm USING HINT = 'rowstile help AZ707';
       END CASE;
     WHEN 'project' THEN
       IF NOT pg_catalog.pg_input_is_valid(p_id, 'bigint') THEN RETURN false; END IF;
       v_bigint := p_id::bigint;
       CASE p_perm
-        WHEN 'edit' THEN RETURN coalesce((SELECT (coalesce(o."lead_id" = (SELECT authz.uid()), false)
+        WHEN 'edit' THEN RETURN EXISTS (SELECT 1 FROM "mt"."projects" o WHERE o."id" = v_bigint AND ((coalesce(o."lead_id" = (SELECT authz.uid()), false)
     OR EXISTS (SELECT 1 FROM authz_gen."org__admin" v WHERE v.id = o."org_id")
-    OR EXISTS (SELECT 1 FROM authz_gen."folder__edit" v WHERE v.id = o."folder_id")) FROM "mt"."projects" o WHERE o."id" = v_bigint), false);
-        WHEN 'view' THEN RETURN coalesce((SELECT (coalesce(o."lead_id" = (SELECT authz.uid()), false)
+    OR EXISTS (SELECT 1 FROM authz_gen."folder__edit" v WHERE v.id = o."folder_id"))));
+        WHEN 'view' THEN RETURN EXISTS (SELECT 1 FROM "mt"."projects" o WHERE o."id" = v_bigint AND ((coalesce(o."lead_id" = (SELECT authz.uid()), false)
     OR EXISTS (SELECT 1 FROM authz_gen."org__admin" v WHERE v.id = o."org_id")
     OR EXISTS (SELECT 1 FROM authz_gen."project__viewer" v WHERE v.id = o."id")
-    OR EXISTS (SELECT 1 FROM authz_gen."folder__view" v WHERE v.id = o."folder_id")) FROM "mt"."projects" o WHERE o."id" = v_bigint), false);
+    OR EXISTS (SELECT 1 FROM authz_gen."folder__view" v WHERE v.id = o."folder_id"))));
         ELSE RAISE EXCEPTION 'no permission %.% in the policy', p_type, p_perm USING HINT = 'rowstile help AZ707';
       END CASE;
     WHEN 'folder' THEN
       IF NOT pg_catalog.pg_input_is_valid(p_id, 'bigint') THEN RETURN false; END IF;
       v_bigint := p_id::bigint;
       CASE p_perm
-        WHEN 'edit' THEN RETURN coalesce((SELECT ((coalesce(o."owner_id" = (SELECT authz.uid()), false)
+        WHEN 'edit' THEN RETURN EXISTS (SELECT 1 FROM "mt"."folders" o WHERE o."id" = v_bigint AND (((coalesce(o."owner_id" = (SELECT authz.uid()), false)
     OR EXISTS (SELECT 1 FROM authz_gen."folder__editor" v WHERE v.id = o."id")
     OR EXISTS (SELECT 1 FROM authz_gen."folder__roles:edit" v WHERE v.id = o."id")
     OR (coalesce((not locked), false)
     AND (EXISTS (SELECT 1 FROM authz_gen."folder__edit" v WHERE v.id = (CASE WHEN o."parent_type" = 'folder' THEN o."parent_id" END)::bigint)
     OR EXISTS (SELECT 1 FROM authz_gen."project__edit" v WHERE v.id = (CASE WHEN o."parent_type" = 'project' THEN o."parent_id" END)::bigint))))
-    AND coalesce((not archived), false)) FROM "mt"."folders" o WHERE o."id" = v_bigint), false);
-        WHEN 'view' THEN RETURN coalesce((SELECT ((coalesce(o."owner_id" = (SELECT authz.uid()), false)
+    AND coalesce((not archived), false))));
+        WHEN 'view' THEN RETURN EXISTS (SELECT 1 FROM "mt"."folders" o WHERE o."id" = v_bigint AND (((coalesce(o."owner_id" = (SELECT authz.uid()), false)
     OR EXISTS (SELECT 1 FROM authz_gen."folder__editor" v WHERE v.id = o."id")
     OR EXISTS (SELECT 1 FROM authz_gen."folder__roles:edit" v WHERE v.id = o."id")
     OR EXISTS (SELECT 1 FROM authz_gen."folder__viewer" v WHERE v.id = o."id")
@@ -2610,26 +2610,26 @@ BEGIN
     OR EXISTS (SELECT 1 FROM authz_gen."project__edit" v WHERE v.id = (CASE WHEN o."parent_type" = 'project' THEN o."parent_id" END)::bigint)))
     OR (EXISTS (SELECT 1 FROM authz_gen."folder__view" v WHERE v.id = (CASE WHEN o."parent_type" = 'folder' THEN o."parent_id" END)::bigint)
     OR EXISTS (SELECT 1 FROM authz_gen."project__view" v WHERE v.id = (CASE WHEN o."parent_type" = 'project' THEN o."parent_id" END)::bigint)))
-    AND coalesce((not archived), false)) FROM "mt"."folders" o WHERE o."id" = v_bigint), false);
-        WHEN 'share' THEN RETURN coalesce((SELECT ((coalesce(o."owner_id" = (SELECT authz.uid()), false)
+    AND coalesce((not archived), false))));
+        WHEN 'share' THEN RETURN EXISTS (SELECT 1 FROM "mt"."folders" o WHERE o."id" = v_bigint AND (((coalesce(o."owner_id" = (SELECT authz.uid()), false)
     OR EXISTS (SELECT 1 FROM authz_gen."folder__editor" v WHERE v.id = o."id")
     OR EXISTS (SELECT 1 FROM authz_gen."folder__roles:edit" v WHERE v.id = o."id")
     OR (coalesce((not locked), false)
     AND (EXISTS (SELECT 1 FROM authz_gen."folder__edit" v WHERE v.id = (CASE WHEN o."parent_type" = 'folder' THEN o."parent_id" END)::bigint)
     OR EXISTS (SELECT 1 FROM authz_gen."project__edit" v WHERE v.id = (CASE WHEN o."parent_type" = 'project' THEN o."parent_id" END)::bigint))))
-    AND coalesce((not archived), false)) FROM "mt"."folders" o WHERE o."id" = v_bigint), false);
+    AND coalesce((not archived), false))));
         ELSE RAISE EXCEPTION 'no permission %.% in the policy', p_type, p_perm USING HINT = 'rowstile help AZ707';
       END CASE;
     WHEN 'doc' THEN
       IF NOT pg_catalog.pg_input_is_valid(p_id, 'uuid') THEN RETURN false; END IF;
       v_uuid := p_id::uuid;
       CASE p_perm
-        WHEN 'edit' THEN RETURN coalesce((SELECT (coalesce(o."author_id" = (SELECT authz.uid()), false)
+        WHEN 'edit' THEN RETURN EXISTS (SELECT 1 FROM "mt"."docs" o WHERE o."id" = v_uuid AND ((coalesce(o."author_id" = (SELECT authz.uid()), false)
     OR (EXISTS (SELECT 1 FROM authz_gen."folder__edit" v WHERE v.id = (CASE WHEN o."container_type" = 'folder' THEN o."container_id" END)::bigint)
-    OR EXISTS (SELECT 1 FROM authz_gen."project__edit" v WHERE v.id = (CASE WHEN o."container_type" = 'project' THEN o."container_id" END)::bigint))) FROM "mt"."docs" o WHERE o."id" = v_uuid), false);
-        WHEN 'view' THEN RETURN coalesce((SELECT (coalesce(o."author_id" = (SELECT authz.uid()), false)
+    OR EXISTS (SELECT 1 FROM authz_gen."project__edit" v WHERE v.id = (CASE WHEN o."container_type" = 'project' THEN o."container_id" END)::bigint)))));
+        WHEN 'view' THEN RETURN EXISTS (SELECT 1 FROM "mt"."docs" o WHERE o."id" = v_uuid AND ((coalesce(o."author_id" = (SELECT authz.uid()), false)
     OR (EXISTS (SELECT 1 FROM authz_gen."folder__view" v WHERE v.id = (CASE WHEN o."container_type" = 'folder' THEN o."container_id" END)::bigint)
-    OR EXISTS (SELECT 1 FROM authz_gen."project__view" v WHERE v.id = (CASE WHEN o."container_type" = 'project' THEN o."container_id" END)::bigint))) FROM "mt"."docs" o WHERE o."id" = v_uuid), false);
+    OR EXISTS (SELECT 1 FROM authz_gen."project__view" v WHERE v.id = (CASE WHEN o."container_type" = 'project' THEN o."container_id" END)::bigint)))));
         ELSE RAISE EXCEPTION 'no permission %.% in the policy', p_type, p_perm USING HINT = 'rowstile help AZ707';
       END CASE;
     ELSE

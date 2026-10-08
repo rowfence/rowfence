@@ -58,6 +58,16 @@ same "a key that changes there" "$(as 1 -c "$(changed "UPDATE ch.docs SET id = 1
 same "... takes the row's shares away" "$(shares doc 11) $(shares doc 111)" "0 0"
 PSQL -c "INSERT INTO ch.docs_old VALUES (11, 1, 'another doc 11')"
 same "... so a row that has the key later starts with none" "$(as 2 -c "SELECT count(*) FROM ch.docs WHERE id = 11")" 0
+# the table's primary key doesn't cover the rows of a table that inherits: two rows may hold one key, each
+# with its own owner. A permission holds on the key where it holds on either row, as the views say
+PSQL -c "INSERT INTO ch.docs_old VALUES (2, 3, 'another doc 2')"
+same "a key two rows hold: authz.can answers for either (owner of one, of the other, of neither)" \
+  "$(as 1 -c "SELECT authz.can('doc', 2, 'own')")|$(as 3 -c "SELECT authz.can('doc', 2, 'own')")|$(as 2 -c "SELECT authz.can('doc', 2, 'own')")" "t|t|f"
+same "... and so do perms, explain and who" \
+  "$(as 3 -c "SELECT authz.perms('doc', 2)")|$(as 3 -c "SELECT left(e, 3) FROM authz.explain('doc', 2, 'own') e LIMIT 1")|$(owner 1 -c "SELECT string_agg(w, ' ' ORDER BY w) FROM authz.who('doc', 2, 'own') w")" \
+  "{own,edit}|yes|1 3"
+same "... as list does" "$(as 3 -c "SELECT count(*) FROM authz.list('doc', 'own') l WHERE l = '2'")" 1
+PSQL -c "DELETE FROM ch.docs_old WHERE id = 2"
 PSQL -c "DELETE FROM ch.docs WHERE id = 1"
 same "a row deleted through the table above: its shares go" "$(shares doc 1)" 0
 
