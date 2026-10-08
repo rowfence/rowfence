@@ -4,8 +4,26 @@
   "description": "rowstile with Next.js: signed-in reads kept out of caches, 403 and 404 from route handlers and server actions",
   "license": "Apache-2.0",
   "homepage": "https://rowstile.dev",
-  "keywords": ["rowstile", "postgres", "postgresql", "authorization", "row-level-security", "rls", "permissions", "access-control", "rbac", "rebac", "multi-tenant", "nextjs", "next"],
-  "repository": { "type": "git", "url": "git+https://github.com/rowstile/rowstile.git", "directory": "sdk/typescript/next" },
+  "keywords": [
+    "rowstile",
+    "postgres",
+    "postgresql",
+    "authorization",
+    "row-level-security",
+    "rls",
+    "permissions",
+    "access-control",
+    "rbac",
+    "rebac",
+    "multi-tenant",
+    "nextjs",
+    "next"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rowstile/rowstile.git",
+    "directory": "sdk/typescript/next"
+  },
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -23,6 +41,6 @@
     "@rowstile/client": "0.1.0-dev"
   },
   "peerDependencies": {
-    "next": ">=15"
+    "next": "^16.4.0"
   }
 }
