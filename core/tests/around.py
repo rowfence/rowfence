@@ -30,7 +30,7 @@ and checks, after each random change to the data:
     says of the rules and of who may share; and the tables under a governed one, read and written directly
   - no share is left on a row that is gone or whose key changed
   - a role the policy doesn't name gets no row of a governed table, whatever it was granted there, and a
-    member of the app role that didn't sign in gets an error (28000), not a row
+    member of the app role that didn't sign in gets an error (28000) or nothing, never a row
   - the privileges on authz, authz_gen and authz_int are the ones a database with no world around it has
   - what changed behind the policy's back: authz.lint() reports it, and `rowstile apply` puts it right (or
     refuses, AZ612, for the schema others may create in) and then answers `unchanged`
@@ -390,6 +390,8 @@ class AroundChecker(Checker):
     the answers compared with the reference evaluator."""
 
     world: World
+    since: int = 2**62  # a transaction id from before the last change (none yet)
+    excused: set[str]  # shares the changes wrote on rows they had removed (share_problems)
 
     def snapshot(self) -> Snapshot:
         snap = super().snapshot()  # (it makes difftest_app's functions too, which the questions below call)
@@ -571,27 +573,34 @@ def write_problems(checker: AroundChecker, direct: bool = True) -> list[str]:
     return problems
 
 
-def share_problems(checker: Checker) -> list[str]:
-    """Shares on (or to) rows that are gone, or whose key changed: there must be none. (A user that is no row
-    may be named on purpose: genpolicy's GONE.)"""
-    counts = []
+def share_problems(checker: AroundChecker) -> list[str]:
+    """Shares on (or to) rows that are gone, or whose key changed: rowstile forgets them, so there must be none.
+    (A user that is no row may be named on purpose: genpolicy's GONE.) Except the ones the last change wrote
+    itself: genpolicy inserts shares directly, and in one transaction may insert one for a row it has just
+    deleted or given another key. A share written since checker.since (a transaction id from before the
+    change) is that, and is excused for as long as it stays on no row."""
+    found = []
     for t in checker.types.values():
         if t.name == "user":
             continue
         there = f"EXISTS (SELECT 1 FROM {t.table} r WHERE {idsql(t, 'r')} = "
-        counts.append(
-            f"SELECT {lit(t.name)}, 'on', coalesce(json_agg(DISTINCT g.object_id), '[]') FROM authz.shares g "
+        share = (
+            "md5(ROW(g.object_type, g.object_id, g.relation, g.subject_type, g.subject_id, g.subject_relation)::text), "
+            "g.xmin::text FROM authz.shares g"
+        )
+        found.append(
+            f"SELECT {lit(t.name)}, 'on', g.object_id, {share} "
             f"WHERE g.object_type = {lit(t.name)} AND NOT {there}g.object_id)"
         )
-        counts.append(
-            f"SELECT {lit(t.name)}, 'to', coalesce(json_agg(DISTINCT g.subject_id), '[]') FROM authz.shares g "
+        found.append(
+            f"SELECT {lit(t.name)}, 'to', g.subject_id, {share} "
             f"WHERE g.subject_type = {lit(t.name)} AND g.subject_id <> '*' AND NOT {there}g.subject_id)"
         )
-    return [
-        f"shares {side} {name} {', '.join(json.loads(ids))}: no such row (it is gone, or its key changed)"
-        for name, side, ids in checker.db.rows(";\n".join(counts) + ";")
-        if json.loads(ids)
-    ]
+    rows = checker.db.rows("\nUNION ALL\n".join(found) + "\nORDER BY 1, 2, 3;") if found else []
+    checker.excused &= {share for _, _, _, share, _ in rows}
+    checker.excused |= {share for _, _, _, share, xmin in rows if int(xmin) >= checker.since}
+    left = sorted({(name, side, i) for name, side, i, share, _ in rows if share not in checker.excused})
+    return [f"shares {side} {name} {i}: no such row (it is gone, or its key changed)" for name, side, i in left]
 
 
 # ----------------------------------------------------------------------
@@ -630,29 +639,29 @@ def stranger_problems(checker: Checker) -> list[str]:
 
 def unsigned_problems(checker: Checker) -> list[str]:
     """A member of the app role that doesn't sign in, sets the user itself, or brings a signature from another
-    transaction: an error (28000), never a row."""
+    transaction: never a row. An error (28000) wherever Postgres comes to ask who is signed in; no row and no
+    error where it doesn't have to (a rule that is false whoever asks, `nobody and {b1}`, is folded to false
+    when the read is planned; so is one whose own conditions no row passes)."""
     db = checker.db
-    table = next((r.table for r in checker.rules if r.command == "select"), None)
-    if table is None:
-        return []
-    read = f"SELECT pg_temp.around_try({lit(f'SELECT 1 FROM {table}')})"
-    cases = {
-        "nobody signed in": f"BEGIN;\n{read};\nCOMMIT;",
-        "authz.user_id set directly": f"BEGIN;\nSET LOCAL authz.user_id = '1';\n{read};\nCOMMIT;",
-        "a signature from the transaction before": (
-            "BEGIN;\nDO $$ BEGIN PERFORM authz.act_as('user', '1'); END $$;\n"
-            "SELECT current_setting('authz.session') AS sig \\gset\nCOMMIT;\n"
-            "BEGIN;\nSET LOCAL authz.user_id = '2';\nSELECT set_config('authz.session', :'sig', true) \\gset x_\n"
-            f"{read};\nCOMMIT;"
-        ),
-    }
     problems = []
-    for role, first in ((MEMBER, ""), (SETROLE, f"SET ROLE {checker.role};\n")):
-        for what, sql in cases.items():
-            code, out, err = psql(db, role, first + TRY + "\n" + sql)
-            last = out.strip().splitlines()[-1] if out.strip() else err.strip()
-            if code != 0 or not last.startswith("28000 "):
-                problems.append(f"{role}, {what}, reads {table}: {last}")
+    for table in dict.fromkeys(r.table for r in checker.rules if r.command == "select"):
+        read = f"SELECT pg_temp.around_try({lit(f'SELECT 1 FROM {table}')})"
+        cases = {
+            "nobody signed in": f"BEGIN;\n{read};\nCOMMIT;",
+            "authz.user_id set directly": f"BEGIN;\nSET LOCAL authz.user_id = '1';\n{read};\nCOMMIT;",
+            "a signature from the transaction before": (
+                "BEGIN;\nDO $$ BEGIN PERFORM authz.act_as('user', '1'); END $$;\n"
+                "SELECT current_setting('authz.session') AS sig \\gset\nCOMMIT;\n"
+                "BEGIN;\nSET LOCAL authz.user_id = '2';\nSELECT set_config('authz.session', :'sig', true) \\gset x_\n"
+                f"{read};\nCOMMIT;"
+            ),
+        }
+        for role, first in ((MEMBER, ""), (SETROLE, f"SET ROLE {checker.role};\n")):
+            for what, sql in cases.items():
+                code, out, err = psql(db, role, first + TRY + "\n" + sql)
+                last = out.strip().splitlines()[-1] if out.strip() else err.strip()
+                if code != 0 or not (last.startswith("28000 ") or last == "rows 0"):
+                    problems.append(f"{role}, {what}, reads {table}: {last}")
     return problems
 
 
@@ -763,7 +772,9 @@ def drift(checker: AroundChecker, rnd: random.Random, plain: list[str], policy_p
             continue
         if kind != "creator" and word != "applied":
             problems.append(f"after `{what}`, rowstile apply answers '{word}': it left it as it was")
-        left = [e for e in lint_errors(db) if e not in before]
+        # (what the app role was given on the app's own table is the owner's to take back: the owner's default
+        # privileges can give it TRUNCATE on a table made now, which lint goes on reporting, rightly)
+        left = [e for e in lint_errors(db) if e not in before and "may TRUNCATE it" not in e]
         problems += [f"after `{what}` and rowstile apply, authz.lint() still reports: {e[:200]}" for e in left[:3]]
         problems += privilege_problems(db, plain, f"after `{what}` and rowstile apply")
         code, word, out = command(db, "apply", policy_path)
@@ -824,7 +835,7 @@ def run(spec: Spec, w: World, db: DB, control: DB, steps: int, workdir: str, sec
     plain = privileges(control)
     problems += privilege_problems(db, plain, "after the first apply")
     checker = AroundChecker(db, policy_path, gen)
-    checker.world = w
+    checker.world, checker.excused = w, set()
     problems += stranger_problems(checker) + unsigned_problems(checker)
     if problems:
         return ["before any change:", *problems[:12]]
@@ -844,6 +855,7 @@ def run(spec: Spec, w: World, db: DB, control: DB, steps: int, workdir: str, sec
             for t in checker.types.values()
         }
         sql = gen.change(ids)
+        checker.since = int(db.rows("SELECT txid_current()")[0][0])
         code, _, err = db.run(sql, check=False)
         if code != 0 and not any(e in err for e in gen.expected_errors):
             return [f"step {step + 1}: unexpected error", f"  {sql}", f"  {err.strip()}"]
