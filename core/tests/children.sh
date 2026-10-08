@@ -77,6 +77,9 @@ run apply; is unchanged && ok "apply again: unchanged" || bad "apply once more" 
 PSQL -c "ALTER TABLE ch.docs_older NO INHERIT ch.docs"
 run apply; is unchanged && ok "a table that inherits no more keeps its triggers until the next apply, and that is no reason to apply" || bad "apply after NO INHERIT" "$out"
 PSQL -c "ALTER TABLE ch.docs_older INHERIT ch.docs"
+PSQL -c "DROP TRIGGER authz_update_3 ON ch.docs_old"
+run apply; is applied && ok "a row trigger dropped from a table that inherits: apply applies" || bad "apply after a dropped copy" "$out"
+same "... and it is back" "$(triggers ch.docs_old)" "$rowtriggers"
 
 echo "-- a partitioned table: a row that stays in its partition, and one an update puts in another"
 as 1 -c "SELECT authz.share('note', 1, 'viewer', 'user', 2)" -c "SELECT authz.share('note', 3, 'viewer', 'user', 2)" \
