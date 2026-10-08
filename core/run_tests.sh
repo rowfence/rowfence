@@ -42,12 +42,14 @@ case " $PARTS " in *" ${PART:-${PARTS%% *}} "*) ;; *) echo "no part '$PART' in t
 part() { [ -z "$PART" ] || [ "$PART" = "$1" ]; }
 # ROWSTILE_COVERAGE=DIR: each Python process the suites start measures which lines and branches of authzlib and
 # cli it runs, into DIR, each one marked with the step that ran it (tests/coverage.ini). It needs coverage.py: the
-# image core/Dockerfile builds with COVERAGE=1 has it, and core/ci.sh --coverage uses that image.
+# image core/Dockerfile builds with COVERAGE=1 has it, and core/ci.sh --coverage uses that image. Each database is
+# also asked, before it is dropped, which of rowstile's functions were called in it (tests/coverage-bin wraps
+# createdb and dropdb; Postgres counts them with track_functions = all, which ci.sh --coverage sets).
 # python3 tests/coverage_report.py DIR then says what nothing runs.
 if [ -n "${ROWSTILE_COVERAGE:-}" ]; then
   mkdir -p "$ROWSTILE_COVERAGE/data" && ROWSTILE_COVERAGE=$(cd "$ROWSTILE_COVERAGE" && pwd) || exit 1
   export ROWSTILE_COVERAGE COVERAGE_PROCESS_START="$PWD/tests/coverage.ini" ROWSTILE_COVERAGE_CODE="$PWD"
-  export ROWSTILE_COVERAGE_CONTEXT=""
+  export ROWSTILE_COVERAGE_CONTEXT="" PATH="$PWD/tests/coverage-bin:$PATH"
   echo "measuring what the suites run, into $ROWSTILE_COVERAGE"
 fi
 STEPS_RUN=0
@@ -266,6 +268,10 @@ if { [ "$MODE" = full ] || [ "$MODE" = proofs ] || [ "$MODE" = soak ]; } && part
   tests/stress.sh $STRESS
   record $? "stress"
 fi
+
+# measuring: the function calls of the databases still here (each one dropped earlier was asked then)
+[ -z "${ROWSTILE_COVERAGE:-}" ] ||
+  bash tests/coverage_functions.sh $(psql -X -At -d postgres -c "SELECT datname FROM pg_database WHERE datname LIKE 'authz%'")
 
 echo
 [ "$STEPS_RUN" -gt 0 ] || failed+=("no step ran")

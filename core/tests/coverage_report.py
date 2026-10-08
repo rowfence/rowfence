@@ -12,7 +12,10 @@ them into --out (the first DIR if not given): .coverage, coverage.json (coverage
   - the lines and branches nothing runs, with their text, the files with the most first;
   - compiled, never judged: what runs of the code that writes the SQL deciding who may do what (DECIDES), but only
     in steps that don't compare the database's answers with the reference evaluator (ORACLE): its SQL was made,
-    and difftest, genpolicy and around never judged it.
+    and difftest, genpolicy and around never judged it;
+  - what the database runs: the kinds of rowstile's functions (authz_gen."<table>:update:refuse", a tree's
+    refresh, authz.share) no suite ever called, from the counts tests/coverage_functions.sh kept (functions.tsv
+    beside each DIR or data file).
 
 With --diff REF it also prints the lines changed since REF (git diff REF...HEAD) that nothing runs, and exits 1 if
 there are any.
@@ -70,6 +73,104 @@ class File:
     branches_run: int
     functions: list[Function] = field(default_factory=list)
     steps: dict[int, set[str]] = field(default_factory=dict)  # a line -> the steps that ran it
+
+
+@dataclass
+class Called:
+    """One of rowstile's functions in a database the suites made, and how often they called it."""
+
+    step: str  # the step that made the database
+    db: str
+    schema: str
+    name: str
+    args: str
+    calls: int
+    how: str = ""  # its language, then definer and set when it has them: "plpgsql definer set", "sql"
+
+    def counted(self) -> bool:
+        """Whether Postgres counts its calls: not a plain SQL function, which it may inline into the query."""
+        return self.how != "sql"
+
+
+def functions_measured(paths: Sequence[str]) -> list[Called]:
+    """What tests/coverage_functions.sh wrote (functions.tsv) beside each measured DIR or data file."""
+    out: list[Called] = []
+    for p in paths:
+        path = os.path.join(p if os.path.isdir(p) else os.path.dirname(p), "functions.tsv")
+        if not os.path.isfile(path):
+            continue
+        with open(path, encoding="utf-8") as fh:
+            for line in fh:
+                parts = line.rstrip("\n").split("\t")
+                if len(parts) in (6, 7) and parts[5].isdigit():
+                    how = parts[6] if len(parts) == 7 else ""
+                    out.append(Called(parts[0], parts[1], parts[2], parts[3], parts[4], int(parts[5]), how))
+    return out
+
+
+def kind(schema: str, name: str, args: str) -> str:
+    """What made a function: its name with the policy's own names taken out (authz_gen.<table>:update:refuse,
+    authz_int.<type>__<name>__why, a tree's <tree>_refresh); rowstile's own functions as they are, and the API's
+    with their arguments (authz.share has three)."""
+    if ":" in name and "__" not in name.split(":", 1)[0]:
+        return f"{schema}.<table>:" + re.sub(r"column_\d+", "column_<n>", name.split(":", 1)[1])
+    name = re.sub(r"__roles:[^_]+(?:_[^_]+)*__", "__roles:<name>__", name)  # a custom role's: doc__roles:view__who
+    if re.fullmatch(r".+__t_[0-9a-f]{8,}", name):  # a tree whose name was too long, shortened to a hash
+        return f"{schema}.<tree>_<hash>"
+    name = re.sub(r"_[0-9a-f]{8,}$", "_<hash>", name)  # a condition's function, named by its text: folder__check_...
+    tree = re.fullmatch(r".+__tree\d*_(.+)", name)
+    if tree:
+        return f"{schema}.<tree>_" + re.sub(r"^rows_.+$", "rows_<type>", re.sub(r"\d+$", "<n>", tree.group(1)))
+    if "__" in name:
+        parts = name.split("__")
+        return f"{schema}." + "__".join(["<type>", *["<name>"] * (len(parts) - 2), re.sub(r"_\d+$", "_<n>", parts[-1])])
+    if schema == "authz":
+        return f"authz.{name}({args})"
+    return f"{schema}." + re.sub(r"_\d+_", "_<n>_", name)
+
+
+@dataclass
+class Kind:
+    """What the suites did with one kind of function."""
+
+    made: int = 0  # in how many databases
+    called: int = 0  # how many of those called it
+    steps: set[str] = field(default_factory=set)  # the steps that made a database where it was called
+    counted: bool = False  # whether Postgres counts its calls (Called.counted)
+
+
+def by_kind(called: Sequence[Called]) -> dict[str, Kind]:
+    """What the suites did with each kind of function."""
+    out: dict[str, Kind] = {}
+    for c in called:
+        k = out.setdefault(kind(c.schema, c.name, c.args), Kind())
+        k.made += 1
+        k.counted = k.counted or c.counted()
+        if c.calls:
+            k.called += 1
+            k.steps.add(c.step)
+    return out
+
+
+def calls_summary(kinds: dict[str, Kind]) -> str:
+    counted = [k for k in kinds.values() if k.counted]
+    return f"{sum(1 for k in counted if k.called)} of {len(counted)} kinds of function called"
+
+
+def functions_report(called: Sequence[Called]) -> list[str]:
+    kinds = by_kind(called)
+    never = sorted(name for name, k in kinds.items() if k.counted and not k.called)
+    uncounted = sorted(name for name, k in kinds.items() if not k.counted)
+    out = [
+        "What the database runs: rowstile's functions in the suites' databases, by what made them (Postgres's counts,",
+        f"track_functions): {calls_summary(kinds)}.",
+        "",
+        "Never called, or every call raised (Postgres counts only the calls that return: a guard's that refuses, not):",
+    ]
+    out += [f"  {name}  (made in {kinds[name].made} database(s))" for name in never] or ["  (none)"]
+    out += ["", "Not counted: plain SQL functions, which Postgres may inline into the query that calls them:"]
+    out += [f"  {name}" for name in uncounted] or ["  (none)"]
+    return out
 
 
 def relative(path: str) -> str:
@@ -306,10 +407,13 @@ def main(argv: Sequence[str]) -> int:
     out = a.out or a.dirs[0]
     data, json_report = combine(a.dirs, out)
     files = read(json_report, steps_by_line(data))
+    called = functions_measured(a.dirs)
     with open(os.path.join(out, "report.txt"), "w", encoding="utf-8") as fh:
-        fh.write("\n".join(report(files)) + "\n")
+        fh.write("\n".join(report(files) + ([""] + functions_report(called) if called else [])) + "\n")
     print("\n".join(table(files)))
-    print(f"\n{summary(files)}; what nothing runs, line by line: {os.path.join(out, 'report.txt')}")
+    kinds = by_kind(called)
+    calls = f"; {calls_summary(kinds)}" if kinds else ""
+    print(f"\n{summary(files)}{calls}; what nothing runs, line by line: {os.path.join(out, 'report.txt')}")
     if not a.diff:
         return 0
     # (in a container the checkout is someone else's, which git refuses unless told: this only reads)

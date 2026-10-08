@@ -3938,6 +3938,64 @@ class CoverageReport(unittest.TestCase):
             [f"{2:>11}  {two}", f"{3:>11}  never to the function's end, line 5: {three}"],
         )
 
+    def test_what_made_a_function(self) -> None:
+        kind = self.report.kind
+        for (schema, name, args), want in {
+            ("authz_gen", "app.files:update:refuse", "t app.files"): "authz_gen.<table>:update:refuse",
+            ("authz_gen", "app.files:column_2:holds", "r app.files"): "authz_gen.<table>:column_<n>:holds",
+            ("authz_int", "folder__view__why", "p_id text"): "authz_int.<type>__<name>__why",
+            ("authz_int", "user__forget_id", ""): "authz_int.<type>__forget_id",
+            ("authz_int", "team__update_1", ""): "authz_int.<type>__update_<n>",
+            ("authz_int", "folder_project__tree2_rows_project", ""): "authz_int.<tree>_rows_<type>",
+            ("authz_int", "folder_project__host_inside_parent__tree_on_links1", ""): "authz_int.<tree>_on_links<n>",
+            ("authz_int", "user__manager__tree_verify", ""): "authz_int.<tree>_verify",
+            ("authz_int", "rel_audit_3_ins", ""): "authz_int.rel_audit_<n>_ins",
+            ("authz_gen", "folder__check_13d4d15429", ""): "authz_gen.<type>__check_<hash>",
+            (
+                "authz_int",
+                "domain_email_org_setting__domain_email_org_settings__t_07bd0a7e",
+                "",
+            ): "authz_int.<tree>_<hash>",
+            ("authz_int", "canon", "p_type text, p_id text"): "authz_int.canon",
+            ("authz", "can", "text, text, text"): "authz.can(text, text, text)",
+        }.items():
+            self.assertEqual(kind(schema, name, args), want, name)
+        # each function the compiler names after a policy's own words (its types, relations and permissions) has a
+        # kind with none of them: a new shape of name gets a kind of its own, not one per policy
+        made = r'CREATE (?:OR REPLACE )?FUNCTION (authz_gen|authz_int)\."?([^"( ]+)'
+        for name, path in POLICIES.items():
+            c = Compiler(parse_policy(read(path), path))
+            own = {w for t in c.types.values() for w in (t.name, *t.perms, *t.relations)}
+            for schema, fn in set(re.findall(made, c.compile(path))):
+                if "__" in fn or ":" in fn:
+                    self.assertFalse(set(re.findall(r"[a-z0-9]+", kind(schema, fn, ""))) & own, f"{name}: {fn}")
+
+    def test_the_calls_written_beside_the_data(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            with open(os.path.join(d, "functions.tsv"), "w", encoding="utf-8") as fh:
+                fh.write("step a\tauthz_x\tauthz\tcan\ttext, text, text\t3\tplpgsql definer set\n")
+                fh.write("step b\tauthz_x\tauthz_gen\tapp.files:update:refuse\tt app.files\t0\tplpgsql set\n")
+                fh.write("step b\tauthz_y\tauthz_gen\tapp.docs:update:refuse\tt app.docs\t2\tplpgsql set\n")
+                fh.write("step b\tauthz_y\tauthz_int\tfolder__forget\t\t0\tplpgsql definer set\n")
+                fh.write("step c\tauthz_y\tauthz\tverify\t\t0\tsql\n")  # inlined: never counted
+                fh.write("step c\tauthz_z\tauthz\tctx\tkey text\t0\n")  # written before the language was
+                fh.write("a line cut short\n")
+            called = self.report.functions_measured([os.path.join(d, ".coverage")])
+        self.assertEqual(len(called), 6)
+        kinds = self.report.by_kind(called)
+        refuse = kinds["authz_gen.<table>:update:refuse"]
+        self.assertEqual((refuse.made, refuse.called, refuse.steps, refuse.counted), (2, 1, {"step b"}, True))
+        self.assertFalse(kinds["authz.verify()"].counted)
+        report = self.report.functions_report(called)
+        # counted: can and the refusals (called), the forget and ctx (whose language was not written: counted)
+        self.assertIn("2 of 4 kinds of function called", report[1])
+        # never called: the one counted kind no call reached; the inlined one stands apart, not counted
+        never, uncounted = (
+            report.index("  authz_int.<type>__forget  (made in 1 database(s))"),
+            report.index("  authz.verify()"),
+        )
+        self.assertLess(never, uncounted)
+
     def test_the_steps_that_compare_answers_are_named_so(self) -> None:
         # the report knows them by their names in run_tests.sh: a step renamed must not leave the comparison
         steps = re.split(r'\n\s*step "', read("run_tests.sh"))[1:]

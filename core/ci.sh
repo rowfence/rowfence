@@ -44,8 +44,9 @@ for v in $VERSIONS; do
   # labelled with the job (ROWSTILE_CI_JOB in CI), whose cleanup removes only its own
   # The server doesn't wait for the disk: the databases last as long as the container, and no suite stops the
   # server to see what it kept. What the suites check is the same, sooner (they make and drop many databases).
+  # (measuring, Postgres also counts the calls of every function: track_functions)
   retry docker run -d --name "$name" --label "rowstile.ci=${ROWSTILE_CI_JOB:-local}" -e POSTGRES_HOST_AUTH_METHOD=trust -v "$REPO:/src" "$image" \
-    -c fsync=off -c synchronous_commit=off -c full_page_writes=off >/dev/null || { failed+=("$v (start)"); continue; }
+    -c fsync=off -c synchronous_commit=off -c full_page_writes=off ${COVERAGE:+-c track_functions=all} >/dev/null || { failed+=("$v (start)"); continue; }
   for _ in $(seq 60); do docker exec "$name" pg_isready -q -h /var/run/postgresql 2>/dev/null && break; sleep 1; done
   sleep 2                              # the image's entrypoint restarts the server once after initdb
   out=".ci/$name"; rm -f "$out.log" "$out.rc"

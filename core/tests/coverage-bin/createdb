@@ -1,0 +1,8 @@
+#!/bin/bash
+# createdb, while run_tests.sh measures what the suites run (ROWSTILE_COVERAGE puts this folder first on the PATH):
+# the step that makes a database is written down, so that the calls counted in it are put down to that step when
+# it is dropped, whichever step drops it (tests/coverage_functions.sh)
+here=$(cd "$(dirname "$0")" && pwd)
+[ -z "${ROWSTILE_COVERAGE:-}" ] ||
+  printf '%s\t%s\n' "${@: -1}" "${ROWSTILE_COVERAGE_CONTEXT:-}" >> "$ROWSTILE_COVERAGE/databases.tsv"
+PATH=${PATH//"$here:"/} exec createdb "$@"

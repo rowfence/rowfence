@@ -1,0 +1,6 @@
+#!/bin/bash
+# dropdb, while run_tests.sh measures what the suites run (ROWSTILE_COVERAGE puts this folder first on the PATH): a
+# database's counts of function calls go with it, so they are kept first (tests/coverage_functions.sh)
+here=$(cd "$(dirname "$0")" && pwd)
+bash "$here/../coverage_functions.sh" "${@: -1}"
+PATH=${PATH//"$here:"/} exec dropdb "$@"
