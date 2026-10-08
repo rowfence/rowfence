@@ -82,5 +82,6 @@ measured (`.ci/coverage-16/`) and says:
 - what runs of the code that writes the SQL deciding access, but only in steps that never compare the database's
   answers with the reference evaluator (difftest, genpolicy, around): its SQL was made, and never judged;
 - each kind of rowstile's functions (`authz_gen."<table>:update:refuse"`, a tree's refresh, `authz.share`) that
-  no suite ever calls;
+  no suite ever calls, as far as Postgres can count: not a call that raises, nor one before a database's last
+  apply (applying makes the functions anew), nor a plain SQL function's, which it may inline (listed apart);
 - with `--diff main`: the lines changed since `main` that nothing runs (exit 1 if there are any).
