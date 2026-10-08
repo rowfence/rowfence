@@ -2089,33 +2089,33 @@ BEGIN
       IF NOT pg_catalog.pg_input_is_valid(p_id, 'bigint') THEN RETURN false; END IF;
       v_bigint := p_id::bigint;
       CASE p_perm
-        WHEN 'edit' THEN RETURN coalesce((SELECT (coalesce(o."owner_id" = (SELECT authz.uid()), false)
-    OR EXISTS (SELECT 1 FROM authz_gen."setting__edit" v WHERE v.id = o."settings_id")) FROM "lp"."orgs" o WHERE o."id" = v_bigint), false);
-        WHEN 'view' THEN RETURN coalesce((SELECT (coalesce(o."owner_id" = (SELECT authz.uid()), false)
-    OR EXISTS (SELECT 1 FROM authz_gen."setting__edit" v WHERE v.id = o."settings_id")) FROM "lp"."orgs" o WHERE o."id" = v_bigint), false);
+        WHEN 'edit' THEN RETURN EXISTS (SELECT 1 FROM "lp"."orgs" o WHERE o."id" = v_bigint AND ((coalesce(o."owner_id" = (SELECT authz.uid()), false)
+    OR EXISTS (SELECT 1 FROM authz_gen."setting__edit" v WHERE v.id = o."settings_id"))));
+        WHEN 'view' THEN RETURN EXISTS (SELECT 1 FROM "lp"."orgs" o WHERE o."id" = v_bigint AND ((coalesce(o."owner_id" = (SELECT authz.uid()), false)
+    OR EXISTS (SELECT 1 FROM authz_gen."setting__edit" v WHERE v.id = o."settings_id"))));
         ELSE RAISE EXCEPTION 'no permission %.% in the policy', p_type, p_perm USING HINT = 'rowstile help AZ707';
       END CASE;
     WHEN 'setting' THEN
       IF NOT pg_catalog.pg_input_is_valid(p_id, 'bigint') THEN RETURN false; END IF;
       v_bigint := p_id::bigint;
       CASE p_perm
-        WHEN 'edit' THEN RETURN coalesce((SELECT (EXISTS (SELECT 1 FROM authz_gen."setting__admin" v WHERE v.id = o."id")
-    OR EXISTS (SELECT 1 FROM authz_gen."email__edit" v WHERE v.id = o."email_id")) FROM "lp"."settings" o WHERE o."id" = v_bigint), false);
+        WHEN 'edit' THEN RETURN EXISTS (SELECT 1 FROM "lp"."settings" o WHERE o."id" = v_bigint AND ((EXISTS (SELECT 1 FROM authz_gen."setting__admin" v WHERE v.id = o."id")
+    OR EXISTS (SELECT 1 FROM authz_gen."email__edit" v WHERE v.id = o."email_id"))));
         ELSE RAISE EXCEPTION 'no permission %.% in the policy', p_type, p_perm USING HINT = 'rowstile help AZ707';
       END CASE;
     WHEN 'email' THEN
       IF NOT pg_catalog.pg_input_is_valid(p_id, 'bigint') THEN RETURN false; END IF;
       v_bigint := p_id::bigint;
       CASE p_perm
-        WHEN 'edit' THEN RETURN coalesce((SELECT (coalesce((verified), false)
-    AND EXISTS (SELECT 1 FROM authz_gen."domain__edit" v WHERE v.id = o."domain_id")) FROM "lp"."emails" o WHERE o."id" = v_bigint), false);
+        WHEN 'edit' THEN RETURN EXISTS (SELECT 1 FROM "lp"."emails" o WHERE o."id" = v_bigint AND ((coalesce((verified), false)
+    AND EXISTS (SELECT 1 FROM authz_gen."domain__edit" v WHERE v.id = o."domain_id"))));
         ELSE RAISE EXCEPTION 'no permission %.% in the policy', p_type, p_perm USING HINT = 'rowstile help AZ707';
       END CASE;
     WHEN 'domain' THEN
       IF NOT pg_catalog.pg_input_is_valid(p_id, 'bigint') THEN RETURN false; END IF;
       v_bigint := p_id::bigint;
       CASE p_perm
-        WHEN 'edit' THEN RETURN coalesce((SELECT EXISTS (SELECT 1 FROM authz_gen."org__edit" v WHERE v.id = o."org_id") FROM "lp"."domains" o WHERE o."id" = v_bigint), false);
+        WHEN 'edit' THEN RETURN EXISTS (SELECT 1 FROM "lp"."domains" o WHERE o."id" = v_bigint AND (EXISTS (SELECT 1 FROM authz_gen."org__edit" v WHERE v.id = o."org_id")));
         ELSE RAISE EXCEPTION 'no permission %.% in the policy', p_type, p_perm USING HINT = 'rowstile help AZ707';
       END CASE;
     ELSE

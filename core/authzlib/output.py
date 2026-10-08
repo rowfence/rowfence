@@ -264,10 +264,12 @@ CREATE OR REPLACE FUNCTION authz.uid() RETURNS {u.pktype} {attrs} AS $uid$ {body
             if not t.perms:
                 return None
             # the permission on the object's own row, as a write rule checks it: that object's lookups (and
-            # its ancestors, for recursive permissions), not every object the user holds it on
+            # its ancestors, for recursive permissions), not every object the user holds it on. On any row with
+            # the key, as the views say: a table that inherits from this one may hold a second (the primary
+            # key doesn't cover its rows)
             cases = "\n".join(
-                f"        WHEN {lit(p)} THEN RETURN coalesce((SELECT {self.can_sql(t, p)} FROM {qt(t.table)} o "
-                f"WHERE {self.key_is(t, 'o', 'v_' + t.pktype)}), false);"
+                f"        WHEN {lit(p)} THEN RETURN EXISTS (SELECT 1 FROM {qt(t.table)} o "
+                f"WHERE {self.key_is(t, 'o', 'v_' + t.pktype)} AND ({self.can_sql(t, p)}));"
                 for p in perms_of[t.name]
             )
             return f"      CASE p_perm\n{cases}\n        ELSE {no_perm}\n      END CASE;"
