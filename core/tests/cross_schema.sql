@@ -1,6 +1,7 @@
--- cross_schema.sql: folders inside folders or projects, projects placed in folders by a table (or by sharing), and
--- the frozen folders a condition reads (tests/cross.authz, difftest --gen cross). No foreign keys from the
--- placements or the frozen folders: their rows may name what is gone.
+-- cross_schema.sql: folders inside folders or projects, projects placed in folders by a table (or by sharing), the
+-- frozen folders a condition reads, and the closed sites the site type's where reads (tests/cross.authz, difftest
+-- --gen cross). No foreign keys from the placements, the frozen folders or the closed sites: their rows may name
+-- what is gone.
 DO $r$ BEGIN
   IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'app_user') THEN CREATE ROLE app_user NOLOGIN; END IF;
 END $r$;
@@ -24,7 +25,8 @@ CREATE TABLE cx.placements (
 CREATE TABLE cx.frozen (folder_id bigint PRIMARY KEY);
 -- regions and sites, which hold each other through these tables only
 CREATE TABLE cx.regions (id bigserial PRIMARY KEY, chief_id bigint REFERENCES cx.users);
-CREATE TABLE cx.sites (id bigserial PRIMARY KEY);
+CREATE TABLE cx.sites (id bigserial PRIMARY KEY, region_id bigint);   -- the region whose chiefs are its wardens
+CREATE TABLE cx.closed (site_id bigint PRIMARY KEY);   -- the closed sites, which the type's where reads
 CREATE TABLE cx.site_links (
   region_id bigint NOT NULL, site_id bigint NOT NULL, active boolean NOT NULL DEFAULT true,
   PRIMARY KEY (region_id, site_id)
@@ -41,4 +43,5 @@ CREATE INDEX ON cx.placements (folder_id);
 GRANT USAGE ON SCHEMA cx TO app_user;
 GRANT SELECT ON ALL TABLES IN SCHEMA cx TO app_user;
 GRANT INSERT, UPDATE, DELETE ON cx.folders, cx.projects TO app_user;
+GRANT UPDATE ON cx.regions, cx.sites TO app_user;
 GRANT USAGE ON ALL SEQUENCES IN SCHEMA cx TO app_user;
