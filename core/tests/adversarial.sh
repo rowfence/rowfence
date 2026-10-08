@@ -19,10 +19,11 @@ sign() { if [ -n "$1" ]; then echo "DO \$\$ BEGIN PERFORM authz.act_as('user', '
 as() { psql -X -q -At -1 -U "$ATTACKER" -d "$DB" -v VERBOSITY=sqlstate -c "$(sign "${AS-3}")" "$@" 2>&1 | tail -n 1; }
 # the same without the transaction and the sign-in, for attempts that span transactions
 bare() { psql -X -q -At -U "$ATTACKER" -d "$DB" -v VERBOSITY=sqlstate "$@" 2>&1 | tail -n 1; }
-expect() {   # $1 label, $2 expected output (an SQLSTATE for errors), rest: psql arguments
+. tests/words.sh
+expect() {   # $1 label, $2 expected output (for an error, "SQLSTATE: the message's words"), rest: psql arguments
   local label=$1 want=$2; shift 2
-  local got; got=$(as "$@"); got=${got#ERROR:  }
-  if [ "$got" = "$want" ]; then echo "ok    $label"; else echo "FAIL  $label: expected '$want', got '$got'"; fails=$((fails + 1)); fi
+  local got; got=$(error_of "$(psql -X -q -At -1 -U "$ATTACKER" -d "$DB" -v VERBOSITY=verbose -c "$(sign "${AS-3}")" "$@" 2>&1)")
+  if agrees "$label" "$want" "$got"; then echo "ok    $label"; else echo "FAIL  $label: expected '$want', got '$got'"; fails=$((fails + 1)); fi
 }
 
 python3 compile_policy.py example/docs.authz > /tmp/authz_adversarial.sql || exit 1
@@ -52,7 +53,7 @@ case "$got" in *prod-keys*|*salaries*|*Secrets*|*Keys*) echo "FAIL  a cheap leak
   *) echo "FAIL  leaky function test didn't run: $got"; fails=$((fails + 1));; esac
 expect "table statistics of governed tables are hidden" "0" \
   -c "SELECT count(*) FROM pg_stats WHERE schemaname = 'app' AND tablename IN ('files', 'folders')"
-expect "row_security = off is refused, not obeyed" "42501" -c "SET row_security = off" -c "SELECT count(*) FROM app.files"
+expect "row_security = off is refused, not obeyed" "42501: query would be affected by row-level security policy for table \"files\"" -c "SET row_security = off" -c "SELECT count(*) FROM app.files"
 expect "a prepared statement follows the signed-in user" "$erin" \
   -c "PREPARE q AS SELECT count(*) FROM app.files" -c "EXECUTE q" -c "EXECUTE q" -c "EXECUTE q" -c "EXECUTE q" -c "EXECUTE q" \
   -c "EXECUTE q" -c "$(sign 5)" -c "EXECUTE q"
@@ -63,24 +64,24 @@ got=$(bare -c "BEGIN" -c "$(sign 5)" -c "COMMIT" -c "SELECT count(*) FROM app.fi
   { echo "FAIL  a transaction's sign-in ends with it: got '$got'"; fails=$((fails + 1)); }
 
 echo "-- choosing another user"
-expect "setting authz.user_id after signing in is refused" "28000" -c "SET LOCAL authz.user_id = 1" -c "SELECT count(*) FROM app.files"
-expect "...and so is setting it instead of signing in" "28000" -c "$(sign '')" -c "SELECT set_config('authz.session', '', true)" \
+expect "setting authz.user_id after signing in is refused" "28000: who is signed in was changed after signing in" -c "SET LOCAL authz.user_id = 1" -c "SELECT count(*) FROM app.files"
+expect "...and so is setting it instead of signing in" "28000: authz.user_id was set directly, so it is not believed" -c "$(sign '')" -c "SELECT set_config('authz.session', '', true)" \
   -c "SET LOCAL authz.user_id = 1" -c "SELECT count(*) FROM app.files"
-expect "sharing as a user chosen by a setting" "28000" -c "SET LOCAL authz.user_id = 5" \
+expect "sharing as a user chosen by a setting" "28000: who is signed in was changed after signing in" -c "SET LOCAL authz.user_id = 5" \
   -c "SELECT authz.share('folder', 5, 'viewer', 'user', 3)"
-expect "asking can() as a user chosen by a setting" "28000" -c "SET LOCAL authz.user_id = 5" -c "SELECT authz.can('folder', 5, 'view')"
+expect "asking can() as a user chosen by a setting" "28000: who is signed in was changed after signing in" -c "SET LOCAL authz.user_id = 5" -c "SELECT authz.can('folder', 5, 'view')"
 
 echo "-- rowstile's own tables and functions"
-expect "internal views" "42501" -c "SELECT count(*) FROM authz_int.\"folder__view\""
-expect "the closure tables" "42501" -c "SELECT count(*) FROM authz_int.\"folder__parent__tree\""
-expect "the shares table" "42501" -c "SELECT count(*) FROM authz.shares"
-expect "writing a share directly" "42501" \
+expect "internal views" "42501: permission denied for schema authz_int" -c "SELECT count(*) FROM authz_int.\"folder__view\""
+expect "the closure tables" "42501: permission denied for schema authz_int" -c "SELECT count(*) FROM authz_int.\"folder__parent__tree\""
+expect "the shares table" "42501: permission denied for table shares" -c "SELECT count(*) FROM authz.shares"
+expect "writing a share directly" "42501: permission denied for table shares" \
   -c "INSERT INTO authz.shares (object_type, object_id, relation, subject_type, subject_id) VALUES ('folder', '5', 'viewer', 'user', '3')"
-expect "the audit trail" "42501" -c "SELECT count(*) FROM authz.audit"
-expect "the change feed" "42501" -c "SELECT count(*) FROM authz.changes"
-expect "the lock rows" "42501" -c "UPDATE authz_int.locks SET n = 0"
-expect "a closure's refresh function" "42501" -c "SELECT authz_int.\"folder__parent__tree_rebuild\"()"
-expect "announcing fake changes" "42501" -c "SELECT authz_int.changed('folder', ARRAY['1'], 'x')"
+expect "the audit trail" "42501: permission denied for table audit" -c "SELECT count(*) FROM authz.audit"
+expect "the change feed" "42501: permission denied for table changes" -c "SELECT count(*) FROM authz.changes"
+expect "the lock rows" "42501: permission denied for schema authz_int" -c "UPDATE authz_int.locks SET n = 0"
+expect "a closure's refresh function" "42501: permission denied for schema authz_int" -c "SELECT authz_int.\"folder__parent__tree_rebuild\"()"
+expect "announcing fake changes" "42501: permission denied for schema authz_int" -c "SELECT authz_int.changed('folder', ARRAY['1'], 'x')"
 expect "the public views return only carol's own ids" "0" \
   -c "SELECT count(*) FROM authz_gen.\"folder__view\" WHERE id IN (5, 6)"
 
@@ -142,32 +143,32 @@ out=$(apply_c) && echo "ok    ... and applies once the schema is closed or off t
 dropdb "$C"
 
 echo "-- turning the policy off"
-expect "disabling row-level security" "42501" -c "ALTER TABLE app.files DISABLE ROW LEVEL SECURITY"
-expect "dropping a policy" "42501" -c "DROP POLICY authz_select ON app.files"
-expect "adding a permissive policy" "42501" -c "CREATE POLICY mine ON app.files FOR SELECT USING (true)"
-expect "dropping a closure trigger" "42501" -c "DROP TRIGGER \"authz_folder__parent__tree_upd\" ON app.folders"
-expect "replacing a generated function" "42501" \
+expect "disabling row-level security" "42501: must be owner of table files" -c "ALTER TABLE app.files DISABLE ROW LEVEL SECURITY"
+expect "dropping a policy" "42501: must be owner of relation files" -c "DROP POLICY authz_select ON app.files"
+expect "adding a permissive policy" "42501: must be owner of table files" -c "CREATE POLICY mine ON app.files FOR SELECT USING (true)"
+expect "dropping a closure trigger" "42501: must be owner of relation folders" -c "DROP TRIGGER \"authz_folder__parent__tree_upd\" ON app.folders"
+expect "replacing a generated function" "42501: permission denied for schema authz" \
   -c "CREATE OR REPLACE FUNCTION authz.can(p_type text, p_id text, p_perm text) RETURNS boolean LANGUAGE sql AS 'SELECT true'"
 
 echo "-- changing what the policy protects"
 expect "updating a hidden row changes nothing" "UPDATE 0" -c "\\set QUIET off" -c "UPDATE app.files SET name = 'x' WHERE id = 12"
 expect "deleting a hidden row changes nothing" "DELETE 0" -c "\\set QUIET off" -c "DELETE FROM app.files WHERE id = 12"
-expect "an upsert onto a hidden row" "42501" \
+expect "an upsert onto a hidden row" "42501: permission denied: user 3 may not insert this row into app.files" \
   -c "INSERT INTO app.files (id, folder_id, owner_id, name) VALUES (12, 4, 3, 'x') ON CONFLICT (id) DO UPDATE SET name = 'pwned'"
 [ "$(PSQL -c "SELECT name FROM app.files WHERE id = 12")" = "prod-keys.txt" ] && echo "ok    the hidden file is untouched" ||
   { echo "FAIL  the hidden file changed"; fails=$((fails + 1)); }
-expect "a file claiming someone else as owner" "42501" \
+expect "a file claiming someone else as owner" "42501: permission denied: user 3 may not insert this row into app.files" \
   -c "INSERT INTO app.files (folder_id, owner_id, name) VALUES (4, 1, 'x')"
-AS=2 expect "bob (may edit, not share) can't take ownership" "42501" -c "UPDATE app.files SET owner_id = 2 WHERE id = 11"
-AS=2 expect "...or move a file where he can't edit" "42501" -c "UPDATE app.files SET folder_id = 2 WHERE id = 11"
-AS=1 expect "alice can't move her folder under a folder she may not edit" "42501" -c "UPDATE app.folders SET parent_id = 20 WHERE id = 4"
-AS=2 expect "bob (may edit Design docs, not share it) can't cut it off from the folders above" "42501" \
+AS=2 expect "bob (may edit, not share) can't take ownership" "42501: changing id, owner_id, confidential of app.files 11 needs: share" -c "UPDATE app.files SET owner_id = 2 WHERE id = 11"
+AS=2 expect "...or move a file where he can't edit" "42501: changing folder_id of app.files 11 needs: folder.edit" -c "UPDATE app.files SET folder_id = 2 WHERE id = 11"
+AS=1 expect "alice can't move her folder under a folder she may not edit" "42501: changing parent_id of app.folders 4 needs: parent.edit or ({parent_id is null} and share)" -c "UPDATE app.folders SET parent_id = 20 WHERE id = 4"
+AS=2 expect "bob (may edit Design docs, not share it) can't cut it off from the folders above" "42501: changing id, owner_id, org_id, inherit of app.folders 4 needs: share" \
   -c "UPDATE app.folders SET inherit = false WHERE id = 4"
 
 echo "-- sharing and asking"
-expect "sharing a hidden file with herself" "42501" -c "SELECT authz.share('file', 12, 'viewer', 'user', 3)"
-expect "sharing what she may only view" "42501" -c "SELECT authz.share('file', 11, 'viewer', 'user', 4)"
-AS=1 expect "sharing a relation the policy doesn't share" "P0001" -c "SELECT authz.share('file', 11, 'owner', 'user', 3)"
+expect "sharing a hidden file with herself" "42501: you cannot share file 12" -c "SELECT authz.share('file', 12, 'viewer', 'user', 3)"
+expect "sharing what she may only view" "42501: you cannot share file 11" -c "SELECT authz.share('file', 11, 'viewer', 'user', 4)"
+AS=1 expect "sharing a relation the policy doesn't share" "P0001: the policy does not allow sharing file.owner with user" -c "SELECT authz.share('file', 11, 'owner', 'user', 3)"
 # every way of asking to share a hidden object (file 12) answers as for a missing one: message and context
 said() { psql -X -q -At -1 -U "$ATTACKER" -d "$DB" -c "$(sign 3)" -c "$1" 2>&1 | sed "s/$2/<id>/g"; }
 for call in "share('file', ID, 'viewer', 'user', '4')" "share('file', ID, 'viewer', 'user', '424242')" \
@@ -177,19 +178,19 @@ for call in "share('file', ID, 'viewer', 'user', '4')" "share('file', ID, 'viewe
   [ "$hidden" = "$missing" ] && [ -n "$hidden" ] && echo "ok    authz.${call/ID/12} answers as for a missing file" ||
     { echo "FAIL  authz.$call tells hidden from missing: '$hidden' / '$missing'"; fails=$((fails + 1)); }
 done
-expect "listing the shares of a hidden object" "42501" -c "SELECT count(*) FROM authz.list_shares('folder', '5')"
-expect "...is refused as for a missing one" "42501" -c "SELECT count(*) FROM authz.list_shares('folder', '999999')"
-expect "listing the links of a hidden object" "42501" -c "SELECT count(*) FROM authz.list_links('folder', '5')"
-expect "...is refused as for a missing one" "42501" -c "SELECT count(*) FROM authz.list_links('folder', '999999')"
-expect "turning off a link of a hidden object" "42501" -c "SELECT authz.revoke_link('folder', '5', 'abc')"
+expect "listing the shares of a hidden object" "42501: you cannot see the shares of folder 5" -c "SELECT count(*) FROM authz.list_shares('folder', '5')"
+expect "...is refused as for a missing one" "42501: you cannot see the shares of folder 999999" -c "SELECT count(*) FROM authz.list_shares('folder', '999999')"
+expect "listing the links of a hidden object" "42501: you cannot see the links of folder 5" -c "SELECT count(*) FROM authz.list_links('folder', '5')"
+expect "...is refused as for a missing one" "42501: you cannot see the links of folder 999999" -c "SELECT count(*) FROM authz.list_links('folder', '999999')"
+expect "turning off a link of a hidden object" "42501: you cannot turn off the links of folder 5" -c "SELECT authz.revoke_link('folder', '5', 'abc')"
 for cursor in "'12abc'" "''" "'99999999999999999999999'"; do
-  expect "a page cursor that isn't an id ($cursor) is the caller's mistake, not a failed query" "22023" \
+  expect "a page cursor that isn't an id ($cursor) is the caller's mistake, not a failed query" "22023: the page cursor $cursor is not a file id" \
     -c "SELECT count(*) FROM authz.list('file', 'view', $cursor, 5)"
 done
-expect "... and so is a negative page size" "22023" -c "SELECT count(*) FROM authz.list('file', 'view', NULL, -1)"
-expect "who may see a hidden object" "42501" -c "SELECT count(*) FROM authz.who('folder', '5', 'view')"
-expect "...is refused as for a missing one" "42501" -c "SELECT count(*) FROM authz.who('folder', '999999', 'view')"
-expect "asking why for someone else" "42501" -c "SELECT authz.explain('file', '11', 'view', '2')"
+expect "... and so is a negative page size" "22023: the page size must not be negative (got -1)" -c "SELECT count(*) FROM authz.list('file', 'view', NULL, -1)"
+expect "who may see a hidden object" "42501: you cannot see who has access to folder 5" -c "SELECT count(*) FROM authz.who('folder', '5', 'view')"
+expect "...is refused as for a missing one" "42501: you cannot see who has access to folder 999999" -c "SELECT count(*) FROM authz.who('folder', '999999', 'view')"
+expect "asking why for someone else" "42501: you cannot inspect access to file 11" -c "SELECT authz.explain('file', '11', 'view', '2')"
 # explaining never walks into what carol can't see, whatever else she holds there (break_glass on every Acme folder)
 hidden=$(said "SELECT authz.explain('folder', '6', 'edit')" "folder 6"); missing=$(said "SELECT authz.explain('folder', '999999', 'edit')" "folder 999999")
 [ "$hidden" = "$missing" ] && echo "ok    explaining a folder she can't see (but may break the glass on) reads as a missing one" ||
@@ -205,7 +206,7 @@ missing=$(said "INSERT INTO app.files (folder_id, owner_id, name) VALUES (999999
 expect "a hidden file and a missing one look the same to can()" "false|false" \
   -c "SELECT authz.can('file', 12, 'view') || '|' || authz.can('file', 999999, 'view')"
 rid=$(as -c "SELECT authz.request_access('folder', 5, 'viewer', 'let me in')")
-expect "approving her own request" "42501" -c "SELECT authz.decide_request($rid, true)"
+expect "approving her own request" "42501: you cannot decide your own request" -c "SELECT authz.decide_request($rid, true)"
 
 echo "-- partitions and inheritance children, which row-level security on the table above doesn't cover"
 PSQL -c "CREATE TABLE app.files_old () INHERITS (app.files)" -c "GRANT SELECT, INSERT, UPDATE, DELETE ON app.files_old TO app_user" \
@@ -217,14 +218,14 @@ PSQL -c "CREATE TABLE app.files_old () INHERITS (app.files)" -c "GRANT SELECT, I
 PGOPTIONS="-c client_min_messages=error" psql -X -q -v ON_ERROR_STOP=1 -d "$DB" -f /tmp/authz_adversarial.sql >/dev/null || exit 1
 expect "reading it directly, once applied again" "0" -c "SELECT count(*) FROM app.files_old"
 expect "... changing it directly" "0" -c "WITH u AS (UPDATE app.files_old SET name = 'mine' RETURNING 1) SELECT count(*) FROM u"
-expect "... adding to it directly" "42501" -c "INSERT INTO app.files_old (id, folder_id, owner_id, name) VALUES (9002, 1, 3, 'x')"
+expect "... adding to it directly" "42501: new row violates row-level security policy for table \"files_old\"" -c "INSERT INTO app.files_old (id, folder_id, owner_id, name) VALUES (9002, 1, 3, 'x')"
 expect "... while through the table above the policy still decides" "0" -c "SELECT count(*) FROM app.files WHERE id = 9001"
 # a row stored there, in a folder bob may edit: written through the table above, where the table's own rule on a
 # column has to be checked too (Postgres runs a table's row triggers for its own rows only)
 PSQL -c "INSERT INTO app.files_old (id, folder_id, owner_id, name) VALUES (9003, 4, 1, 'old-design.md')" >/dev/null
 AS=2 expect "bob renames a file stored there, through the table above" "1" \
   -c "WITH u AS (UPDATE app.files SET name = 'old-design-2.md' WHERE id = 9003 RETURNING 1) SELECT count(*) FROM u"
-AS=2 expect "... and can't take its ownership (the rule on the column)" "42501" -c "UPDATE app.files SET owner_id = 2 WHERE id = 9003"
+AS=2 expect "... and can't take its ownership (the rule on the column)" "42501: changing id, owner_id, confidential of app.files 9003 needs: share" -c "UPDATE app.files SET owner_id = 2 WHERE id = 9003"
 [ "$(PSQL -c "SELECT count(*) FROM authz.lint() WHERE severity = 'error' AND object = 'app.files_old'")" = 0 ] &&
   echo "ok    ... and lint has nothing more to say about it" || { echo "FAIL  lint after apply"; fails=$((fails + 1)); }
 

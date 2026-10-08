@@ -52,7 +52,7 @@ SET ROLE app_user;
 SELECT test.as(1);
 SELECT test.ok('alice owns folder 1: edits the whole chain folder > folder > project > folder > doc',
   authz.can('project', 1, 'edit') AND authz.can('folder', 3, 'edit') AND test.docs() = '01, 02');
-SELECT test.ok('authz.perms lists everything she holds on folder 3', authz.perms('folder', 3) = '{edit,view,share}');
+SELECT test.ok('authz.perms lists everything she holds on folder 3', authz.perms('folder', 3) = '{edit,view,share,peek}');
 SELECT test.ok('uuid ids work as text, and malformed ids are simply not allowed',
   authz.can('doc', '10000000-0000-4000-8000-000000000001', 'edit') AND NOT authz.can('doc', 'not-a-uuid', 'view'));
 SELECT test.as(2);

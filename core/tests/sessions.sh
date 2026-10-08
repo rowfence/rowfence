@@ -15,10 +15,11 @@ bad() { echo "FAIL  $1${2:+: $2}"; fails=$((fails + 1)); }
 PSQL() { psql -X -q -At -v ON_ERROR_STOP=1 -d "$DB" "$@"; }
 # as $APP (or $ROLE), in one transaction: the last line of output, or the error's SQLSTATE
 as() { psql -X -q -At -1 -U "${ROLE:-$APP}" -d "$DB" -v VERBOSITY=sqlstate "$@" 2>&1 | tail -n 1; }
-expect() {   # $1 label, $2 expected (an SQLSTATE for errors), rest: psql arguments
+. tests/words.sh
+expect() {   # $1 label, $2 expected (for an error, "SQLSTATE: the message's words"), rest: psql arguments
   local label=$1 want=$2; shift 2
-  local got; got=$(as "$@"); got=${got#ERROR:  }
-  [ "$got" = "$want" ] && ok "$label" || bad "$label" "expected '$want', got '$got'"
+  local got; got=$(error_of "$(psql -X -q -At -1 -U "${ROLE:-$APP}" -d "$DB" -v VERBOSITY=verbose "$@" 2>&1)")
+  agrees "$label" "$want" "$got" && ok "$label" || bad "$label" "expected '$want', got '$got'"
 }
 ACT() { echo "DO \$\$ BEGIN PERFORM authz.act_as($1); END \$\$"; }
 
@@ -40,23 +41,23 @@ all=$(PSQL -c "SELECT count(*) FROM app.files")
 echo "-- the settings are anyone's to set"
 expect "the app's login role sets authz.user_id, and Postgres doesn't stop it" "t" -c "SET LOCAL authz.user_id = 1" \
   -c "SELECT current_setting('authz.user_id') = '1'"
-expect "... but nobody signed in is an error, not an empty result" "28000" -c "SELECT count(*) FROM app.files"
-expect "... and so is a user set directly" "28000" -c "SET LOCAL authz.user_id = 1" -c "SELECT count(*) FROM app.files"
+expect "... but nobody signed in is an error, not an empty result" "28000: nobody signed in in this transaction" -c "SELECT count(*) FROM app.files"
+expect "... and so is a user set directly" "28000: authz.user_id was set directly, so it is not believed" -c "SET LOCAL authz.user_id = 1" -c "SELECT count(*) FROM app.files"
 
 echo "-- signing in"
 expect "authz.act_as signs carol in: she sees her files" "$carol" -c "$(ACT "'user', '3'")" -c "SELECT count(*) FROM app.files"
 expect "act_as(NULL, NULL): nobody, on purpose, no error" "0" -c "$(ACT "NULL, NULL")" -c "SELECT count(*) FROM app.files WHERE id = 12"
-expect "changing authz.user_id after signing in is an error" "28000" -c "$(ACT "'user', '3'")" -c "SET LOCAL authz.user_id = 1" \
+expect "changing authz.user_id after signing in is an error" "28000: who is signed in was changed after signing in" -c "$(ACT "'user', '3'")" -c "SET LOCAL authz.user_id = 1" \
   -c "SELECT count(*) FROM app.files"
-expect "... authz.principal_type too" "28000" -c "$(ACT "'user', '3'")" -c "SET LOCAL authz.principal_type = 'user'" \
+expect "... authz.principal_type too" "28000: who is signed in was changed after signing in" -c "$(ACT "'user', '3'")" -c "SET LOCAL authz.principal_type = 'user'" \
   -c "SELECT count(*) FROM app.files"
-expect "... authz.acting_user too" "28000" -c "$(ACT "'user', '3'")" -c "SET LOCAL authz.acting_user = 'x'" \
+expect "... authz.acting_user too" "28000: who is signed in was changed after signing in" -c "$(ACT "'user', '3'")" -c "SET LOCAL authz.acting_user = 'x'" \
   -c "SELECT authz.share('file', 11, 'viewer', 'user', 4)"
-expect "a forged signature is an error" "28000" -c "SET LOCAL authz.user_id = 1" -c "SET LOCAL authz.session = 'deadbeef'" \
+expect "a forged signature is an error" "28000: who is signed in was changed after signing in" -c "SET LOCAL authz.user_id = 1" -c "SET LOCAL authz.session = 'deadbeef'" \
   -c "SELECT count(*) FROM app.files"
-expect "sharing as a chosen user is refused" "28000" -c "$(ACT "'user', '3'")" -c "SET LOCAL authz.user_id = 1" \
+expect "sharing as a chosen user is refused" "28000: who is signed in was changed after signing in" -c "$(ACT "'user', '3'")" -c "SET LOCAL authz.user_id = 1" \
   -c "SELECT authz.share('folder', 1, 'viewer', 'user', 3)"
-expect "... and so is asking can() as one" "28000" -c "$(ACT "'user', '3'")" -c "SET LOCAL authz.user_id = 1" \
+expect "... and so is asking can() as one" "28000: who is signed in was changed after signing in" -c "$(ACT "'user', '3'")" -c "SET LOCAL authz.user_id = 1" \
   -c "SELECT authz.can('folder', 5, 'view')"
 
 echo "-- a signature is good for one transaction on one connection"
@@ -74,7 +75,7 @@ SQL
 )
 [ "$got" = "ERROR:  28000" ] && ok "a signature from an earlier transaction is refused in the next one" || bad "replay in the next transaction" "$got"
 sig=$(psql -X -q -At -U "$APP" -d "$DB" -c "BEGIN" -c "SELECT authz.act_as('user', '1')" -c "SELECT current_setting('authz.session')" -c "COMMIT" | tail -n 1)
-expect "... and one from another connection too" "28000" -c "SET LOCAL authz.user_id = 1" -c "SELECT set_config('authz.session', '$sig', true)" \
+expect "... and one from another connection too" "28000: who is signed in was changed after signing in" -c "SET LOCAL authz.user_id = 1" -c "SELECT set_config('authz.session', '$sig', true)" \
   -c "SELECT count(*) FROM app.files"
 got=$(psql -X -q -At -U "$APP" -d "$DB" -v VERBOSITY=sqlstate 2>&1 <<'SQL' | tail -n 1
 BEGIN;
@@ -93,9 +94,9 @@ key=$(PSQL -c "SET authz.user_id = 3" -c "SELECT authz.create_api_key('sessions 
 expect "a read-only key signs carol in" "$carol" -c "SELECT authz.login_key('$key') IS NOT NULL" -c "SELECT count(*) FROM app.files"
 expect "... and can't write" "UPDATE 0" -c "SELECT authz.login_key('$key') IS NOT NULL" -c "\\set QUIET off" \
   -c "UPDATE app.files SET name = name WHERE id = 11"
-expect "clearing its scopes is an error, not a way to write" "28000" -c "SELECT authz.login_key('$key') IS NOT NULL" \
+expect "clearing its scopes is an error, not a way to write" "28000: who is signed in was changed after signing in" -c "SELECT authz.login_key('$key') IS NOT NULL" \
   -c "SET LOCAL authz.scopes = ''" -c "UPDATE app.files SET name = name WHERE id = 11"
-expect "who_among isn't a way out of a key's scopes" "42501" -c "SELECT authz.login_key('$key') IS NOT NULL" \
+expect "who_among isn't a way out of a key's scopes" "42501: authz.who_among() signs people in, which a session limited by scopes or view-as may not" -c "SELECT authz.login_key('$key') IS NOT NULL" \
   -c "SELECT count(*) FROM authz.who_among('file', '11', 'view', ARRAY['1', '2'])"
 
 echo "-- rowstile's own functions switch users and sign again"
@@ -135,10 +136,10 @@ expect "row-level security off on a table with rules: an error" "row-level secur
 PSQL -c "ALTER TABLE app.files ENABLE ROW LEVEL SECURITY"
 
 echo "-- who may sign in whom"
-expect "the key is out of the app role's reach" "42501" -c "SELECT value FROM authz.settings WHERE key = 'session_key'"
-expect "... and so is the signing" "42501" -c "SELECT authz_int.session_sig()"
-ROLE=$OTHER expect "a role that isn't the app role can't act_as" "42501" -c "$(ACT "'user', '1'")"
-expect "act_as names only types that sign in" "22023" -c "$(ACT "'folder', '1'")"
+expect "the key is out of the app role's reach" "42501: permission denied for table settings" -c "SELECT value FROM authz.settings WHERE key = 'session_key'"
+expect "... and so is the signing" "42501: permission denied for schema authz_int" -c "SELECT authz_int.session_sig()"
+ROLE=$OTHER expect "a role that isn't the app role can't act_as" "42501: permission denied for function act_as" -c "$(ACT "'user', '1'")"
+expect "act_as names only types that sign in" "22023: folder is not a type that signs in" -c "$(ACT "'folder', '1'")"
 
 PSQL -c "REVOKE ALL ON SCHEMA app, authz FROM $OTHER" -c "REVOKE ALL ON FUNCTION authz.connection_check() FROM $OTHER" >/dev/null 2>&1
 dropdb "$DB"

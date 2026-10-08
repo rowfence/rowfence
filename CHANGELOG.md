@@ -26,6 +26,10 @@ Each release upgrades from the one before it. How releases are numbered and made
 
 ### Changed
 
+- `authz.unshare` says what it needs: "you cannot unshare editor on folder 3 (needs manage_editors)", where
+  it said "you cannot share folder 3", also to someone who may share folder 3. The same words for an object
+  the caller can't see and one that doesn't exist, as before; the code (42501) and the hint (AZ705) are the
+  same.
 - `rowstile prove` finds a counterexample that needs several conditions at once in fewer worlds: at each
   size it tries, besides worlds drawn row by row, worlds where every condition holds on every row or on none,
   as the review's refactor check does. One that needs `{b1 and b2}` on one object and `{b1}` on another was

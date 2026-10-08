@@ -15,10 +15,12 @@ state() { psql -X -q -At -d "$DB" -c "SET ROLE app_user;" "$@" 2>&1 | tail -n 1;
 code() {    # the SQLSTATE of the last statement, or ok
   psql -X -q -At -d "$DB" -v VERBOSITY=sqlstate -c "SET ROLE app_user;" "$@" 2>&1 | grep -o '^ERROR:  [0-9A-Z]*' | tail -n 1 | cut -c9- || true
 }
-expect_code() {  # $1 label, $2 expected SQLSTATE, rest: -c statements
+. tests/words.sh
+expect_code() {  # $1 label, $2 expected "SQLSTATE: the message's words" (or ok), rest: -c statements
   local label=$1 want=$2; shift 2
-  got=$(code "$@"); got=${got:-ok}
-  if [ "$got" = "$want" ]; then echo "ok    $label"; else echo "FAIL  $label: expected $want, got $got"; fails=$((fails + 1)); fi
+  got=$(psql -X -q -At -d "$DB" -v VERBOSITY=verbose -c "SET ROLE app_user;" "$@" 2>&1 | grep '^ERROR:  ' | tail -n 1)
+  got=${got#ERROR:  }; got=${got:-ok}
+  if agrees "$label" "$want" "$got"; then echo "ok    $label"; else echo "FAIL  $label: expected $want, got $got"; fails=$((fails + 1)); fi
 }
 
 python3 compile_policy.py example/docs.authz > /tmp/authz_identity.sql || exit 1
@@ -36,9 +38,9 @@ check "read-only key: may view file 11, not edit it" "true|false" \
 check "read-only key: SELECT works" "3" "BEGIN; SELECT authz.login_key('$READ'); SELECT count(*) FROM app.files; COMMIT;"
 check "read-only key: UPDATE changes nothing" "0" \
   "BEGIN; SELECT authz.login_key('$READ'); WITH u AS (UPDATE app.files SET body = 'x' WHERE id = 11 RETURNING 1) SELECT count(*) FROM u; ROLLBACK;"
-expect_code "read-only key: cannot share" 42501 -c "BEGIN" -c "SELECT authz.login_key('$READ')" \
+expect_code "read-only key: cannot share" "42501: this session is read-only (viewing as someone else, or a read-only token)" -c "BEGIN" -c "SELECT authz.login_key('$READ')" \
   -c "SELECT authz.share('file', 11, 'viewer', 'user', 4)"
-expect_code "a read-only session cannot mint a broader key" 42501 -c "BEGIN" -c "SELECT authz.login_key('$READ')" \
+expect_code "a read-only session cannot mint a broader key" "42501: this session is read-only (viewing as someone else, or a read-only token)" -c "BEGIN" -c "SELECT authz.login_key('$READ')" \
   -c "SELECT authz.create_api_key('sneaky', 'files')"
 check "files key: may edit files, and update them" "updated" \
   "BEGIN; SELECT authz.login_key('$FILES'); SELECT authz.can('file', 11, 'edit'); UPDATE app.files SET body = 'y' WHERE id = 11 RETURNING 'updated'; ROLLBACK;"
@@ -55,12 +57,12 @@ wait
 check "... last_used_at is kept, to the minute" "t"   "RESET ROLE; SELECT last_used_at > now() - interval '1 minute' FROM authz.api_keys WHERE name = 'script';"
 KEYID=$(state -c "SET authz.user_id = 1" -c "SELECT id FROM authz.list_api_keys() WHERE name = 'laptop'")
 PSQL -c "SET ROLE app_user; SET authz.user_id = 1; SELECT authz.revoke_api_key($KEYID)" >/dev/null
-expect_code "a revoked key no longer signs in" 28000 -c "BEGIN" -c "SELECT authz.login_key('$READ')"
-expect_code "a made-up key does not either" 28000 -c "BEGIN" -c "SELECT authz.login_key('ak_nope')"
+expect_code "a revoked key no longer signs in" "28000: invalid API key" -c "BEGIN" -c "SELECT authz.login_key('$READ')"
+expect_code "a made-up key does not either" "28000: invalid API key" -c "BEGIN" -c "SELECT authz.login_key('ak_nope')"
 SHORT=$(state -c "SET authz.user_id = 1" -c "SELECT authz.create_api_key('for an hour', 'read', now() + interval '1 hour')")
 check "a key with an end signs in until then" "1" "BEGIN; SELECT authz.login_key('$SHORT'); SELECT authz.uid(); COMMIT;"
 PSQL -c "UPDATE authz.api_keys SET expires_at = now() - interval '1 hour' WHERE name = 'for an hour'" >/dev/null
-expect_code "... and no longer after it" 28000 -c "BEGIN" -c "SELECT authz.login_key('$SHORT')"
+expect_code "... and no longer after it" "28000: invalid API key" -c "BEGIN" -c "SELECT authz.login_key('$SHORT')"
 
 echo "-- JWT (HS256)"
 PSQL -c "INSERT INTO authz.settings VALUES ('jwt_secret', 's3cret-for-tests'), ('jwt_issuer', 'https://id.example')" >/dev/null
@@ -89,21 +91,21 @@ PY
 )
 check "a valid token signs in as bob, with its scope" "2|read" \
   "BEGIN; SELECT authz.login_jwt('$T_OK'); SELECT authz.uid() || '|' || current_setting('authz.scopes'); COMMIT;"
-expect_code "wrong signature" 28000 -c "BEGIN" -c "SELECT authz.login_jwt('$T_BADSIG')"
-expect_code "expired" 28000 -c "BEGIN" -c "SELECT authz.login_jwt('$T_EXPIRED')"
-expect_code "another issuer" 28000 -c "BEGIN" -c "SELECT authz.login_jwt('$T_ISS')"
-expect_code "alg none" 28000 -c "BEGIN" -c "SELECT authz.login_jwt('$T_NONE')"
-expect_code "no expiry" 28000 -c "BEGIN" -c "SELECT authz.login_jwt('$T_NOEXP')"
+expect_code "wrong signature" "28000: invalid token" -c "BEGIN" -c "SELECT authz.login_jwt('$T_BADSIG')"
+expect_code "expired" "28000: token expired or not yet valid" -c "BEGIN" -c "SELECT authz.login_jwt('$T_EXPIRED')"
+expect_code "another issuer" "28000: token from another issuer" -c "BEGIN" -c "SELECT authz.login_jwt('$T_ISS')"
+expect_code "alg none" "28000: invalid token" -c "BEGIN" -c "SELECT authz.login_jwt('$T_NONE')"
+expect_code "no expiry" "28000: token expired or not yet valid" -c "BEGIN" -c "SELECT authz.login_jwt('$T_NOEXP')"
 # nbf is optional; the hours keep these far from a clock that steps a few seconds
-expect_code "not valid yet (nbf in an hour)" 28000 -c "BEGIN" \
+expect_code "not valid yet (nbf in an hour)" "28000: token expired or not yet valid" -c "BEGIN" \
   -c "SELECT authz.login_jwt('$(jwt s3cret-for-tests 2 7200 "{\"nbf\": $(( $(date +%s) + 3600 ))}")')"
-expect_code "an nbf that isn't a number" 28000 -c "BEGIN" -c "SELECT authz.login_jwt('$(jwt s3cret-for-tests 2 300 '{"nbf": "soon"}')')"
+expect_code "an nbf that isn't a number" "28000: token expired or not yet valid" -c "BEGIN" -c "SELECT authz.login_jwt('$(jwt s3cret-for-tests 2 300 '{"nbf": "soon"}')')"
 check "valid since an hour (nbf in the past)" "2" \
   "BEGIN; SELECT authz.login_jwt('$(jwt s3cret-for-tests 2 300 "{\"nbf\": $(( $(date +%s) - 3600 ))}")'); COMMIT;"
 # an audience, once the setting names one: a string or a list holding it
 PSQL -c "INSERT INTO authz.settings VALUES ('jwt_audience', 'docs-api')" >/dev/null
-expect_code "a token for no audience, once one is asked" 28000 -c "BEGIN" -c "SELECT authz.login_jwt('$T_OK')"
-expect_code "a token for another audience" 28000 -c "BEGIN" -c "SELECT authz.login_jwt('$(jwt s3cret-for-tests 2 300 '{"aud": "other-api"}')')"
+expect_code "a token for no audience, once one is asked" "28000: token for another audience" -c "BEGIN" -c "SELECT authz.login_jwt('$T_OK')"
+expect_code "a token for another audience" "28000: token for another audience" -c "BEGIN" -c "SELECT authz.login_jwt('$(jwt s3cret-for-tests 2 300 '{"aud": "other-api"}')')"
 check "a token for this audience" "2" "BEGIN; SELECT authz.login_jwt('$(jwt s3cret-for-tests 2 300 '{"aud": "docs-api"}')'); COMMIT;"
 check "... or for a list that holds it" "2" "BEGIN; SELECT authz.login_jwt('$(jwt s3cret-for-tests 2 300 '{"aud": ["other-api", "docs-api"]}')'); COMMIT;"
 PSQL -c "DELETE FROM authz.settings WHERE key = 'jwt_audience'" >/dev/null
@@ -111,7 +113,7 @@ PSQL -c "DELETE FROM authz.settings WHERE key = 'jwt_audience'" >/dev/null
 echo "-- view as (support)"
 check "erin (Acme admin) views as carol: carol's files, read-only" "3|3|5|false" \
   "BEGIN; SET LOCAL authz.user_id = 5; SELECT authz.view_as('3', 'ticket 42'); SELECT (SELECT count(*) FROM app.files) || '|' || authz.uid() || '|' || current_setting('authz.acting_user') || '|' || authz.can('file', 11, 'edit'); COMMIT;"
-expect_code "... and cannot change anything" 42501 -c "BEGIN" -c "SET LOCAL authz.user_id = 5" \
+expect_code "... and cannot change anything" "42501: this session is read-only (viewing as someone else, or a read-only token)" -c "BEGIN" -c "SET LOCAL authz.user_id = 5" \
   -c "SELECT authz.view_as('3', 'ticket 42')" -c "SELECT authz.share('folder', 2, 'viewer', 'user', 4)"
 # the scope view-as carries refuses sharing too; without it (the owner's session sets the settings), only the
 # read-only check is left to refuse
@@ -123,14 +125,14 @@ for call in "share('folder', 1, 'viewer', 'user', 4)" "unshare('folder', 1, 'vie
 done
 check "the audit trail has the reason" "ticket 42" \
   "RESET ROLE; SELECT reason FROM authz.audit WHERE action = 'view_as' ORDER BY id DESC LIMIT 1;"
-expect_code "carol cannot view as erin" 42501 -c "SET authz.user_id = 3" -c "SELECT authz.view_as('5', 'curious')"
-expect_code "a reason is required" P0001 -c "SET authz.user_id = 5" -c "SELECT authz.view_as('3', '')"
+expect_code "carol cannot view as erin" "42501: you cannot view as user 5" -c "SET authz.user_id = 3" -c "SELECT authz.view_as('5', 'curious')"
+expect_code "a reason is required" "P0001: say why (the reason is kept in the audit trail)" -c "SET authz.user_id = 5" -c "SELECT authz.view_as('3', '')"
 
 echo "-- group sync (administrators)"
 check "sync Engineering to alice and carol" "1|0" \
   "RESET ROLE; SELECT added || '|' || removed FROM authz.sync_members('team', '10', 'member', ARRAY['1', '3']);"
 check "... carol is now in Engineering" "t" "SET authz.user_id = 3; SELECT authz.can('folder', 3, 'edit');"
-expect_code "the app role cannot sync" 42501 -c "SELECT authz.sync_members('team', '10', 'member', ARRAY['4'])"
+expect_code "the app role cannot sync" "42501: permission denied for function sync_members" -c "SELECT authz.sync_members('team', '10', 'member', ARRAY['4'])"
 
 dropdb "$DB"
 if [ $fails -eq 0 ]; then echo "identity: all passed"; else echo "identity: $fails failed"; exit 1; fi

@@ -20,10 +20,12 @@ as() { local u=$1; shift; PSQL -c "SET ROLE app_user; SET authz.user_id = '$u';"
 code() {
   psql -X -q -At -d "$DB" -v VERBOSITY=sqlstate "$@" 2>&1 | grep -o '^ERROR:  [0-9A-Z]*' | tail -n 1 | cut -c9- || true
 }
-expect_code() {  # $1 label, $2 expected SQLSTATE, rest: -c statements (as app_user unless the first is RESET ROLE)
+. tests/words.sh
+expect_code() {  # $1 label, $2 expected "SQLSTATE: the message's words" (or ok), rest: -c statements (as app_user unless the first is RESET ROLE)
   local label=$1 want=$2; shift 2
-  got=$(code -c "SET ROLE app_user" "$@"); got=${got:-ok}
-  if [ "$got" = "$want" ]; then echo "ok    $label"; else echo "FAIL  $label: expected $want, got $got"; fails=$((fails + 1)); fi
+  got=$(psql -X -q -At -d "$DB" -v VERBOSITY=verbose -c "SET ROLE app_user" "$@" 2>&1 | grep '^ERROR:  ' | tail -n 1)
+  got=${got#ERROR:  }; got=${got:-ok}
+  if agrees "$label" "$want" "$got"; then echo "ok    $label"; else echo "FAIL  $label: expected $want, got $got"; fails=$((fails + 1)); fi
 }
 
 python3 compile_policy.py example/docs.authz > /tmp/authz_governance.sql || exit 1
@@ -74,9 +76,9 @@ PGOPTIONS="-c client_min_messages=error" psql -X -q -v ON_ERROR_STOP=1 -d "$DB" 
 admin "shares dropped when the policy is applied (their row is gone) are recorded, with why" \
   "unshare|applying the policy: the row was deleted" \
   "SELECT action || '|' || reason FROM authz.audit WHERE object_id = '999' ORDER BY id DESC LIMIT 1"
-expect_code "the trail cannot be edited, even by an administrator" 42501 -c "RESET ROLE" -c "DELETE FROM authz.audit"
-expect_code "... or emptied" 42501 -c "RESET ROLE" -c "TRUNCATE authz.audit"
-expect_code "the app role cannot read it" 42501 -c "SELECT count(*) FROM authz.audit"
+expect_code "the trail cannot be edited, even by an administrator" "42501: the audit trail cannot be changed" -c "RESET ROLE" -c "DELETE FROM authz.audit"
+expect_code "... or emptied" "42501: the audit trail cannot be changed" -c "RESET ROLE" -c "TRUNCATE authz.audit"
+expect_code "the app role cannot read it" "42501: permission denied for table audit" -c "SELECT count(*) FROM authz.audit"
 
 echo "-- the change feed"
 POS=$(PSQL -c "SELECT coalesce(max(pos), 0) FROM authz.changes")
@@ -96,19 +98,19 @@ got=$(psql -X -q -At -d "$DB" -c "LISTEN authz_changes" -c "SET ROLE app_user" -
 case "$got" in *'notification "authz_changes"'*) echo "ok    with notify_changes on, listeners hear of a change (NOTIFY authz_changes)";;
   *) echo "FAIL  notify: $got"; fails=$((fails + 1));; esac
 PSQL -c "DELETE FROM authz.settings WHERE key = 'notify_changes'" >/dev/null
-expect_code "the app role cannot read the feed" 42501 -c "SELECT * FROM authz.changes_since(0)"
+expect_code "the app role cannot read the feed" "42501: permission denied for function changes_since" -c "SELECT * FROM authz.changes_since(0)"
 
 
 echo "-- emergency access (break glass)"
 check "carol cannot see the prod keys" "f" "SET authz.user_id = 3; SELECT authz.can('file', 12, 'view')"
-expect_code "a reason is required" P0001 -c "SET authz.user_id = 3" -c "SELECT authz.break_glass('folder', '6', 'viewer', '')"
-expect_code "it lasts one day at most" P0001 -c "SET authz.user_id = 3" \
+expect_code "a reason is required" "P0001: say why (it is kept in the audit trail)" -c "SET authz.user_id = 3" -c "SELECT authz.break_glass('folder', '6', 'viewer', '')"
+expect_code "it lasts one day at most" "P0001: emergency access lasts more than nothing and one day at most" -c "SET authz.user_id = 3" \
   -c "SELECT authz.break_glass('folder', '6', 'viewer', 'outage', '2 days')"
-expect_code "... and a duration must be given" P0001 -c "SET authz.user_id = 3" \
+expect_code "... and a duration must be given" "P0001: emergency access lasts more than nothing and one day at most" -c "SET authz.user_id = 3" \
   -c "SELECT authz.break_glass('folder', '6', 'viewer', 'outage', NULL)"
-expect_code "... a positive one" P0001 -c "SET authz.user_id = 3" \
+expect_code "... a positive one" "P0001: emergency access lasts more than nothing and one day at most" -c "SET authz.user_id = 3" \
   -c "SELECT authz.break_glass('folder', '6', 'viewer', 'outage', '-1 hour')"
-expect_code "frank (Globex) cannot break the glass on an Acme folder" 42501 -c "SET authz.user_id = 6" \
+expect_code "frank (Globex) cannot break the glass on an Acme folder" "42501: you cannot break the glass on folder 6" -c "SET authz.user_id = 6" \
   -c "SELECT authz.break_glass('folder', '6', 'viewer', 'outage')"
 got=$(psql -X -q -At -d "$DB" -c "LISTEN authz_alerts" -c "SET ROLE app_user" -c "SET authz.user_id = 3" \
        -c "SELECT authz.break_glass('folder', '6', 'viewer', 'prod outage INC-7')" -c "SELECT 1" 2>&1)
@@ -124,7 +126,7 @@ admin "the trail has it, with the reason" "break_glass|3|prod outage INC-7" \
 expect_code "the id may be a number, as for authz.can" ok -c "SET authz.user_id = 3" \
   -c "SELECT authz.break_glass('folder', 6, 'viewer', 'INC-7 outage', '1 hour')"
 expect_code "... for a review too" ok -c "SET authz.user_id = 5" -c "BEGIN" -c "SELECT authz.start_review('folder', 3)" -c "ROLLBACK"
-expect_code "... and for an owner's roles (the docs policy has none: refused, not unknown)" 42501 -c "SET authz.user_id = 5" \
+expect_code "... and for an owner's roles (the docs policy has none: refused, not unknown)" "42501: you cannot see roles of org 1" -c "SET authz.user_id = 5" \
   -c "SELECT * FROM authz.roles_of('org', 1)"
 
 echo "-- access requests"
@@ -133,9 +135,9 @@ REQ=$(as 3 -c "SELECT authz.request_access('folder', 5, 'viewer', 'need the offe
 check "carol sees her own request" "t" "SET authz.user_id = 3; SELECT mine FROM authz.pending_requests() WHERE id = $REQ"
 check "erin (who may share Secrets) sees it to decide" "1" "SET authz.user_id = 5; SELECT count(*) FROM authz.pending_requests() WHERE id = $REQ"
 check "alice (who may not) does not" "0" "SET authz.user_id = 1; SELECT count(*) FROM authz.pending_requests() WHERE id = $REQ"
-expect_code "alice cannot decide it" 42501 -c "SET authz.user_id = 1" -c "SELECT authz.decide_request($REQ, true)"
-expect_code "alice cannot deny it either" 42501 -c "SET authz.user_id = 1" -c "SELECT authz.decide_request($REQ, false)"
-expect_code "carol cannot approve her own request" 42501 -c "SET authz.user_id = 3" -c "SELECT authz.decide_request($REQ, true)"
+expect_code "alice cannot decide it" "42501: you cannot decide request 1" -c "SET authz.user_id = 1" -c "SELECT authz.decide_request($REQ, true)"
+expect_code "alice cannot deny it either" "42501: you cannot decide request 1" -c "SET authz.user_id = 1" -c "SELECT authz.decide_request($REQ, false)"
+expect_code "carol cannot approve her own request" "42501: you cannot decide your own request" -c "SET authz.user_id = 3" -c "SELECT authz.decide_request($REQ, true)"
 check "before approval carol cannot view the offer letter" "f" "SET authz.user_id = 3; SELECT authz.can('file', 13, 'view')"
 as 5 -c "SELECT authz.decide_request($REQ, true, 'ok for a week')" >/dev/null
 check "after erin approves, she can" "t" "SET authz.user_id = 3; SELECT authz.can('file', 13, 'view')"
@@ -149,11 +151,11 @@ check "a denied request grants nothing" "f" "SET authz.user_id = 4; SELECT authz
 REQ3=$(as 4 -c "SELECT authz.request_access('folder', 6, 'viewer', 'please')")
 as 4 -c "SELECT authz.cancel_request($REQ3)" >/dev/null
 admin "requests can be withdrawn" "cancelled" "SELECT status FROM authz.requests WHERE id = $REQ3"
-expect_code "only relations the policy lets people share can be requested" P0001 -c "SET authz.user_id = 4" \
+expect_code "only relations the policy lets people share can be requested" "P0001: the policy does not allow sharing folder.owner with a user" -c "SET authz.user_id = 4" \
   -c "SELECT authz.request_access('folder', 6, 'owner', 'mine now')"
-expect_code "... on types the policy has" P0001 -c "SET authz.user_id = 4" \
+expect_code "... on types the policy has" "P0001: no type nosuchtype in the policy" -c "SET authz.user_id = 4" \
   -c "SELECT authz.request_access('nosuchtype', '1', 'role:1', 'boom')"
-expect_code "... and roles that exist" P0001 -c "SET authz.user_id = 4" \
+expect_code "... and roles that exist" "P0001: the policy does not allow sharing folder.role:999 with a user" -c "SET authz.user_id = 4" \
   -c "SELECT authz.request_access('folder', '6', 'role:999', 'boom')"
 R999=$(as 4 -c "SELECT authz.request_access('folder', '999', 'viewer', 'boom')")
 check "a request for a missing object reaches no approver" "0" "SET authz.user_id = 5; SELECT count(*) FROM authz.pending_requests() WHERE id = $R999"
@@ -162,16 +164,16 @@ check "approvers can still list requests" "0" "SET authz.user_id = 5; SELECT cou
 
 echo "-- access reviews"
 as 5 -c "SELECT authz.share('folder', 5, 'viewer', 'user', 4)" >/dev/null
-expect_code "carol cannot review Secrets" 42501 -c "SET authz.user_id = 3" -c "SELECT authz.start_review('folder', '5')"
+expect_code "carol cannot review Secrets" "42501: you cannot review folder 5" -c "SET authz.user_id = 3" -c "SELECT authz.start_review('folder', '5')"
 REV=$(as 5 -c "SELECT authz.start_review('folder', '5')")
 check "erin's review lists every share on Secrets" "2" "SET authz.user_id = 5; SELECT count(*) FROM authz.review_items($REV)"
 ITEM=$(as 5 -c "SELECT item FROM authz.review_items($REV) WHERE subject_id = '3'")
 as 5 -c "SELECT authz.review_decide($REV, $ITEM, false)" >/dev/null
-expect_code "carol cannot decide in it" 42501 -c "SET authz.user_id = 3" -c "SELECT authz.review_decide($REV, $ITEM, true)"
+expect_code "carol cannot decide in it" "42501: you cannot decide in review 2" -c "SET authz.user_id = 3" -c "SELECT authz.review_decide($REV, $ITEM, true)"
 check "closing the review revokes what was marked" "1" "SET authz.user_id = 5; SELECT authz.close_review($REV)"
 check "... carol lost the offer letter" "f" "SET authz.user_id = 3; SELECT authz.can('file', 13, 'view')"
 check "... dave (not decided) kept it" "t" "SET authz.user_id = 4; SELECT authz.can('file', 13, 'view')"
-expect_code "a closed review cannot be changed" 42501 -c "SET authz.user_id = 5" -c "SELECT authz.review_decide($REV, 1, false)"
+expect_code "a closed review cannot be changed" "42501: you cannot decide in review 2" -c "SET authz.user_id = 5" -c "SELECT authz.review_decide($REV, 1, false)"
 
 echo "-- reviews respect 'shared by'"
 sed -e 's/^  editor      : user, team#member shared$/  editor      : user, team#member, link shared by manage_editors/' \
@@ -182,18 +184,18 @@ grep -q "can manage_editors = owner" /tmp/authz_governance_by.authz && grep -q "
 python3 compile_policy.py /tmp/authz_governance_by.authz > /tmp/authz_governance_by.sql &&
 PGOPTIONS="-c client_min_messages=error" psql -X -q -v ON_ERROR_STOP=1 -d "$DB" -f /tmp/authz_governance_by.sql >/dev/null
 as 1 -c "SELECT authz.share('folder', 3, 'editor', 'user', 4)" >/dev/null
-expect_code "erin (share, but not manage_editors) cannot unshare dave's editor share" 42501 -c "SET authz.user_id = 5" \
+expect_code "erin (share, but not manage_editors) cannot unshare dave's editor share" "42501: you cannot unshare editor on folder 3 (needs manage_editors)" -c "SET authz.user_id = 5" \
   -c "SELECT authz.unshare('folder', 3, 'editor', 'user', 4)"
 REV2=$(as 5 -c "SELECT authz.start_review('folder', '3')")
 ITEM2=$(as 5 -c "SELECT item FROM authz.review_items($REV2) WHERE subject_id = '4' AND relation = 'editor'")
-expect_code "... nor revoke it in a review" 42501 -c "SET authz.user_id = 5" -c "SELECT authz.review_decide($REV2, $ITEM2, false)"
+expect_code "... nor revoke it in a review" "42501: you cannot decide on editor in review 3 (you could not unshare it)" -c "SET authz.user_id = 5" -c "SELECT authz.review_decide($REV2, $ITEM2, false)"
 check "... nor by closing the review with undecided items revoked" "0" "SET authz.user_id = 5; SELECT authz.close_review($REV2, true)"
 check "dave is still an editor" "t" "SET authz.user_id = 4; SELECT authz.can('folder', 3, 'edit')"
 as 1 -c "SELECT authz.create_link('folder', 3, 'editor')" >/dev/null
 LINK=$(as 1 -c "SELECT id FROM authz.list_links('folder', 3)")
 check "erin (share) sees the editors' link alice made" "$LINK|editor|1"   "SET authz.user_id = 5; SELECT id || '|' || relation || '|' || created_by FROM authz.list_links('folder', 3)"
-expect_code "... but cannot turn it off (not manage_editors)" 42501 -c "SET authz.user_id = 5"   -c "SELECT authz.revoke_link('folder', 3, '$LINK')"
-expect_code "a read-only session turns no link off" 42501 -c "SET authz.user_id = 1" -c "SET authz.scopes = 'read'"   -c "SELECT authz.revoke_link('folder', 3, '$LINK')"
+expect_code "... but cannot turn it off (not manage_editors)" "42501: you cannot turn off link " -c "SET authz.user_id = 5"   -c "SELECT authz.revoke_link('folder', 3, '$LINK')"
+expect_code "a read-only session turns no link off" "42501: this session is read-only (viewing as someone else, or a read-only token)" -c "SET authz.user_id = 1" -c "SET authz.scopes = 'read'"   -c "SELECT authz.revoke_link('folder', 3, '$LINK')"
 admin "the link is still there" "1" "SELECT count(*) FROM authz.shares WHERE object_type = 'folder' AND object_id = '3' AND subject_type = 'link'"
 as 1 -c "SELECT authz.revoke_link('folder', 3, '$LINK')" >/dev/null
 admin "alice (manage_editors) turns it off, and the audit trail has it as an unshare of hers" "unshare|1|folder|3|editor|link"   "SELECT action || '|' || user_id || '|' || object_type || '|' || object_id || '|' || relation || '|' || subject_type
@@ -212,7 +214,7 @@ got=$(psql -X -q -At -d "$DB" -f <(python3 compile_policy.py example/docs.authz 
 case "$got" in *"FAIL  invariant"*"policy test(s) failed"*) echo "ok    the policy tests fail on it";;
   *) echo "FAIL  policy tests with a broken invariant: $got"; fails=$((fails + 1));; esac
 PSQL -c "UPDATE app.folders SET owner_id = 1 WHERE id = 4" >/dev/null
-expect_code "the app role cannot run the invariant check" 42501 -c "SELECT * FROM authz.check_invariants()"
+expect_code "the app role cannot run the invariant check" "42501: permission denied for function check_invariants" -c "SELECT * FROM authz.check_invariants()"
 
 got=$(psql -X -q -At -d "$DB" -c "SET ROLE app_user" -c "SET client_min_messages = log" -c "SET authz_debug.log_decisions = on" \
        -c "SET authz.user_id = 1" -c "SELECT authz.can('file', E'11\\nauthz decision: forged', 'view')" 2>&1)
@@ -320,7 +322,7 @@ PSQL -c "ALTER TABLE app.files OWNER TO CURRENT_USER" -c "REVOKE CREATE ON SCHEM
 PSQL -c "ALTER TABLE app.files DISABLE ROW LEVEL SECURITY" >/dev/null
 admin "lint finds row-level security off on a table with rules: an error" "1"   "SELECT count(*) FROM authz.lint() WHERE severity = 'error' AND object = 'app.files' AND problem LIKE 'row-level security is off%'"
 PSQL -c "ALTER TABLE app.files ENABLE ROW LEVEL SECURITY" >/dev/null
-expect_code "the app role cannot run lint" 42501 -c "SELECT * FROM authz.lint()"
+expect_code "the app role cannot run lint" "42501: permission denied for function lint" -c "SELECT * FROM authz.lint()"
 # without its 'after' rule, moving a folder isn't checked where it goes
 grep -v "update parent_id after" example/docs.authz > /tmp/authz_no_after.authz
 python3 compile_policy.py /tmp/authz_no_after.authz > /tmp/authz_no_after.sql &&
@@ -337,23 +339,23 @@ PSQL -c "UPDATE authz.changes SET at = now() - interval '10 days'" -c "INSERT IN
 admin "the feed keeps 7 days by default: older entries are trimmed" "t" "SELECT authz.trim_changes() > 0"
 admin "... all of them" "f" "SELECT EXISTS (SELECT 1 FROM authz.changes WHERE pos <= $POS)"
 admin "... newer ones stay" "t" "SELECT EXISTS (SELECT 1 FROM authz.changes WHERE pos > $POS)"
-expect_code "a reader behind the trimmed part is told to read everything again" 55000 -c "RESET ROLE" \
+expect_code "a reader behind the trimmed part is told to read everything again" "55000: the change feed up to position " -c "RESET ROLE" \
   -c "SELECT * FROM authz.changes_since(0)"
 admin "... a reader past it goes on" "t" "SELECT count(*) > 0 FROM authz.changes_since($POS)"
 PSQL -c "INSERT INTO authz.settings VALUES ('changes_keep', '1 hour')" >/dev/null
 admin "how long the feed keeps entries is a setting" "0" "SELECT authz.trim_changes()"
-expect_code "trimming the audit trail needs a period" P0001 -c "RESET ROLE" -c "SELECT authz.trim_audit(NULL)"
+expect_code "trimming the audit trail needs a period" "P0001: say how long to keep the audit trail, e.g. authz.trim_audit(interval '2 years')" -c "RESET ROLE" -c "SELECT authz.trim_audit(NULL)"
 admin "entries younger than the period stay" "0" "SELECT authz.trim_audit(interval '1 day')"
 N=$(PSQL -c "SELECT count(*) FROM authz.audit")
 admin "... older ones go" "$N" "SELECT authz.trim_audit(interval '0')"
 admin "... and the trim is recorded" "trim_audit|$N" \
   "SELECT action || '|' || (detail ->> 'rows') FROM authz.audit ORDER BY id DESC LIMIT 1"
-expect_code "the trail still cannot be edited otherwise" 42501 -c "RESET ROLE" -c "DELETE FROM authz.audit"
-expect_code "... whatever the session sets" 42501 -c "RESET ROLE" -c "SET authz_int.trim_before = '2999-01-01'" \
+expect_code "the trail still cannot be edited otherwise" "42501: the audit trail cannot be changed" -c "RESET ROLE" -c "DELETE FROM authz.audit"
+expect_code "... whatever the session sets" "42501: the audit trail cannot be changed" -c "RESET ROLE" -c "SET authz_int.trim_before = '2999-01-01'" \
   -c "DELETE FROM authz.audit"
 admin "... and the trigger is on again after a trim" "O" \
   "SELECT tgenabled FROM pg_trigger WHERE tgrelid = 'authz.audit'::regclass AND tgname = 'authz_audit_append_only'"
-expect_code "the app role cannot trim" 42501 -c "SELECT authz.trim_audit(interval '0')"
+expect_code "the app role cannot trim" "42501: permission denied for function trim_audit" -c "SELECT authz.trim_audit(interval '0')"
 admin "inheritance tables still match a rebuild" "t" "SELECT authz.verify()"
 dropdb "$DB"
 if [ $fails -eq 0 ]; then echo "governance: all passed"; else echo "governance: $fails failed"; exit 1; fi
