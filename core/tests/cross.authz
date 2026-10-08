@@ -6,6 +6,8 @@
 -- lead's alone (outside it). A closed site, which the type's where reads from another table, holds nothing. A
 -- region's chief is named by a column, or by sharing; a site's wardens are the chiefs of the region its column
 -- names. Notes are written and never read back: no select rule, so explain tells even their authors nothing.
+-- A project's backers are folders or regions, which a table's rows name with their type: what is funded comes
+-- down from them, through the folders inside the recursion and through the regions outside it.
 app role app_user
 
 type user = cx.users
@@ -19,14 +21,17 @@ type folder = cx.folders where {not archived}
   -- a comment, dollar quotes and an E'' string are text in a condition: this. stays as written there; and
   -- <>-1 is <> then a minus, as Postgres reads it
   can file = owner or (parent.file and {owner_id is null /* this.owner_id: nobody's */ and parent_type <> $$this.id$$ and parent_type <> e'it\'s' and id <>-1})
+  can fund = owner or parent.fund
 
 type project = cx.projects
   inside : folder = cx.placements(project_id -> folder_id) where {active}   -- placed in folders by a table
   host   : folder  shared by edit                                          -- or by sharing
   lead   : user = lead_id
+  backer : folder, region = cx.backings(project_id -> (backer_type, backer_id))   -- a table naming either
   can edit = lead or inside.edit or host.edit
   can view = edit or inside.view or host.view
   can file = lead
+  can fund = lead or backer.fund
 
 type region = cx.regions                                                    -- regions and sites hold each other,
   over  : site   = cx.site_links(region_id -> site_id) where {active}        -- through tables only, and nothing
@@ -35,6 +40,7 @@ type region = cx.regions                                                    -- r
   chief : user   shared by run
   can run = chief or over.run
   can rename = chief
+  can fund = chief
 
 type site = cx.sites where {not exists (select 1 from cx.closed c where c.site_id = this.id)}
   over   : region = cx.site_regions(site_id -> region_id) where {active}
@@ -67,3 +73,4 @@ rules cx.projects
   select : view
   update : edit
   update after : edit
+  delete : fund

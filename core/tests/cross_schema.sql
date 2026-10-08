@@ -28,6 +28,11 @@ CREATE TABLE cx.regions (id bigserial PRIMARY KEY, chief_id bigint REFERENCES cx
 CREATE TABLE cx.sites (id bigserial PRIMARY KEY, region_id bigint);   -- the region whose chiefs are its wardens
 CREATE TABLE cx.closed (site_id bigint PRIMARY KEY);   -- the closed sites, which the type's where reads
 CREATE TABLE cx.notes (id bigserial PRIMARY KEY, author_id bigint);   -- written, never read back
+-- a project's backers: folders or regions, each row saying which (a type the policy doesn't name gives nothing)
+CREATE TABLE cx.backings (
+  project_id bigint NOT NULL, backer_type text NOT NULL, backer_id bigint NOT NULL,
+  PRIMARY KEY (project_id, backer_type, backer_id)
+);
 CREATE TABLE cx.site_links (
   region_id bigint NOT NULL, site_id bigint NOT NULL, active boolean NOT NULL DEFAULT true,
   PRIMARY KEY (region_id, site_id)
