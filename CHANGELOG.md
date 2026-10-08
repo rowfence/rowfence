@@ -26,6 +26,13 @@ Each release upgrades from the one before it. How releases are numbered and made
 
 ### Changed
 
+- `rowstile prove` finds a counterexample that needs several conditions at once in fewer worlds: at each
+  size it tries, besides worlds drawn row by row, worlds where every condition holds on every row or on none,
+  as the review's refactor check does. One that needs `{b1 and b2}` on one object and `{b1}` on another was
+  found at the 191st world, and missed with `--worlds 200`; it is found at the 12th. Over 1,200 random
+  policies, of 952 invariants that can be broken, it missed 1 with 400 worlds where it missed 4, and 4 with
+  200 where it missed 12, for about a sixth more time. The worlds it tries include those, so `--worlds 80`
+  counts more than 80.
 - A migration run on a database that already holds what it brings says so: "this database already holds
   what this migration brings (it ran here before, or rowstile dev or push took the database there): don't
   run it, tell your migration tool it is applied [AZ607]", with the Prisma and the Alembic command in the
@@ -53,6 +60,11 @@ Each release upgrades from the one before it. How releases are numbered and made
 
 ### Fixed
 
+- `rowstile prove` and the review's refactor check could read the column values of a world they had
+  already left, kept under its address once another world took it: an invariant found broken that the
+  world doesn't break (prove stopped on an internal check), or a world's answer missed. And a world where
+  every condition holds could make `{archived}` and `{not archived}` hold on the same row: a corner now
+  chooses each row's column values, and the conditions are read from them as in any other world.
 - **Rows under a governed table.** Rowstile checks a rule on a column (`update owner_id : share`) with a
   row trigger, and forgets a row's shares when its key changes with another. Three kinds of rows escaped
   them. An app with neither partitions nor tables that inherit was not affected.
