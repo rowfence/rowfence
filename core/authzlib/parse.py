@@ -452,28 +452,6 @@ def check_name(name: str, loc: Loc, previous: bool = False) -> str:
     return name
 
 
-def split_top(text: str, sep: str = ",") -> list[str]:
-    """Split on sep outside parentheses, braces and quotes."""
-    parts: list[str] = []
-    depth, quote, cur = 0, False, ""
-    for c in text:
-        if quote:
-            quote = c != "'"
-        elif c == "'":
-            quote = True
-        elif c in "({":
-            depth += 1
-        elif c in ")}":
-            depth -= 1
-        elif c == sep and depth == 0:
-            parts.append(cur.strip())
-            cur = ""
-            continue
-        cur += c
-    parts.append(cur.strip())
-    return parts
-
-
 Line: TypeAlias = "tuple[Loc, int, str]"
 # an include line, as the readers of included files see it (at the start of a line, maybe a comment after)
 INCLUDE = re.compile(r'include\s+"([^"]+)"\s*(?:--.*)?')

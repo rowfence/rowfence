@@ -508,6 +508,47 @@ COMPILE = [
         "custom roles on doc are made by people with manage_roles on their owner, and no type has `can manage_roles`",
         10,
     ),
+    # mistakes the parser reports that no case met (the coverage report)
+    ("an empty condition", "  can see = owner and {   }\n", "empty {} condition", 10),
+    ("a key column named twice", "type t2 = alt.docs (doc_no, doc_no)\n", "a key column is named twice", 10),
+    (
+        "a link table's object side named as two columns",
+        "  x : user = alt.group_members(object: (a, b), subject: user_id)\n",
+        "the object side is one column",
+        10,
+    ),
+    (
+        "a link table's sides named, but not one object and one subject",
+        "  x : user = alt.group_members(object: group_id, object: user_id)\n",
+        "name one 'object' column and one 'subject' column",
+        10,
+    ),
+    (
+        "a table given a second view",
+        "rules alt.docs view alt.v1\n  select : share\nrules alt.docs view alt.v2\n  select : share\n",
+        "alt.docs already has the view alt.v1",
+        12,
+    ),
+    ("a caveat defined twice", "caveat c = {true}\ncaveat c = {true}\n", "caveat c is defined twice", 11),
+    ("a test's given without a statement", 'test "t"\n  given x = { }\n', "given {...} needs a statement", 11),
+    ("a test's as without a statement", 'test "t"\n  as user 1 allowed { }\n', "as ... {...} needs a statement", 11),
+    (
+        "a test named twice, once in single quotes and once in double",
+        "test 'a'\n  user 1 can share doc 1\ntest \"a\"\n  user 1 can share doc 1\n",
+        "there is already a test named 'a'",
+        12,
+    ),
+    ("a scope's command without its table", "scope s = docs.select\n", "commands are qualified by a table", 10),
+    ("a scope's permission under a schema", "scope s = alt.doc.share\n", "permissions are qualified by a type", 10),
+    ("custom roles declared twice", "  roles : user\n  roles : user\n", "doc declares custom roles twice", 11),
+    ("custom roles naming no one", "  roles :\n", "write custom roles as: roles : user, team#member [from org]", 10),
+    (
+        "a pair of columns naming a group",
+        "  x : grp#member = (kind, owner_id)\n",
+        "a (type_col, id_col) source links to objects, not groups",
+        10,
+    ),
+    ("a mask without columns", "rules alt.docs\n  select : share\n  mask : share\n", "write masks as: mask col1", 12),
 ]
 
 # whole policies, without BASE: (what, policy, expected piece of the message, expected line)
