@@ -64,6 +64,10 @@ Each release upgrades from the one before it. How releases are numbered and made
 
 ### Fixed
 
+- An `update after` rule on the whole row checked the row after an update without asking the scope (or
+  view-as) whether it allows updates, where every other rule asks. Nothing was let through: the update rule
+  itself asks, and Postgres only checks the row after for a row the update rule let it change. **Upgrading**:
+  apply the policy again (or the next migration).
 - `authz.can` failed with Postgres's "more than one row returned by a subquery used as an expression" for a
   key two rows hold: a governed table's primary key doesn't cover the rows of a table that inherits from it,
   so a key changed or inserted in one can be in the other too. So did `authz.perms`, `explain` and `who`,

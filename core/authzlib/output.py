@@ -986,7 +986,11 @@ END $kv$;"""
                     )
                 elif r.command == "update" and "update check" in cmds:
                     c = cmds["update check"]
-                    check = self.rule_sql(t, alias, c, point=True, invoker=True)
+                    # the scope's word on updates, as in USING: a scope without them refuses the row after too
+                    check = (
+                        f"((SELECT authz_int.scope_cmd({lit(table)}, 'update')) AND "
+                        f"{self.rule_sql(t, alias, c, point=True, invoker=True)})"
+                    )
                     head += f"-- {table} update after ({c.loc}): {c.src}\n"
                     policies.append(
                         f"{head}CREATE POLICY {name} ON {qt(table)} FOR UPDATE TO {self.role}\n"

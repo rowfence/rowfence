@@ -1498,7 +1498,11 @@ class CrossGen(Gen):
     down: rows put in it, taken out and truncated must change the inheritance at once. Loops close through the
     placements and the shares, which may loop; through the columns they are refused. Regions and sites hold each
     other through tables only, whose where is the only thing that stops them (and a relation with two sources,
-    each naming another type)."""
+    each naming another type). Shapes no other policy has: what is filed comes down through a relation whose
+    types are partly inside the recursion and partly outside it, narrowed by a condition with a comment, dollar
+    quotes and an E'' string in it; a type whose where reads another table (cx.closed); a region's chief named by
+    a column and by shares; a site's wardens, the chiefs of the region a column names; an update rule with an
+    after rule on the whole row."""
 
     policy = "tests/cross.authz"
     schema = "tests/cross_schema.sql"
@@ -1530,7 +1534,11 @@ class CrossGen(Gen):
             )
         s += [f"INSERT INTO cx.frozen VALUES ({f}) ON CONFLICT DO NOTHING;" for f in r.sample(range(1, 11), 2)]
         s += [f"INSERT INTO cx.regions (id, chief_id) VALUES ({i}, {self.maybe_user()});" for i in range(1, 5)]
-        s.append("INSERT INTO cx.sites (id) SELECT generate_series(1, 4);")
+        s += [
+            f"INSERT INTO cx.sites (id, region_id) VALUES ({i}, {r.choice(['1', '2', '3', '4', 'NULL'])});"
+            for i in range(1, 5)
+        ]
+        s.append(f"INSERT INTO cx.closed VALUES ({r.randint(1, 4)});")
         for _ in range(4):
             for table in ("site_links", "site_regions"):
                 s.append(
@@ -1553,6 +1561,12 @@ class CrossGen(Gen):
     def grant(self, ids: Ids | None = None) -> str:
         r = self.r
         folders, projects = ints(ids, "folder") or list(range(1, 11)), ints(ids, "project") or list(range(1, 5))
+        if r.random() < 0.2:  # a region's chief by sharing, beside the one its column names
+            regions = ints(ids, "region") or list(range(1, 5))
+            return (
+                f"INSERT INTO authz.shares VALUES ('region', {r.choice(regions)}, 'chief', 'user', "
+                f"{r.choice(self.users)}, '', {r.choice(['NULL', EXPIRED])}) ON CONFLICT DO NOTHING;"
+            )
         if r.random() < 0.5:  # a project shared with a folder: a link, which never expires
             return (
                 f"INSERT INTO authz.shares VALUES ('project', {r.choice(projects)}, 'host', 'folder', "
@@ -1631,6 +1645,14 @@ class CrossGen(Gen):
             lambda: f"DELETE FROM cx.regions WHERE id = {a};",
             lambda: f"UPDATE cx.sites SET id = {max(sites) + r.randint(1, 50)} WHERE id = {site};",
             lambda: "INSERT INTO cx.sites DEFAULT VALUES;",
+            # the closed sites, which the type's where reads
+            lambda: f"INSERT INTO cx.closed VALUES ({site}) ON CONFLICT DO NOTHING;",
+            lambda: f"DELETE FROM cx.closed WHERE site_id = {r.choice(sites)};",
+            lambda: f"UPDATE cx.closed SET site_id = {r.choice(sites)} WHERE site_id = {site};",
+            lambda: "TRUNCATE cx.closed;",
+            # a region's chiefs by sharing, and the region whose chiefs are a site's wardens
+            lambda: f"DELETE FROM authz.shares WHERE object_type = 'region' AND object_id = '{a}';",
+            lambda: f"UPDATE cx.sites SET region_id = {r.choice([str(a), str(b), 'NULL'])} WHERE id = {site};",
         ]
         if r.random() < 0.15:  # several changes in one transaction
             return "BEGIN;\n" + "\n".join(r.choice(ops)() for _ in range(r.randint(2, 4))) + "\nCOMMIT;"
