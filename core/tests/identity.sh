@@ -57,6 +57,10 @@ KEYID=$(state -c "SET authz.user_id = 1" -c "SELECT id FROM authz.list_api_keys(
 PSQL -c "SET ROLE app_user; SET authz.user_id = 1; SELECT authz.revoke_api_key($KEYID)" >/dev/null
 expect_code "a revoked key no longer signs in" 28000 -c "BEGIN" -c "SELECT authz.login_key('$READ')"
 expect_code "a made-up key does not either" 28000 -c "BEGIN" -c "SELECT authz.login_key('ak_nope')"
+SHORT=$(state -c "SET authz.user_id = 1" -c "SELECT authz.create_api_key('for an hour', 'read', now() + interval '1 hour')")
+check "a key with an end signs in until then" "1" "BEGIN; SELECT authz.login_key('$SHORT'); SELECT authz.uid(); COMMIT;"
+PSQL -c "UPDATE authz.api_keys SET expires_at = now() - interval '1 hour' WHERE name = 'for an hour'" >/dev/null
+expect_code "... and no longer after it" 28000 -c "BEGIN" -c "SELECT authz.login_key('$SHORT')"
 
 echo "-- JWT (HS256)"
 PSQL -c "INSERT INTO authz.settings VALUES ('jwt_secret', 's3cret-for-tests'), ('jwt_issuer', 'https://id.example')" >/dev/null
@@ -111,7 +115,8 @@ expect_code "... and cannot change anything" 42501 -c "BEGIN" -c "SET LOCAL auth
   -c "SELECT authz.view_as('3', 'ticket 42')" -c "SELECT authz.share('folder', 2, 'viewer', 'user', 4)"
 # the scope view-as carries refuses sharing too; without it (the owner's session sets the settings), only the
 # read-only check is left to refuse
-for call in "share('folder', 1, 'viewer', 'user', 4)" "unshare('folder', 1, 'viewer', 'org', 1, 'member')"; do
+for call in "share('folder', 1, 'viewer', 'user', 4)" "unshare('folder', 1, 'viewer', 'org', 1, 'member')" \
+            "revoke_link('folder', 1, 'no such link')"; do
   got=$(psql -X -q -At -d "$DB" -c "SET ROLE app_user" -c "SET authz.user_id = 5" -c "SET authz.acting_user = '1'" -c "SELECT authz.$call" 2>&1)
   case "$got" in *"this session is read-only"*) echo "ok    ... whatever the scopes: ${call%%(*} is refused as read-only";;
     *) echo "FAIL  ${call%%(*} while viewing as someone, no scope: $got"; fails=$((fails + 1));; esac

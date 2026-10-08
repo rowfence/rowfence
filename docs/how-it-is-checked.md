@@ -88,6 +88,10 @@ one by the random policies. All 153 are fixed.
 Then the suites themselves were tested: 44 mistakes were put into the compiler on purpose, one at a time. The
 suites caught 42. The two they missed got tests.
 
+That was done again in October 2026, with twenty more mistakes for what had been added since and for checks no
+mistake had been tried on: 64 in all. The suites caught 60. Each of the four they missed got a test, which
+fails with the mistake put back.
+
 ## When something is found
 
 Vulnerabilities are reported privately ([SECURITY.md](../SECURITY.md)) and published as advisories once
