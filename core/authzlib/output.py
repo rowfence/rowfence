@@ -145,27 +145,40 @@ CREATE TRIGGER {q("authz_" + t.name + "_forget_trunc")} AFTER TRUNCATE ON {tbl}
         # the explanation, as for refused inserts and updates (refusals.py)
         name = f"column_{idx}"
         why = self.rule_fn(rule.table, name, "why")
+        holds = self.rule_fn(rule.table, name, "holds")
         schema, table = rule.table.split(".")
+        tbl = f"{lit(qt(rule.table))}::pg_catalog.regclass"
         return f"""{self.rule_items_sql(t, rule.table, alias, rule, name)}
 
 {self.rule_why_sql(t, rule.table, alias, rule, name)}
 
 -- {rule.table} update {cols}{" after" if new else ""} ({rule.loc}): {rule.src}
+-- Whether the rule holds for a row. BEGIN ATOMIC, as the refusals' functions are: the trigger below runs as the app
+-- role, which can't name what is in authz_int in text read at run time (the signed-in service, authz_int."<type>__me")
+CREATE FUNCTION {holds}(p_row {qt(rule.table)}) RETURNS boolean
+LANGUAGE sql STABLE
+BEGIN ATOMIC
+  SELECT coalesce({cond}, false) FROM (SELECT (p_row).*) AS {alias};
+END;
 -- checked on the row {"after" if new else "before"} the change, for roles that row-level security applies to on the
 -- table (not on TG_RELID: on a partition made since the policy was applied, where it is not on yet, this runs too)
 CREATE FUNCTION {fn}() RETURNS trigger
 LANGUAGE plpgsql SET search_path FROM CURRENT AS $f$
-DECLARE v_lines text;
+DECLARE v_lines text; v_row {qt(rule.table)};
 BEGIN
-  IF pg_catalog.row_security_active({lit(qt(rule.table))}::pg_catalog.regclass)
-     AND NOT coalesce((SELECT {cond} FROM (SELECT {row}.*) AS {alias}), false) THEN
-    BEGIN
-      v_lines := (SELECT string_agg(l, E'\\n') FROM {why}({row}) l);
-    EXCEPTION WHEN OTHERS THEN
-      v_lines := 'no explanation: ' || SQLERRM;
-    END;
-    RAISE EXCEPTION {lit(msg)}, {self.key(t, "OLD")} USING ERRCODE = 'insufficient_privilege', DETAIL = v_lines,
-      SCHEMA = {lit(schema)}, TABLE = {lit(table)}, CONSTRAINT = 'authz_update', HINT = 'rowstile help AZ709';
+  IF pg_catalog.row_security_active({tbl}) THEN
+    -- the row as the table's own: a partition's columns may be in another order, a table that inherits may have more
+    IF TG_RELID = {tbl} THEN v_row := {row};
+    ELSE v_row := pg_catalog.jsonb_populate_record(NULL::{qt(rule.table)}, pg_catalog.to_jsonb({row})); END IF;
+    IF NOT {holds}(v_row) THEN
+      BEGIN
+        v_lines := (SELECT string_agg(l, E'\\n') FROM {why}(v_row) l);
+      EXCEPTION WHEN OTHERS THEN
+        v_lines := 'no explanation: ' || SQLERRM;
+      END;
+      RAISE EXCEPTION {lit(msg)}, {self.key(t, "OLD")} USING ERRCODE = 'insufficient_privilege', DETAIL = v_lines,
+        SCHEMA = {lit(schema)}, TABLE = {lit(table)}, CONSTRAINT = 'authz_update', HINT = 'rowstile help AZ709';
+    END IF;
   END IF;
   RETURN NEW;
 END $f$;

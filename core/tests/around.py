@@ -439,6 +439,12 @@ EXCEPTION
 END $f$;"""
 
 
+# what a refused WITH CHECK says (refusals.py): the update rule doesn't hold for the row as changed
+CHECK_REFUSED = " may not update this row of "
+# ... and what Postgres says itself when the user could not read the row as changed (the select rule)
+UNREADABLE = "new row violates row-level security policy for table"
+
+
 def tried(key: list[str], statement: str, ids: list[str]) -> str:
     """statement (with %s for the row's id) tried on each row: [[id, outcome], ...]"""
     return emit(
@@ -536,8 +542,10 @@ def write_problems(checker: AroundChecker, direct: bool = True) -> list[str]:
                     elif i not in holds:
                         ok, want = refused, f"refused by the rule on {', '.join(r.columns)} ({r.src})"
                     else:  # the rule holds; the update's check, on the row as changed, may still refuse
-                        ok = outcome == "rows 1" or (outcome.startswith("42501 ") and not refused)
-                        want = "rows 1, or refused by the update rule on the changed row"
+                        ok = outcome == "rows 1" or (
+                            outcome.startswith("42501 ") and (CHECK_REFUSED in outcome or UNREADABLE in outcome)
+                        )
+                        want = "rows 1, or refused for the row as changed (the update rule, or the select rule)"
                     if not ok:
                         problems.append(
                             f"{who}: update of {', '.join(r.columns)} of {table} {i} as the app role: "
@@ -624,7 +632,9 @@ def unsigned_problems(checker: Checker) -> list[str]:
     """A member of the app role that doesn't sign in, sets the user itself, or brings a signature from another
     transaction: an error (28000), never a row."""
     db = checker.db
-    table = next(r.table for r in checker.rules if r.command == "select")
+    table = next((r.table for r in checker.rules if r.command == "select"), None)
+    if table is None:
+        return []
     read = f"SELECT pg_temp.around_try({lit(f'SELECT 1 FROM {table}')})"
     cases = {
         "nobody signed in": f"BEGIN;\n{read};\nCOMMIT;",

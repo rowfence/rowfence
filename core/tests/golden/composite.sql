@@ -3688,21 +3688,32 @@ BEGIN
 END $f$;
 
 -- cx.files update folder_id after (line 53): folder.edit
+-- Whether the rule holds for a row. BEGIN ATOMIC, as the refusals' functions are: the trigger below runs as the app
+-- role, which can't name what is in authz_int in text read at run time (the signed-in service, authz_int."<type>__me")
+CREATE FUNCTION authz_gen."cx.files:column_1:holds"(p_row "cx"."files") RETURNS boolean
+LANGUAGE sql STABLE
+BEGIN ATOMIC
+  SELECT coalesce(authz_gen."folder__edit__has"((CASE WHEN ("files"."org_id", "files"."folder_id") IS NOT NULL THEN ROW("files"."org_id"::bigint, "files"."folder_id"::bigint)::text END)), false) FROM (SELECT (p_row).*) AS "files";
+END;
 -- checked on the row after the change, for roles that row-level security applies to on the
 -- table (not on TG_RELID: on a partition made since the policy was applied, where it is not on yet, this runs too)
 CREATE FUNCTION authz_int."file__update_1"() RETURNS trigger
 LANGUAGE plpgsql SET search_path FROM CURRENT AS $f$
-DECLARE v_lines text;
+DECLARE v_lines text; v_row "cx"."files";
 BEGIN
-  IF pg_catalog.row_security_active('"cx"."files"'::pg_catalog.regclass)
-     AND NOT coalesce((SELECT authz_gen."folder__edit__has"((CASE WHEN ("files"."org_id", "files"."folder_id") IS NOT NULL THEN ROW("files"."org_id"::bigint, "files"."folder_id"::bigint)::text END)) FROM (SELECT NEW.*) AS "files"), false) THEN
-    BEGIN
-      v_lines := (SELECT string_agg(l, E'\n') FROM authz_gen."cx.files:column_1:why"(NEW) l);
-    EXCEPTION WHEN OTHERS THEN
-      v_lines := 'no explanation: ' || SQLERRM;
-    END;
-    RAISE EXCEPTION 'changing folder_id of cx.files % needs: folder.edit', ROW(OLD."org_id"::bigint, OLD."id"::bigint)::text USING ERRCODE = 'insufficient_privilege', DETAIL = v_lines,
-      SCHEMA = 'cx', TABLE = 'files', CONSTRAINT = 'authz_update', HINT = 'rowstile help AZ709';
+  IF pg_catalog.row_security_active('"cx"."files"'::pg_catalog.regclass) THEN
+    -- the row as the table's own: a partition's columns may be in another order, a table that inherits may have more
+    IF TG_RELID = '"cx"."files"'::pg_catalog.regclass THEN v_row := NEW;
+    ELSE v_row := pg_catalog.jsonb_populate_record(NULL::"cx"."files", pg_catalog.to_jsonb(NEW)); END IF;
+    IF NOT authz_gen."cx.files:column_1:holds"(v_row) THEN
+      BEGIN
+        v_lines := (SELECT string_agg(l, E'\n') FROM authz_gen."cx.files:column_1:why"(v_row) l);
+      EXCEPTION WHEN OTHERS THEN
+        v_lines := 'no explanation: ' || SQLERRM;
+      END;
+      RAISE EXCEPTION 'changing folder_id of cx.files % needs: folder.edit', ROW(OLD."org_id"::bigint, OLD."id"::bigint)::text USING ERRCODE = 'insufficient_privilege', DETAIL = v_lines,
+        SCHEMA = 'cx', TABLE = 'files', CONSTRAINT = 'authz_update', HINT = 'rowstile help AZ709';
+    END IF;
   END IF;
   RETURN NEW;
 END $f$;
@@ -3750,24 +3761,35 @@ BEGIN
 END $f$;
 
 -- cx.folders update parent_type, parent_id after (line 59): parent.edit or {parent_id is null}
+-- Whether the rule holds for a row. BEGIN ATOMIC, as the refusals' functions are: the trigger below runs as the app
+-- role, which can't name what is in authz_int in text read at run time (the signed-in service, authz_int."<type>__me")
+CREATE FUNCTION authz_gen."cx.folders:column_2:holds"(p_row "cx"."folders") RETURNS boolean
+LANGUAGE sql STABLE
+BEGIN ATOMIC
+  SELECT coalesce((coalesce((parent_id is null), false)
+    OR (authz_gen."folder__edit__has"((CASE WHEN "folders"."parent_type" = 'folder' THEN (CASE WHEN ("folders"."org_id", "folders"."parent_id") IS NOT NULL THEN ROW("folders"."org_id"::bigint, "folders"."parent_id"::bigint)::text END) END))
+    OR EXISTS (SELECT 1 FROM authz_gen."project__edit" v WHERE v.id = (CASE WHEN "folders"."parent_type" = 'project' THEN (CASE WHEN ("folders"."org_id", "folders"."parent_id") IS NOT NULL THEN ROW("folders"."org_id"::bigint, "folders"."parent_id"::bigint)::text END) END))
+    OR EXISTS (SELECT 1 FROM authz_gen."folder__parent__edit__ext" v WHERE v.id = ROW("folders"."org_id"::bigint, "folders"."id"::bigint)::text))), false) FROM (SELECT (p_row).*) AS "folders";
+END;
 -- checked on the row after the change, for roles that row-level security applies to on the
 -- table (not on TG_RELID: on a partition made since the policy was applied, where it is not on yet, this runs too)
 CREATE FUNCTION authz_int."folder__update_2"() RETURNS trigger
 LANGUAGE plpgsql SET search_path FROM CURRENT AS $f$
-DECLARE v_lines text;
+DECLARE v_lines text; v_row "cx"."folders";
 BEGIN
-  IF pg_catalog.row_security_active('"cx"."folders"'::pg_catalog.regclass)
-     AND NOT coalesce((SELECT (coalesce((parent_id is null), false)
-    OR (authz_gen."folder__edit__has"((CASE WHEN "folders"."parent_type" = 'folder' THEN (CASE WHEN ("folders"."org_id", "folders"."parent_id") IS NOT NULL THEN ROW("folders"."org_id"::bigint, "folders"."parent_id"::bigint)::text END) END))
-    OR EXISTS (SELECT 1 FROM authz_gen."project__edit" v WHERE v.id = (CASE WHEN "folders"."parent_type" = 'project' THEN (CASE WHEN ("folders"."org_id", "folders"."parent_id") IS NOT NULL THEN ROW("folders"."org_id"::bigint, "folders"."parent_id"::bigint)::text END) END))
-    OR EXISTS (SELECT 1 FROM authz_gen."folder__parent__edit__ext" v WHERE v.id = ROW("folders"."org_id"::bigint, "folders"."id"::bigint)::text))) FROM (SELECT NEW.*) AS "folders"), false) THEN
-    BEGIN
-      v_lines := (SELECT string_agg(l, E'\n') FROM authz_gen."cx.folders:column_2:why"(NEW) l);
-    EXCEPTION WHEN OTHERS THEN
-      v_lines := 'no explanation: ' || SQLERRM;
-    END;
-    RAISE EXCEPTION 'changing parent_type, parent_id of cx.folders % needs: parent.edit or {parent_id is null}', ROW(OLD."org_id"::bigint, OLD."id"::bigint)::text USING ERRCODE = 'insufficient_privilege', DETAIL = v_lines,
-      SCHEMA = 'cx', TABLE = 'folders', CONSTRAINT = 'authz_update', HINT = 'rowstile help AZ709';
+  IF pg_catalog.row_security_active('"cx"."folders"'::pg_catalog.regclass) THEN
+    -- the row as the table's own: a partition's columns may be in another order, a table that inherits may have more
+    IF TG_RELID = '"cx"."folders"'::pg_catalog.regclass THEN v_row := NEW;
+    ELSE v_row := pg_catalog.jsonb_populate_record(NULL::"cx"."folders", pg_catalog.to_jsonb(NEW)); END IF;
+    IF NOT authz_gen."cx.folders:column_2:holds"(v_row) THEN
+      BEGIN
+        v_lines := (SELECT string_agg(l, E'\n') FROM authz_gen."cx.folders:column_2:why"(v_row) l);
+      EXCEPTION WHEN OTHERS THEN
+        v_lines := 'no explanation: ' || SQLERRM;
+      END;
+      RAISE EXCEPTION 'changing parent_type, parent_id of cx.folders % needs: parent.edit or {parent_id is null}', ROW(OLD."org_id"::bigint, OLD."id"::bigint)::text USING ERRCODE = 'insufficient_privilege', DETAIL = v_lines,
+        SCHEMA = 'cx', TABLE = 'folders', CONSTRAINT = 'authz_update', HINT = 'rowstile help AZ709';
+    END IF;
   END IF;
   RETURN NEW;
 END $f$;
