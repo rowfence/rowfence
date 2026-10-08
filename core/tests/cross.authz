@@ -65,7 +65,7 @@ rules cx.regions
   select : run
   update : rename
 
-rules cx.sites
+rules cx.sites view cx.sites_seen                                    -- the app reads sites through this view: no mask
   select : run
   update : guard
 

@@ -4312,6 +4312,36 @@ BEGIN
   END LOOP;
 END $fk$;
 
+-- cx.sites_seen: the rows of cx.sites the user may select (line 69: run)
+-- @object view "cx"."sites_seen"
+DO $mv$
+DECLARE cols text; uses text;
+BEGIN
+  SELECT string_agg(format('%I.%I', 'sites', a.attname), ', ' ORDER BY a.attnum) INTO cols
+  FROM pg_attribute a WHERE a.attrelid = '"cx"."sites"'::regclass AND a.attnum > 0 AND NOT a.attisdropped;
+  -- in place when it is there: what the app built on it (a view over it) goes on working
+  BEGIN
+    EXECUTE format('CREATE OR REPLACE VIEW "cx"."sites_seen" WITH (security_barrier) AS SELECT %s FROM "cx"."sites" "sites" WHERE %s',
+                   cols, '(SELECT authz_int.scope_cmd(''cx.sites'', ''select'')) AND (EXISTS (SELECT 1 FROM authz_gen."site__over__run" v WHERE v.id = "sites"."id")
+    AND coalesce((not exists (select 1 from cx.closed c where c.site_id = "sites".id)), false))');
+  EXCEPTION WHEN invalid_table_definition THEN
+    -- its columns are not the ones it had (the table's changed): made anew, unless something is built on it
+    BEGIN
+      DROP VIEW "cx"."sites_seen";
+    EXCEPTION WHEN dependent_objects_still_exist THEN
+      GET STACKED DIAGNOSTICS uses = PG_EXCEPTION_DETAIL;
+      RAISE EXCEPTION 'the masked view cx.sites_seen can''t be replaced in place: the columns of cx.sites changed, and something is built on the view [AZ617]'
+        USING DETAIL = uses, HINT = 'drop what is built on it, apply (or run the migration) again, then make it again';
+    END;
+    EXECUTE format('CREATE VIEW "cx"."sites_seen" WITH (security_barrier) AS SELECT %s FROM "cx"."sites" "sites" WHERE %s',
+                   cols, '(SELECT authz_int.scope_cmd(''cx.sites'', ''select'')) AND (EXISTS (SELECT 1 FROM authz_gen."site__over__run" v WHERE v.id = "sites"."id")
+    AND coalesce((not exists (select 1 from cx.closed c where c.site_id = "sites".id)), false))');
+  END;
+END $mv$;
+COMMENT ON VIEW "cx"."sites_seen" IS 'rowstile masked view';
+REVOKE ALL ON "cx"."sites_seen" FROM PUBLIC;
+GRANT SELECT ON "cx"."sites_seen" TO app_user;
+
 -- Column privileges: masked columns are read through the masked view only
 DO $mc$
 DECLARE r record; cols text;
@@ -7218,7 +7248,7 @@ BEGIN
            FROM pg_depend d WHERE d.refclassid = 'pg_class'::regclass AND d.refobjid = c.oid AND d.deptype = 'n'
              AND NOT (d.classid = 'pg_rewrite'::regclass AND d.objid IN (SELECT oid FROM pg_rewrite WHERE ev_class = c.oid))) || ')', '; ')
   INTO v_old FROM pg_class c JOIN pg_description d ON d.objoid = c.oid AND d.classoid = 'pg_class'::regclass
-  WHERE c.relkind = 'v' AND d.description IN ('rowstile masked view', 'rowfence masked view', 'authzc masked view') AND c.oid <> ALL (ARRAY[]::oid[]);
+  WHERE c.relkind = 'v' AND d.description IN ('rowstile masked view', 'rowfence masked view', 'authzc masked view') AND c.oid <> ALL (ARRAY[to_regclass('"cx"."sites_seen"')::oid]::oid[]);
   IF v_old IS NOT NULL THEN
     RAISE EXCEPTION 'this policy no longer makes a masked view that something in the database is built on: % [AZ617]', v_old
       USING HINT = 'Drop or change what is built on it, then apply again.';
