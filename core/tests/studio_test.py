@@ -492,6 +492,22 @@ def main() -> None:
             and all(x["masked"] == [] for x in r["rows"]),
             r,
         )
+        # why on a policy with a container of two types and custom roles: the ways through the project the doc
+        # sits in, and its own author; a custom role is no way rowstile why offers (roles are made at run time)
+        _, said = cli(masks, "why", "--as", f"user:{carol}", "doc", plain, "edit")
+        lines = said.splitlines()
+        ways = (
+            [x.strip() for x in lines[lines.index("would be granted by:") + 1 :]]
+            if "would be granted by:" in lines
+            else []
+        )
+        check(
+            "why through a container of two types: the project's lead, or the doc's author",
+            any(w.startswith(f"set lead_id of project 1 to {carol}") for w in ways)
+            and any(w.startswith(f"set author_id of doc {plain} to {carol}") for w in ways)
+            and not any("role:" in w or "custom role" in w for w in ways),
+            said,
+        )
     finally:
         ms.stop()
     subprocess.run(["dropdb", "--if-exists", masks], capture_output=True)
