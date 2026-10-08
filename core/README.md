@@ -66,3 +66,16 @@ the stock Postgres image. CI runs it in parts, each on a machine of its own, sid
 | `tests/stress.sh` | the full run and `--proofs`: 16 clients writing a folder tree at once at each isolation level; the tables match a rebuild afterwards, and the biggest moves and links on the tree they leave each take under 10 s alone |
 | `tests/around.py` | every run (4; 16 on the full run; `--soak`: 60, a new seed each night): genpolicy's random policies, each in a world drawn at random too: tables partitioned or with a table that inherits from them, the owner's default privileges, conditions that name things without their schema, who connects (the owner switched to the app role, a member of it, one that has to `SET ROLE`) and with which settings, a search path that starts with decoys; then something changed behind the policy's back (a grant, row-level security off, a table made under a governed one). Checked: difftest's checks in that session, real writes as the app role against the rules, no share left on a row that is gone, a role the policy doesn't name gets nothing, nobody unsigned gets a row, the privileges are those of a plain database, lint reports what changed and `rowstile apply` puts it right |
 | `tests/genpolicy.py` | the full run (12) and `--soak` (100, a new seed each night): random policies, each with its tables and data (write rules with conditions that read another table: a subquery, a function called by a quoted name, an operator), checked against the reference evaluator like the fixed ones |
+
+### What the suites run
+
+`core/ci.sh --coverage 16` runs the suites in an image that also has coverage.py (`core/Dockerfile` built with
+`COVERAGE=1`). Each Python process they start then measures which lines and branches of `authzlib` and `cli` it
+runs, and marks each with the step of `run_tests.sh` that ran it (`ROWSTILE_COVERAGE`; the settings are in
+`tests/coverage.ini`). `tests/coverage_report.py` reads what they measured (`.ci/coverage-16/`) and says:
+
+- for each file, how many of its lines and branches the suites run;
+- each line and branch that nothing runs;
+- what runs of the code that writes the SQL deciding access, but only in steps that never compare the database's
+  answers with the reference evaluator (difftest, genpolicy, around): its SQL was made, and never judged;
+- with `--diff main`: the lines changed since `main` that nothing runs (exit 1 if there are any).

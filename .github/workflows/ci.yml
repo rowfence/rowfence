@@ -57,7 +57,8 @@ jobs:
           - {pg: "18", mode: "--short"}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
-      - run: bash core/ci.sh ${{ matrix.mode }} ${{ matrix.pg }}
+      # --coverage: each Python process also measures what it runs of authzlib and cli (the coverage job reads it)
+      - run: bash core/ci.sh --coverage ${{ matrix.mode }} ${{ matrix.pg }}
         env: {ROWSTILE_CI_LOGS: "${{ runner.temp }}", ROWSTILE_PART: "${{ matrix.part }}"}
       # a cancelled job may stop before ci.sh removes its container: this job's own (the label names the job)
       - if: always()
@@ -67,6 +68,15 @@ jobs:
         with:
           name: logs-pg${{ matrix.pg }}-${{ matrix.part }}
           path: ${{ runner.temp }}/rowstile-ci-${{ matrix.pg }}.log
+      # what it measured, combined in one file (ci.sh's report made it), whose name starts with a dot
+      - if: success()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a   # v7.0.1
+        with:
+          name: coverage-pg${{ matrix.pg }}-${{ matrix.part }}
+          path: .ci/coverage-${{ matrix.pg }}/.coverage
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
   # The checks `main` requires, under the names it knows: one per version, green when every part above was.
   # It runs whatever became of them (a job that is skipped counts as passed), and fails unless they passed
   postgres:
@@ -85,6 +95,28 @@ jobs:
           echo "the suites, all versions and parts together: $SUITES"
           test "$SUITES" = success
         env: {SUITES: "${{ needs.suites.result }}"}
+  # What the suites run of authzlib and cli, every version's and part's measure together (core/tests/coverage_report.py:
+  # the table here, what nothing runs line by line in the artifact). On a pull request, a line it adds or changes
+  # there that nothing runs fails the job
+  coverage:
+    needs: suites
+    runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
+        with: {fetch-depth: 0}     # the changes are read against main
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333   # v8.0.2
+        with: {pattern: "coverage-pg*", path: .ci/parts}
+      - run: docker build -q -t rowstile:16-coverage --build-arg PG_MAJOR=16 --build-arg COVERAGE=1 -f core/Dockerfile .
+      - run: >-
+          docker run --rm -v "$PWD:/src" -w /src/core --entrypoint bash rowstile:16-coverage
+          -c "python3 tests/coverage_report.py --out /src/.ci/coverage $DIFF /src/.ci/parts/coverage-pg*/.coverage"
+        env: {DIFF: "${{ github.event_name == 'pull_request' && '--diff origin/main' || '' }}"}
+      - if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a   # v7.0.1
+        with:
+          name: coverage
+          path: .ci/coverage/report.txt
+          if-no-files-found: ignore
   # rowstile review on pull requests: one comment, updated in place, on what the file manager's
   # policy change does, and a warning on each line it flags (review-ci/github/action.yml), with this commit's command
   review:

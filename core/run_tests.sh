@@ -8,6 +8,7 @@
 #   SOAK_SEED=N ./run_tests.sh --soak                              # the random checks (random policies too), long, with a new seed
 #                         (about 110 minutes; a random seed if SOAK_SEED is empty; the log says which)
 #   ROWSTILE_PART=command ./run_tests.sh --quick                   # one part of a run (below: the parts of each)
+#   ROWSTILE_COVERAGE=/abs/dir ./run_tests.sh --quick              # also measure what the suites run (below)
 # Needs psql, createdb, dropdb and python3. Creates and drops databases named authz_*, as a non-superuser.
 # Each step's result line says how long it took.
 set -u
@@ -39,8 +40,18 @@ PART=${ROWSTILE_PART:-}
 case " $PARTS " in *" ${PART:-${PARTS%% *}} "*) ;; *) echo "no part '$PART' in this run: its parts are $PARTS"; exit 2;; esac
 [ -z "$PART" ] || echo "part $PART (of: $PARTS)"
 part() { [ -z "$PART" ] || [ "$PART" = "$1" ]; }
+# ROWSTILE_COVERAGE=DIR: each Python process the suites start measures which lines and branches of authzlib and
+# cli it runs, into DIR, each one marked with the step that ran it (tests/coverage.ini). It needs coverage.py: the
+# image core/Dockerfile builds with COVERAGE=1 has it, and core/ci.sh --coverage uses that image.
+# python3 tests/coverage_report.py DIR then says what nothing runs.
+if [ -n "${ROWSTILE_COVERAGE:-}" ]; then
+  mkdir -p "$ROWSTILE_COVERAGE/data" && ROWSTILE_COVERAGE=$(cd "$ROWSTILE_COVERAGE" && pwd) || exit 1
+  export ROWSTILE_COVERAGE COVERAGE_PROCESS_START="$PWD/tests/coverage.ini" ROWSTILE_COVERAGE_CODE="$PWD"
+  export ROWSTILE_COVERAGE_CONTEXT=""
+  echo "measuring what the suites run, into $ROWSTILE_COVERAGE"
+fi
 STEPS_RUN=0
-step() { echo; echo "=== $1"; STEP_START=$SECONDS; STEPS_RUN=$((STEPS_RUN + 1)); }
+step() { echo; echo "=== $1"; STEP_START=$SECONDS; STEPS_RUN=$((STEPS_RUN + 1)); ROWSTILE_COVERAGE_CONTEXT=$1; }
 record() {
   local took="($((SECONDS - STEP_START))s)"
   if [ "$1" -eq 0 ]; then echo "--- passed: $2 $took"; else echo "--- FAILED: $2 $took"; failed+=("$2"); fi
