@@ -366,6 +366,13 @@ expect_code "... whatever the session sets" "42501: the audit trail cannot be ch
 admin "... and the trigger is on again after a trim" "O" \
   "SELECT tgenabled FROM pg_trigger WHERE tgrelid = 'authz.audit'::regclass AND tgname = 'authz_audit_append_only'"
 expect_code "the app role cannot trim" "42501: permission denied for function trim_audit" -c "SELECT authz.trim_audit(interval '0')"
+# emptying a governed table whose own columns hold relations (a file's folder and owner): last, the files are gone
+POS=$(PSQL -c "SELECT coalesce(max(pos), 0) FROM authz.changes")
+PSQL -c "TRUNCATE app.files" >/dev/null
+admin "emptying a table whose columns hold relations is recorded" "truncate|app.files" \
+  "SELECT action || '|' || (detail ->> 'table') FROM authz.audit WHERE action = 'truncate' AND object_type = 'file'"
+admin "... and announced for every file" "1" \
+  "SELECT count(*) FROM authz.changes WHERE pos > $POS AND object_type = 'file' AND object_ids = '{*}'"
 admin "inheritance tables still match a rebuild" "t" "SELECT authz.verify()"
 dropdb "$DB"
 if [ $fails -eq 0 ]; then echo "governance: all passed"; else echo "governance: $fails failed"; exit 1; fi
