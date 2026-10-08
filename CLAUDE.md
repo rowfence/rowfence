@@ -156,7 +156,8 @@ User-facing docs: `README.md`, then `docs/reference/` (read them first). Terms i
 - `.github/workflows/ci.yml` — on each push: `tests/unit_test.py` and the type checks, every suite on PG 16
   (`ci.sh`) and what depends on the version on 17 and 18 (`ci.sh --short`), the examples, the conformance suites,
   the editors, packaging, the site. `nightly.yml` (main) — every suite on 17 and 18, the proofs (`--proofs`) on
-  each version, the soak (new seeds each night, one version in turn), the conformance suites on 17 and 18 and on 16
+  each version, the soak (new seeds each night, one version in turn; by hand, several at once on the three versions: `gh workflow run
+  nightly.yml -f only=soak -f soaks=7`), the conformance suites on 17 and 18 and on 16
   through PgBouncer (`integrations/pooler.sh`), then
   the benchmark check, last (`gh workflow run nightly.yml -f only=bench` runs it alone; it judges speed against
   the runners' own baseline, not the gate's limits). On self-hosted runners sharing one machine, jobs with fixed container
