@@ -19,9 +19,10 @@ which works straight from the policy, on sets of ids, to a fixed point, and know
 compiler writes. The two share one thing, the parser: a policy misread there would be misread by both, and
 they would agree. So the evaluator is held to answers that neither of them wrote, below.
 
-- **Random data**: [`tests/difftest.py`](../core/tests/difftest.py) fills five policies' tables with random
-  rows and makes a hundred random changes to each (moves, links, loops, groups inside groups, shares that
-  start and end, ids that change, `TRUNCATE`, several statements in one transaction). After each change,
+- **Random data**: [`tests/difftest.py`](../core/tests/difftest.py) fills six policies' tables with random
+  rows and makes a hundred random changes to each (moves, links, loops, groups inside groups, inheritance
+  through two types at once, shares that start and end, ids that change, `TRUNCATE`, several statements in
+  one transaction). After each change,
   `authz.can`, `authz.list`, `authz.explain`, `authz.who`, what row-level security lets each user read, every
   rule's condition and the masked views are compared with the evaluator's answer.
 - **Random policies**: [`tests/genpolicy.py`](../core/tests/genpolicy.py) writes policies at random, with

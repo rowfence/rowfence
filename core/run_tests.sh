@@ -71,7 +71,7 @@ if [ "$MODE" = soak ]; then
   python3 tests/conditions_test.py --cases 50000 --seed "$SEED"
   record $? "conditions"
   fi
-  for gen in docs alt multi composite loop; do
+  for gen in docs alt multi composite loop cross; do
     # two parts, about as long as each other
     case "$gen" in docs|multi) part changes-1;; *) part changes-2;; esac || continue
     step "random changes, compared with the reference evaluator ($gen, 500 changes, seed $SEED)"
@@ -226,9 +226,9 @@ tests/cookbook.sh
 record $? "cookbook"
 
 fi
-GENS="docs alt multi composite loop"; every_version || GENS=docs
+GENS="docs alt multi composite loop cross"; every_version || GENS=docs
 for gen in $GENS; do
-  # five policies: three in the random part, one with each of the two others, which are shorter, so that the
+  # six policies: four in the random part, one with each of the two others, which are shorter, so that the
   # three parts are about as long as each other
   case "$gen" in composite) part policy;; multi) part command;; *) part random;; esac || continue
   step "random changes, compared with the reference evaluator ($gen, $STEPS changes)"

@@ -48,6 +48,7 @@ POLICIES = {
     "multi": "tests/multi.authz",
     "composite": "tests/composite.authz",
     "loop": "tests/loop.authz",
+    "cross": "tests/cross.authz",
 }
 
 
