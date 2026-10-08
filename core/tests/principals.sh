@@ -112,6 +112,11 @@ got=$(psql -X -q -At -d "$DB" -c "SET ROLE app_user" -c "SET authz.user_id = '3'
 case "$got" in *"you cannot grant doc.helper on doc 1: you do not hold assist"*) echo "ok    a viewer may share helper, but not grant assist, which they don't hold";;
   *) echo "FAIL  sharing what the sharer doesn't hold: $got"; fails=$((fails + 1));; esac
 check "the owner holds it, and may" "1" "$AS_USER SELECT authz.share('doc', 1, 'helper', 'user', 2); SELECT count(*) FROM authz.list_shares('doc', 1) WHERE relation = 'helper';"
+# each relation is shared by its own permission: this viewer holds the one that shares helper (view) and
+# everything reader gives, and still may not share reader, which takes share
+got=$(psql -X -q -At -d "$DB" -c "SET ROLE app_user" -c "SET authz.user_id = '3'" -c "SELECT authz.share('doc', 1, 'reader', 'user', 2)" 2>&1)
+case "$got" in *"you cannot share doc 1 (needs share)"*) echo "ok    ... and may not share reader, which another permission shares";;
+  *) echo "FAIL  sharing a relation by the permission that shares another: $got"; fails=$((fails + 1));; esac
 got=$(psql -X -q -At -d "$DB" -f <(python3 compile_policy.py /tmp/authz_principals.authz --tests) 2>&1)
 case "$got" in *"FAIL  invariant never doc: edit and not owner"*": service 7 can reach {1}"*) echo "ok    ... and the policy tests say which service";;
   *) echo "FAIL  the policy tests on a service breaking an invariant: $got"; fails=$((fails + 1));; esac
