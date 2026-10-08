@@ -1333,6 +1333,21 @@ class Migrations(unittest.TestCase):
             open(os.path.join(d, "0004_schema.sql"), "w", encoding="utf-8").close()
             self.assertEqual(migrations.sql_file_name(d, "authz_x", "20260101000000"), "0005_authz_x.sql")
 
+    def test_what_a_tool_is_refused_for(self) -> None:
+        import migrations
+
+        with tempfile.TemporaryDirectory() as d:
+            for rev in ("aaa", "bbb"):  # two revisions, neither the other's down_revision: two heads
+                with open(os.path.join(d, f"{rev}.py"), "w", encoding="utf-8") as fh:
+                    fh.write(f'revision = "{rev}"\ndown_revision = None\n')
+            with self.assertRaisesRegex(migrations.Error, re.escape("has several heads (aaa, bbb): merge them first")):
+                migrations.write_migration("alembic", d, "x", "SELECT 1;\n")
+        with self.assertRaisesRegex(migrations.Error, "unknown migration tool 'liquibase'"):
+            migrations.write_migration("liquibase", ".", "x", "SELECT 1;\n")
+        for journal, said in (({}, "isn't a journal (no entries)"), ({"entries": [1]}, "an entry that isn't one: 1")):
+            with self.assertRaisesRegex(migrations.Error, re.escape(said)):
+                migrations.journal_of(journal)
+
     def test_the_alembic_revision_says_asyncpg_in_a_line(self) -> None:
         # a policy's revision is one script, and asyncpg takes one statement at a time: its own error carries the
         # whole script (four thousand lines for a small policy). The revision says it first, with the way out; with a
