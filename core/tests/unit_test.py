@@ -1132,6 +1132,27 @@ class Command(unittest.TestCase):
 class Statements(unittest.TestCase):
     """Reading the compiled SQL back as statements, the way psql does (the migrations work on them)."""
 
+    def test_nested_comments_quoted_names_and_what_it_refuses(self) -> None:
+        from authzlib import statements
+
+        sql = (
+            "CREATE TABLE a (x int); /* outer /* inner; */ still a comment; */\n"
+            'CREATE TABLE "b;""c" (y int);\n'
+            "CREATE VIEW v AS SELECT 1 -- a comment; inside\n  AS z;\n"
+        )
+        self.assertEqual(
+            statements.split(sql),
+            [
+                ("", "CREATE TABLE a (x int)"),
+                ("/* outer /* inner; */ still a comment; */", 'CREATE TABLE "b;""c" (y int)'),
+                ("", "CREATE VIEW v AS SELECT 1 -- a comment; inside\n  AS z"),
+            ],
+        )
+        with self.assertRaisesRegex(ValueError, re.escape("unterminated dollar quote $x$")):
+            statements.split("DO $x$ BEGIN END")
+        with self.assertRaisesRegex(ValueError, "unbalanced parentheses in a function's arguments"):
+            statements.made("CREATE FUNCTION f(a int RETURNS int AS 1")
+
     def test_quotes_comments_and_atomic_bodies(self) -> None:
         from authzlib.statements import split
 
@@ -2426,6 +2447,31 @@ class Wire(unittest.TestCase):
         self.assertEqual(convert(1009, b"[0:1]={a,b}"), "[0:1]={a,b}")
         self.assertEqual(self.pgwire._saslprep("pa\u00adss\u2168"), "passIX")  # as psql prepares a password for SCRAM
         self.assertEqual(self.pgwire._saslprep("caf\u00e9"), "caf\u00e9")
+
+
+class TestFiles(unittest.TestCase):
+    """Named tests in files of their own (rowstile.toml's tests): a mistake there is named with its file and line,
+    and so are a test named as one the policy has, and a test about a type the policy lacks."""
+
+    POLICY = (
+        "app role app_user\ntype user = app.users\ntype doc = app.docs\n  owner : user = owner_id\n  can view = owner\n"
+        "rules app.docs\n  select : view\n"
+    )
+
+    def test_what_a_test_file_is_refused_for(self) -> None:
+        for policy, body, said in (
+            ("", 'test "a"\n  user 1 cann view doc 1\n', "t.authz line 2: a test's lines are:"),
+            (
+                'test "a"\n  user 1 can view doc 1\n',
+                'test "a"\n  user 1 can view doc 1\n',
+                "t.authz line 1: there is already a test named 'a'",
+            ),
+            ("", 'test "a"\n  user 1 can view nothing 1\n', "t.authz line 2: unknown type 'nothing'"),
+        ):
+            c = Compiler(parse_policy(self.POLICY + policy, "p.authz"))
+            with self.assertRaisesRegex(PolicyError, re.escape(said)):
+                c.add_test_files({"t.authz": body})
+                c.check_scenarios()
 
 
 class Readers(unittest.TestCase):
