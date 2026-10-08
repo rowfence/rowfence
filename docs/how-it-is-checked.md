@@ -57,7 +57,7 @@ what).
 Inherited permissions are kept in tables by triggers, and those tables must match the tree at every commit.
 [`tests/races.sh`](../core/tests/races.sh) races every pair of tree writes in two sessions at each isolation
 level, and [`tests/stress.sh`](../core/tests/stress.sh) lets sixteen clients write one tree at once; after
-each, the tables are compared with a rebuild.
+each, the tables are compared with a rebuild, and the biggest moves on the tree they leave are timed alone.
 
 ## Proofs in small worlds
 
