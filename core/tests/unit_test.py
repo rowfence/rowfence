@@ -4016,6 +4016,133 @@ class CoverageReport(unittest.TestCase):
             self.assertTrue(os.path.isfile(os.path.join(ROOT, name)), name)
 
 
+class Guards(unittest.TestCase):
+    """Each refusal the SQL authzlib writes can raise is asked for by its own words in some suite: a check that asks
+    only for an SQLSTATE can't tell which guard refused (two that answer 42501 look alike). A guard's own words are
+    four in a row of the parts of its message that don't vary, which no other guard's message has, or its code
+    ([AZ6xx]) when no other has that code."""
+
+    REPO = os.path.dirname(ROOT)
+    N = 4
+    # guards whose every run of words another guard's message has too: words can't tell them apart, so each is
+    # reached by what its check sets up. A new guard listed here wants words of its own, or a line here.
+    SHARED = frozenset(
+        {
+            "% cannot be moved inside itself",
+            "bad",
+            "custom roles on % cannot grant %",
+            "invalid API key",
+            "no API key % of yours",
+            "no caveat % in the policy",
+            "no item % in review %",
+            "no link % on % %",
+            "no pending request %",
+            "no pending request % of yours",
+            "no permission %.% in the policy",
+            "no role % for %",
+            "no scope % in the policy",
+            "no type % in the policy",
+            "the policy does not allow sharing %.% with %",
+            "the policy does not allow sharing %.% with a user",
+            "there is no % %",
+            "you cannot manage role %",
+            "you cannot share % %",
+            "you cannot share % % (needs %)",
+            "you cannot unshare % on % %",
+            "you cannot unshare % on % % (needs %)",
+            "{t.name} % cannot be moved inside itself",
+        }
+    )
+    # guards with no message of their own, in the text: a column rule's refusal, whose message is made in Python
+    # (principals.sh and children.sh ask for its words), and the named tests' end, never shown (AZT00)
+    NO_MESSAGE = 2
+
+    def guards(self) -> list[tuple[str, str | None]]:
+        """(file:line, the message's text as the source writes it) for each RAISE EXCEPTION in authzlib."""
+        literal = re.compile(r"RAISE EXCEPTION\s+(?:USING[^;]*?MESSAGE\s*=\s*)?'((?:[^']|'')*)'")
+        out = []
+        for name in sorted(os.listdir(os.path.join(ROOT, "authzlib"))):
+            if name.endswith(".py"):
+                src = read(f"authzlib/{name}")
+                for m in re.finditer(r"RAISE EXCEPTION", src):
+                    lm = literal.match(src, m.start())
+                    out.append((f"{name}:{src.count(chr(10), 0, m.start()) + 1}", lm.group(1) if lm else None))
+        return out
+
+    def runs(self, message: str) -> set[str]:
+        """Every run of N words of the parts of the message that don't vary (% and {python} do); a part of fewer
+        words, whole, if it is long enough to mean something."""
+        text = message.replace("''", "'").replace("{{", "{").replace("}}", "}")
+        out = set()
+        for part in re.split(r"%|\{[^{}]*\}|\[AZ\d{3}\]", text):
+            words = part.split()
+            if len(words) >= self.N:
+                out |= {" ".join(words[i : i + self.N]) for i in range(len(words) - self.N + 1)}
+            elif len(" ".join(words)) >= 12:
+                out.add(" ".join(words))
+        return out
+
+    def suites(self) -> str:
+        """Every suite's text, white space made single and SQL's doubled quotes read back: the core's suites (but
+        this file, which names the messages), the conformance apps' and the example apps' tests."""
+        paths = [
+            p
+            for pattern in ("core/tests/*.*", "integrations/*/tests/*.*", "examples/*/backend/tests/*.*")
+            for p in glob.glob(os.path.join(self.REPO, *pattern.split("/")))
+            if p.endswith((".sh", ".py", ".sql", ".ts", ".tsx")) and os.path.basename(p) != "unit_test.py"
+        ]
+        self.assertGreater(len(paths), 40, "the suites aren't found")
+        texts = []
+        for p in paths:
+            with open(p, encoding="utf-8", errors="replace") as fh:
+                texts.append(re.sub(r"\s+", " ", fh.read()).replace("''", "'"))
+        return "\n".join(texts)
+
+    def sorted_out(self) -> tuple[list[str], set[str], int]:
+        """(guards no suite asks for by their own words, the messages of those with no words of their own, how
+        many have no message at all)."""
+        guards = self.guards()
+        seen: dict[str, int] = {}
+        codes: dict[str, int] = {}
+        for _, message in guards:
+            for r in self.runs(message or ""):
+                seen[r] = seen.get(r, 0) + 1
+            for c in set(re.findall(r"\[(AZ\d{3})\]", message or "")):
+                codes[c] = codes.get(c, 0) + 1
+        text = self.suites()
+        unasked, shared, no_message = [], set(), 0
+        for where, message in guards:
+            if message is None:
+                no_message += 1
+                continue
+            own = {r for r in self.runs(message) if seen[r] == 1}
+            own_codes = {c for c in re.findall(r"\[(AZ\d{3})\]", message) if codes[c] == 1}
+            if not own and not own_codes:
+                # its words are another's too: some check still asks for them, all of them, in order
+                shared.add(message)
+                parts = [p.strip() for p in re.split(r"%|\{[^{}]*\}", message.replace("''", "'")) if p.strip()]
+                if not re.search(r"[^\n]{0,80}?".join(re.escape(p) for p in parts), text):
+                    unasked.append(f"{where}: {message[:100]} (words another guard has too)")
+            elif not any(r in text for r in own) and not any(re.search(c + r"\b", text) for c in own_codes):
+                unasked.append(f"{where}: {message[:100]}")
+        return unasked, shared, no_message
+
+    def test_each_guard_is_asked_for_by_its_words(self) -> None:
+        unasked, shared, no_message = self.sorted_out()
+        self.assertEqual(unasked, [], "a guard no suite asks for by its own words: write a check that does")
+        self.assertEqual(sorted(shared), sorted(self.SHARED), "guards whose words another has (Guards.SHARED)")
+        self.assertEqual(no_message, self.NO_MESSAGE, "guards with no message of their own (Guards.NO_MESSAGE)")
+
+    def test_the_rule(self) -> None:
+        self.assertEqual(
+            self.runs("you cannot give role % on % %: you do not hold %"),
+            {"you cannot give role", ": you do not", "you do not hold"},
+        )
+        self.assertEqual(self.runs("no type % in the policy"), {"in the policy"})
+        self.assertEqual(self.runs("bad"), set())
+        self.assertIn("doesn't own", " ".join(self.runs("role % belongs to % %, which doesn''t own % %")))
+
+
 class Delivery(unittest.TestCase):
     """What the workflows run, what the packages are built from, and what this folder's README says is tested."""
 

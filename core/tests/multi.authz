@@ -14,14 +14,16 @@ type team = mt.teams
   member : user        = mt.team_members(team_id -> user_id)
   member : team#member shared by manage                        -- teams inside teams, by sharing
   can manage = member
+  can manage_roles = member                                    -- a team owns roles, but folders take theirs from orgs
 
 type project = mt.projects
   org    : org    = org_id
   parent : folder = folder_id                                  -- a project can sit inside a folder
   lead   : user   = lead_id
   viewer : user, team#member, user:*, anyone, link  shared by edit
+  roles  : user, team#member                                   -- custom roles of any owner (no `from`): a team's
   can edit = lead or org.admin or parent.edit
-  can view = edit or viewer or parent.view
+  can view = edit or viewer or parent.view or roles
   can peek = lead                                              -- not edit: an org admin edits, doesn't peek
 
 type folder = mt.folders where {not archived}
@@ -37,6 +39,7 @@ type folder = mt.folders where {not archived}
   can view  = edit or viewer or parent.view or roles
   can share = edit
   can peek  = view                                             -- edit too: on a folder, peek includes edit
+  can archive = owner or roles                                 -- a role may give it; editors, who share, don't hold it
 
 type doc = mt.docs (id uuid)
   container : folder, project = (container_type, container_id)

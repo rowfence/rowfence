@@ -138,6 +138,13 @@ check "alice (who may not) does not" "0" "SET authz.user_id = 1; SELECT count(*)
 expect_code "alice cannot decide it" "42501: you cannot decide request 1" -c "SET authz.user_id = 1" -c "SELECT authz.decide_request($REQ, true)"
 expect_code "alice cannot deny it either" "42501: you cannot decide request 1" -c "SET authz.user_id = 1" -c "SELECT authz.decide_request($REQ, false)"
 expect_code "carol cannot approve her own request" "42501: you cannot decide your own request" -c "SET authz.user_id = 3" -c "SELECT authz.decide_request($REQ, true)"
+expect_code "an answer is yes or no" "P0001: approve (true) or deny (false)" -c "SET authz.user_id = 5" -c "SELECT authz.decide_request($REQ, NULL)"
+expect_code "... for a request still pending" "P0001: no pending request 999" -c "SET authz.user_id = 5" -c "SELECT authz.decide_request(999, true)"
+expect_code "dave cannot withdraw carol's request" "P0001: no pending request $REQ of yours" -c "SET authz.user_id = 4" -c "SELECT authz.cancel_request($REQ)"
+expect_code "a request says why" "P0001: say why you need it" -c "SET authz.user_id = 4" \
+  -c "SELECT authz.request_access('folder', 6, 'viewer', '  ')"
+expect_code "... and how long it may last is more than nothing" "P0001: the duration must be positive" -c "SET authz.user_id = 4" \
+  -c "SELECT authz.request_access('folder', 6, 'viewer', 'please', '-1 day')"
 check "before approval carol cannot view the offer letter" "f" "SET authz.user_id = 3; SELECT authz.can('file', 13, 'view')"
 as 5 -c "SELECT authz.decide_request($REQ, true, 'ok for a week')" >/dev/null
 check "after erin approves, she can" "t" "SET authz.user_id = 3; SELECT authz.can('file', 13, 'view')"
@@ -170,6 +177,9 @@ check "erin's review lists every share on Secrets" "2" "SET authz.user_id = 5; S
 ITEM=$(as 5 -c "SELECT item FROM authz.review_items($REV) WHERE subject_id = '3'")
 as 5 -c "SELECT authz.review_decide($REV, $ITEM, false)" >/dev/null
 expect_code "carol cannot decide in it" "42501: you cannot decide in review 2" -c "SET authz.user_id = 3" -c "SELECT authz.review_decide($REV, $ITEM, true)"
+expect_code "... nor read its items" "42501: you cannot see review $REV" -c "SET authz.user_id = 3" -c "SELECT * FROM authz.review_items($REV)"
+expect_code "... nor close it" "42501: you cannot close review $REV" -c "SET authz.user_id = 3" -c "SELECT authz.close_review($REV)"
+expect_code "erin decides on the items it has" "P0001: no item 999 in review $REV" -c "SET authz.user_id = 5" -c "SELECT authz.review_decide($REV, 999, false)"
 check "closing the review revokes what was marked" "1" "SET authz.user_id = 5; SELECT authz.close_review($REV)"
 check "... carol lost the offer letter" "f" "SET authz.user_id = 3; SELECT authz.can('file', 13, 'view')"
 check "... dave (not decided) kept it" "t" "SET authz.user_id = 4; SELECT authz.can('file', 13, 'view')"

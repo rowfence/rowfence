@@ -449,5 +449,15 @@ for policy in teams teams_shared; do
 done
 dropdb "$CDB"
 
+echo "-- a policy whose user ids have another type than the one applied before (bigint, then uuid)"
+UDB="${DB}_uid"
+fresh "$UDB"
+quiet -d "$UDB" -f example/app_schema.sql -f tests/multi_schema.sql >/dev/null &&
+  python3 compile_policy.py example/docs.authz | quiet -d "$UDB" >/dev/null || bad "applying the docs policy"
+out=$(python3 compile_policy.py tests/multi.authz | psql -X -q -v ON_ERROR_STOP=1 -d "$UDB" 2>&1)
+case "$out" in *"authz.uid() returns another type than this policy's user ids (uuid); drop it first"*"[AZ606]"*)
+  ok "applying is refused, and says what to drop first";; *) bad "user ids of another type" "$out";; esac
+dropdb "$UDB"
+
 rm -rf "$T"
 if [ $fails -eq 0 ]; then echo "apply: all passed"; else echo "apply: $fails failed"; exit 1; fi

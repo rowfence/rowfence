@@ -524,6 +524,11 @@ APPLY = [
         "line 10: table alt.things not found",
     ),
     (
+        "... said first: the policy names what the database lacks",
+        "type thing = alt.things\n  owner : user = owner_id\n  can view = owner\n",
+        "the policy does not match this database:",
+    ),
+    (
         "a column that doesn't exist",
         "  editor : user = editor_id\n  can view = editor\n",
         "line 10: column editor_id not found in alt.docs",

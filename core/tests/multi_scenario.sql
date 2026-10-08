@@ -15,6 +15,10 @@ BEGIN
 END $$;
 CREATE FUNCTION test.try(stmt text) RETURNS text LANGUAGE plpgsql AS $$
 BEGIN EXECUTE stmt; RETURN 'ok'; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE; END $$;
+-- a refusal by its words, 'SQLSTATE: message', as tests/words.sh reads them: the code alone can't say which guard
+-- refused, where two answer with the same one
+CREATE FUNCTION test.error(stmt text) RETURNS text LANGUAGE plpgsql AS $$
+BEGIN EXECUTE stmt; RETURN 'ok'; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || SQLERRM; END $$;
 CREATE FUNCTION test.rows(stmt text) RETURNS bigint LANGUAGE plpgsql AS $$
 DECLARE n bigint; BEGIN EXECUTE stmt; GET DIAGNOSTICS n = ROW_COUNT; RETURN n; END $$;
 CREATE FUNCTION test.docs() RETURNS text LANGUAGE sql AS $$
@@ -106,18 +110,25 @@ SELECT test.ok('alice shares folder 1 with carol as viewer',
   test.try($$SELECT authz.share('folder', '1', 'viewer', 'user', '00000000-0000-4000-8000-000000000003')$$) = 'ok');
 SELECT test.as(3);
 SELECT test.ok('carol now sees folder 1''s documents', test.docs() = '01, 02');
-SELECT test.ok('carol (viewer) cannot share folder 1: viewer is shared by edit',
-  test.try($$SELECT authz.share('folder', '1', 'viewer', 'user', '00000000-0000-4000-8000-000000000004')$$) = '42501');
+SELECT test.ok('carol (viewer) cannot share folder 1: viewer is shared by edit (she may share nothing there)',
+  test.error($$SELECT authz.share('folder', '1', 'viewer', 'user', '00000000-0000-4000-8000-000000000004')$$)
+    = '42501: you cannot share folder 1');
 RESET ROLE;
 UPDATE mt.users SET active = false WHERE id = '00000000-0000-4000-8000-000000000006';
 SET ROLE app_user;
 SELECT test.as(1);
 SELECT test.ok('shared if: no sharing with inactive users',
-  test.try($$SELECT authz.share('folder', '1', 'viewer', 'user', '00000000-0000-4000-8000-000000000006')$$) = '42501');
+  test.error($$SELECT authz.share('folder', '1', 'viewer', 'user', '00000000-0000-4000-8000-000000000006')$$)
+    LIKE '42501: the policy does not allow this share (line %)');
 SELECT test.ok('sharing with someone who does not exist is refused',
-  test.try($$SELECT authz.share('folder', '1', 'viewer', 'user', '00000000-0000-4000-8000-000000000099')$$) = '23503');
+  test.error($$SELECT authz.share('folder', '1', 'viewer', 'user', '00000000-0000-4000-8000-000000000099')$$)
+    = '23503: there is no user 00000000-0000-4000-8000-000000000099');
+SELECT test.ok('a share names a caveat the policy has',
+  test.error($$SELECT authz.share('folder', '1', 'viewer', 'user', '00000000-0000-4000-8000-000000000004', '', NULL, NULL,
+                                  'nosuch', '{}')$$) = 'P0001: no caveat nosuch in the policy');
 SELECT test.ok('shares the policy does not declare are refused (anyone on folders)',
-  test.try($$SELECT authz.share('folder', '1', 'viewer', 'anyone', '*')$$) = 'P0001');
+  test.error($$SELECT authz.share('folder', '1', 'viewer', 'anyone', '*')$$)
+    = 'P0001: the policy does not allow sharing folder.viewer with anyone');
 
 -- every signed-in user; anyone at all
 SELECT test.ok('alice shares folder 2 with every signed-in user',
@@ -224,13 +235,21 @@ SELECT authz.unshare('folder', '1', 'viewer', 'user', '00000000-0000-4000-8000-0
 -- ---------------------------------------------------------------------
 SELECT test.as(1);
 SELECT test.ok('alice is no Acme admin: she cannot define roles for Acme',
-  test.try($$SELECT authz.create_role('org', '1', 'folder', 'reviewer', ARRAY['view'])$$) = '42501');
+  test.error($$SELECT authz.create_role('org', '1', 'folder', 'reviewer', ARRAY['view'])$$)
+    = '42501: you cannot manage roles of org 1');
+SELECT test.ok('... nor for a type that has no manage_roles',
+  test.error($$SELECT authz.create_role('project', '1', 'folder', 'reviewer', ARRAY['view'])$$)
+    = 'P0001: project has no manage_roles permission in the policy');
+SELECT test.ok('... and a team''s roles (alice is in team 1) are for projects, not for folders, which take theirs from orgs',
+  test.error($$SELECT authz.create_role('team', '1', 'folder', 'reviewer', ARRAY['view'])$$)
+    = 'P0001: custom roles on folder belong to a org (the policy says where they come from), not to a team');
 SELECT test.as(5);
 SELECT test.ok('erin (Acme admin) defines "reviewer" (view) and "writer" (view, edit) for folders',
   test.try($$SELECT authz.create_role('org', '1', 'folder', 'reviewer', ARRAY['view'])$$) = 'ok'
   AND test.try($$SELECT authz.create_role('org', '1', 'folder', 'writer', ARRAY['view', 'edit'])$$) = 'ok');
 SELECT test.ok('a role cannot include what the policy does not let roles grant (share)',
-  test.try($$SELECT authz.create_role('org', '1', 'folder', 'boss', ARRAY['share'])$$) = 'P0001');
+  test.error($$SELECT authz.create_role('org', '1', 'folder', 'boss', ARRAY['share'])$$)
+    = 'P0001: custom roles on folder cannot grant share');
 SELECT test.ok('Acme''s roles are listed for Acme members', (SELECT count(*) FROM authz.roles_of('org', '1')) = 2);
 SELECT set_config('test.reviewer', (SELECT id::text FROM authz.roles_of('org', '1') WHERE name = 'reviewer'), false);
 SELECT set_config('test.writer', (SELECT id::text FROM authz.roles_of('org', '1') WHERE name = 'writer'), false);
@@ -242,9 +261,16 @@ SELECT test.as(4);
 SELECT test.ok('dave views folder 1 and below, but cannot edit',
   test.docs() = '01, 02' AND NOT authz.can('folder', 1, 'edit'));
 SELECT test.as(3);
-SELECT test.ok('carol (a viewer) cannot hand out the writer role: she does not hold edit',
-  test.try(format($$SELECT authz.share('folder', '1', 'role:%s', 'user', '00000000-0000-4000-8000-000000000004')$$,
-                  current_setting('test.writer'))) = '42501');
+SELECT test.ok('carol (a viewer) cannot hand out the writer role: she may not share folder 1',
+  test.error(format($$SELECT authz.share('folder', '1', 'role:%s', 'user', '00000000-0000-4000-8000-000000000004')$$,
+                    current_setting('test.writer'))) = '42501: you cannot share folder 1');
+SELECT test.as(1);
+SELECT test.ok('a role is given to whom the policy says (user, team#member), not to a team itself',
+  test.error(format($$SELECT authz.share('folder', '1', 'role:%s', 'team', '1')$$, current_setting('test.writer')))
+    = 'P0001: custom roles on folder cannot be given to team');
+SELECT test.ok('... and only a role that exists, for its type',
+  test.error($$SELECT authz.share('folder', '1', 'role:999999', 'user', '00000000-0000-4000-8000-000000000004')$$)
+    = 'P0001: no role role:999999 for folder');
 SELECT test.as(5);
 SELECT test.ok('erin adds edit to reviewer: dave can now edit',
   test.try(format($$SELECT authz.set_role_permissions(%s, ARRAY['view', 'edit'])$$, current_setting('test.reviewer'))) = 'ok');
@@ -262,8 +288,8 @@ SELECT test.ok('gina (Globex admin) defines "auditor" (view) for Globex''s folde
 SELECT set_config('test.auditor', (SELECT id::text FROM authz.roles_of('org', '2') WHERE name = 'auditor'), false);
 SELECT test.as(1);
 SELECT test.ok('alice cannot give Globex''s role on Acme''s folder 1',
-  test.try(format($$SELECT authz.share('folder', '1', 'role:%s', 'user', '00000000-0000-4000-8000-000000000004')$$,
-                  current_setting('test.auditor'))) = 'P0001');
+  test.error(format($$SELECT authz.share('folder', '1', 'role:%s', 'user', '00000000-0000-4000-8000-000000000004')$$,
+                    current_setting('test.auditor'))) = 'P0001: role auditor belongs to org 2, which doesn''t own folder 1');
 RESET ROLE;
 INSERT INTO authz.shares (object_type, object_id, relation, subject_type, subject_id)
 VALUES ('folder', '1', 'role:' || current_setting('test.auditor'), 'user', '00000000-0000-4000-8000-000000000004');
@@ -278,6 +304,20 @@ RESET ROLE;
 UPDATE mt.folders SET org_id = 1 WHERE id = 1;
 DELETE FROM authz.shares WHERE relation = 'role:' || current_setting('test.auditor');
 SET ROLE app_user;
+-- a role may give what one who may share doesn't hold (archive: owners only): giving it is refused
+SELECT test.as(5);
+SELECT set_config('test.archivist', authz.create_role('org', '1', 'folder', 'archivist', ARRAY['archive'])::text, false);
+SELECT test.as(1);
+SELECT authz.share('folder', '1', 'editor', 'user', '00000000-0000-4000-8000-000000000002');
+SELECT test.as(2);
+SELECT test.ok('bob (an editor: he may share folder 1) cannot give the archivist role, for he does not hold archive',
+  test.error(format($$SELECT authz.share('folder', '1', 'role:%s', 'user', '00000000-0000-4000-8000-000000000004')$$,
+                    current_setting('test.archivist')))
+    = '42501: you cannot give role archivist on folder 1: you do not hold archive');
+SELECT test.as(1);
+SELECT authz.unshare('folder', '1', 'editor', 'user', '00000000-0000-4000-8000-000000000002');
+SELECT test.as(5);
+SELECT authz.delete_role(current_setting('test.archivist')::bigint);
 
 -- ---------------------------------------------------------------------
 -- Writes through RLS on documents
