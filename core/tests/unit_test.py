@@ -4224,6 +4224,66 @@ class Respelling(unittest.TestCase):
         self.assertNotRegex(sql, r"(?<![\"\w])(Gp|parentId|Archived)(?![\"\w])", "a name unquoted")
 
 
+class CheckCounts(unittest.TestCase):
+    """tests/check_counts.py, which ci.sh runs on run_tests.sh's log: each suite passes as many checks as
+    tests/check_counts.txt says, no fewer and no more; the random ones aren't counted."""
+
+    LOG = (
+        "=== the share API\nok    one\nok    two\n--- passed: multi scenario (1s)\n"
+        "=== the scenario\n93 checks passed\n--- passed: scenario (1s)\n"
+        "Ran 216 tests in 69.120s\n\nOK\n--- passed: unit (69s)\n"
+        "policy errors: 132 of 133 cases\n--- FAILED: policy errors (2s)\n"
+        "ok    drawn at random\n--- passed: difftest docs (14s)\n"
+        "--- passed: re-apply (0s)\n"
+    )
+
+    def setUp(self) -> None:
+        sys.path.insert(0, os.path.join(ROOT, "tests"))
+        import check_counts
+
+        self.c = check_counts
+
+    def test_what_a_log_counts(self) -> None:
+        self.assertEqual(
+            self.c.counted(self.LOG),
+            {"multi scenario": 2, "scenario": 93, "unit": 216, "policy errors": 132, "re-apply": 0},
+        )
+
+    def test_fewer_or_more_is_said(self) -> None:
+        want = {"multi scenario": 3, "scenario": 93, "unit": 215, "cli": 80}  # cli: not in this log, not asked
+        self.assertEqual(
+            self.c.differences(self.c.counted(self.LOG), want),
+            [
+                "multi scenario passed 2 checks, check_counts.txt says 3",
+                "policy errors passed 132 checks, check_counts.txt doesn't name it",
+                "unit passed 216 checks, check_counts.txt says 215",
+            ],
+        )
+
+    def test_a_count_that_isnt_fixed(self) -> None:
+        got, unfixed = self.c.together([{"a": 1}, {"a": 1, "b": 2}, {"a": 3}])
+        self.assertEqual(got, {"a": 1, "b": 2})
+        self.assertEqual(unfixed, ["a passed 1 checks in one log and 3 in another: its count isn't fixed"])
+
+    def test_writing_keeps_the_comments(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "counts.txt")
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write("# what this is\nunit 1\n")
+            self.c.write(path, {"unit": 216, "scenario": 93, "re-apply": 0})
+            with open(path, encoding="utf-8") as fh:
+                self.assertEqual(fh.read(), "# what this is\nscenario 93\nunit 216\n")
+            self.assertEqual(self.c.expected(path), {"scenario": 93, "unit": 216})
+
+    def test_each_suite_written_is_one_run_tests_records(self) -> None:
+        with open(os.path.join(ROOT, "run_tests.sh"), encoding="utf-8") as fh:
+            recorded = set(re.findall(r'^\s*record \S+ "([^"$]+)"$', fh.read(), re.M))
+        written = self.c.expected()
+        self.assertEqual(sorted(set(written) - recorded), [])
+        self.assertEqual(sorted(k for k in written if not self.c.FIXED.match(k)), [])  # random ones aren't counted
+        self.assertNotIn(0, written.values())
+
+
 class Delivery(unittest.TestCase):
     """What the workflows run, what the packages are built from, and what this folder's README says is tested."""
 

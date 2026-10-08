@@ -59,6 +59,9 @@ record() {
   if [ "$1" -eq 0 ]; then echo "--- passed: $2 $took"; else echo "--- FAILED: $2 $took"; failed+=("$2"); fi
 }
 apply() { PGOPTIONS="-c client_min_messages=error" psql -X -q -v ON_ERROR_STOP=1 -d "$DB" -f "$1"; }
+# a suite's output without a line for each check it passed, but how many it passed: the log stays short, and
+# tests/check_counts.py (which core/ci.sh runs on the log) still sees how many each suite passed
+quiet_ok() { awk '/^ok/ {n++; next} {print} END {print n + 0 " checks passed"}'; }
 
 # --soak: the parser fuzzer and every random-change run, longer and with a seed of their own, then the race
 # and stress tests below, longer too. Nightly runs it with the run's id, so each night tries new cases.
@@ -125,7 +128,8 @@ apply /tmp/authz_docs.sql && apply /tmp/authz_docs.sql &&
 [ "$(psql -X -q -d "$DB" -At -c 'SELECT count(*) FROM authz.shares')" = "$(cat /tmp/authz_shares_before)" ] &&
 [ "$(psql -X -q -d "$DB" -At -c 'SELECT authz.verify()')" = "t" ]
 record $? "re-apply"
-tests/keep.sh >/tmp/authz_keep.log 2>&1; rc=$?; grep "FAIL" /tmp/authz_keep.log
+tests/keep.sh >/tmp/authz_keep.log 2>&1; rc=$?; echo "$(grep -c '^ok' /tmp/authz_keep.log) checks passed"
+grep "FAIL" /tmp/authz_keep.log
 record $rc "keep unchanged trees"
 dropdb "$DB"
 
@@ -164,7 +168,7 @@ step "developer tools: diagram, Python and TypeScript clients, editor grammar"
 python3 tests/tools_test.py
 record $? "tools"
 if every_version; then
-  python3 tests/lsp_test.py | grep -v "^ok"
+  python3 tests/lsp_test.py | quiet_ok
   record "${PIPESTATUS[0]}" "language server"
 fi
 
@@ -190,19 +194,19 @@ tests/review.sh
 record $? "review"
 if every_version; then
 step "a migration leaves what applying the new policy whole leaves (each kind of change, both ways)"
-python3 tests/migrate_test.py | grep -v "^ok"
+python3 tests/migrate_test.py | quiet_ok
 record "${PIPESTATUS[0]}" "migrate vs apply"
 fi
 fi
 if part policy; then
 step "prove, coverage, snapshots, indexes, plans and bench"
-python3 tests/confidence_test.py | grep -v "^ok"
+python3 tests/confidence_test.py | quiet_ok
 record "${PIPESTATUS[0]}" "confidence"
 step "why, and how to grant; Studio (read-only, and able to write)"
-python3 tests/studio_test.py | grep -v "^ok"
+python3 tests/studio_test.py | quiet_ok
 record "${PIPESTATUS[0]}" "studio"
 step "the MCP server, for coding agents: check, prove, push, test, why, lint"
-python3 tests/mcp_test.py | grep -v "^ok"
+python3 tests/mcp_test.py | quiet_ok
 record "${PIPESTATUS[0]}" "mcp"
 step "day to day: named tests, refusals that say why, who_among, init, dev, --as"
 tests/devx.sh
@@ -262,7 +266,7 @@ fi
 if { [ "$MODE" = full ] || [ "$MODE" = proofs ] || [ "$MODE" = soak ]; } && part races; then
   STRESS=100; [ "$MODE" = proofs ] && STRESS=15; [ "$MODE" = soak ] && STRESS=300
   step "tree writes raced in pairs"
-  tests/races.sh | grep -v "^ok"
+  tests/races.sh | quiet_ok
   record "${PIPESTATUS[0]}" "races"
   step "tree writes under stress (${STRESS}s per isolation level)"
   tests/stress.sh $STRESS
