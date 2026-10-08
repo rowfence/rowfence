@@ -85,3 +85,14 @@ measured (`.ci/coverage-16/`) and says:
   no suite ever calls, as far as Postgres can count: not a call that raises, nor one before a database's last
   apply (applying makes the functions anew), nor a plain SQL function's, which it may inline (listed apart);
 - with `--diff main`: the lines changed since `main` that nothing runs (exit 1 if there are any).
+
+### How many checks each suite passes
+
+A suite can stop checking something and stay green: a glob that matches nothing, a loop over an empty list, a
+suite cut short. So `tests/check_counts.txt` says how many checks each suite passes, and `core/ci.sh` holds every
+run to it (`tests/check_counts.py`, on the run's log): a suite that passes fewer or more fails the run, though
+each of its checks passed, and a count that changes is in the diff, like the golden SQL. After adding or taking
+away checks on purpose, write the new count there, or `python3 tests/check_counts.py --write LOG` with the run's
+log (`rowstile-ci-16.log`, in `/tmp` or where `ROWSTILE_CI_LOGS` says). The random suites (difftest, genpolicy,
+around, the conditions, the parser fuzzer, the stress test) check as many things as their seeds draw, and aren't
+counted.

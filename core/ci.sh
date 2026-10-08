@@ -68,10 +68,16 @@ for v in $VERSIONS; do
     [ -f "$out.rc" ] && { why=""; break; }
     echo 1 > "$out.rc"
   done
-  rc=$(cat "$out.rc"); cp "$out.log" "$LOGS/rowstile-ci-$v.log"; rm -f "$out.log" "$out.rc"
+  rc=$(cat "$out.rc")
+  # each suite passed as many checks as tests/check_counts.txt says (tests/check_counts.py, on the log, in the
+  # container: its python3)
+  counts=$(docker exec -w /src/core "$name" python3 tests/check_counts.py "/src/$out.log" 2>&1) ||
+    { [ "$rc" -ne 0 ] || rc=1; }
+  cp "$out.log" "$LOGS/rowstile-ci-$v.log"; rm -f "$out.log" "$out.rc"
   # said in the copy: the log itself was made inside the container (by root, on Linux), and this user can't add to it
+  printf '%s\n' "$counts" >> "$LOGS/rowstile-ci-$v.log"
   [ -z "$why" ] || echo "FAILED: $why" >> "$LOGS/rowstile-ci-$v.log"
-  grep -E "^(--- |ALL PASSED|FAILED)" "$LOGS/rowstile-ci-$v.log"
+  grep -E "^(--- |ALL PASSED|FAILED|check counts: )" "$LOGS/rowstile-ci-$v.log"
   [ $rc -eq 0 ] || failed+=("$v")
   # what the suites ran: the totals here, each file's beside the log, what nothing runs in .ci/coverage-<version>
   if [ -n "$COVERAGE" ]; then

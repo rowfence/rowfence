@@ -102,6 +102,10 @@ not a proof for worlds of any size, and it reads the policy, not your data.
   is applied and tested, and every line of code on the stack pages is in an app whose tests pass.
 - **Three versions of Postgres**: every suite on PostgreSQL 16 for each change, and on 17 and 18
   [every night](../.github/workflows/nightly.yml), with the races, the stress test and the random policies.
+- **The suites themselves**: each passes as many checks as
+  [`tests/check_counts.txt`](../core/tests/check_counts.txt) says, no fewer and no more, or the run fails. A
+  suite that stopped checking something (a glob that matches nothing, a loop over an empty list) can't stay
+  green unseen.
 
 ## What a review of every file found
 
