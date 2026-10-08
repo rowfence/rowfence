@@ -19,12 +19,13 @@ The data (Data; difftest reads it from a database, World makes it up):
 from __future__ import annotations
 
 import dataclasses
+import itertools
 import random
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import TypeAlias, TypedDict, TypeVar, cast
 
-from .conditions import Scalar, columns_of, simple, truth, uses_uid
+from .conditions import Node, Scalar, columns_of, simple, truth, uses_uid
 from .parse import KEYWORDS, ROLES, Expr, Policy, Relation, Rule, Source, Type
 
 # a relation or permission of a type, and the ids that hold it
@@ -117,7 +118,10 @@ class Reference:
         self.data = Data()
         self.links: set[str] = set()
         self.principal: tuple[str, str] | None = None
-        self._rows: dict[tuple[int, str], dict[str, dict[str, Scalar]]] = {}
+        # each type's rows (row_values), for the data they were read from: held, not its id(), which a later
+        # world's data may take once this one is gone
+        self._rows_of: Data | None = None
+        self._rows: dict[str, dict[str, dict[str, Scalar]]] = {}
 
     def strata(self) -> list[list[Name]]:
         """Groups of names that depend on each other, each after the ones it depends on."""
@@ -285,8 +289,9 @@ class Reference:
     def row_values(self, t: Type) -> dict[str, dict[str, Scalar]]:
         """Each row's column values for simple conditions; a column a relation reads is its link's id (so a
         smaller world, with a link taken away, has the column NULL)."""
-        key = (id(self.data), t.name)
-        if key not in self._rows:
+        if self._rows_of is not self.data:
+            self._rows_of, self._rows = self.data, {}
+        if t.name not in self._rows:
             rows = {i: dict(v) for i, v in self.data.columns.get(t.name, {}).items()}
             for r in t.relations.values():
                 for i, src in enumerate(r.sources):
@@ -297,8 +302,8 @@ class Reference:
                         row[col] = None
                     for o, s in self.data.pairs.get((t.name, r.name, i, src.subjects[0][0], ""), []):
                         rows.setdefault(o, {})[col] = s
-            self._rows = {key: rows}
-        return self._rows[key]
+            self._rows[t.name] = rows
+        return self._rows[t.name]
 
     def role_holders(self, state: State, t: Type, perm: str) -> set[str]:
         """The objects of t on which the principal holds a custom role that includes perm: what `roles` means in
@@ -394,6 +399,20 @@ class Difference(TypedDict):
     worlds: int  # how many worlds were tried
 
 
+def groups(nodes: list[tuple[Node, bool]]) -> list[list[tuple[Node, bool]]]:
+    """Conditions in groups that read columns in common: a group's values are chosen together, apart from the
+    others'."""
+    out: list[tuple[set[str], list[tuple[Node, bool]]]] = []
+    for item in nodes:
+        cols, members = set(columns_of(item[0])), [item]
+        for other in [g for g in out if g[0] & cols]:
+            out.remove(other)
+            cols |= other[0]
+            members = other[1] + members
+        out.append((cols, members))
+    return [members for _, members in out]
+
+
 class World:
     """Made-up data for one or more policies, the same for what they share: ids per type, the links each
     column, link table and share holds, the column values simple conditions read (conditions.py: `{archived}`
@@ -483,20 +502,51 @@ class World:
                 )
             for i in ids:
                 out[tname][i][col] = drawn[i]
+        self.corner_columns(pol, out)
         return out
 
-    def in_corner(self, tname: str, cond: str, pol: Policy) -> bool:
-        """Whether this corner says yes or no for the simple condition on every row, as for any other: not when it
-        reads who is signed in or a relation's column (those come from the links, the same facts as the relation)."""
-        if cond not in self.conds:
-            return False
-        node = simple(cond)
-        if node is None:
-            return True
-        if uses_uid(node):
-            return False
-        linked = self.linked(pol)
-        return not any((tname, col) in linked for col in columns_of(node))
+    # a corner leaves drawn the values of columns its simple conditions read together (one reading two, another
+    # reading one of those and a third...) when they have more than this many combinations of values
+    CORNER_CHOICES = 4096
+
+    def corner_columns(self, pol: Policy, out: dict[str, dict[str, dict[str, Scalar]]]) -> None:
+        """In a corner, each row's values for the columns its type's simple conditions read: chosen so that as
+        many of those conditions as can be say what the corner says. They are still read from the columns, so a
+        condition and its opposite (`{archived}`, `{not archived}`) never both hold: the values decide. Conditions
+        that share no column are chosen for apart. Not those that read who is signed in or a relation's column
+        (those come from the links, the same facts as the relation)."""
+        if not self.conds:
+            return
+        domains, linked = self.domains(pol), self.linked(pol)
+        conds = list(Reference(pol).conditions()) + [(t.name, t.where) for t in pol.types.values() if t.where]
+        wanted: dict[str, list[tuple[Node, bool]]] = {}
+        for tname, cond in dict.fromkeys(conds):
+            node = simple(cond)
+            if cond not in self.conds or tname not in pol.types or node is None or uses_uid(node):
+                continue
+            if not any((tname, col) in linked for col in columns_of(node)):
+                wanted.setdefault(tname, []).append((node, self.conds[cond]))
+        for tname, nodes in sorted(wanted.items(), key=lambda kv: kv[0]):
+            for group in groups(nodes):
+                cols = sorted({col for node, _ in group for col in columns_of(node)})
+                combos = 1
+                for col in cols:
+                    combos *= len(domains[(tname, col)])
+                if combos > self.CORNER_CHOICES:
+                    continue
+
+                def said(
+                    values: tuple[Scalar, ...], cols: list[str] = cols, group: list[tuple[Node, bool]] = group
+                ) -> int:
+                    row = dict(zip(cols, values, strict=True))
+                    return sum((truth(node, row, None) is True) == want for node, want in group)
+
+                choices = list(itertools.product(*[domains[(tname, col)] for col in cols]))
+                most = max(said(v) for v in choices)
+                best = [v for v in choices if said(v) == most]
+                for i in out[tname]:
+                    values = self.pick(("corner", tname, i, *cols), lambda rng, best=best: rng.choice(best))
+                    out[tname][i].update(zip(cols, values, strict=True))
 
     def pick(self, key: tuple[object, ...], make: Callable[[random.Random], V]) -> V:
         """What make gives for key, made once per world from the world's seed and the key."""
@@ -526,7 +576,7 @@ class World:
             out.ids[t.name] = ids
             # the where is a condition like any other: the same text gives the same rows in a rule or a permission
             where = simple(t.where) if t.where else None
-            if t.where and where is not None and not uses_uid(where) and not self.in_corner(t.name, t.where, pol):
+            if t.where and where is not None and not uses_uid(where):
                 out.valid[t.name] = [i for i in ids if truth(where, out.columns[t.name][i], None) is True]
             else:
                 out.valid[t.name] = self.holds(t.name, t.where, ids, 0.85) if t.where else ids
@@ -554,7 +604,7 @@ class World:
             # a simple condition reads the row's columns
             if cond in KEYWORDS.values():
                 out.cond[(tname, cond)] = []
-            elif simple(cond) is None or self.in_corner(tname, cond, pol):
+            elif simple(cond) is None:
                 out.cond[(tname, cond)] = self.holds(tname, cond, self.ids(tname))
         return out
 

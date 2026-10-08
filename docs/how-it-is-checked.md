@@ -62,8 +62,10 @@ each, the tables are compared with a rebuild, and the biggest moves on the tree 
 ## Proofs in small worlds
 
 `rowstile prove` takes a policy's invariants ("never: someone views a workspace of an organisation they aren't
-in") and looks for a small world in which one fails: a few users, a few rows, every way of linking them. It
-answers with the smallest counterexample, or says that there is none among the worlds tried. It is a search,
+in") and looks for a small world in which one fails: a few users, a few rows, every way of linking them, and
+at each size worlds where every condition holds on every row or on none (a counterexample that needs several
+at once is rare in worlds drawn row by row). It answers with the smallest counterexample, or says that there
+is none among the worlds tried. It is a search,
 not a proof for worlds of any size, and it reads the policy, not your data.
 
 ## What ships, and what the docs say

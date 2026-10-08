@@ -122,7 +122,9 @@ def main() -> None:
         with open(ok, "w", encoding="utf-8") as fh:
             fh.write(text.replace("never folder: share and not org.member", "never folder: edit and not view"))
         rc, out = cli(None, "prove", ok, "--worlds", "60")
-        check("one it does: exit 0", rc == 0 and "ok   holds in every world tried (60 worlds" in out, out)
+        # the 60 drawn, and the corners (each condition true on every row or none) 3 times at each of the 4 sizes
+        tried = re.search(r"ok   holds in every world tried \((\d+) worlds", out)
+        check("one it does: exit 0", rc == 0 and tried is not None and (int(tried.group(1)) - 60) % 12 == 0, out)
         with open(ok, "w", encoding="utf-8") as fh:
             fh.write(
                 text.replace(

@@ -2414,14 +2414,56 @@ class Confidence(unittest.TestCase):
         self.assertIn("no   user 1 holds it on folder 1", prove.describe([r]))
 
     def test_prove_says_when_none_is_found(self) -> None:
-        from authzlib import prove
+        from authzlib import evaluate, prove
 
         text = read(POLICIES["docs"]).replace(
             "never folder: share and not org.member", "never folder: edit and not view"
         )
-        [r] = prove.prove(parse_policy(text, "docs.authz"), worlds=80)
+        pol = parse_policy(text, "docs.authz")
+        [r] = prove.prove(pol, worlds=80)
         self.assertTrue(r["holds"])
-        self.assertEqual(r["worlds"], 80)
+        # the 80 drawn, and each corner 3 times at each of the 4 sizes
+        self.assertEqual(r["worlds"], 80 + 3 * 4 * len(evaluate.corners([pol])))
+
+    def test_prove_finds_a_counterexample_that_needs_conditions_at_once(self) -> None:
+        # a t3 holds p3 through its t1, where {b1 and b2} must hold, and the invariant asks {b1} on the t3 too: a
+        # world drawn row by row has that one time in hundreds (the first found was the 191st world), a corner at
+        # once (found by a soak, where 200 worlds said it holds)
+        from authzlib import prove
+
+        [r] = prove.prove(
+            parse_policy(
+                self.HEAD + "type t1 = app.t1\n  r1 : user = c_r1\n  parent : t1 = parent_id\n  can p2 = r1\n"
+                "  can p3 = parent.p2 and {b1 and b2}\ntype t3 = app.t3\n  up : t1 = c_up\n  can p3 = up.p3\n"
+                "invariants\n  never t3: p3 and {b1}\n",
+                "p.authz",
+            ),
+            worlds=200,
+        )
+        self.assertFalse(r["holds"])
+        self.assertLessEqual(r["worlds"], 20)
+        self.assertEqual(r["world"][:3], ["user: 1", "t1: 1", "t3: 1"])
+
+    def test_the_evaluator_reads_the_rows_of_the_data_it_is_given(self) -> None:
+        # the column values it reads for a world were kept by the world's id(): once that world was gone, another
+        # could be made at its address and read the first one's rows (prove counted a counterexample that wasn't).
+        # Every id the same here: the rows must still be the second world's
+        from unittest import mock
+
+        from authzlib import evaluate
+
+        pol = parse_policy(self.HEAD + "type doc = app.docs\n  can view = {published}\n", "p.authz")
+
+        def world(published: bool) -> evaluate.Data:
+            ids = {"user": ["1"], "doc": ["1"]}
+            return evaluate.Data(
+                ids=ids, valid=ids, columns={"user": {"1": {}}, "doc": {"1": {"published": published}}}
+            )
+
+        ref = evaluate.Reference(pol)
+        with mock.patch.object(evaluate, "id", lambda _: 0, create=True):
+            self.assertEqual(ref.evaluate(world(True), "1")[("doc", "view")], {"1"})
+            self.assertEqual(ref.evaluate(world(False), "1")[("doc", "view")], set())
 
     HEAD = "app role app_user\ntype user = app.users\n"
 
