@@ -165,7 +165,9 @@ def functions_report(called: Sequence[Called]) -> list[str]:
         "What the database runs: rowstile's functions in the suites' databases, by what made them (Postgres's counts,",
         f"track_functions): {calls_summary(kinds)}.",
         "",
-        "Never called, or every call raised (Postgres counts only the calls that return: a guard's that refuses, not):",
+        "Never called, or every call raised (Postgres counts only the calls that return: a guard's that refuses, not),",
+        "or called only before the database's last apply (Postgres counts each function apart, and applying a policy",
+        "makes its functions anew: a suite that applies twice is counted for what it did after the second):",
     ]
     out += [f"  {name}  (made in {kinds[name].made} database(s))" for name in never] or ["  (none)"]
     out += ["", "Not counted: plain SQL functions, which Postgres may inline into the query that calls them:"]

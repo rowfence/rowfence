@@ -1,7 +1,8 @@
 #!/bin/bash
 # test.sh: the editors' side, each in a container:
 #   - the Tree-sitter grammar (tree-sitter-authz): src/ is what grammar.js generates, its corpus passes, and
-#     every .authz file in the repository parses without an error, the queries included
+#     every .authz file in the repository parses without an error, the queries included; and it reads each of
+#     them, and 200 random policies, as core/authzlib/parse.py does (core/tests/parse_agreement.py)
 #   - the Zed extension builds (WebAssembly, as Zed builds it)
 # Needs Docker and bash (Git Bash works on Windows).
 set -u
@@ -24,6 +25,12 @@ docker run --rm "${as_me[@]}" -v "$REPO:/repo" -w /repo/editor/tree-sitter-authz
   files=$(find /repo -name "*.authz" -not -path "*/node_modules/*" -not -path "*/.venv/*" | sort)
   npx tree-sitter parse -q $files 2>/dev/null && echo "ok    every policy in the repository parses ($(echo "$files" | wc -l) files)" ||
     { npx tree-sitter parse -q $files; echo "FAIL  a policy has a parse error"; exit 1; }
+  # the grammar was written apart from core/authzlib/parse.py, which the compiler and the reference evaluator
+  # share: each policy, and 200 random ones, read alike by both (core/tests/parse_agreement.py)
+  python3 /repo/core/tests/parse_agreement.py --write /tmp/gen 200 &&
+    { echo "$files"; ls /tmp/gen/*.authz; } > /tmp/paths && npx tree-sitter parse --xml --paths /tmp/paths > /tmp/all.xml 2>/dev/null &&
+    python3 /repo/core/tests/parse_agreement.py /tmp/all.xml > /tmp/agree.log 2>&1 &&
+    echo "ok    $(tail -n 1 /tmp/agree.log)" || { cat /tmp/agree.log; echo "FAIL  the grammar and the parser read a policy differently"; exit 1; }
   for q in queries/*.scm; do
     npx tree-sitter query -q "$q" $files >/dev/null 2>/tmp/query.log || { cat /tmp/query.log; echo "FAIL  $q"; exit 1; }
   done && echo "ok    the queries run on them"

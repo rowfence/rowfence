@@ -19,6 +19,11 @@ which works straight from the policy, on sets of ids, to a fixed point, and know
 compiler writes. The two share one thing, the parser: a policy misread there would be misread by both, and
 they would agree. So the evaluator is held to answers that neither of them wrote, below.
 
+- **A second reading of the language**: the editors' grammar ([`editor/tree-sitter-authz`](../editor/tree-sitter-authz))
+  was written apart from the parser. [`tests/parse_agreement.py`](../core/tests/parse_agreement.py) has both
+  read every policy in the repository and two hundred random ones, and compares what they read: the types,
+  each relation's sources, the permissions with their grouping, the rules, the tests. They read each one alike.
+  (The grammar takes more than the parser does, as an editor must: what the parser refuses isn't compared.)
 - **Random data**: [`tests/difftest.py`](../core/tests/difftest.py) fills six policies' tables with random
   rows and makes a hundred random changes to each (moves, links, loops, groups inside groups, inheritance
   through two types at once, shares that start and end, ids that change, `TRUNCATE`, several statements in

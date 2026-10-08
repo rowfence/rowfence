@@ -4143,6 +4143,48 @@ class Guards(unittest.TestCase):
         self.assertIn("doesn't own", " ".join(self.runs("role % belongs to % %, which doesn''t own % %")))
 
 
+class ParseAgreement(unittest.TestCase):
+    """tests/parse_agreement.py, which compares the editors' grammar's reading of each policy with parse.py's (the
+    editor job runs it on Tree-sitter's XML): it finds them alike when they are, and says where they differ."""
+
+    POLICY = "app role app_user\ntype user = app.users\ntype doc = app.docs\n  owner : user = owner_id\n  can view = owner or {public}\n"
+    # what `tree-sitter parse --xml` writes for it, cut to what the comparison reads ({public} is row 4, columns 22-30)
+    XML = (
+        '<sources><source name="{path}"><source_file>'
+        '<app_role>app role<identifier field="name">app_user</identifier></app_role>'
+        '<type>type<identifier field="name">user</identifier>=<table_name field="table">'
+        '<identifier field="schema">app</identifier>.<identifier field="name">users</identifier></table_name></type>'
+        '<type>type<identifier field="name">doc</identifier>=<table_name field="table">'
+        '<identifier field="schema">app</identifier>.<identifier field="name">docs</identifier></table_name>'
+        '<relation><identifier field="name">owner</identifier>:<subject><identifier field="type">user</identifier>'
+        "</subject>=<column><identifier>owner_id</identifier></column></relation>"
+        '<permission>can<identifier field="name">view</identifier>=<{op} field="expression"><ref><identifier>owner'
+        '</identifier></ref>or<sql srow="4" scol="22" erow="4" ecol="30">{{<sql_text>public</sql_text>}}</sql></{op}>'
+        "</permission></type></source_file></source></sources>"
+    )
+
+    def compare(self, op: str) -> tuple[int, int, list[str]]:
+        sys.path.insert(0, os.path.join(ROOT, "tests"))
+        import parse_agreement
+
+        with tempfile.TemporaryDirectory() as d:
+            policy, xml = os.path.join(d, "p.authz"), os.path.join(d, "all.xml")
+            with open(policy, "w", encoding="utf-8", newline="\n") as fh:
+                fh.write(self.POLICY)
+            with open(xml, "w", encoding="utf-8") as fh:
+                fh.write(self.XML.format(path=policy, op=op))
+            return parse_agreement.compare(xml)
+
+    def test_alike(self) -> None:
+        self.assertEqual(self.compare("or"), (1, 0, []))
+
+    def test_a_difference_is_found_and_placed(self) -> None:
+        compared, _, problems = self.compare("and")
+        self.assertEqual(compared, 1)
+        self.assertEqual(len(problems), 1)
+        self.assertIn("/types/doc/perms/view[0]: the parser reads 'or', the grammar 'and'", problems[0])
+
+
 class Delivery(unittest.TestCase):
     """What the workflows run, what the packages are built from, and what this folder's README says is tested."""
 
