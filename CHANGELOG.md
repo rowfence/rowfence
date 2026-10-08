@@ -75,6 +75,12 @@ Each release upgrades from the one before it. How releases are numbered and made
   it answered `unchanged` and left it as it was, though `authz.lint()` said to apply again.
   **Upgrading**: apply the policy again (`rowstile apply`, or the next migration). The limits page says
   what stays a limit.
+- A rule on a column whose permission involves a service (a principal type other than `user`: `update
+  owner_id : bot`, or a permission a bot's relation feeds) could be passed by nobody: every update of that
+  column through the app role failed with Postgres's "permission denied for schema authz_int", for the
+  service the rule names as for those it refuses. The trigger that checks the rule runs as the app role
+  and named the signed-in service, which is not the app role's to name; the rule is now behind a function
+  made once, as the refusals' are. Nothing was let through that the policy doesn't allow. (#108)
 - `rowstile apply` also applies when someone was given a privilege on rowstile's own schemas since the last
   apply. `authz.lint()` said "the next apply takes it back", and `apply` answered `unchanged`: only `rowstile
   reapply` took it back.

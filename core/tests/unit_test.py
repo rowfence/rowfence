@@ -308,6 +308,37 @@ class ColumnRules(unittest.TestCase):
         self.assertEqual(compile_(text), compile_(spelt))
         self.assertIn("checked on the row after the change", compile_(text))
 
+    # a function whose body is a string, without SECURITY DEFINER: Postgres reads the body when it runs, as the caller
+    AS_CALLER = re.compile(
+        r"CREATE (?:OR REPLACE )?FUNCTION ((?:authz|authz_gen|authz_int)\.(?:\"[^\"]+\"|\w+))\(.*?\)(.*?)AS \$(\w*)\$(.*?)\$\3\$;",
+        re.S,
+    )
+
+    def test_what_runs_as_the_app_role_names_nothing_in_authz_int(self) -> None:
+        # The app role may not use authz_int by name. A policy or a BEGIN ATOMIC body names it once, when the owner
+        # makes it; a body in a string is read each time, as whoever runs it. A rule on a column is checked by
+        # a trigger that runs as the app role: where the rule names a service (authz_int."bot__me"), the rule
+        # is behind a BEGIN ATOMIC function, or every update of the column fails for want of the schema
+        ruled = read(POLICIES["composite"]).replace(
+            "  update folder_id after : folder.edit\n",
+            "  update folder_id after : folder.edit\n  update name : uploader\n",
+        )
+        self.assertNotEqual(ruled, read(POLICIES["composite"]))
+        # (these two run as the owner whoever calls: their callers are definer functions)
+        owners = {"authz_int.session_ok", "authz_int.shares_canon"}
+        for sql in [Compiler(parse_policy(ruled)).compile("x"), *(compiled(name) for name in POLICIES)]:
+            for m in self.AS_CALLER.finditer(sql):
+                name, head, body = m.group(1), m.group(2), m.group(4)
+                if "SECURITY DEFINER" in head or name in owners:
+                    continue
+                self.assertNotRegex(body, r"\bauthz_int\.", f"{name} runs as its caller and names authz_int")
+        sql = Compiler(parse_policy(ruled)).compile("x")
+        holds = re.findall(r'CREATE FUNCTION authz_gen\."cx\.\w+:column_\d+:holds".*?END;', sql, re.S)
+        self.assertEqual(
+            len(holds), len(re.findall(r'IF NOT authz_gen\."cx\.\w+:column_\d+:holds"\(v_row\) THEN', sql))
+        )
+        self.assertTrue(any('"bot__me"' in fn for fn in holds), "the rule that names the bot is behind no function")
+
 
 class SlowPlans(unittest.TestCase):
     """Each time a permission is named, Postgres writes its view out again when it plans a read. An operand

@@ -99,7 +99,8 @@ each rule the app role has no privilege for.
 That is Postgres's own message, not rowstile's (whose refusals say which rule, and why). It comes from:
 
 - `INSERT ... RETURNING` or `UPDATE ... RETURNING` of a row the user may not *read* afterwards: returning it
-  needs the `select` rule too.
+  needs the `select` rule too. So does an `UPDATE` with a `WHERE` on the table's columns, which reads the row:
+  an update after which its author could no longer see the row is refused this way.
 - A policy on the table that rowstile didn't make. `authz.lint()` lists them: a restrictive one as a note, a
   permissive one as an error, since Postgres joins it to the rules with OR and it lets through what they don't.
 

@@ -3207,21 +3207,32 @@ BEGIN
 END $f$;
 
 -- alt.docs update owner_id (line 46): share
+-- Whether the rule holds for a row. BEGIN ATOMIC, as the refusals' functions are: the trigger below runs as the app
+-- role, which can't name what is in authz_int in text read at run time (the signed-in service, authz_int."<type>__me")
+CREATE FUNCTION authz_gen."alt.docs:column_1:holds"(p_row "alt"."docs") RETURNS boolean
+LANGUAGE sql STABLE
+BEGIN ATOMIC
+  SELECT coalesce(coalesce("docs"."owner_id" = (SELECT authz.uid()), false), false) FROM (SELECT (p_row).*) AS "docs";
+END;
 -- checked on the row before the change, for roles that row-level security applies to on the
 -- table (not on TG_RELID: on a partition made since the policy was applied, where it is not on yet, this runs too)
 CREATE FUNCTION authz_int."doc__update_1"() RETURNS trigger
 LANGUAGE plpgsql SET search_path FROM CURRENT AS $f$
-DECLARE v_lines text;
+DECLARE v_lines text; v_row "alt"."docs";
 BEGIN
-  IF pg_catalog.row_security_active('"alt"."docs"'::pg_catalog.regclass)
-     AND NOT coalesce((SELECT coalesce("docs"."owner_id" = (SELECT authz.uid()), false) FROM (SELECT OLD.*) AS "docs"), false) THEN
-    BEGIN
-      v_lines := (SELECT string_agg(l, E'\n') FROM authz_gen."alt.docs:column_1:why"(OLD) l);
-    EXCEPTION WHEN OTHERS THEN
-      v_lines := 'no explanation: ' || SQLERRM;
-    END;
-    RAISE EXCEPTION 'changing owner_id of alt.docs % needs: share', OLD."doc_no" USING ERRCODE = 'insufficient_privilege', DETAIL = v_lines,
-      SCHEMA = 'alt', TABLE = 'docs', CONSTRAINT = 'authz_update', HINT = 'rowstile help AZ709';
+  IF pg_catalog.row_security_active('"alt"."docs"'::pg_catalog.regclass) THEN
+    -- the row as the table's own: a partition's columns may be in another order, a table that inherits may have more
+    IF TG_RELID = '"alt"."docs"'::pg_catalog.regclass THEN v_row := OLD;
+    ELSE v_row := pg_catalog.jsonb_populate_record(NULL::"alt"."docs", pg_catalog.to_jsonb(OLD)); END IF;
+    IF NOT authz_gen."alt.docs:column_1:holds"(v_row) THEN
+      BEGIN
+        v_lines := (SELECT string_agg(l, E'\n') FROM authz_gen."alt.docs:column_1:why"(v_row) l);
+      EXCEPTION WHEN OTHERS THEN
+        v_lines := 'no explanation: ' || SQLERRM;
+      END;
+      RAISE EXCEPTION 'changing owner_id of alt.docs % needs: share', OLD."doc_no" USING ERRCODE = 'insufficient_privilege', DETAIL = v_lines,
+        SCHEMA = 'alt', TABLE = 'docs', CONSTRAINT = 'authz_update', HINT = 'rowstile help AZ709';
+    END IF;
   END IF;
   RETURN NEW;
 END $f$;
@@ -3264,23 +3275,34 @@ BEGIN
 END $f$;
 
 -- alt.docs update up after (line 47): parent.edit or {up is null}
+-- Whether the rule holds for a row. BEGIN ATOMIC, as the refusals' functions are: the trigger below runs as the app
+-- role, which can't name what is in authz_int in text read at run time (the signed-in service, authz_int."<type>__me")
+CREATE FUNCTION authz_gen."alt.docs:column_2:holds"(p_row "alt"."docs") RETURNS boolean
+LANGUAGE sql STABLE
+BEGIN ATOMIC
+  SELECT coalesce((coalesce((up is null), false)
+    OR (authz_gen."doc__edit__has"("docs"."up")
+    OR authz_gen."doc__parent__edit__links"("docs"."doc_no"))), false) FROM (SELECT (p_row).*) AS "docs";
+END;
 -- checked on the row after the change, for roles that row-level security applies to on the
 -- table (not on TG_RELID: on a partition made since the policy was applied, where it is not on yet, this runs too)
 CREATE FUNCTION authz_int."doc__update_2"() RETURNS trigger
 LANGUAGE plpgsql SET search_path FROM CURRENT AS $f$
-DECLARE v_lines text;
+DECLARE v_lines text; v_row "alt"."docs";
 BEGIN
-  IF pg_catalog.row_security_active('"alt"."docs"'::pg_catalog.regclass)
-     AND NOT coalesce((SELECT (coalesce((up is null), false)
-    OR (authz_gen."doc__edit__has"("docs"."up")
-    OR authz_gen."doc__parent__edit__links"("docs"."doc_no"))) FROM (SELECT NEW.*) AS "docs"), false) THEN
-    BEGIN
-      v_lines := (SELECT string_agg(l, E'\n') FROM authz_gen."alt.docs:column_2:why"(NEW) l);
-    EXCEPTION WHEN OTHERS THEN
-      v_lines := 'no explanation: ' || SQLERRM;
-    END;
-    RAISE EXCEPTION 'changing up of alt.docs % needs: parent.edit or {up is null}', OLD."doc_no" USING ERRCODE = 'insufficient_privilege', DETAIL = v_lines,
-      SCHEMA = 'alt', TABLE = 'docs', CONSTRAINT = 'authz_update', HINT = 'rowstile help AZ709';
+  IF pg_catalog.row_security_active('"alt"."docs"'::pg_catalog.regclass) THEN
+    -- the row as the table's own: a partition's columns may be in another order, a table that inherits may have more
+    IF TG_RELID = '"alt"."docs"'::pg_catalog.regclass THEN v_row := NEW;
+    ELSE v_row := pg_catalog.jsonb_populate_record(NULL::"alt"."docs", pg_catalog.to_jsonb(NEW)); END IF;
+    IF NOT authz_gen."alt.docs:column_2:holds"(v_row) THEN
+      BEGIN
+        v_lines := (SELECT string_agg(l, E'\n') FROM authz_gen."alt.docs:column_2:why"(v_row) l);
+      EXCEPTION WHEN OTHERS THEN
+        v_lines := 'no explanation: ' || SQLERRM;
+      END;
+      RAISE EXCEPTION 'changing up of alt.docs % needs: parent.edit or {up is null}', OLD."doc_no" USING ERRCODE = 'insufficient_privilege', DETAIL = v_lines,
+        SCHEMA = 'alt', TABLE = 'docs', CONSTRAINT = 'authz_update', HINT = 'rowstile help AZ709';
+    END IF;
   END IF;
   RETURN NEW;
 END $f$;

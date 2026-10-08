@@ -56,8 +56,8 @@ def read(path: str) -> str:
 
 
 REFUSE = re.compile(r'authz_gen\."[^"]*:refuse"\(')
-# a column rule's trigger function: the condition, and the row it is checked on
-COLUMN_CHECK = re.compile(r"AND NOT coalesce\(\(SELECT (.*) FROM \(SELECT (OLD|NEW)\.\*\) AS \S+\), false\) THEN", re.S)
+# a column rule's trigger function: the row it checks, and the function that says whether the rule holds for it
+COLUMN_CHECK = re.compile(r"v_row := (OLD|NEW);.*?IF NOT (authz_gen\.\"[^\"]+:holds\")\(v_row\) THEN", re.S)
 
 # a share's end in the past, far enough that a clock set back (Docker Desktop's VM resyncing its clock, seconds at a
 # time) doesn't make it live again half way through a check, which reads the data and the answers at different times
@@ -266,12 +266,12 @@ class Checker:
         self.column_rules: list[tuple[Rule, str]] = []
         for n, r in enumerate(ruled, 1):
             m = COLUMN_CHECK.search(triggers[f"authz_update_{n}"])
-            if not m or (m.group(2) == "NEW") != (r.command == "update check"):
+            if not m or (m.group(1) == "NEW") != (r.command == "update check"):
                 raise SystemExit(
                     f"{r.table}, the rule on {', '.join(r.columns)}: its trigger authz_update_{n} doesn't "
                     f"check the row {'after' if r.command == 'update check' else 'before'} the change"
                 )
-            self.column_rules.append((r, m.group(1)))
+            self.column_rules.append((r, f"{m.group(2)}(the_row)"))  # asked of each row, FROM <table> the_row
         self.checks = 0  # how many snapshots so far: who is asked with a scope, and which
         self.scoped: tuple[str, str] = ("", "read")
 
@@ -358,7 +358,7 @@ class Checker:
                 emit(
                     [u, "column", str(n)],
                     f"SELECT coalesce(json_agg({idsql(self.ref.type_of_table(r.table))}), '[]') "
-                    f"FROM {r.table} WHERE coalesce(({cond}), false)",
+                    f"FROM {r.table} the_row WHERE coalesce(({cond}), false)",
                 )
             for k in self.context(u):
                 lines.append(f"RESET authz_ctx.{k};")
@@ -440,7 +440,7 @@ class Checker:
                     (
                         ["column as app", str(n)],
                         f"SELECT coalesce(json_agg({idsql(self.ref.type_of_table(r.table))}), "
-                        f"'[]') FROM {r.table} WHERE coalesce(({cond}), false)",
+                        f"'[]') FROM {r.table} the_row WHERE coalesce(({cond}), false)",
                     )
                 )
         return out

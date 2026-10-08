@@ -2005,21 +2005,32 @@ BEGIN
 END $f$;
 
 -- lp.domains update org_id after (line 42): org.edit
+-- Whether the rule holds for a row. BEGIN ATOMIC, as the refusals' functions are: the trigger below runs as the app
+-- role, which can't name what is in authz_int in text read at run time (the signed-in service, authz_int."<type>__me")
+CREATE FUNCTION authz_gen."lp.domains:column_1:holds"(p_row "lp"."domains") RETURNS boolean
+LANGUAGE sql STABLE
+BEGIN ATOMIC
+  SELECT coalesce(EXISTS (SELECT 1 FROM authz_gen."org__edit" v WHERE v.id = "domains"."org_id"), false) FROM (SELECT (p_row).*) AS "domains";
+END;
 -- checked on the row after the change, for roles that row-level security applies to on the
 -- table (not on TG_RELID: on a partition made since the policy was applied, where it is not on yet, this runs too)
 CREATE FUNCTION authz_int."domain__update_1"() RETURNS trigger
 LANGUAGE plpgsql SET search_path FROM CURRENT AS $f$
-DECLARE v_lines text;
+DECLARE v_lines text; v_row "lp"."domains";
 BEGIN
-  IF pg_catalog.row_security_active('"lp"."domains"'::pg_catalog.regclass)
-     AND NOT coalesce((SELECT EXISTS (SELECT 1 FROM authz_gen."org__edit" v WHERE v.id = "domains"."org_id") FROM (SELECT NEW.*) AS "domains"), false) THEN
-    BEGIN
-      v_lines := (SELECT string_agg(l, E'\n') FROM authz_gen."lp.domains:column_1:why"(NEW) l);
-    EXCEPTION WHEN OTHERS THEN
-      v_lines := 'no explanation: ' || SQLERRM;
-    END;
-    RAISE EXCEPTION 'changing org_id of lp.domains % needs: org.edit', OLD."id" USING ERRCODE = 'insufficient_privilege', DETAIL = v_lines,
-      SCHEMA = 'lp', TABLE = 'domains', CONSTRAINT = 'authz_update', HINT = 'rowstile help AZ709';
+  IF pg_catalog.row_security_active('"lp"."domains"'::pg_catalog.regclass) THEN
+    -- the row as the table's own: a partition's columns may be in another order, a table that inherits may have more
+    IF TG_RELID = '"lp"."domains"'::pg_catalog.regclass THEN v_row := NEW;
+    ELSE v_row := pg_catalog.jsonb_populate_record(NULL::"lp"."domains", pg_catalog.to_jsonb(NEW)); END IF;
+    IF NOT authz_gen."lp.domains:column_1:holds"(v_row) THEN
+      BEGIN
+        v_lines := (SELECT string_agg(l, E'\n') FROM authz_gen."lp.domains:column_1:why"(v_row) l);
+      EXCEPTION WHEN OTHERS THEN
+        v_lines := 'no explanation: ' || SQLERRM;
+      END;
+      RAISE EXCEPTION 'changing org_id of lp.domains % needs: org.edit', OLD."id" USING ERRCODE = 'insufficient_privilege', DETAIL = v_lines,
+        SCHEMA = 'lp', TABLE = 'domains', CONSTRAINT = 'authz_update', HINT = 'rowstile help AZ709';
+    END IF;
   END IF;
   RETURN NEW;
 END $f$;
