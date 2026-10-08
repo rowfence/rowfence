@@ -106,6 +106,36 @@ case "$out" in "unknown command 'bogus'"*) [ $rc -eq 2 ] && ok "an unknown comma
 run sql --as user:5 "SELECT count(*) FROM app.files -- --limit 3"; [ $rc -eq 0 ] && ok "sql's statement is left as it is" || bad "sql" "$rc $out"
 run explain-rule --as user:3 app.files insert --row '{folder_id: 6}'; [ $rc -eq 2 ] && case "$out" in *"--row: not JSON: {folder_id: 6}"*"The shell took the double quotes"*) true;; *) false;; esac && ok "explain-rule shows a row a Windows shell took the quotes out of, and how to write it there" || bad "explain-rule --row without quotes" "$out"
 run explain-rule --as user:3 app.files insert --row '[1]'; [ $rc -eq 2 ] && case "$out" in *"JSON object"*) true;; *) false;; esac && ok "explain-rule --row wants an object" || bad "--row" "$rc $out"
+run diff "$T/main.authz" --limit; [ $rc -eq 2 ] && [ "$out" = "--limit needs a value" ] && ok "an option without its value is refused" || bad "option without value" "$rc $out"
+run client rb "$T/main.authz"; [ $rc -eq 2 ] && [ "$out" = "rowstile client: which language, py or ts?" ] && ok "client in a language it doesn't write is refused" || bad "client rb" "$rc $out"
+run migrate "$T/main.authz" --tool bogus; [ $rc -eq 2 ] && case "$out" in "rowstile migrate: unknown tool 'bogus' (use one of "*) true;; *) false;; esac && ok "migrate for a tool it doesn't know says which it does" || bad "migrate --tool" "$rc $out"
+printf 'app role app_user\ntype user = app.users\n' > "$T/plain.authz"
+run prove "$T/plain.authz"; [ $rc -eq 0 ] && case "$out" in *"no invariants to prove"*) true;; *) false;; esac && ok "prove on a policy without invariants says there is nothing to prove" || bad "prove without invariants" "$rc $out"
+
+echo "-- the command's own pages: help, version, an error code's page"
+out=$(python3 cli/rowstile_cli.py --version 2>&1); rc=$?
+case "$out" in "rowstile "*" (Python "*")") [ $rc -eq 0 ] && ok "--version says the version, and the Python it runs on" || bad "--version exit" "$rc";; *) bad "--version" "$out";; esac
+[ "$(python3 cli/rowstile_cli.py version 2>&1)" = "$out" ] && ok "... and so does version" || bad "version"
+out=$(python3 cli/rowstile_cli.py --help 2>&1); rc=$?
+[ $rc -eq 0 ] && case "$out" in "rowstile: compile policies"*"rowstile dev"*) true;; *) false;; esac && ok "--help prints the usage, exit 0" || bad "--help" "$rc ${out:0:80}"
+out=$(python3 cli/rowstile_cli.py 2>&1); rc=$?
+[ $rc -eq 2 ] && case "$out" in "rowstile: compile policies"*) true;; *) false;; esac && ok "no command at all: the usage, exit 2" || bad "no command" "$rc ${out:0:80}"
+out=$(python3 cli/rowstile_cli.py help az201 2>&1); rc=$?
+[ $rc -eq 0 ] && case "$out" in *AZ201*) true;; *) false;; esac && ok "help AZ201 shows that error's page, written in either case" || bad "help AZ201" "$rc ${out:0:80}"
+out=$(python3 cli/rowstile_cli.py help errors 2>&1); rc=$?
+[ $rc -eq 0 ] && case "$out" in *AZ201*AZ709*) true;; *) false;; esac && ok "help errors lists the codes" || bad "help errors" "$rc ${out:0:80}"
+out=$(python3 cli/rowstile_cli.py help AZ999 2>&1); rc=$?
+[ $rc -eq 2 ] && [ "$out" = "rowstile help: no code AZ999 (rowstile help errors lists them)" ] && ok "help with a code that doesn't exist says so, exit 2" || bad "help AZ999" "$rc $out"
+
+echo "-- questions to the database, as someone"
+want=$(PSQL -c "SET authz.user_id = '5'" -c "SELECT array_to_string(authz.perms('folder', 1), E'\n')")
+run perms --as user:5 folder 1; [ $rc -eq 0 ] && [ "$out" = "${want:-(none)}" ] && ok "perms: what someone holds on an object, as authz.perms says" || bad "perms" "$rc $out (wanted $want)"
+run perms --as user:5 folder 999999; [ $rc -eq 0 ] && [ "$out" = "(none)" ] && ok "... and (none) where they hold nothing" || bad "perms none" "$rc $out"
+run can folder 1 view; [ $rc -eq 2 ] && [ "$out" = "rowstile can: as whom? --as user:42 (or bot:7, or anyone)" ] && ok "a question without --as asks as whom" || bad "can without --as" "$rc $out"
+run can --as user:5 folder 1; [ $rc -eq 2 ] && [ "$out" = "rowstile can: see rowstile --help" ] && ok "a question an argument short is refused" || bad "can short" "$rc $out"
+run explain-rule --as user:3 app.files; [ $rc -eq 2 ] && case "$out" in "rowstile explain-rule --as WHO TABLE"*) true;; *) false;; esac && ok "explain-rule without a command shows how to ask" || bad "explain-rule short" "$rc $out"
+run why folder 1 view; [ $rc -eq 2 ] && [ "$out" = "rowstile why --as user:42 TYPE ID PERM" ] && ok "why without --as shows how to ask" || bad "why without --as" "$rc $out"
+run sql --as user:5 "UPDATE app.files SET name = name WHERE false"; [ $rc -eq 0 ] && [ "$out" = "UPDATE 0, as user:5; rolled back" ] && ok "sql says what a statement without rows did, in the server's words" || bad "sql's tag" "$rc $out"
 
 echo "-- files that can't be read as they should"
 { cat example/docs.authz; printf -- '-- caf\351\n'; } > "$T/latin.authz"
