@@ -3913,13 +3913,24 @@ class CoverageReport(unittest.TestCase):
         )
         # a policy's mistake is reported on lines no policy that compiles reaches: all of a fail(...) call's
         self.assertEqual(
-            self.report.never_judged(f, 'a = 1\nb = 2\nc = 3\nfail(\n    "a mistake",\n    "AZ999",\n)\n'),
+            self.report.never_judged(
+                f, 'a = 1\nb = 2\nc = 3\nif c:\n    fail(\n        "a mistake",\n        "AZ999",\n    )\n'
+            ),
             ([1], ["Core.b"]),
         )
         self.assertEqual(
             self.report.mistakes("try:\n    x = 1\nexcept ValueError:\n    y = 2\nraise KeyError(\n    'k'\n)\n"),
             {3, 4, 5, 6, 7},
         )
+        # a check that only reports a mistake: an if ending in one (its message made first), a loop of them
+        check = "if bad:\n    msg = 'm'\n    fail(msg)\nfor x in xs:\n    if x:\n        fail('x')\n"
+        self.assertEqual(self.report.mistakes(check), {1, 2, 3, 4, 5, 6})
+        # but not an if with an else, nor a loop that does more than look
+        does = "if bad:\n    fail('m')\nelse:\n    a = 1\nfor x in xs:\n    out.append(x)\n    assert x\n"
+        self.assertEqual(self.report.mistakes(does), {2, 7})  # an assert passes: the append isn't a message
+        # after a way out, what only leads on to a report makes its message
+        look = "def f(n):\n    if n in names:\n        return\n    known = sorted(names)\n    fail(n, known)\n"
+        self.assertEqual(self.report.mistakes(look), {4, 5})
 
     def test_what_nothing_runs_is_shown_with_its_text(self) -> None:
         f = self.report.File(

@@ -266,19 +266,65 @@ def judged(f: File) -> set[int]:
     return {n for n, steps in f.steps.items() if any(ORACLE.search(s) for s in steps)}
 
 
+def fails(node: ast.stmt) -> bool:
+    """Whether a statement always reports a mistake: fail(...) or raise."""
+    return isinstance(node, ast.Raise) or (
+        isinstance(node, ast.Expr)
+        and isinstance(node.value, ast.Call)
+        and isinstance(node.value.func, ast.Name)
+        and node.value.func.id == "fail"
+    )
+
+
+def reports(node: ast.stmt) -> bool:
+    """Whether a statement only looks for a mistake: fail(...), raise or assert; an if without an else whose body
+    only looks, or ends in a failure (what comes before it there makes the message); a loop whose body only
+    looks."""
+    match node:
+        case ast.Assert():
+            return True
+        case ast.If(body=body, orelse=[]):
+            return fails(body[-1]) or all(reports(s) for s in body)
+        case ast.For(body=body, orelse=[]) | ast.While(body=body, orelse=[]):
+            return all(reports(s) for s in body)
+    return fails(node)
+
+
+def leading_to_report(block: list[ast.stmt]) -> list[ast.stmt]:
+    """The statements at the end of a block that only lead to a failure: it, and the straight-line ones before it
+    (they make its message: nothing between them goes elsewhere)."""
+    if not block or not fails(block[-1]):
+        return []
+    n = len(block) - 1
+    while n > 0 and isinstance(block[n - 1], ast.Assign | ast.AnnAssign | ast.AugAssign | ast.Expr | ast.Assert):
+        n -= 1
+    return block[n:]
+
+
 def mistakes(code: str) -> set[int]:
-    """The lines of code that report a mistake or handle one: each fail(...) call, raise, and except clause, whole
-    (no policy that compiles reaches them)."""
+    """The lines of code that report a mistake or handle one: each fail(...) call, raise and except clause, each
+    check that only looks for one (`reports`) and what only leads on to a failure (`leading_to_report`), whole: no
+    policy that compiles reaches them, or they only look."""
     try:
         tree = ast.parse(code)
     except SyntaxError:
         return set()
     out: set[int] = set()
     for node in ast.walk(tree):
-        if isinstance(node, ast.Raise | ast.ExceptHandler) or (
-            isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "fail"
+        if (
+            isinstance(node, ast.Raise | ast.ExceptHandler)
+            or (isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "fail")
+            or (isinstance(node, ast.stmt) and reports(node))
         ):
             out.update(range(node.lineno, (node.end_lineno or node.lineno) + 1))
+        for name in ("body", "orelse", "finalbody"):
+            block = getattr(node, name, None)
+            if not isinstance(block, list):
+                continue  # an if expression's body, say
+            stmts = [s for s in block if isinstance(s, ast.stmt)]
+            if len(stmts) == len(block):
+                for s in leading_to_report(stmts):
+                    out.update(range(s.lineno, (s.end_lineno or s.lineno) + 1))
     return out
 
 
