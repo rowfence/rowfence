@@ -42,7 +42,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 import compile_policy  # noqa: E402
 from authzlib import evaluate  # noqa: E402
-from authzlib.parse import Caveat, Cols, Rule, Type  # noqa: E402
+from authzlib.parse import Caveat, Cols, Policy, Rule, Type  # noqa: E402
+from authzlib.sqlutil import q, qt  # noqa: E402  (names as the policy writes them, quoted: capitals, reserved words)
 
 # the database's answers, read back as JSON: their shape is what the checks compare
 Answer = Any
@@ -57,7 +58,22 @@ def read(path: str) -> str:
 
 REFUSE = re.compile(r'authz_gen\."[^"]*:refuse"\(')
 # a column rule's trigger function: the row it checks, and the function that says whether the rule holds for it
-COLUMN_CHECK = re.compile(r"v_row := (OLD|NEW);.*?IF NOT (authz_gen\.\"[^\"]+:holds\")\(v_row\) THEN", re.S)
+# (`<table>:column_<n>:holds`, or that name shortened with a hash when it is longer than Postgres allows)
+COLUMN_CHECK = re.compile(r"v_row := (OLD|NEW);.*?IF NOT (authz_gen\.\"[^\"]+\")\(v_row\) THEN", re.S)
+
+
+def refusals_of(pol: Policy) -> re.Pattern[str]:
+    """The calls of the refuse functions a policy's write rules make, by their names as the compiler makes them
+    (refusals.rule_fn): a long table's are shortened with a hash, and no longer end in `:refuse`."""
+    names = sorted(
+        {
+            "authz_gen." + q(f"{r.table}:{r.command.replace('update check', 'update_after')}:refuse")
+            for r in pol.rules
+            if r.command in ("insert", "update", "update check")
+        }
+    )
+    return re.compile("|".join([REFUSE.pattern, *(re.escape(n) + r"\(" for n in names)]))
+
 
 # a share's end in the past, far enough that a clock set back (Docker Desktop's VM resyncing its clock, seconds at a
 # time) doesn't make it live again half way through a check, which reads the data and the answers at different times
@@ -68,11 +84,11 @@ EXPIRED = "now() - interval '1 hour'"
 SESSIONS = int(os.environ.get("DIFFTEST_SESSIONS") or min(4, os.cpu_count() or 1))
 
 
-def without_refusals(expr: str) -> str:
+def without_refusals(expr: str, refuse: re.Pattern[str] = REFUSE) -> str:
     """A WITH CHECK is `check OR <refuse>(row)`, and the refuse function raises (with the reason) when it runs:
-    evaluated on every row here, the call becomes false, leaving the check itself."""
+    evaluated on every row here, the call becomes false, leaving the check itself. (refuse: refusals_of(policy).)"""
     while True:
-        m = REFUSE.search(expr)
+        m = refuse.search(expr)
         if not m:
             return expr
         depth, i = 1, m.end()
@@ -142,13 +158,13 @@ def idsql(t: Type, a: str | None = None, columns: Cols | None = None) -> str:
     p = f"{a}." if a else ""
     cols = [columns] if isinstance(columns, str) else list(columns or [c for c, _ in t.key])
     if len(t.key) == 1:
-        return f"{p}{cols[0]}::text"
-    return "ROW(" + ", ".join(f"{p}{c}::{ty}" for c, (_, ty) in zip(cols, t.key, strict=True)) + ")::text"
+        return f"{p}{q(cols[0])}::text"
+    return "ROW(" + ", ".join(f"{p}{q(c)}::{ty}" for c, (_, ty) in zip(cols, t.key, strict=True)) + ")::text"
 
 
 def notnull(a: str, columns: Cols | None) -> str:
     cols = [columns] if isinstance(columns, str) else list(columns or ())
-    return " AND ".join(f"{a}.{c} IS NOT NULL" for c in cols)
+    return " AND ".join(f"{a}.{q(c)} IS NOT NULL" for c in cols)
 
 
 class Reference(evaluate.Reference):
@@ -165,14 +181,14 @@ class Reference(evaluate.Reference):
         """(key, sql returning a json array) for everything the evaluator reads."""
         out: list[tuple[tuple[str | int, ...], str]] = []
         for t in self.types.values():
-            out.append((("ids", t.name), f"SELECT coalesce(json_agg({idsql(t, 'r')}), '[]') FROM {t.table} r"))
+            out.append((("ids", t.name), f"SELECT coalesce(json_agg({idsql(t, 'r')}), '[]') FROM {qt(t.table)} r"))
             # a condition's row is the table aliased `this`: `this.id` and a bare column mean what SQL makes of
             # them, with nothing of the compiler's (sqlutil.on_row) between
             where = f"coalesce(({t.where}), false)" if t.where else "true"
             out.append(
                 (
                     ("valid", t.name),
-                    f"SELECT coalesce(json_agg({idsql(t, 'this')}), '[]') FROM {t.table} this WHERE {where}",
+                    f"SELECT coalesce(json_agg({idsql(t, 'this')}), '[]') FROM {qt(t.table)} this WHERE {where}",
                 )
             )
             for r in t.relations.values():
@@ -180,19 +196,19 @@ class Reference(evaluate.Reference):
                     for st, sr in src.subjects:
                         key = ("pairs", t.name, r.name, i, st, sr or "")
                         if src.kind == "column":
-                            poly = f" AND r.{src.type_col} = {lit(st)}" if src.type_col else ""
+                            poly = f" AND r.{q(src.type_col)} = {lit(st)}" if src.type_col else ""
                             sql = (
                                 f"SELECT coalesce(json_agg(json_build_array({idsql(t, 'r')}, "
                                 f"{idsql(self.types[st], 'r', src.column)})), '[]') "
-                                f"FROM {t.table} r WHERE {notnull('r', src.column)}{poly}"
+                                f"FROM {qt(t.table)} r WHERE {notnull('r', src.column)}{poly}"
                             )
                         elif src.kind == "table":
                             where = f" AND coalesce(({src.where}), false)" if src.where else ""
-                            poly = f" AND this.{src.type_col} = {lit(st)}" if src.type_col else ""
+                            poly = f" AND this.{q(src.type_col)} = {lit(st)}" if src.type_col else ""
                             sql = (
                                 f"SELECT coalesce(json_agg(json_build_array({idsql(t, 'this', src.obj_col)}, "
                                 f"{idsql(self.types[st], 'this', src.subj_col)})), '[]') "
-                                f"FROM {src.table} this WHERE {notnull('this', src.obj_col)} "
+                                f"FROM {qt(src.table or '')} this WHERE {notnull('this', src.obj_col)} "
                                 f"AND {notnull('this', src.subj_col)}{where}{poly}"
                             )
                         else:
@@ -236,7 +252,7 @@ class Reference(evaluate.Reference):
             out.append(
                 (
                     ("cond", tname, cond),
-                    f"SELECT coalesce(json_agg({idsql(t, 'this')}), '[]') FROM {t.table} this WHERE coalesce(({cond}), false)",
+                    f"SELECT coalesce(json_agg({idsql(t, 'this')}), '[]') FROM {qt(t.table)} this WHERE coalesce(({cond}), false)",
                 )
             )
         return out
@@ -251,6 +267,7 @@ class Checker:
         # everyone who signs in, and nobody ('': signed out, what `anyone` and links are for)
         self.users, self.role = [*gen.users, ""], gen.role
         self.pol = compile_policy.parse_policy(read(policy_path), policy_path)
+        self.refuse = refusals_of(self.pol)
         self.types, self.rules = self.pol.types, self.pol.rules
         self.ref = Reference(self.pol)
         self._nocontext: dict[tuple[str, str, str], set[str]] | None = None
@@ -337,21 +354,21 @@ class Checker:
                     emit(
                         [u, "can", t.name, p],
                         f"SELECT coalesce(json_agg(json_build_array(i, authz.can({lit(t.name)}, i, {lit(p)}))), '[]') "
-                        f"FROM (SELECT {idsql(t)} AS i FROM {t.table} TABLESAMPLE BERNOULLI (30) "
+                        f"FROM (SELECT {idsql(t)} AS i FROM {qt(t.table)} TABLESAMPLE BERNOULLI (30) "
                         f"UNION SELECT '999999') ids",
                     )
             for table in dict.fromkeys(r.table for r in self.rules if r.command == "select"):
                 t = self.ref.type_of_table(table)
-                emit([u, "rls", table], f"SELECT coalesce(json_agg({idsql(t)}), '[]') FROM {table}")
+                emit([u, "rls", table], f"SELECT coalesce(json_agg({idsql(t)}), '[]') FROM {qt(table)}")
             for table, view in self.pol.views.items():
                 t = self.ref.type_of_table(table)
-                emit([u, "view", table], f"SELECT coalesce(json_agg({idsql(t)}), '[]') FROM {view}")
+                emit([u, "view", table], f"SELECT coalesce(json_agg({idsql(t)}), '[]') FROM {qt(view)}")
                 for r in self.rules:
                     if r.table == table and r.command == "mask":
                         for c in r.columns:
                             emit(
                                 [u, "mask", table, c],
-                                f"SELECT coalesce(json_agg({idsql(t)}), '[]') FROM {view} WHERE {c} IS NOT NULL",
+                                f"SELECT coalesce(json_agg({idsql(t)}), '[]') FROM {qt(view)} WHERE {q(c)} IS NOT NULL",
                             )
             # the policy expressions and column rules again, as the app role checks them (on the rows it may
             # select): a condition run with the app role's rights instead of the policy's shows here only
@@ -365,23 +382,23 @@ class Checker:
                     emit(
                         [u, "explain", t.name, p],
                         f"SELECT coalesce(json_agg(json_build_array(i, (SELECT e FROM authz.explain({lit(t.name)}, i, "
-                        f"{lit(p)}, {asked}) e LIMIT 1))), '[]') FROM (SELECT {idsql(t)} AS i FROM {t.table} "
+                        f"{lit(p)}, {asked}) e LIMIT 1))), '[]') FROM (SELECT {idsql(t)} AS i FROM {qt(t.table)} "
                         f"ORDER BY md5({idsql(t)}) LIMIT 2) s",
                     )
             # every policy expression on every row (as the owner, so RLS does not filter)
             for table, name, qual, check in self.policies:
                 t = self.ref.type_of_table(table)
-                for part, expr in (("using", qual), ("check", without_refusals(check))):
+                for part, expr in (("using", qual), ("check", without_refusals(check, self.refuse))):
                     if expr:
                         emit(
                             [u, "policy", table, name, part],
-                            f"SELECT coalesce(json_agg({idsql(t)}), '[]') FROM {table} WHERE ({expr})",
+                            f"SELECT coalesce(json_agg({idsql(t)}), '[]') FROM {qt(table)} WHERE ({expr})",
                         )
             for n, (r, cond) in enumerate(self.column_rules):
                 emit(
                     [u, "column", str(n)],
                     f"SELECT coalesce(json_agg({idsql(self.ref.type_of_table(r.table))}), '[]') "
-                    f"FROM {r.table} the_row WHERE coalesce(({cond}), false)",
+                    f"FROM {qt(r.table)} the_row WHERE coalesce(({cond}), false)",
                 )
             for k in self.context(u):
                 lines.append(f"RESET authz_ctx.{k};")
@@ -409,16 +426,16 @@ class Checker:
                 emit(
                     ["scoped", "can", t.name, p],
                     f"SELECT coalesce(json_agg(json_build_array(i, authz.can({lit(t.name)}, i, {lit(p)}))), '[]') "
-                    f"FROM (SELECT {idsql(t)} AS i FROM {t.table} TABLESAMPLE BERNOULLI (30)) ids",
+                    f"FROM (SELECT {idsql(t)} AS i FROM {qt(t.table)} TABLESAMPLE BERNOULLI (30)) ids",
                 )
         lines.append("RESET ROLE;")
         for table, name, qual, check in self.policies:
             t = self.ref.type_of_table(table)
-            for part, expr in (("using", qual), ("check", without_refusals(check))):
+            for part, expr in (("using", qual), ("check", without_refusals(check, self.refuse))):
                 if expr:
                     emit(
                         ["scoped", "policy", table, name, part],
-                        f"SELECT coalesce(json_agg({idsql(t)}), '[]') FROM {table} WHERE ({expr})",
+                        f"SELECT coalesce(json_agg({idsql(t)}), '[]') FROM {qt(table)} WHERE ({expr})",
                     )
         lines += ["RESET authz.scopes;", *[f"RESET authz_ctx.{k};" for k in self.context(u)]]
         lines.append("RESET authz.user_id;")
@@ -432,7 +449,7 @@ class Checker:
                     ["who", t.name, p],
                     f"SELECT coalesce(json_agg(json_build_array(i, (SELECT coalesce(json_agg(x ORDER BY x), '[]') "
                     f"FROM authz.who({lit(t.name)}, i, {lit(p)}) x))), '[]') FROM (SELECT {idsql(t)} AS i "
-                    f"FROM {t.table} ORDER BY md5({idsql(t)} || 'w') LIMIT 6) s",
+                    f"FROM {qt(t.table)} ORDER BY md5({idsql(t)} || 'w') LIMIT 6) s",
                 )
         lines.append("SELECT '[\"verify\"]', to_json(authz.verify());")
         # two blocks or more to a session, where there are enough
@@ -458,12 +475,12 @@ class Checker:
         for table, name, qual, check in self.policies:
             if self.as_app(table):
                 t = self.ref.type_of_table(table)
-                for part, expr in (("using", qual), ("check", without_refusals(check))):
+                for part, expr in (("using", qual), ("check", without_refusals(check, self.refuse))):
                     if expr:
                         out.append(
                             (
                                 ["policy as app", table, name, part],
-                                f"SELECT coalesce(json_agg({idsql(t)}), '[]') FROM {table} WHERE ({expr})",
+                                f"SELECT coalesce(json_agg({idsql(t)}), '[]') FROM {qt(table)} WHERE ({expr})",
                             )
                         )
         for n, (r, cond) in enumerate(self.column_rules):
@@ -472,7 +489,7 @@ class Checker:
                     (
                         ["column as app", str(n)],
                         f"SELECT coalesce(json_agg({idsql(self.ref.type_of_table(r.table))}), "
-                        f"'[]') FROM {r.table} the_row WHERE coalesce(({cond}), false)",
+                        f"'[]') FROM {qt(r.table)} the_row WHERE coalesce(({cond}), false)",
                     )
                 )
         return out
@@ -1666,7 +1683,7 @@ def main() -> None:
         if step == args.steps:
             break
         ids: Ids = {
-            t.name: [x[0] for x in db.rows(f"SELECT {idsql(t)} FROM {t.table} ORDER BY 1")]
+            t.name: [x[0] for x in db.rows(f"SELECT {idsql(t)} FROM {qt(t.table)} ORDER BY 1")]
             for t in checker.types.values()
         }
         sql = gen.change(ids)

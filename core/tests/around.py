@@ -59,6 +59,7 @@ sys.path.insert(0, os.path.dirname(HERE))
 import genpolicy  # noqa: E402
 from authzlib import evaluate  # noqa: E402
 from authzlib.parse import Rule  # noqa: E402
+from authzlib.sqlutil import qt  # noqa: E402
 from difftest import DB, Checker, Snapshot, idsql, lit  # noqa: E402
 from genpolicy import SCHEMA, Refused, Slow, Spec  # noqa: E402
 
@@ -583,7 +584,7 @@ def share_problems(checker: AroundChecker) -> list[str]:
     for t in checker.types.values():
         if t.name == "user":
             continue
-        there = f"EXISTS (SELECT 1 FROM {t.table} r WHERE {idsql(t, 'r')} = "
+        there = f"EXISTS (SELECT 1 FROM {qt(t.table)} r WHERE {idsql(t, 'r')} = "
         share = (
             "md5(ROW(g.object_type, g.object_id, g.relation, g.subject_type, g.subject_id, g.subject_relation)::text), "
             "g.xmin::text FROM authz.shares g"
@@ -851,7 +852,7 @@ def run(spec: Spec, w: World, db: DB, control: DB, steps: int, workdir: str, sec
         if step == steps:
             break
         ids = {
-            t.name: [x[0] for x in db.rows(f"SELECT {idsql(t)} FROM {t.table} ORDER BY 1")]
+            t.name: [x[0] for x in db.rows(f"SELECT {idsql(t)} FROM {qt(t.table)} ORDER BY 1")]
             for t in checker.types.values()
         }
         sql = gen.change(ids)
@@ -887,7 +888,8 @@ def main() -> None:
                 return False
 
         for seed in seeds:
-            spec = with_write_rules(genpolicy.make(seed), seed)
+            # plain names: the worlds rebuild genpolicy's tables from its schema's text, as it writes them plainly
+            spec = with_write_rules(genpolicy.make(seed, respell=False), seed)
             w = draw(seed, spec)
             if args.only is not None:
                 print(f"world: {w.describe()}\n\n{policy_text(spec, w)}")
