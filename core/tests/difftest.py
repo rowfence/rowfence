@@ -333,6 +333,13 @@ class Checker:
             lines.append(f"SELECT {lit(json.dumps(key))}, ({sql});")
 
         self.db.run("\n".join(self.as_app_functions()))
+        # the rows explain is asked about by each user themselves, whether they may see them or not: picked here
+        sample = {
+            t.name: [
+                row[0] for row in self.db.rows(f"SELECT {idsql(t)} FROM {qt(t.table)} ORDER BY md5({idsql(t)}) LIMIT 2")
+            ]
+            for t in self.types.values()
+        }
         for u in self.users:
             lines = []
             blocks.append(lines)
@@ -357,6 +364,16 @@ class Checker:
                         f"FROM (SELECT {idsql(t)} AS i FROM {qt(t.table)} TABLESAMPLE BERNOULLI (30) "
                         f"UNION SELECT '999999') ids",
                     )
+            if kind == "user" and pid:
+                # authz.explain asked by the user themselves: about a row they can't see, nothing
+                for t in self.types.values():
+                    ids = "ARRAY[" + ", ".join(lit(i) for i in sample[t.name]) + "]::text[]"
+                    for p in t.perms:
+                        emit(
+                            [u, "explain self", t.name, p],
+                            f"SELECT coalesce(json_agg(json_build_array(i, (SELECT e FROM authz.explain("
+                            f"{lit(t.name)}, i, {lit(p)}, NULL) e LIMIT 1))), '[]') FROM unnest({ids}) i",
+                        )
             for table in dict.fromkeys(r.table for r in self.rules if r.command == "select"):
                 t = self.ref.type_of_table(table)
                 emit([u, "rls", table], f"SELECT coalesce(json_agg({idsql(t)}), '[]') FROM {qt(table)}")
@@ -516,6 +533,16 @@ class Checker:
             raise LookupError(f"{table}: no {command} rule")
         return self.ref.eval_expr(state, t, rule.expr) & self.ref.ids(t) & self.ref.valid(t)
 
+    def visible(self, state: evaluate.State, t: Type, i: str) -> bool:
+        """Whether the user may select row i of t, as explain asks (authz_int.visible): by the table's select rule;
+        a table without rules is readable (its where aside); one with rules but no select rule, by nobody."""
+        rules = [r for r in self.rules if r.table == t.table]
+        if not rules:
+            return i in self.ref.ids(t) & self.ref.valid(t)
+        if not any(r.command == "select" and not r.columns for r in rules):
+            return False
+        return i in self.expected_rule(state, t.table, "select")
+
     def links_of(self, u: str) -> set[str]:
         tokens = [x.strip() for x in self.context(u).get("links", "").split(",") if x.strip()]
         return {hashlib.sha256(x.encode()).hexdigest() for x in tokens}
@@ -540,6 +567,16 @@ class Checker:
                         if not line or line.startswith("yes") != want:
                             problems.append(
                                 f"user {u}: authz.explain('{t.name}', {i}, '{p}') says "
+                                f"{line!r}, expected {'yes' if want else 'no'}"
+                            )
+                    # asked by the user themselves: the same, but nothing about a row they can't see (unless they
+                    # may share it, and so inspect it)
+                    for i, line in snap.get((u, "explain self", t.name, p), []):
+                        inspects = "share" in t.perms and i in state[(t.name, "share")] & self.ref.ids(t)
+                        want = i in state[(t.name, p)] & self.ref.ids(t) and (self.visible(state, t, i) or inspects)
+                        if not line or line.startswith("yes") != want:
+                            problems.append(
+                                f"user {u}: authz.explain('{t.name}', {i}, '{p}') asked by themselves says "
                                 f"{line!r}, expected {'yes' if want else 'no'}"
                             )
             for t in self.types.values():
@@ -1502,7 +1539,7 @@ class CrossGen(Gen):
     types are partly inside the recursion and partly outside it, narrowed by a condition with a comment, dollar
     quotes and an E'' string in it; a type whose where reads another table (cx.closed); a region's chief named by
     a column and by shares; a site's wardens, the chiefs of the region a column names; an update rule with an
-    after rule on the whole row."""
+    after rule on the whole row; notes, a table with rules and no select rule, whose `open` is conditions alone."""
 
     policy = "tests/cross.authz"
     schema = "tests/cross_schema.sql"
@@ -1539,6 +1576,7 @@ class CrossGen(Gen):
             for i in range(1, 5)
         ]
         s.append(f"INSERT INTO cx.closed VALUES ({r.randint(1, 4)});")
+        s += [f"INSERT INTO cx.notes (id, author_id) VALUES ({i}, {self.maybe_user()});" for i in range(1, 5)]
         for _ in range(4):
             for table in ("site_links", "site_regions"):
                 s.append(
@@ -1653,6 +1691,10 @@ class CrossGen(Gen):
             # a region's chiefs by sharing, and the region whose chiefs are a site's wardens
             lambda: f"DELETE FROM authz.shares WHERE object_type = 'region' AND object_id = '{a}';",
             lambda: f"UPDATE cx.sites SET region_id = {r.choice([str(a), str(b), 'NULL'])} WHERE id = {site};",
+            # notes, which nobody may read back
+            lambda: f"INSERT INTO cx.notes (author_id) VALUES ({self.maybe_user()});",
+            lambda: f"UPDATE cx.notes SET author_id = {self.maybe_user()} WHERE id = {r.randint(1, 6)};",
+            lambda: f"DELETE FROM cx.notes WHERE id = {r.randint(1, 6)};",
         ]
         if r.random() < 0.15:  # several changes in one transaction
             return "BEGIN;\n" + "\n".join(r.choice(ops)() for _ in range(r.randint(2, 4))) + "\nCOMMIT;"

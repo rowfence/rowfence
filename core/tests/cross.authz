@@ -5,7 +5,7 @@
 -- owns: from the folder above, inside the recursion, or from the project the folder sits in, whose filing is its
 -- lead's alone (outside it). A closed site, which the type's where reads from another table, holds nothing. A
 -- region's chief is named by a column, or by sharing; a site's wardens are the chiefs of the region its column
--- names.
+-- names. Notes are written and never read back: no select rule, so explain tells even their authors nothing.
 app role app_user
 
 type user = cx.users
@@ -41,6 +41,14 @@ type site = cx.sites where {not exists (select 1 from cx.closed c where c.site_i
   warden : region#chief = region_id                                   -- a column naming a group's members
   can run = over.run
   can guard = warden or run
+
+type note = cx.notes                                                -- written, never read back: no select rule
+  author : user = author_id
+  can write = author
+  can open = {author_id is null} and {id > 0}                        -- conditions alone: anyone, on such a row
+
+rules cx.notes
+  insert : write
 
 rules cx.folders
   select : view
