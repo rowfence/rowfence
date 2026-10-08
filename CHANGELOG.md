@@ -65,6 +65,13 @@ Each release upgrades from the one before it. How releases are numbered and made
   world doesn't break (prove stopped on an internal check), or a world's answer missed. And a world where
   every condition holds could make `{archived}` and `{not archived}` hold on the same row: a corner now
   chooses each row's column values, and the conditions are read from them as in any other world.
+- `rowstile prove` and the review's refactor check read a condition as a fact about the row only where it
+  means the same whatever the column's type. Text in order (`{name < 'b'}`, which follows the database's
+  collation), text Postgres reads as the column's number or boolean (`{size = '10'}`, `{done = 't'}`, `{kind
+  in ('y')}`) and an order against `authz.uid()` are now left to the database, as a subquery is: a world may
+  have any row pass them. They compared text by its characters, `'t'` with a boolean as text, and the ids a
+  relation's column holds with a number as text: `{owner_id < 10}` was false for owner 2. Conditions made up
+  at random are now asked of Postgres too, on the same rows, and must get the same answer.
 - **Rows under a governed table.** Rowstile checks a rule on a column (`update owner_id : share`) with a
   row trigger, and forgets a row's shares when its key changes with another. Three kinds of rows escaped
   them. An app with neither partitions nor tables that inherit was not affected.

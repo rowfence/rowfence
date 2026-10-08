@@ -14,9 +14,10 @@ user, and compares.
 ## A second implementation
 
 Tests written by the author of the code share the author's mistakes. So the answers are also compared with a
-second implementation that shares no code with the first: the reference evaluator
-([`authzlib/evaluate.py`](../core/authzlib/evaluate.py)), which works straight from the policy, on sets of
-ids, to a fixed point, and knows nothing of the SQL the compiler writes.
+second implementation: the reference evaluator ([`authzlib/evaluate.py`](../core/authzlib/evaluate.py)),
+which works straight from the policy, on sets of ids, to a fixed point, and knows nothing of the SQL the
+compiler writes. The two share one thing, the parser: a policy misread there would be misread by both, and
+they would agree. So the evaluator is held to answers that neither of them wrote, below.
 
 - **Random data**: [`tests/difftest.py`](../core/tests/difftest.py) fills five policies' tables with random
   rows and makes a hundred random changes to each (moves, links, loops, groups inside groups, shares that
@@ -36,6 +37,17 @@ ids, to a fixed point, and knows nothing of the SQL the compiler writes.
   app role on every row and undoes them, checks that no share outlives its row, that a role the policy
   doesn't name gets nothing, and that `authz.lint()` reports what changed and `rowstile apply` puts it right.
   A few on every run, sixty with new seeds every night.
+- **Answers worked out by hand**: `HandAnswers` in [`tests/unit_test.py`](../core/tests/unit_test.py) gives
+  the evaluator small policies and worlds whose answers were worked out from
+  [the language's reference](reference/language.md), by hand: `not` and parentheses, inheritance stopped by
+  a condition or by a type's `where`, a suspended user, groups inside groups and in a loop, each kind of
+  subject (`user:*`, `anyone`, a link, a service), a deny inside inheritance, folders and projects inside each
+  other, custom roles with and without `from`, NULL in conditions.
+- **Conditions, against Postgres**: `rowstile prove` and the review read simple conditions (`{not archived}`,
+  `{size > 10}`, `{owner_id = authz.uid()}`) themselves, in worlds they make up. difftest never does: it
+  asks the database. So [`tests/conditions_test.py`](../core/tests/conditions_test.py) makes conditions up at
+  random over columns of each kind, and each one the evaluator reads itself must get Postgres's answer on
+  every row: three thousand on every run, fifty thousand with new seeds every night.
 
 ## The boundary
 
