@@ -1078,7 +1078,8 @@ class MultiGen(Gen):
     """tests/multi.authz: UUID keys, suspended users and orgs, archived folders,
     folders and projects nested in each other (inheritance across types),
     documents in either, user:*, anyone, link tokens, shares that start later or
-    carry a caveat, and custom roles."""
+    carry a caveat, and custom roles: a folder's from its org's column, a doc's
+    from the orgs a table lists (mt.doc_orgs, while active)."""
 
     policy = "tests/multi.authz"
     schema = "tests/multi_schema.sql"
@@ -1136,6 +1137,13 @@ class MultiGen(Gen):
                 f"INSERT INTO mt.docs VALUES ({lit(uid(d, '10000000-0000-4000-8000-'))}, {lit(kind)}, {cid}, {self.maybe_user()});"
             )
         s.append("UPDATE mt.folders SET org_id = (ARRAY[1, 2, NULL])[1 + id % 3];")  # whose roles count there
+        # the orgs whose roles count on a doc: a table's rows, none, one or both, some not active
+        for d in range(1, 31):
+            for o in r.sample([1, 2], r.choice([0, 1, 1, 2])):
+                s.append(
+                    f"INSERT INTO mt.doc_orgs VALUES ({lit(uid(d, '10000000-0000-4000-8000-'))}, {o}, "
+                    f"{str(r.random() < 0.7).lower()});"
+                )
         return "\n".join(s)
 
     def grants(self) -> str:
@@ -1145,6 +1153,10 @@ class MultiGen(Gen):
             "INSERT INTO authz.roles (id, owner_type, owner_id, object_type, name) VALUES "
             "(1, 'org', '1', 'folder', 'reader'), (2, 'org', '1', 'folder', 'writer'), (3, 'org', '2', 'folder', 'editor3');",
             "INSERT INTO authz.role_permissions VALUES (1, 'view'), (2, 'view'), (2, 'edit'), (3, 'edit');",
+            # a doc's roles, one per org; view gives nothing on a doc, whose view doesn't name its roles
+            "INSERT INTO authz.roles (id, owner_type, owner_id, object_type, name) VALUES "
+            "(4, 'org', '1', 'doc', 'doc writer'), (5, 'org', '2', 'doc', 'doc writer');",
+            "INSERT INTO authz.role_permissions VALUES (4, 'edit'), (5, 'edit'), (5, 'view');",
             "SELECT setval(pg_get_serial_sequence('authz.roles', 'id'), 10);",
         ]
         # ... and a few such from the start: folders 3, 6, 9 are org 1's, 1 and 4 org 2's, 2 nobody's (initial)
@@ -1153,7 +1165,14 @@ class MultiGen(Gen):
             f"VALUES ('folder', '{f}', 'role:{role}', 'user', {self.u()}, '') ON CONFLICT DO NOTHING;"
             for f, role in ((3, 3), (6, 3), (9, 3), (1, 1), (4, 2), (2, 2))
         ]
-        return "\n".join(roles + cross + [self.grant() for _ in range(30)])
+        # a doc's roles from the start, on docs whose orgs may be listed, not listed, or listed but not active
+        docs = [
+            "INSERT INTO authz.shares (object_type, object_id, relation, subject_type, subject_id, subject_relation) "
+            f"VALUES ('doc', {lit(uid(d, '10000000-0000-4000-8000-'))}, 'role:{self.r.choice([4, 5])}', 'user', "
+            f"{self.u()}, '') ON CONFLICT DO NOTHING;"
+            for d in range(1, 13)
+        ]
+        return "\n".join(roles + cross + docs + [self.grant() for _ in range(30)])
 
     def subject(self, allowed: list[str]) -> tuple[str, str, str]:
         r = self.r
@@ -1182,9 +1201,13 @@ class MultiGen(Gen):
         elif k < 0.6:
             obj, oid, rel = "folder", r.choice(folders), "editor"
             st, sid, sr = self.subject(["user", "team"])
-        elif k < 0.85:
+        elif k < 0.77:
             obj, oid, rel = "folder", r.choice(folders), f"role:{r.choice([1, 2, 3])}"
             st, sid, sr = self.subject(["user", "team"])
+        elif k < 0.85:  # a doc's role: it counts while the doc lists its org (mt.doc_orgs, active)
+            docs = (ids or {}).get("doc") or [uid(d, "10000000-0000-4000-8000-") for d in range(1, 31)]
+            obj, oid, rel = "doc", r.choice(docs), f"role:{r.choice([4, 5])}"
+            st, sid, sr = self.subject(["user"])
         else:
             obj, oid, rel = "team", r.randint(1, 4), "member"
             st, sid, sr = "team", str(r.randint(1, 4)), "member"
@@ -1267,6 +1290,16 @@ class MultiGen(Gen):
                 "(3, 'org', '2', 'folder', 'editor3') ON CONFLICT DO NOTHING;"
             ),
             lambda: f"DELETE FROM authz.roles WHERE id = {r.choice([1, 2, 3])};",
+            # the orgs whose roles count on a doc, and a doc's roles
+            lambda: (
+                f"INSERT INTO mt.doc_orgs VALUES ({lit(r.choice(docs))}, {r.choice([1, 2])}, true) "
+                "ON CONFLICT (doc_id, org_id) DO UPDATE SET active = NOT mt.doc_orgs.active;"
+            ),
+            lambda: f"DELETE FROM mt.doc_orgs WHERE doc_id = {lit(r.choice(docs))};",
+            lambda: f"UPDATE mt.doc_orgs SET org_id = 3 - org_id WHERE doc_id = {lit(r.choice(docs))};",
+            lambda: "TRUNCATE mt.doc_orgs;",
+            lambda: f"DELETE FROM authz.roles WHERE id = {r.choice([4, 5])};",
+            lambda: "INSERT INTO authz.role_permissions VALUES (4, 'view') ON CONFLICT DO NOTHING;",
         ]
         if r.random() < 0.15:
             return "BEGIN;\n" + "\n".join(r.choice(ops)() for _ in range(r.randint(2, 4))) + "\nCOMMIT;"

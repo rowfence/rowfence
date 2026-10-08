@@ -41,6 +41,9 @@ CREATE TABLE mt.docs (
   container_id   bigint NOT NULL,
   author_id      uuid REFERENCES mt.users ON DELETE SET NULL,
   body           text NOT NULL DEFAULT 'the text');
+-- the orgs whose custom roles count on a doc (no foreign keys: a row may name what is gone)
+CREATE TABLE mt.doc_orgs (
+  doc_id uuid NOT NULL, org_id bigint NOT NULL, active boolean NOT NULL DEFAULT true, PRIMARY KEY (doc_id, org_id));
 GRANT USAGE ON SCHEMA mt TO app_user;
 GRANT SELECT ON ALL TABLES IN SCHEMA mt TO app_user;
 GRANT INSERT, UPDATE, DELETE ON mt.docs TO app_user;

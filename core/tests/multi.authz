@@ -44,7 +44,9 @@ type folder = mt.folders where {not archived}
 type doc = mt.docs (id uuid)
   container : folder, project = (container_type, container_id)
   author    : user = author_id
-  can edit = author or container.edit
+  org       : org = mt.doc_orgs(doc_id -> org_id) where {active}    -- whose custom roles count on a doc: a
+  roles     : user  from org                                         -- table's rows, so any number of orgs
+  can edit = author or container.edit or roles
   can view = edit or container.view
   can glance = container.peek or container.edit               -- tiers that differ by type: container.edit stays
 

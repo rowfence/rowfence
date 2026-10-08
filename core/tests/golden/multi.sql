@@ -407,10 +407,20 @@ BEGIN
                     AND attname = 'author_id' AND attnum > 0 AND NOT attisdropped) THEN
     missing := missing || E'\n  line 46: column author_id not found in mt.docs [AZ601]';
   END IF;
-  IF to_regclass('"mt"."docs"') IS NULL THEN missing := missing || E'\n  line 57: table mt.docs not found [AZ601]';
+  IF to_regclass('"mt"."doc_orgs"') IS NULL THEN missing := missing || E'\n  line 47: table mt.doc_orgs not found [AZ601]';
+  ELSIF NOT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = to_regclass('"mt"."doc_orgs"')
+                    AND attname = 'doc_id' AND attnum > 0 AND NOT attisdropped) THEN
+    missing := missing || E'\n  line 47: column doc_id not found in mt.doc_orgs [AZ601]';
+  END IF;
+  IF to_regclass('"mt"."doc_orgs"') IS NULL THEN missing := missing || E'\n  line 47: table mt.doc_orgs not found [AZ601]';
+  ELSIF NOT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = to_regclass('"mt"."doc_orgs"')
+                    AND attname = 'org_id' AND attnum > 0 AND NOT attisdropped) THEN
+    missing := missing || E'\n  line 47: column org_id not found in mt.doc_orgs [AZ601]';
+  END IF;
+  IF to_regclass('"mt"."docs"') IS NULL THEN missing := missing || E'\n  line 59: table mt.docs not found [AZ601]';
   ELSIF NOT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = to_regclass('"mt"."docs"')
                     AND attname = 'body' AND attnum > 0 AND NOT attisdropped) THEN
-    missing := missing || E'\n  line 57: column body not found in mt.docs [AZ601]';
+    missing := missing || E'\n  line 59: column body not found in mt.docs [AZ601]';
   END IF;
   SELECT atttypid, replace(format_type(atttypid, NULL), 'character varying', 'varchar') INTO v_oid, v_type
   FROM pg_attribute WHERE attrelid = to_regclass('"mt"."users"') AND attname = 'id' AND attnum > 0 AND NOT attisdropped;
@@ -646,11 +656,11 @@ END $w$;
 
 CREATE TABLE authz_int.role_subjects (object_type text, subject text, PRIMARY KEY (object_type, subject));
 
-INSERT INTO authz_int.role_subjects VALUES ('project', 'user'), ('project', 'team#member'), ('folder', 'user'), ('folder', 'team#member');
+INSERT INTO authz_int.role_subjects VALUES ('project', 'user'), ('project', 'team#member'), ('folder', 'user'), ('folder', 'team#member'), ('doc', 'user');
 
 CREATE TABLE authz_int.role_grantable (object_type text, permission text, PRIMARY KEY (object_type, permission));
 
-INSERT INTO authz_int.role_grantable VALUES ('project', 'view'), ('folder', 'edit'), ('folder', 'view'), ('folder', 'archive');
+INSERT INTO authz_int.role_grantable VALUES ('project', 'view'), ('folder', 'edit'), ('folder', 'view'), ('folder', 'archive'), ('doc', 'edit');
 
 CREATE TABLE authz_int.caveats (name text PRIMARY KEY);
 
@@ -911,6 +921,7 @@ LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path FROM CURRENT AS $f$
 BEGIN
   CASE p_type
     WHEN 'folder' THEN RETURN p_owner_type = 'org' AND p_owner_id IN (SELECT (w."org_id")::text FROM "mt"."folders" w WHERE w."id" = p_id::bigint);
+    WHEN 'doc' THEN RETURN p_owner_type = 'org' AND p_owner_id IN (SELECT (w."org_id")::text FROM "mt"."doc_orgs" w WHERE w."doc_id" = p_id::uuid AND coalesce((active), false));
     ELSE RETURN true;
   END CASE;
 END $f$;
@@ -920,6 +931,7 @@ LANGUAGE plpgsql IMMUTABLE SET search_path = pg_catalog, pg_temp AS $f$
 BEGIN
   CASE p_object_type
     WHEN 'folder' THEN RETURN 'org';
+    WHEN 'doc' THEN RETURN 'org';
     ELSE RETURN NULL;
   END CASE;
 END $f$;
@@ -1523,8 +1535,133 @@ DO $tr$ BEGIN
   END IF;
 END $tr$;
 
--- relationships kept in mt.org_members
+-- shares on doc rows that are gone, or whose id changed, are removed
+CREATE FUNCTION authz_int."doc__forget"() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path FROM CURRENT AS $f$
+BEGIN
+  IF TG_OP = 'TRUNCATE' THEN
+    DELETE FROM authz.shares WHERE object_type = 'doc';
+    DELETE FROM authz.shares WHERE subject_type = 'doc' AND subject_id <> '*';      -- '*' (every one signed in) names no row
+  ELSIF TG_OP = 'UPDATE' THEN   -- on a partitioned table (the last trigger below): the ids the update left no row with
+    DELETE FROM authz.shares WHERE object_type = 'doc' AND object_id IN (SELECT o."id"::text FROM old_rows o EXCEPT SELECT n."id"::text FROM new_rows n);
+    DELETE FROM authz.shares WHERE subject_type = 'doc' AND subject_id IN (SELECT o."id"::text FROM old_rows o EXCEPT SELECT n."id"::text FROM new_rows n);
+  ELSE
+    DELETE FROM authz.shares WHERE object_type = 'doc' AND object_id IN (SELECT o."id"::text FROM old_rows o);
+    DELETE FROM authz.shares WHERE subject_type = 'doc' AND subject_id IN (SELECT o."id"::text FROM old_rows o);
+  END IF;
+  RETURN NULL;
+END $f$;
+CREATE FUNCTION authz_int."doc__forget_id"() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path FROM CURRENT AS $f$
+BEGIN
+  DELETE FROM authz.shares WHERE object_type = 'doc' AND object_id = OLD."id"::text;
+  DELETE FROM authz.shares WHERE subject_type = 'doc' AND subject_id = OLD."id"::text;
+  RETURN NULL;
+END $f$;
+CREATE TRIGGER "authz_doc_forget_del" AFTER DELETE ON "mt"."docs"
+  REFERENCING OLD TABLE AS old_rows FOR EACH STATEMENT EXECUTE FUNCTION authz_int."doc__forget"();
+CREATE TRIGGER "authz_doc_forget_id" AFTER UPDATE ON "mt"."docs" FOR EACH ROW
+  WHEN (OLD."id" IS DISTINCT FROM NEW."id") EXECUTE FUNCTION authz_int."doc__forget_id"();
+CREATE TRIGGER "authz_doc_forget_trunc" AFTER TRUNCATE ON "mt"."docs"
+  FOR EACH STATEMENT EXECUTE FUNCTION authz_int."doc__forget"();
+-- On a partitioned table, an update that puts a row in another partition is a delete there and an insert here:
+-- Postgres runs no AFTER UPDATE row trigger for it. The ids an update leaves no row with are forgotten too.
+-- @object trigger "authz_doc_forget_moved" ON "mt"."docs"
+-- @if partitioned
+DO $tr$ BEGIN
+  IF (SELECT relkind FROM pg_catalog.pg_class WHERE oid = '"mt"."docs"'::regclass) = 'p' THEN
+    EXECUTE 'CREATE TRIGGER "authz_doc_forget_moved" AFTER UPDATE ON "mt"."docs" REFERENCING OLD TABLE AS old_rows NEW TABLE AS new_rows FOR EACH STATEMENT EXECUTE FUNCTION authz_int."doc__forget"()';
+  END IF;
+END $tr$;
+
+-- relationships kept in mt.doc_orgs
 CREATE FUNCTION authz_int."rel_audit_1_ins"() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path FROM CURRENT AS $f$
+BEGIN
+    INSERT INTO authz.audit (db_role, user_id, acting_user, action, object_type, object_id, relation, subject_type,
+                             subject_id, subject_relation, reason)
+    SELECT authz_int.caller_role(), authz_int.actor(),
+           nullif(current_setting('authz.acting_user', true), ''), c.action, c.ot, c.oid, c.rel, c.st, c.sid, c.sr,
+           nullif(current_setting('authz_ctx.reason', true), '')
+    FROM (SELECT 'relate' AS action, 'doc' AS ot, x."doc_id"::text AS oid, 'org' AS rel, 'org' AS st, x."org_id"::text AS sid, '' AS sr FROM new_rows x WHERE true AND coalesce((active), false)) c;
+    PERFORM authz_int.changed(c.ot, array_agg(DISTINCT c.oid), 'relationship') FROM (SELECT 'relate' AS action, 'doc' AS ot, x."doc_id"::text AS oid, 'org' AS rel, 'org' AS st, x."org_id"::text AS sid, '' AS sr FROM new_rows x WHERE true AND coalesce((active), false)) c GROUP BY c.ot;
+  RETURN NULL;
+END $f$;
+-- @object trigger "authz_rel_audit_1_ins" ON "mt"."doc_orgs"
+DO $tr$ BEGIN
+  IF (SELECT relkind FROM pg_class WHERE oid = '"mt"."doc_orgs"'::regclass) IN ('r', 'p') THEN
+    EXECUTE 'CREATE TRIGGER "authz_rel_audit_1_ins" AFTER INSERT ON "mt"."doc_orgs" REFERENCING NEW TABLE AS new_rows FOR EACH STATEMENT EXECUTE FUNCTION authz_int."rel_audit_1_ins"()';
+  ELSE
+    RAISE NOTICE '"mt"."doc_orgs" is not a table: changes to it are not audited or fed (audit)';
+  END IF;
+END $tr$;
+CREATE FUNCTION authz_int."rel_audit_1_upd"() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path FROM CURRENT AS $f$
+BEGIN
+    INSERT INTO authz.audit (db_role, user_id, acting_user, action, object_type, object_id, relation, subject_type,
+                             subject_id, subject_relation, reason)
+    SELECT authz_int.caller_role(), authz_int.actor(),
+           nullif(current_setting('authz.acting_user', true), ''), c.action, c.ot, c.oid, c.rel, c.st, c.sid, c.sr,
+           nullif(current_setting('authz_ctx.reason', true), '')
+    FROM (SELECT 'relate' AS action, 'doc' AS ot, x."doc_id"::text AS oid, 'org' AS rel, 'org' AS st, x."org_id"::text AS sid, '' AS sr FROM new_rows x WHERE true AND coalesce((active), false)) c
+    WHERE NOT EXISTS (SELECT 1 FROM (SELECT 'unrelate' AS action, 'doc' AS ot, x."doc_id"::text AS oid, 'org' AS rel, 'org' AS st, x."org_id"::text AS sid, '' AS sr FROM old_rows x WHERE true AND coalesce((active), false)) o WHERE (o.ot, o.oid, o.rel, o.st, o.sid) = (c.ot, c.oid, c.rel, c.st, c.sid));
+    PERFORM authz_int.changed(c.ot, array_agg(DISTINCT c.oid), 'relationship') FROM (SELECT 'relate' AS action, 'doc' AS ot, x."doc_id"::text AS oid, 'org' AS rel, 'org' AS st, x."org_id"::text AS sid, '' AS sr FROM new_rows x WHERE true AND coalesce((active), false)) c GROUP BY c.ot;
+    INSERT INTO authz.audit (db_role, user_id, acting_user, action, object_type, object_id, relation, subject_type,
+                             subject_id, subject_relation, reason)
+    SELECT authz_int.caller_role(), authz_int.actor(),
+           nullif(current_setting('authz.acting_user', true), ''), c.action, c.ot, c.oid, c.rel, c.st, c.sid, c.sr,
+           nullif(current_setting('authz_ctx.reason', true), '')
+    FROM (SELECT 'unrelate' AS action, 'doc' AS ot, x."doc_id"::text AS oid, 'org' AS rel, 'org' AS st, x."org_id"::text AS sid, '' AS sr FROM old_rows x WHERE true AND coalesce((active), false)) c
+    WHERE NOT EXISTS (SELECT 1 FROM (SELECT 'relate' AS action, 'doc' AS ot, x."doc_id"::text AS oid, 'org' AS rel, 'org' AS st, x."org_id"::text AS sid, '' AS sr FROM new_rows x WHERE true AND coalesce((active), false)) o WHERE (o.ot, o.oid, o.rel, o.st, o.sid) = (c.ot, c.oid, c.rel, c.st, c.sid));
+    PERFORM authz_int.changed(c.ot, array_agg(DISTINCT c.oid), 'relationship') FROM (SELECT 'unrelate' AS action, 'doc' AS ot, x."doc_id"::text AS oid, 'org' AS rel, 'org' AS st, x."org_id"::text AS sid, '' AS sr FROM old_rows x WHERE true AND coalesce((active), false)) c GROUP BY c.ot;
+  RETURN NULL;
+END $f$;
+-- @object trigger "authz_rel_audit_1_upd" ON "mt"."doc_orgs"
+DO $tr$ BEGIN
+  IF (SELECT relkind FROM pg_class WHERE oid = '"mt"."doc_orgs"'::regclass) IN ('r', 'p') THEN
+    EXECUTE 'CREATE TRIGGER "authz_rel_audit_1_upd" AFTER UPDATE ON "mt"."doc_orgs" REFERENCING OLD TABLE AS old_rows NEW TABLE AS new_rows FOR EACH STATEMENT EXECUTE FUNCTION authz_int."rel_audit_1_upd"()';
+  ELSE
+    RAISE NOTICE '"mt"."doc_orgs" is not a table: changes to it are not audited or fed (audit)';
+  END IF;
+END $tr$;
+CREATE FUNCTION authz_int."rel_audit_1_del"() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path FROM CURRENT AS $f$
+BEGIN
+    INSERT INTO authz.audit (db_role, user_id, acting_user, action, object_type, object_id, relation, subject_type,
+                             subject_id, subject_relation, reason)
+    SELECT authz_int.caller_role(), authz_int.actor(),
+           nullif(current_setting('authz.acting_user', true), ''), c.action, c.ot, c.oid, c.rel, c.st, c.sid, c.sr,
+           nullif(current_setting('authz_ctx.reason', true), '')
+    FROM (SELECT 'unrelate' AS action, 'doc' AS ot, x."doc_id"::text AS oid, 'org' AS rel, 'org' AS st, x."org_id"::text AS sid, '' AS sr FROM old_rows x WHERE true AND coalesce((active), false)) c;
+    PERFORM authz_int.changed(c.ot, array_agg(DISTINCT c.oid), 'relationship') FROM (SELECT 'unrelate' AS action, 'doc' AS ot, x."doc_id"::text AS oid, 'org' AS rel, 'org' AS st, x."org_id"::text AS sid, '' AS sr FROM old_rows x WHERE true AND coalesce((active), false)) c GROUP BY c.ot;
+  RETURN NULL;
+END $f$;
+-- @object trigger "authz_rel_audit_1_del" ON "mt"."doc_orgs"
+DO $tr$ BEGIN
+  IF (SELECT relkind FROM pg_class WHERE oid = '"mt"."doc_orgs"'::regclass) IN ('r', 'p') THEN
+    EXECUTE 'CREATE TRIGGER "authz_rel_audit_1_del" AFTER DELETE ON "mt"."doc_orgs" REFERENCING OLD TABLE AS old_rows FOR EACH STATEMENT EXECUTE FUNCTION authz_int."rel_audit_1_del"()';
+  ELSE
+    RAISE NOTICE '"mt"."doc_orgs" is not a table: changes to it are not audited or fed (audit)';
+  END IF;
+END $tr$;
+CREATE FUNCTION authz_int."rel_audit_1_trunc"() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path FROM CURRENT AS $f$
+BEGIN
+    PERFORM authz_int.audit('truncate', 'doc', NULL, NULL, NULL, NULL, NULL, jsonb_build_object('table', 'mt.doc_orgs'));
+    PERFORM authz_int.changed('doc', ARRAY['*'], 'relationship');
+  RETURN NULL;
+END $f$;
+-- @object trigger "authz_rel_audit_1_trunc" ON "mt"."doc_orgs"
+DO $tr$ BEGIN
+  IF (SELECT relkind FROM pg_class WHERE oid = '"mt"."doc_orgs"'::regclass) IN ('r', 'p') THEN
+    EXECUTE 'CREATE TRIGGER "authz_rel_audit_1_trunc" AFTER TRUNCATE ON "mt"."doc_orgs" FOR EACH STATEMENT EXECUTE FUNCTION authz_int."rel_audit_1_trunc"()';
+  ELSE
+    RAISE NOTICE '"mt"."doc_orgs" is not a table: changes to it are not audited or fed (audit)';
+  END IF;
+END $tr$;
+
+-- relationships kept in mt.org_members
+CREATE FUNCTION authz_int."rel_audit_2_ins"() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER SET search_path FROM CURRENT AS $f$
 BEGIN
     INSERT INTO authz.audit (db_role, user_id, acting_user, action, object_type, object_id, relation, subject_type,
@@ -1536,15 +1673,15 @@ BEGIN
     PERFORM authz_int.changed(c.ot, array_agg(DISTINCT c.oid), 'relationship') FROM (SELECT 'relate' AS action, 'org' AS ot, x."org_id"::text AS oid, 'member' AS rel, 'user' AS st, x."user_id"::text AS sid, '' AS sr FROM new_rows x WHERE true UNION ALL SELECT 'relate' AS action, 'org' AS ot, x."org_id"::text AS oid, 'admin' AS rel, 'user' AS st, x."user_id"::text AS sid, '' AS sr FROM new_rows x WHERE true AND coalesce((role = 'admin'), false)) c GROUP BY c.ot;
   RETURN NULL;
 END $f$;
--- @object trigger "authz_rel_audit_1_ins" ON "mt"."org_members"
+-- @object trigger "authz_rel_audit_2_ins" ON "mt"."org_members"
 DO $tr$ BEGIN
   IF (SELECT relkind FROM pg_class WHERE oid = '"mt"."org_members"'::regclass) IN ('r', 'p') THEN
-    EXECUTE 'CREATE TRIGGER "authz_rel_audit_1_ins" AFTER INSERT ON "mt"."org_members" REFERENCING NEW TABLE AS new_rows FOR EACH STATEMENT EXECUTE FUNCTION authz_int."rel_audit_1_ins"()';
+    EXECUTE 'CREATE TRIGGER "authz_rel_audit_2_ins" AFTER INSERT ON "mt"."org_members" REFERENCING NEW TABLE AS new_rows FOR EACH STATEMENT EXECUTE FUNCTION authz_int."rel_audit_2_ins"()';
   ELSE
     RAISE NOTICE '"mt"."org_members" is not a table: changes to it are not audited or fed (audit)';
   END IF;
 END $tr$;
-CREATE FUNCTION authz_int."rel_audit_1_upd"() RETURNS trigger
+CREATE FUNCTION authz_int."rel_audit_2_upd"() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER SET search_path FROM CURRENT AS $f$
 BEGIN
     INSERT INTO authz.audit (db_role, user_id, acting_user, action, object_type, object_id, relation, subject_type,
@@ -1565,15 +1702,15 @@ BEGIN
     PERFORM authz_int.changed(c.ot, array_agg(DISTINCT c.oid), 'relationship') FROM (SELECT 'unrelate' AS action, 'org' AS ot, x."org_id"::text AS oid, 'member' AS rel, 'user' AS st, x."user_id"::text AS sid, '' AS sr FROM old_rows x WHERE true UNION ALL SELECT 'unrelate' AS action, 'org' AS ot, x."org_id"::text AS oid, 'admin' AS rel, 'user' AS st, x."user_id"::text AS sid, '' AS sr FROM old_rows x WHERE true AND coalesce((role = 'admin'), false)) c GROUP BY c.ot;
   RETURN NULL;
 END $f$;
--- @object trigger "authz_rel_audit_1_upd" ON "mt"."org_members"
+-- @object trigger "authz_rel_audit_2_upd" ON "mt"."org_members"
 DO $tr$ BEGIN
   IF (SELECT relkind FROM pg_class WHERE oid = '"mt"."org_members"'::regclass) IN ('r', 'p') THEN
-    EXECUTE 'CREATE TRIGGER "authz_rel_audit_1_upd" AFTER UPDATE ON "mt"."org_members" REFERENCING OLD TABLE AS old_rows NEW TABLE AS new_rows FOR EACH STATEMENT EXECUTE FUNCTION authz_int."rel_audit_1_upd"()';
+    EXECUTE 'CREATE TRIGGER "authz_rel_audit_2_upd" AFTER UPDATE ON "mt"."org_members" REFERENCING OLD TABLE AS old_rows NEW TABLE AS new_rows FOR EACH STATEMENT EXECUTE FUNCTION authz_int."rel_audit_2_upd"()';
   ELSE
     RAISE NOTICE '"mt"."org_members" is not a table: changes to it are not audited or fed (audit)';
   END IF;
 END $tr$;
-CREATE FUNCTION authz_int."rel_audit_1_del"() RETURNS trigger
+CREATE FUNCTION authz_int."rel_audit_2_del"() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER SET search_path FROM CURRENT AS $f$
 BEGIN
     INSERT INTO authz.audit (db_role, user_id, acting_user, action, object_type, object_id, relation, subject_type,
@@ -1585,32 +1722,32 @@ BEGIN
     PERFORM authz_int.changed(c.ot, array_agg(DISTINCT c.oid), 'relationship') FROM (SELECT 'unrelate' AS action, 'org' AS ot, x."org_id"::text AS oid, 'member' AS rel, 'user' AS st, x."user_id"::text AS sid, '' AS sr FROM old_rows x WHERE true UNION ALL SELECT 'unrelate' AS action, 'org' AS ot, x."org_id"::text AS oid, 'admin' AS rel, 'user' AS st, x."user_id"::text AS sid, '' AS sr FROM old_rows x WHERE true AND coalesce((role = 'admin'), false)) c GROUP BY c.ot;
   RETURN NULL;
 END $f$;
--- @object trigger "authz_rel_audit_1_del" ON "mt"."org_members"
+-- @object trigger "authz_rel_audit_2_del" ON "mt"."org_members"
 DO $tr$ BEGIN
   IF (SELECT relkind FROM pg_class WHERE oid = '"mt"."org_members"'::regclass) IN ('r', 'p') THEN
-    EXECUTE 'CREATE TRIGGER "authz_rel_audit_1_del" AFTER DELETE ON "mt"."org_members" REFERENCING OLD TABLE AS old_rows FOR EACH STATEMENT EXECUTE FUNCTION authz_int."rel_audit_1_del"()';
+    EXECUTE 'CREATE TRIGGER "authz_rel_audit_2_del" AFTER DELETE ON "mt"."org_members" REFERENCING OLD TABLE AS old_rows FOR EACH STATEMENT EXECUTE FUNCTION authz_int."rel_audit_2_del"()';
   ELSE
     RAISE NOTICE '"mt"."org_members" is not a table: changes to it are not audited or fed (audit)';
   END IF;
 END $tr$;
-CREATE FUNCTION authz_int."rel_audit_1_trunc"() RETURNS trigger
+CREATE FUNCTION authz_int."rel_audit_2_trunc"() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER SET search_path FROM CURRENT AS $f$
 BEGIN
     PERFORM authz_int.audit('truncate', 'org', NULL, NULL, NULL, NULL, NULL, jsonb_build_object('table', 'mt.org_members'));
     PERFORM authz_int.changed('org', ARRAY['*'], 'relationship');
   RETURN NULL;
 END $f$;
--- @object trigger "authz_rel_audit_1_trunc" ON "mt"."org_members"
+-- @object trigger "authz_rel_audit_2_trunc" ON "mt"."org_members"
 DO $tr$ BEGIN
   IF (SELECT relkind FROM pg_class WHERE oid = '"mt"."org_members"'::regclass) IN ('r', 'p') THEN
-    EXECUTE 'CREATE TRIGGER "authz_rel_audit_1_trunc" AFTER TRUNCATE ON "mt"."org_members" FOR EACH STATEMENT EXECUTE FUNCTION authz_int."rel_audit_1_trunc"()';
+    EXECUTE 'CREATE TRIGGER "authz_rel_audit_2_trunc" AFTER TRUNCATE ON "mt"."org_members" FOR EACH STATEMENT EXECUTE FUNCTION authz_int."rel_audit_2_trunc"()';
   ELSE
     RAISE NOTICE '"mt"."org_members" is not a table: changes to it are not audited or fed (audit)';
   END IF;
 END $tr$;
 
 -- relationships kept in mt.team_members
-CREATE FUNCTION authz_int."rel_audit_2_ins"() RETURNS trigger
+CREATE FUNCTION authz_int."rel_audit_3_ins"() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER SET search_path FROM CURRENT AS $f$
 BEGIN
     INSERT INTO authz.audit (db_role, user_id, acting_user, action, object_type, object_id, relation, subject_type,
@@ -1622,15 +1759,15 @@ BEGIN
     PERFORM authz_int.changed(c.ot, array_agg(DISTINCT c.oid), 'relationship') FROM (SELECT 'relate' AS action, 'team' AS ot, x."team_id"::text AS oid, 'member' AS rel, 'user' AS st, x."user_id"::text AS sid, '' AS sr FROM new_rows x WHERE true) c GROUP BY c.ot;
   RETURN NULL;
 END $f$;
--- @object trigger "authz_rel_audit_2_ins" ON "mt"."team_members"
+-- @object trigger "authz_rel_audit_3_ins" ON "mt"."team_members"
 DO $tr$ BEGIN
   IF (SELECT relkind FROM pg_class WHERE oid = '"mt"."team_members"'::regclass) IN ('r', 'p') THEN
-    EXECUTE 'CREATE TRIGGER "authz_rel_audit_2_ins" AFTER INSERT ON "mt"."team_members" REFERENCING NEW TABLE AS new_rows FOR EACH STATEMENT EXECUTE FUNCTION authz_int."rel_audit_2_ins"()';
+    EXECUTE 'CREATE TRIGGER "authz_rel_audit_3_ins" AFTER INSERT ON "mt"."team_members" REFERENCING NEW TABLE AS new_rows FOR EACH STATEMENT EXECUTE FUNCTION authz_int."rel_audit_3_ins"()';
   ELSE
     RAISE NOTICE '"mt"."team_members" is not a table: changes to it are not audited or fed (audit)';
   END IF;
 END $tr$;
-CREATE FUNCTION authz_int."rel_audit_2_upd"() RETURNS trigger
+CREATE FUNCTION authz_int."rel_audit_3_upd"() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER SET search_path FROM CURRENT AS $f$
 BEGIN
     INSERT INTO authz.audit (db_role, user_id, acting_user, action, object_type, object_id, relation, subject_type,
@@ -1651,15 +1788,15 @@ BEGIN
     PERFORM authz_int.changed(c.ot, array_agg(DISTINCT c.oid), 'relationship') FROM (SELECT 'unrelate' AS action, 'team' AS ot, x."team_id"::text AS oid, 'member' AS rel, 'user' AS st, x."user_id"::text AS sid, '' AS sr FROM old_rows x WHERE true) c GROUP BY c.ot;
   RETURN NULL;
 END $f$;
--- @object trigger "authz_rel_audit_2_upd" ON "mt"."team_members"
+-- @object trigger "authz_rel_audit_3_upd" ON "mt"."team_members"
 DO $tr$ BEGIN
   IF (SELECT relkind FROM pg_class WHERE oid = '"mt"."team_members"'::regclass) IN ('r', 'p') THEN
-    EXECUTE 'CREATE TRIGGER "authz_rel_audit_2_upd" AFTER UPDATE ON "mt"."team_members" REFERENCING OLD TABLE AS old_rows NEW TABLE AS new_rows FOR EACH STATEMENT EXECUTE FUNCTION authz_int."rel_audit_2_upd"()';
+    EXECUTE 'CREATE TRIGGER "authz_rel_audit_3_upd" AFTER UPDATE ON "mt"."team_members" REFERENCING OLD TABLE AS old_rows NEW TABLE AS new_rows FOR EACH STATEMENT EXECUTE FUNCTION authz_int."rel_audit_3_upd"()';
   ELSE
     RAISE NOTICE '"mt"."team_members" is not a table: changes to it are not audited or fed (audit)';
   END IF;
 END $tr$;
-CREATE FUNCTION authz_int."rel_audit_2_del"() RETURNS trigger
+CREATE FUNCTION authz_int."rel_audit_3_del"() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER SET search_path FROM CURRENT AS $f$
 BEGIN
     INSERT INTO authz.audit (db_role, user_id, acting_user, action, object_type, object_id, relation, subject_type,
@@ -1671,25 +1808,25 @@ BEGIN
     PERFORM authz_int.changed(c.ot, array_agg(DISTINCT c.oid), 'relationship') FROM (SELECT 'unrelate' AS action, 'team' AS ot, x."team_id"::text AS oid, 'member' AS rel, 'user' AS st, x."user_id"::text AS sid, '' AS sr FROM old_rows x WHERE true) c GROUP BY c.ot;
   RETURN NULL;
 END $f$;
--- @object trigger "authz_rel_audit_2_del" ON "mt"."team_members"
+-- @object trigger "authz_rel_audit_3_del" ON "mt"."team_members"
 DO $tr$ BEGIN
   IF (SELECT relkind FROM pg_class WHERE oid = '"mt"."team_members"'::regclass) IN ('r', 'p') THEN
-    EXECUTE 'CREATE TRIGGER "authz_rel_audit_2_del" AFTER DELETE ON "mt"."team_members" REFERENCING OLD TABLE AS old_rows FOR EACH STATEMENT EXECUTE FUNCTION authz_int."rel_audit_2_del"()';
+    EXECUTE 'CREATE TRIGGER "authz_rel_audit_3_del" AFTER DELETE ON "mt"."team_members" REFERENCING OLD TABLE AS old_rows FOR EACH STATEMENT EXECUTE FUNCTION authz_int."rel_audit_3_del"()';
   ELSE
     RAISE NOTICE '"mt"."team_members" is not a table: changes to it are not audited or fed (audit)';
   END IF;
 END $tr$;
-CREATE FUNCTION authz_int."rel_audit_2_trunc"() RETURNS trigger
+CREATE FUNCTION authz_int."rel_audit_3_trunc"() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER SET search_path FROM CURRENT AS $f$
 BEGIN
     PERFORM authz_int.audit('truncate', 'team', NULL, NULL, NULL, NULL, NULL, jsonb_build_object('table', 'mt.team_members'));
     PERFORM authz_int.changed('team', ARRAY['*'], 'relationship');
   RETURN NULL;
 END $f$;
--- @object trigger "authz_rel_audit_2_trunc" ON "mt"."team_members"
+-- @object trigger "authz_rel_audit_3_trunc" ON "mt"."team_members"
 DO $tr$ BEGIN
   IF (SELECT relkind FROM pg_class WHERE oid = '"mt"."team_members"'::regclass) IN ('r', 'p') THEN
-    EXECUTE 'CREATE TRIGGER "authz_rel_audit_2_trunc" AFTER TRUNCATE ON "mt"."team_members" FOR EACH STATEMENT EXECUTE FUNCTION authz_int."rel_audit_2_trunc"()';
+    EXECUTE 'CREATE TRIGGER "authz_rel_audit_3_trunc" AFTER TRUNCATE ON "mt"."team_members" FOR EACH STATEMENT EXECUTE FUNCTION authz_int."rel_audit_3_trunc"()';
   ELSE
     RAISE NOTICE '"mt"."team_members" is not a table: changes to it are not audited or fed (audit)';
   END IF;
@@ -2307,11 +2444,18 @@ CREATE VIEW authz_int."doc__container__edit" AS
   (SELECT r."id" AS id FROM "mt"."docs" r WHERE (CASE WHEN r."container_type" = 'project' THEN r."container_id" END)::bigint IN (SELECT id FROM authz_int."project__edit"));
 CREATE VIEW authz_gen."doc__container__edit" WITH (security_barrier) AS SELECT id FROM authz_int."doc__container__edit";
 
--- doc.edit (line 47): author or container.edit
+-- doc.custom roles granting edit (line 48)
+CREATE VIEW authz_int."doc__roles:edit" AS
+  SELECT g.object_id::uuid AS id FROM authz.shares g WHERE g.object_type = 'doc' AND g.relation = ANY ((SELECT authz_int.role_relations('doc', 'edit'))::text[]) AND EXISTS (SELECT 1 FROM authz.roles ro WHERE 'role:' || ro.id = g.relation AND ro.owner_type = 'org' AND ro.owner_id IN (SELECT (w."org_id")::text FROM "mt"."doc_orgs" w WHERE w."doc_id" = g.object_id::uuid AND coalesce((active), false))) AND g.subject_type = 'user' AND g.subject_relation = '' AND g.subject_id = (SELECT authz.uid()::text) AND (g.expires_at IS NULL OR g.expires_at > now()) AND (g.starts_at IS NULL OR g.starts_at <= now()) AND (g.caveat IS NULL OR CASE g.caveat WHEN 'business_hours' THEN coalesce((authz.ctx('mode') = 'business'), false) WHEN 'from_ip' THEN coalesce((authz.ctx('ip') = (g.caveat_args ->> 'ip')), false) ELSE false END);
+CREATE VIEW authz_gen."doc__roles:edit" WITH (security_barrier) AS SELECT id FROM authz_int."doc__roles:edit";
+
+-- doc.edit (line 49): author or container.edit or roles
 CREATE VIEW authz_int."doc__edit" AS
   (SELECT id FROM authz_int."doc__author")
   UNION ALL
-  (SELECT id FROM authz_int."doc__container__edit");
+  (SELECT id FROM authz_int."doc__container__edit")
+  UNION ALL
+  (SELECT id FROM authz_int."doc__roles:edit");
 CREATE VIEW authz_gen."doc__edit" WITH (security_barrier) AS SELECT id FROM authz_int."doc__edit";
 
 -- doc.container.view
@@ -2321,9 +2465,11 @@ CREATE VIEW authz_int."doc__container__view" AS
   (SELECT r."id" AS id FROM "mt"."docs" r WHERE (CASE WHEN r."container_type" = 'project' THEN r."container_id" END)::bigint IN (SELECT id FROM authz_int."project__view"));
 CREATE VIEW authz_gen."doc__container__view" WITH (security_barrier) AS SELECT id FROM authz_int."doc__container__view";
 
--- doc.view (line 48): edit or container.view
+-- doc.view (line 50): edit or container.view
 CREATE VIEW authz_int."doc__view" AS
   (SELECT id FROM authz_int."doc__author")
+  UNION ALL
+  (SELECT id FROM authz_int."doc__roles:edit")
   UNION ALL
   (SELECT id FROM authz_int."doc__container__view");
 CREATE VIEW authz_gen."doc__view" WITH (security_barrier) AS SELECT id FROM authz_int."doc__view";
@@ -2335,7 +2481,7 @@ CREATE VIEW authz_int."doc__container__peek" AS
   (SELECT r."id" AS id FROM "mt"."docs" r WHERE (CASE WHEN r."container_type" = 'project' THEN r."container_id" END)::bigint IN (SELECT id FROM authz_int."project__peek"));
 CREATE VIEW authz_gen."doc__container__peek" WITH (security_barrier) AS SELECT id FROM authz_int."doc__container__peek";
 
--- doc.glance (line 49): container.peek or container.edit
+-- doc.glance (line 51): container.peek or container.edit
 CREATE VIEW authz_int."doc__glance" AS
   (SELECT id FROM authz_int."doc__container__peek")
   UNION ALL
@@ -2389,11 +2535,13 @@ LANGUAGE sql STABLE
 BEGIN ATOMIC
   SELECT ARRAY[
     coalesce((coalesce("docs"."author_id" = (SELECT authz.uid()), false)
+    OR EXISTS (SELECT 1 FROM authz_gen."doc__roles:edit" v WHERE v.id = "docs"."id")
     OR (EXISTS (SELECT 1 FROM authz_gen."folder__edit" v WHERE v.id = (CASE WHEN "docs"."container_type" = 'folder' THEN "docs"."container_id" END)::bigint)
     OR EXISTS (SELECT 1 FROM authz_gen."project__edit" v WHERE v.id = (CASE WHEN "docs"."container_type" = 'project' THEN "docs"."container_id" END)::bigint))), false),
     coalesce((SELECT authz_int.scope_cmd('mt.docs', 'update')), false),
     coalesce(true, false),
     coalesce((coalesce("docs"."author_id" = (SELECT authz.uid()), false)
+    OR EXISTS (SELECT 1 FROM authz_gen."doc__roles:edit" v WHERE v.id = "docs"."id")
     OR (EXISTS (SELECT 1 FROM authz_gen."folder__edit" v WHERE v.id = (CASE WHEN "docs"."container_type" = 'folder' THEN "docs"."container_id" END)::bigint)
     OR EXISTS (SELECT 1 FROM authz_gen."project__edit" v WHERE v.id = (CASE WHEN "docs"."container_type" = 'project' THEN "docs"."container_id" END)::bigint))), false)]
   FROM (SELECT (p_row).*) AS "docs";
@@ -2448,20 +2596,23 @@ BEGIN
   RETURN ARRAY(SELECT * FROM authz_gen."mt.docs:update:why"(r_old)) || CASE WHEN p_row IS NULL THEN '{}'::text[] ELSE ARRAY['after the change:'] || ARRAY(SELECT '  ' || l FROM authz_gen."mt.docs:update:why"(r_new) l) END;
 END $f$;
 
--- mt.docs select (line 55): view
+-- mt.docs select (line 57): view
 CREATE POLICY "authz_select" ON "mt"."docs" FOR SELECT TO app_user
   USING (((SELECT authz_int.scope_cmd('mt.docs', 'select')) AND (coalesce("docs"."author_id" = (SELECT authz.uid()), false)
+    OR EXISTS (SELECT 1 FROM authz_gen."doc__roles:edit" v WHERE v.id = "docs"."id")
     OR (EXISTS (SELECT 1 FROM authz_gen."folder__view" v WHERE v.id = (CASE WHEN "docs"."container_type" = 'folder' THEN "docs"."container_id" END)::bigint)
     OR EXISTS (SELECT 1 FROM authz_gen."project__view" v WHERE v.id = (CASE WHEN "docs"."container_type" = 'project' THEN "docs"."container_id" END)::bigint)))));
 
 COMMENT ON POLICY "authz_select" ON "mt"."docs" IS 'rowstile';
 
--- mt.docs update (line 56): edit
+-- mt.docs update (line 58): edit
 CREATE POLICY "authz_update" ON "mt"."docs" FOR UPDATE TO app_user
   USING (((SELECT authz_int.scope_cmd('mt.docs', 'update')) AND (coalesce("docs"."author_id" = (SELECT authz.uid()), false)
+    OR EXISTS (SELECT 1 FROM authz_gen."doc__roles:edit" v WHERE v.id = "docs"."id")
     OR (EXISTS (SELECT 1 FROM authz_gen."folder__edit" v WHERE v.id = (CASE WHEN "docs"."container_type" = 'folder' THEN "docs"."container_id" END)::bigint)
     OR EXISTS (SELECT 1 FROM authz_gen."project__edit" v WHERE v.id = (CASE WHEN "docs"."container_type" = 'project' THEN "docs"."container_id" END)::bigint)))))
   WITH CHECK (((SELECT authz_int.scope_cmd('mt.docs', 'update')) AND (coalesce("docs"."author_id" = (SELECT authz.uid()), false)
+    OR EXISTS (SELECT 1 FROM authz_gen."doc__roles:edit" v WHERE v.id = "docs"."id")
     OR (EXISTS (SELECT 1 FROM authz_gen."folder__edit" v WHERE v.id = (CASE WHEN "docs"."container_type" = 'folder' THEN "docs"."container_id" END)::bigint)
     OR EXISTS (SELECT 1 FROM authz_gen."project__edit" v WHERE v.id = (CASE WHEN "docs"."container_type" = 'project' THEN "docs"."container_id" END)::bigint))))
     OR authz_gen."mt.docs:update:refuse"(ROW("docs".*)::"mt"."docs"));
@@ -2480,14 +2631,15 @@ BEGIN
   END LOOP;
 END $fk$;
 
--- mt.docs_visible: the rows of mt.docs the user may select (line 55: view)
--- mask body (line 57): edit
+-- mt.docs_visible: the rows of mt.docs the user may select (line 57: view)
+-- mask body (line 59): edit
 -- @object view "mt"."docs_visible"
 DO $mv$
 DECLARE cols text; uses text;
 BEGIN
   SELECT string_agg(CASE a.attname
       WHEN 'body' THEN format('CASE WHEN %s THEN %I.%I END AS %I', '(coalesce("docs"."author_id" = (SELECT authz.uid()), false)
+    OR EXISTS (SELECT 1 FROM authz_gen."doc__roles:edit" v WHERE v.id = "docs"."id")
     OR (EXISTS (SELECT 1 FROM authz_gen."folder__edit" v WHERE v.id = (CASE WHEN "docs"."container_type" = ''folder'' THEN "docs"."container_id" END)::bigint)
     OR EXISTS (SELECT 1 FROM authz_gen."project__edit" v WHERE v.id = (CASE WHEN "docs"."container_type" = ''project'' THEN "docs"."container_id" END)::bigint)))', 'docs', a.attname, a.attname)
       ELSE format('%I.%I', 'docs', a.attname) END, ', ' ORDER BY a.attnum) INTO cols
@@ -2496,6 +2648,7 @@ BEGIN
   BEGIN
     EXECUTE format('CREATE OR REPLACE VIEW "mt"."docs_visible" WITH (security_barrier) AS SELECT %s FROM "mt"."docs" "docs" WHERE %s',
                    cols, '(SELECT authz_int.scope_cmd(''mt.docs'', ''select'')) AND (coalesce("docs"."author_id" = (SELECT authz.uid()), false)
+    OR EXISTS (SELECT 1 FROM authz_gen."doc__roles:edit" v WHERE v.id = "docs"."id")
     OR (EXISTS (SELECT 1 FROM authz_gen."folder__view" v WHERE v.id = (CASE WHEN "docs"."container_type" = ''folder'' THEN "docs"."container_id" END)::bigint)
     OR EXISTS (SELECT 1 FROM authz_gen."project__view" v WHERE v.id = (CASE WHEN "docs"."container_type" = ''project'' THEN "docs"."container_id" END)::bigint)))');
   EXCEPTION WHEN invalid_table_definition THEN
@@ -2509,6 +2662,7 @@ BEGIN
     END;
     EXECUTE format('CREATE VIEW "mt"."docs_visible" WITH (security_barrier) AS SELECT %s FROM "mt"."docs" "docs" WHERE %s',
                    cols, '(SELECT authz_int.scope_cmd(''mt.docs'', ''select'')) AND (coalesce("docs"."author_id" = (SELECT authz.uid()), false)
+    OR EXISTS (SELECT 1 FROM authz_gen."doc__roles:edit" v WHERE v.id = "docs"."id")
     OR (EXISTS (SELECT 1 FROM authz_gen."folder__view" v WHERE v.id = (CASE WHEN "docs"."container_type" = ''folder'' THEN "docs"."container_id" END)::bigint)
     OR EXISTS (SELECT 1 FROM authz_gen."project__view" v WHERE v.id = (CASE WHEN "docs"."container_type" = ''project'' THEN "docs"."container_id" END)::bigint)))');
   END;
@@ -2651,9 +2805,11 @@ BEGIN
       v_uuid := p_id::uuid;
       CASE p_perm
         WHEN 'edit' THEN RETURN EXISTS (SELECT 1 FROM "mt"."docs" o WHERE o."id" = v_uuid AND ((coalesce(o."author_id" = (SELECT authz.uid()), false)
+    OR EXISTS (SELECT 1 FROM authz_gen."doc__roles:edit" v WHERE v.id = o."id")
     OR (EXISTS (SELECT 1 FROM authz_gen."folder__edit" v WHERE v.id = (CASE WHEN o."container_type" = 'folder' THEN o."container_id" END)::bigint)
     OR EXISTS (SELECT 1 FROM authz_gen."project__edit" v WHERE v.id = (CASE WHEN o."container_type" = 'project' THEN o."container_id" END)::bigint)))));
         WHEN 'view' THEN RETURN EXISTS (SELECT 1 FROM "mt"."docs" o WHERE o."id" = v_uuid AND ((coalesce(o."author_id" = (SELECT authz.uid()), false)
+    OR EXISTS (SELECT 1 FROM authz_gen."doc__roles:edit" v WHERE v.id = o."id")
     OR (EXISTS (SELECT 1 FROM authz_gen."folder__view" v WHERE v.id = (CASE WHEN o."container_type" = 'folder' THEN o."container_id" END)::bigint)
     OR EXISTS (SELECT 1 FROM authz_gen."project__view" v WHERE v.id = (CASE WHEN o."container_type" = 'project' THEN o."container_id" END)::bigint)))));
         WHEN 'glance' THEN RETURN EXISTS (SELECT 1 FROM "mt"."docs" o WHERE o."id" = v_uuid AND (((EXISTS (SELECT 1 FROM authz_gen."folder__peek" v WHERE v.id = (CASE WHEN o."container_type" = 'folder' THEN o."container_id" END)::bigint)
@@ -2974,17 +3130,20 @@ BEGIN
       IF p_limit IS NULL AND p_after IS NULL THEN
         RETURN QUERY SELECT o."id"::text FROM "mt"."docs" o
         WHERE (coalesce(o."author_id" = (SELECT authz.uid()), false)
+    OR EXISTS (SELECT 1 FROM authz_gen."doc__roles:edit" v WHERE v.id = o."id")
     OR (EXISTS (SELECT 1 FROM authz_gen."folder__edit" v WHERE v.id = (CASE WHEN o."container_type" = 'folder' THEN o."container_id" END)::bigint)
     OR EXISTS (SELECT 1 FROM authz_gen."project__edit" v WHERE v.id = (CASE WHEN o."container_type" = 'project' THEN o."container_id" END)::bigint)));
       ELSIF p_after IS NULL THEN
         RETURN QUERY SELECT o."id"::text FROM "mt"."docs" o
         WHERE (coalesce(o."author_id" = (SELECT authz.uid()), false)
+    OR EXISTS (SELECT 1 FROM authz_gen."doc__roles:edit" v WHERE v.id = o."id")
     OR (EXISTS (SELECT 1 FROM authz_gen."folder__edit" v WHERE v.id = (CASE WHEN o."container_type" = 'folder' THEN o."container_id" END)::bigint)
     OR EXISTS (SELECT 1 FROM authz_gen."project__edit" v WHERE v.id = (CASE WHEN o."container_type" = 'project' THEN o."container_id" END)::bigint)))
         ORDER BY o."id" LIMIT p_limit;
       ELSE
         RETURN QUERY SELECT o."id"::text FROM "mt"."docs" o
         WHERE o."id" > p_after::uuid AND (coalesce(o."author_id" = (SELECT authz.uid()), false)
+    OR EXISTS (SELECT 1 FROM authz_gen."doc__roles:edit" v WHERE v.id = o."id")
     OR (EXISTS (SELECT 1 FROM authz_gen."folder__edit" v WHERE v.id = (CASE WHEN o."container_type" = 'folder' THEN o."container_id" END)::bigint)
     OR EXISTS (SELECT 1 FROM authz_gen."project__edit" v WHERE v.id = (CASE WHEN o."container_type" = 'project' THEN o."container_id" END)::bigint)))
         ORDER BY o."id" LIMIT p_limit;
@@ -2993,17 +3152,20 @@ BEGIN
       IF p_limit IS NULL AND p_after IS NULL THEN
         RETURN QUERY SELECT o."id"::text FROM "mt"."docs" o
         WHERE (coalesce(o."author_id" = (SELECT authz.uid()), false)
+    OR EXISTS (SELECT 1 FROM authz_gen."doc__roles:edit" v WHERE v.id = o."id")
     OR (EXISTS (SELECT 1 FROM authz_gen."folder__view" v WHERE v.id = (CASE WHEN o."container_type" = 'folder' THEN o."container_id" END)::bigint)
     OR EXISTS (SELECT 1 FROM authz_gen."project__view" v WHERE v.id = (CASE WHEN o."container_type" = 'project' THEN o."container_id" END)::bigint)));
       ELSIF p_after IS NULL THEN
         RETURN QUERY SELECT o."id"::text FROM "mt"."docs" o
         WHERE (coalesce(o."author_id" = (SELECT authz.uid()), false)
+    OR EXISTS (SELECT 1 FROM authz_gen."doc__roles:edit" v WHERE v.id = o."id")
     OR (EXISTS (SELECT 1 FROM authz_gen."folder__view" v WHERE v.id = (CASE WHEN o."container_type" = 'folder' THEN o."container_id" END)::bigint)
     OR EXISTS (SELECT 1 FROM authz_gen."project__view" v WHERE v.id = (CASE WHEN o."container_type" = 'project' THEN o."container_id" END)::bigint)))
         ORDER BY o."id" LIMIT p_limit;
       ELSE
         RETURN QUERY SELECT o."id"::text FROM "mt"."docs" o
         WHERE o."id" > p_after::uuid AND (coalesce(o."author_id" = (SELECT authz.uid()), false)
+    OR EXISTS (SELECT 1 FROM authz_gen."doc__roles:edit" v WHERE v.id = o."id")
     OR (EXISTS (SELECT 1 FROM authz_gen."folder__view" v WHERE v.id = (CASE WHEN o."container_type" = 'folder' THEN o."container_id" END)::bigint)
     OR EXISTS (SELECT 1 FROM authz_gen."project__view" v WHERE v.id = (CASE WHEN o."container_type" = 'project' THEN o."container_id" END)::bigint)))
         ORDER BY o."id" LIMIT p_limit;
@@ -3498,6 +3660,11 @@ LANGUAGE sql STABLE STRICT SECURITY DEFINER SET search_path FROM CURRENT ROWS 50
   SELECT r."author_id" FROM "mt"."docs" r WHERE r."id" = p_id AND r."author_id" IS NOT NULL
 $f$;
 
+CREATE FUNCTION authz_int."doc__roles:edit__who"(p_id uuid) RETURNS SETOF uuid
+LANGUAGE sql STABLE STRICT SECURITY DEFINER SET search_path FROM CURRENT ROWS 50 AS $f$
+  SELECT g.subject_id::uuid FROM authz.shares g WHERE g.object_type = 'doc' AND g.object_id = (p_id)::text AND g.relation = ANY ((SELECT authz_int.role_relations('doc', 'edit'))::text[]) AND EXISTS (SELECT 1 FROM authz.roles ro WHERE 'role:' || ro.id = g.relation AND ro.owner_type = 'org' AND ro.owner_id IN (SELECT (w."org_id")::text FROM "mt"."doc_orgs" w WHERE w."doc_id" = p_id AND coalesce((active), false))) AND g.subject_type = 'user' AND g.subject_relation = '' AND g.subject_id <> '*'
+$f$;
+
 CREATE FUNCTION authz_int."org__manage_roles__who"(p_id bigint) RETURNS SETOF uuid
 LANGUAGE sql STABLE STRICT SECURITY DEFINER SET search_path FROM CURRENT ROWS 50 AS $f$
   SELECT x FROM authz_int."org__admin__who"(p_id) x
@@ -3611,6 +3778,8 @@ LANGUAGE sql STABLE STRICT SECURITY DEFINER SET search_path FROM CURRENT ROWS 50
   ((SELECT x FROM (SELECT (CASE WHEN r."container_type" = 'folder' THEN r."container_id" END)::bigint AS id FROM "mt"."docs" r WHERE r."id" = p_id AND (CASE WHEN r."container_type" = 'folder' THEN r."container_id" END)::bigint IS NOT NULL) tg, LATERAL authz_int."folder__edit__who"(tg.id) x)
   UNION ALL
   (SELECT x FROM (SELECT (CASE WHEN r."container_type" = 'project' THEN r."container_id" END)::bigint AS id FROM "mt"."docs" r WHERE r."id" = p_id AND (CASE WHEN r."container_type" = 'project' THEN r."container_id" END)::bigint IS NOT NULL) tg, LATERAL authz_int."project__edit__who"(tg.id) x))
+  UNION ALL
+  (SELECT x FROM authz_int."doc__roles:edit__who"(p_id) x)
 $f$;
 
 CREATE FUNCTION authz_int."doc__view__who"(p_id uuid) RETURNS SETOF uuid
@@ -4261,13 +4430,32 @@ BEGIN
   RETURN NEXT pad || 'no   you do not hold doc.author';
 END $f$;
 
+CREATE FUNCTION authz_int."doc__org__why"(p_id uuid, p_depth int, p_seen text[])
+RETURNS SETOF text LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path FROM CURRENT AS $f$
+DECLARE pad text := repeat('  ', p_depth); v_t record;
+BEGIN
+
+  RETURN NEXT pad || 'no   you do not hold doc.org';
+END $f$;
+
+CREATE FUNCTION authz_int."doc__roles:edit__why"(p_id uuid, p_depth int, p_seen text[])
+RETURNS SETOF text LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path FROM CURRENT AS $f$
+DECLARE pad text := repeat('  ', p_depth); v_t record;
+BEGIN
+  IF p_id IN (SELECT g.object_id::uuid AS id FROM authz.shares g WHERE g.object_type = 'doc' AND g.relation = ANY ((SELECT authz_int.role_relations('doc', 'edit'))::text[]) AND EXISTS (SELECT 1 FROM authz.roles ro WHERE 'role:' || ro.id = g.relation AND ro.owner_type = 'org' AND ro.owner_id IN (SELECT (w."org_id")::text FROM "mt"."doc_orgs" w WHERE w."doc_id" = g.object_id::uuid AND coalesce((active), false))) AND g.subject_type = 'user' AND g.subject_relation = '' AND g.subject_id = (SELECT authz.uid()::text) AND (g.expires_at IS NULL OR g.expires_at > now()) AND (g.starts_at IS NULL OR g.starts_at <= now()) AND (g.caveat IS NULL OR CASE g.caveat WHEN 'business_hours' THEN coalesce((authz.ctx('mode') = 'business'), false) WHEN 'from_ip' THEN coalesce((authz.ctx('ip') = (g.caveat_args ->> 'ip')), false) ELSE false END)) THEN
+    RETURN NEXT pad || 'yes  ' || 'a custom role given to you' || coalesce((SELECT concat(' (by ', coalesce(g.created_by, 'an admin'), coalesce(', until ' || g.expires_at, ''), coalesce(', from ' || g.starts_at, ''), coalesce(', caveat ' || g.caveat, ''), ')') || coalesce(' (role ' || (SELECT ro.name FROM authz.roles ro WHERE 'role:' || ro.id = g.relation) || ')', '') FROM authz.shares g WHERE g.object_type = 'doc' AND g.object_id = p_id::text AND g.relation = ANY ((SELECT authz_int.role_relations('doc', 'edit'))::text[]) AND EXISTS (SELECT 1 FROM authz.roles ro WHERE 'role:' || ro.id = g.relation AND ro.owner_type = 'org' AND ro.owner_id IN (SELECT (w."org_id")::text FROM "mt"."doc_orgs" w WHERE w."doc_id" = p_id AND coalesce((active), false))) AND g.subject_type = 'user' AND (g.expires_at IS NULL OR g.expires_at > now()) AND (g.starts_at IS NULL OR g.starts_at <= now()) AND (g.caveat IS NULL OR CASE g.caveat WHEN 'business_hours' THEN coalesce((authz.ctx('mode') = 'business'), false) WHEN 'from_ip' THEN coalesce((authz.ctx('ip') = (g.caveat_args ->> 'ip')), false) ELSE false END) ORDER BY g.created_at LIMIT 1), '');
+    RETURN;
+  END IF;
+  RETURN NEXT pad || 'no   you do not hold doc.role';
+END $f$;
+
 CREATE FUNCTION authz_int."doc__edit__why"(p_id uuid, p_depth int, p_seen text[])
 RETURNS SETOF text LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path FROM CURRENT AS $f$
 DECLARE pad text := repeat('  ', p_depth); v_ok boolean; v_done boolean := false; v_t record;
         v_holds boolean := p_id IN (SELECT id FROM authz_int."doc__edit");
 BEGIN
   IF p_depth > 60 THEN RETURN NEXT pad || '...'; RETURN; END IF;
-  RETURN NEXT pad || 'doc.edit = author or container.edit';
+  RETURN NEXT pad || 'doc.edit = author or container.edit or roles';
   BEGIN
     v_ok := (p_id) IN (SELECT id FROM authz_int."doc__author");
     RETURN NEXT pad || CASE WHEN v_ok THEN 'yes  ' ELSE 'no   ' END || 'author';
@@ -4300,6 +4488,9 @@ BEGIN
         v_done := true; RETURN QUERY SELECT * FROM authz_int."project__edit__why"(v_t.id::bigint, p_depth + 1 + 1, p_seen || ('project:edit:' || v_t.id));
       END IF;
     END LOOP;
+    v_ok := (p_id) IN (SELECT id FROM authz_int."doc__roles:edit");
+    RETURN NEXT pad || CASE WHEN v_ok THEN 'yes  ' ELSE 'no   ' END || 'a custom role';
+    IF v_ok AND NOT v_done THEN v_done := true; RETURN QUERY SELECT * FROM authz_int."doc__roles:edit__why"(p_id, p_depth + 1, p_seen); END IF;
   END;
 END $f$;
 
@@ -4438,6 +4629,7 @@ BEGIN
     WHEN 'doc' THEN
       RETURN EXISTS (SELECT 1 FROM "mt"."docs" "docs" WHERE "docs"."id" = p_id::uuid
         AND (SELECT authz_int.scope_cmd('mt.docs', 'select')) AND (coalesce("docs"."author_id" = (SELECT authz.uid()), false)
+    OR EXISTS (SELECT 1 FROM authz_gen."doc__roles:edit" v WHERE v.id = "docs"."id")
     OR (EXISTS (SELECT 1 FROM authz_gen."folder__view" v WHERE v.id = (CASE WHEN "docs"."container_type" = 'folder' THEN "docs"."container_id" END)::bigint)
     OR EXISTS (SELECT 1 FROM authz_gen."project__view" v WHERE v.id = (CASE WHEN "docs"."container_type" = 'project' THEN "docs"."container_id" END)::bigint))));
     ELSE RETURN false;
@@ -5413,9 +5605,9 @@ WHERE w.who IS NOT NULL AND n.nspname !~ '^pg_(toast_)?temp_' LOOP
   -- tables beside the policy's (in their schemas) that it doesn't name: nothing filters what the app role reads there
   FOR r IN SELECT c.oid::regclass AS tbl FROM pg_class c
            WHERE c.relkind IN ('r', 'p') AND NOT c.relispartition AND NOT c.relrowsecurity
-             AND c.relnamespace IN (SELECT k.relnamespace FROM unnest(ARRAY['"mt"."docs"', '"mt"."folders"', '"mt"."orgs"', '"mt"."projects"', '"mt"."teams"', '"mt"."users"', '"mt"."org_members"', '"mt"."team_members"']::text[]) x
+             AND c.relnamespace IN (SELECT k.relnamespace FROM unnest(ARRAY['"mt"."docs"', '"mt"."folders"', '"mt"."orgs"', '"mt"."projects"', '"mt"."teams"', '"mt"."users"', '"mt"."doc_orgs"', '"mt"."org_members"', '"mt"."team_members"']::text[]) x
                                     JOIN pg_class k ON k.oid = to_regclass(x))
-             AND c.oid NOT IN (SELECT to_regclass(x)::oid FROM unnest(ARRAY['"mt"."docs"', '"mt"."folders"', '"mt"."orgs"', '"mt"."projects"', '"mt"."teams"', '"mt"."users"', '"mt"."org_members"', '"mt"."team_members"']::text[]) x
+             AND c.oid NOT IN (SELECT to_regclass(x)::oid FROM unnest(ARRAY['"mt"."docs"', '"mt"."folders"', '"mt"."orgs"', '"mt"."projects"', '"mt"."teams"', '"mt"."users"', '"mt"."doc_orgs"', '"mt"."org_members"', '"mt"."team_members"']::text[]) x
                                WHERE to_regclass(x) IS NOT NULL)
              AND has_any_column_privilege(v_role, c.oid, 'SELECT')
            ORDER BY c.oid::regclass::text LOOP
@@ -5428,7 +5620,7 @@ WHERE w.who IS NOT NULL AND n.nspname !~ '^pg_(toast_)?temp_' LOOP
   FOR r IN WITH RECURSIVE d(oid, top, governed) AS (
              SELECT i.inhrelid, i.inhparent, x.governed FROM pg_inherits i
              JOIN (SELECT to_regclass(t) AS tbl, true AS governed FROM unnest(ARRAY['"mt"."docs"']::text[]) t
-                   UNION ALL SELECT to_regclass(t), false FROM unnest(ARRAY['"mt"."org_members"', '"mt"."team_members"']::text[]) t) x
+                   UNION ALL SELECT to_regclass(t), false FROM unnest(ARRAY['"mt"."doc_orgs"', '"mt"."org_members"', '"mt"."team_members"']::text[]) t) x
                ON i.inhparent = x.tbl
              UNION SELECT i.inhrelid, d.top, d.governed FROM pg_inherits i JOIN d ON i.inhparent = d.oid)
            SELECT d.oid::regclass AS part, d.top::regclass AS tbl, d.governed, k.relrowsecurity
@@ -5487,7 +5679,7 @@ WHERE w.who IS NOT NULL AND n.nspname !~ '^pg_(toast_)?temp_' LOOP
   END LOOP;
   -- tables holding relationships (memberships, links) the app role may change directly
   FOR r IN SELECT to_regclass(v.tbl) AS tbl, v.readers, v.typed
-           FROM (VALUES ('"mt"."org_members"', 'org.member, org.admin', false), ('"mt"."team_members"', 'team.member', false)) v(tbl, readers, typed) LOOP
+           FROM (VALUES ('"mt"."doc_orgs"', 'doc.org', false), ('"mt"."org_members"', 'org.member, org.admin', false), ('"mt"."team_members"', 'team.member', false)) v(tbl, readers, typed) LOOP
     CONTINUE WHEN r.tbl IS NULL;
     IF has_table_privilege(v_role, r.tbl, 'TRUNCATE') THEN
       severity := 'error'; object := r.tbl::text;
@@ -5564,7 +5756,7 @@ WHERE w.who IS NOT NULL AND n.nspname !~ '^pg_(toast_)?temp_' LOOP
            FROM pg_depend d JOIN pg_rewrite w ON w.oid = d.objid JOIN pg_class v ON v.oid = w.ev_class
            LEFT JOIN pg_description ds ON ds.objoid = v.oid AND ds.classoid = 'pg_class'::regclass
            WHERE d.classid = 'pg_rewrite'::regclass AND d.refclassid = 'pg_class'::regclass
-             AND d.refobjid = ANY (SELECT to_regclass(x) FROM unnest(ARRAY['"mt"."docs"', '"mt"."folders"', '"mt"."orgs"', '"mt"."projects"', '"mt"."teams"', '"mt"."users"', '"mt"."org_members"', '"mt"."team_members"']::text[]) x)
+             AND d.refobjid = ANY (SELECT to_regclass(x) FROM unnest(ARRAY['"mt"."docs"', '"mt"."folders"', '"mt"."orgs"', '"mt"."projects"', '"mt"."teams"', '"mt"."users"', '"mt"."doc_orgs"', '"mt"."org_members"', '"mt"."team_members"']::text[]) x)
              AND v.oid <> d.refobjid AND v.relkind IN ('v', 'm')
              AND v.relnamespace NOT IN (to_regnamespace('authz_gen'), to_regnamespace('authz_int'))
              AND coalesce(ds.description, '') NOT IN ('rowstile masked view', 'rowfence masked view', 'authzc masked view')
@@ -5581,7 +5773,7 @@ WHERE w.who IS NOT NULL AND n.nspname !~ '^pg_(toast_)?temp_' LOOP
                                                        to_regnamespace('authz_gen'), 'pg_catalog'::regnamespace)
              AND has_function_privilege(v_role, p.oid, 'EXECUTE')
              AND p.prokind IN ('f', 'p')
-             AND EXISTS (SELECT 1 FROM unnest(ARRAY['mt.docs', 'mt.folders', 'mt.orgs', 'mt.projects', 'mt.teams', 'mt.users', 'mt.org_members', 'mt.team_members']::text[]) x
+             AND EXISTS (SELECT 1 FROM unnest(ARRAY['mt.docs', 'mt.folders', 'mt.orgs', 'mt.projects', 'mt.teams', 'mt.users', 'mt.doc_orgs', 'mt.org_members', 'mt.team_members']::text[]) x
                          WHERE lower(replace(pg_get_functiondef(p.oid), '"', '')) ~
                                ('(from|join|update|into|table|only)\s+(' || lower(split_part(x, '.', 1)) || '\.)?'
                                 || lower(split_part(x, '.', 2)) || '([^a-z0-9_$]|$)')) LOOP
@@ -5590,7 +5782,7 @@ WHERE w.who IS NOT NULL AND n.nspname !~ '^pg_(toast_)?temp_' LOOP
     RETURN NEXT;
   END LOOP;
   -- lookups the permission views make
-  FOR r IN SELECT * FROM (VALUES ('"mt"."org_members"', 'org_id', 'org.member: find the members of an object; org.admin: find the members of an object'), ('"mt"."org_members"', 'user_id', 'org.member: find what a subject is in; org.admin: find what a subject is in'), ('"mt"."team_members"', 'team_id', 'team.member: find the members of an object'), ('"mt"."team_members"', 'user_id', 'team.member: find what a subject is in'), ('"mt"."projects"', 'org_id', 'project.org: find objects by org_id'), ('"mt"."projects"', 'folder_id', 'project.parent: find objects by folder_id'), ('"mt"."projects"', 'lead_id', 'project.lead: find objects by lead_id'), ('"mt"."folders"', 'parent_id', 'folder.parent: find objects by parent_id'), ('"mt"."folders"', 'owner_id', 'folder.owner: find objects by owner_id'), ('"mt"."folders"', 'org_id', 'folder.org: find objects by org_id'), ('"mt"."docs"', 'container_id', 'doc.container: find objects by container_id'), ('"mt"."docs"', 'author_id', 'doc.author: find objects by author_id')) v(tbl, col, why) WHERE tbl IS NOT NULL LOOP
+  FOR r IN SELECT * FROM (VALUES ('"mt"."org_members"', 'org_id', 'org.member: find the members of an object; org.admin: find the members of an object'), ('"mt"."org_members"', 'user_id', 'org.member: find what a subject is in; org.admin: find what a subject is in'), ('"mt"."team_members"', 'team_id', 'team.member: find the members of an object'), ('"mt"."team_members"', 'user_id', 'team.member: find what a subject is in'), ('"mt"."projects"', 'org_id', 'project.org: find objects by org_id'), ('"mt"."projects"', 'folder_id', 'project.parent: find objects by folder_id'), ('"mt"."projects"', 'lead_id', 'project.lead: find objects by lead_id'), ('"mt"."folders"', 'parent_id', 'folder.parent: find objects by parent_id'), ('"mt"."folders"', 'owner_id', 'folder.owner: find objects by owner_id'), ('"mt"."folders"', 'org_id', 'folder.org: find objects by org_id'), ('"mt"."docs"', 'container_id', 'doc.container: find objects by container_id'), ('"mt"."docs"', 'author_id', 'doc.author: find objects by author_id'), ('"mt"."doc_orgs"', 'doc_id', 'doc.org: find the members of an object'), ('"mt"."doc_orgs"', 'org_id', 'doc.org: find what a subject is in')) v(tbl, col, why) WHERE tbl IS NOT NULL LOOP
     CONTINUE WHEN to_regclass(r.tbl) IS NULL;
     -- a plain view can't have an index: the tables under it answer the lookups
     CONTINUE WHEN (SELECT c.relkind FROM pg_class c WHERE c.oid = to_regclass(r.tbl)) = 'v';
@@ -5671,7 +5863,7 @@ INSERT INTO authz_gen.policy_lines VALUES
   ('relation doc.author author_id', 'line 46'),
   ('relation doc.container container_id', 'line 45'),
   ('relation doc.container container_type', 'line 45'),
-  ('rule mt.docs update', 'line 56'),
+  ('rule mt.docs update', 'line 58'),
   ('share folder.editor team#member', 'line 32'),
   ('share folder.editor user', 'line 32'),
   ('share folder.viewer link', 'line 33'),
