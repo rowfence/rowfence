@@ -1595,6 +1595,39 @@ rules app.folders
             "a type's where loosened", {f["why"] for f in self.small(" where {active}", "")["risk"]}
         )  # the user type's
 
+    def test_each_change_the_review_warns_of(self) -> None:
+        def risk(base: str, head: str) -> set[str]:
+            return {f["why"] for f in self.review.review((base, {}, {}), (head, {}, {}), worlds=40)["risk"]}
+
+        mask, scope, never = (
+            "  mask status : edit\n",
+            "scope reading = select, view",
+            "  never folder: remove and not edit",
+        )
+        base = self.SMALL.replace("rules app.folders\n", "rules app.folders view app.folders_seen\n") + (
+            f"{mask}{scope}\ninvariants\n{never}\n"
+        )
+        cases = {
+            "sharing needs another permission": (self.SMALL, self.SMALL.replace("shared by edit", "shared by view")),
+            "a new way to reach a type": (
+                self.SMALL,
+                self.SMALL.replace(
+                    "  owner  : user = owner_id\n", "  owner  : user = owner_id\n  parent : folder = up\n"
+                ).replace("can view = edit or viewer", "can view = edit or viewer or parent.view"),
+            ),
+            "a new inheritance path": (
+                self.SMALL,
+                self.SMALL.replace("can view = edit or viewer", "can view = edit or viewer or org.see"),
+            ),
+            "a mask or column rule removed": (base, base.replace(mask, "")),
+            "a mask changed": (base, base.replace(mask, "  mask status : view\n")),
+            "a scope changed": (base, base.replace(scope, scope + ", edit")),
+            "an invariant removed": (base, base.replace(f"invariants\n{never}\n", "")),
+        }
+        for why, (b, h) in cases.items():
+            self.assertNotEqual(b, h, why)
+            self.assertIn(why, risk(b, h), why)
+
     def test_a_tightening_is_not_flagged(self) -> None:
         for old, new in (
             ("  select : view\n", "  select : edit\n"),
