@@ -64,6 +64,9 @@ Each release upgrades from the one before it. How releases are numbered and made
 
 ### Fixed
 
+- A condition in a select rule that Postgres refuses (a column the table doesn't have, say) was reported in
+  Postgres's words alone, without its line: Postgres says no position in a row-level security policy's own
+  expression. `rowstile apply` now names it with its line, as it does the others (AZ613).
 - An `update after` rule on the whole row checked the row after an update without asking the scope (or
   view-as) whether it allows updates, where every other rule asks. Nothing was let through: the update rule
   itself asks, and Postgres only checks the row after for a row the update rule let it change. **Upgrading**:
