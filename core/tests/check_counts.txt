@@ -27,6 +27,6 @@ races 4
 review 20
 scenario 93
 signed sessions 36
-studio 48
+studio 56
 tools 36
 unit 221

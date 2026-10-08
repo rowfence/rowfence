@@ -304,6 +304,28 @@ def main() -> None:
             status == 200 and any(x["subject_type"] == "org" for x in sh["shares"]),
             sh,
         )
+        owner = psql(db, "SELECT owner_id FROM app.folders WHERE id = 1")
+        status, w = c.call(f"/api/why?as=user:{owner}&type=folder&id=1&perm=edit")
+        check(
+            "why for someone who holds it: yes, and nothing to grant", status == 200 and w["holds"] and not w["ways"], w
+        )
+        # what a page asks wrongly is answered with a problem: its status, and words that say what to change
+        for label, path, want, words in (
+            ("someone to view as, written wrongly", "/api/rows?table=app.folders&as=user:", 400, "as whom? 'user:'"),
+            ("why for nobody", "/api/why?as=anyone&type=folder&id=3&perm=edit", 400, "why for nobody"),
+            ("why on a type the policy doesn't have", "/api/why?as=user:3&type=nothing&id=3&perm=edit", 404, "no type"),
+            ("why on a permission the type doesn't have", "/api/why?as=user:3&type=folder&id=3&perm=nope", 404, "nope"),
+            ("a test expecting neither", "/api/test?as=user:3&type=folder&id=3&perm=edit&expect=maybe", 400, "expect:"),
+            (
+                "a test on a type the policy doesn't have",
+                "/api/test?as=user:3&type=nothing&id=3&perm=edit",
+                404,
+                "no type",
+            ),
+            ("an address it doesn't answer", "/api/nothing", 404, "nothing"),
+        ):
+            status, p = c.call(path)
+            check(f"{label}: {want}, and says so", status == want and words in str(p.get("detail", "")), (status, p))
     finally:
         ro.stop()
 
