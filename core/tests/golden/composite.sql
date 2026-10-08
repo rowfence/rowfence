@@ -422,80 +422,70 @@ BEGIN
                     AND attname = 'folder_id' AND attnum > 0 AND NOT attisdropped) THEN
     missing := missing || E'\n  line 27: column folder_id not found in cx.projects [AZ601]';
   END IF;
-  IF to_regclass('"cx"."folders"') IS NULL THEN missing := missing || E'\n  line 31: table cx.folders not found [AZ601]';
-  ELSIF NOT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = to_regclass('"cx"."folders"')
-                    AND attname = 'org_id' AND attnum > 0 AND NOT attisdropped) THEN
-    missing := missing || E'\n  line 31: column org_id not found in cx.folders [AZ601]';
-  END IF;
-  IF to_regclass('"cx"."folders"') IS NULL THEN missing := missing || E'\n  line 31: table cx.folders not found [AZ601]';
-  ELSIF NOT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = to_regclass('"cx"."folders"')
-                    AND attname = 'id' AND attnum > 0 AND NOT attisdropped) THEN
-    missing := missing || E'\n  line 31: column id not found in cx.folders [AZ601]';
-  END IF;
   IF to_regclass('"cx"."folders"') IS NULL THEN missing := missing || E'\n  line 32: table cx.folders not found [AZ601]';
   ELSIF NOT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = to_regclass('"cx"."folders"')
                     AND attname = 'org_id' AND attnum > 0 AND NOT attisdropped) THEN
     missing := missing || E'\n  line 32: column org_id not found in cx.folders [AZ601]';
+  END IF;
+  IF to_regclass('"cx"."folders"') IS NULL THEN missing := missing || E'\n  line 32: table cx.folders not found [AZ601]';
+  ELSIF NOT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = to_regclass('"cx"."folders"')
+                    AND attname = 'id' AND attnum > 0 AND NOT attisdropped) THEN
+    missing := missing || E'\n  line 32: column id not found in cx.folders [AZ601]';
   END IF;
   IF to_regclass('"cx"."folders"') IS NULL THEN missing := missing || E'\n  line 33: table cx.folders not found [AZ601]';
   ELSIF NOT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = to_regclass('"cx"."folders"')
                     AND attname = 'org_id' AND attnum > 0 AND NOT attisdropped) THEN
     missing := missing || E'\n  line 33: column org_id not found in cx.folders [AZ601]';
   END IF;
-  IF to_regclass('"cx"."folders"') IS NULL THEN missing := missing || E'\n  line 33: table cx.folders not found [AZ601]';
+  IF to_regclass('"cx"."folders"') IS NULL THEN missing := missing || E'\n  line 34: table cx.folders not found [AZ601]';
+  ELSIF NOT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = to_regclass('"cx"."folders"')
+                    AND attname = 'org_id' AND attnum > 0 AND NOT attisdropped) THEN
+    missing := missing || E'\n  line 34: column org_id not found in cx.folders [AZ601]';
+  END IF;
+  IF to_regclass('"cx"."folders"') IS NULL THEN missing := missing || E'\n  line 34: table cx.folders not found [AZ601]';
   ELSIF NOT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = to_regclass('"cx"."folders"')
                     AND attname = 'parent_id' AND attnum > 0 AND NOT attisdropped) THEN
-    missing := missing || E'\n  line 33: column parent_id not found in cx.folders [AZ601]';
+    missing := missing || E'\n  line 34: column parent_id not found in cx.folders [AZ601]';
   END IF;
-  IF to_regclass('"cx"."folders"') IS NULL THEN missing := missing || E'\n  line 33: table cx.folders not found [AZ601]';
+  IF to_regclass('"cx"."folders"') IS NULL THEN missing := missing || E'\n  line 34: table cx.folders not found [AZ601]';
   ELSIF NOT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = to_regclass('"cx"."folders"')
                     AND attname = 'parent_type' AND attnum > 0 AND NOT attisdropped) THEN
-    missing := missing || E'\n  line 33: column parent_type not found in cx.folders [AZ601]';
+    missing := missing || E'\n  line 34: column parent_type not found in cx.folders [AZ601]';
   END IF;
-  IF to_regclass('"cx"."folder_links"') IS NULL THEN missing := missing || E'\n  line 34: table cx.folder_links not found [AZ601]';
+  IF to_regclass('"cx"."folder_links"') IS NULL THEN missing := missing || E'\n  line 35: table cx.folder_links not found [AZ601]';
   ELSIF NOT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = to_regclass('"cx"."folder_links"')
                     AND attname = 'org_id' AND attnum > 0 AND NOT attisdropped) THEN
-    missing := missing || E'\n  line 34: column org_id not found in cx.folder_links [AZ601]';
+    missing := missing || E'\n  line 35: column org_id not found in cx.folder_links [AZ601]';
   END IF;
-  IF to_regclass('"cx"."folder_links"') IS NULL THEN missing := missing || E'\n  line 34: table cx.folder_links not found [AZ601]';
+  IF to_regclass('"cx"."folder_links"') IS NULL THEN missing := missing || E'\n  line 35: table cx.folder_links not found [AZ601]';
   ELSIF NOT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = to_regclass('"cx"."folder_links"')
                     AND attname = 'child_id' AND attnum > 0 AND NOT attisdropped) THEN
-    missing := missing || E'\n  line 34: column child_id not found in cx.folder_links [AZ601]';
+    missing := missing || E'\n  line 35: column child_id not found in cx.folder_links [AZ601]';
   END IF;
-  IF to_regclass('"cx"."folder_links"') IS NULL THEN missing := missing || E'\n  line 34: table cx.folder_links not found [AZ601]';
+  IF to_regclass('"cx"."folder_links"') IS NULL THEN missing := missing || E'\n  line 35: table cx.folder_links not found [AZ601]';
   ELSIF NOT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = to_regclass('"cx"."folder_links"')
                     AND attname = 'parent_id' AND attnum > 0 AND NOT attisdropped) THEN
-    missing := missing || E'\n  line 34: column parent_id not found in cx.folder_links [AZ601]';
+    missing := missing || E'\n  line 35: column parent_id not found in cx.folder_links [AZ601]';
   END IF;
-  IF to_regclass('"cx"."folders"') IS NULL THEN missing := missing || E'\n  line 35: table cx.folders not found [AZ601]';
+  IF to_regclass('"cx"."folders"') IS NULL THEN missing := missing || E'\n  line 36: table cx.folders not found [AZ601]';
   ELSIF NOT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = to_regclass('"cx"."folders"')
                     AND attname = 'owner_id' AND attnum > 0 AND NOT attisdropped) THEN
-    missing := missing || E'\n  line 35: column owner_id not found in cx.folders [AZ601]';
+    missing := missing || E'\n  line 36: column owner_id not found in cx.folders [AZ601]';
   END IF;
-  IF to_regclass('"cx"."folder_teams"') IS NULL THEN missing := missing || E'\n  line 37: table cx.folder_teams not found [AZ601]';
+  IF to_regclass('"cx"."folder_teams"') IS NULL THEN missing := missing || E'\n  line 38: table cx.folder_teams not found [AZ601]';
   ELSIF NOT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = to_regclass('"cx"."folder_teams"')
                     AND attname = 'org_id' AND attnum > 0 AND NOT attisdropped) THEN
-    missing := missing || E'\n  line 37: column org_id not found in cx.folder_teams [AZ601]';
+    missing := missing || E'\n  line 38: column org_id not found in cx.folder_teams [AZ601]';
   END IF;
-  IF to_regclass('"cx"."folder_teams"') IS NULL THEN missing := missing || E'\n  line 37: table cx.folder_teams not found [AZ601]';
+  IF to_regclass('"cx"."folder_teams"') IS NULL THEN missing := missing || E'\n  line 38: table cx.folder_teams not found [AZ601]';
   ELSIF NOT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = to_regclass('"cx"."folder_teams"')
                     AND attname = 'folder_id' AND attnum > 0 AND NOT attisdropped) THEN
-    missing := missing || E'\n  line 37: column folder_id not found in cx.folder_teams [AZ601]';
+    missing := missing || E'\n  line 38: column folder_id not found in cx.folder_teams [AZ601]';
   END IF;
-  IF to_regclass('"cx"."folder_teams"') IS NULL THEN missing := missing || E'\n  line 37: table cx.folder_teams not found [AZ601]';
+  IF to_regclass('"cx"."folder_teams"') IS NULL THEN missing := missing || E'\n  line 38: table cx.folder_teams not found [AZ601]';
   ELSIF NOT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = to_regclass('"cx"."folder_teams"')
                     AND attname = 'team_slug' AND attnum > 0 AND NOT attisdropped) THEN
-    missing := missing || E'\n  line 37: column team_slug not found in cx.folder_teams [AZ601]';
-  END IF;
-  IF to_regclass('"cx"."files"') IS NULL THEN missing := missing || E'\n  line 42: table cx.files not found [AZ601]';
-  ELSIF NOT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = to_regclass('"cx"."files"')
-                    AND attname = 'org_id' AND attnum > 0 AND NOT attisdropped) THEN
-    missing := missing || E'\n  line 42: column org_id not found in cx.files [AZ601]';
-  END IF;
-  IF to_regclass('"cx"."files"') IS NULL THEN missing := missing || E'\n  line 42: table cx.files not found [AZ601]';
-  ELSIF NOT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = to_regclass('"cx"."files"')
-                    AND attname = 'id' AND attnum > 0 AND NOT attisdropped) THEN
-    missing := missing || E'\n  line 42: column id not found in cx.files [AZ601]';
+    missing := missing || E'\n  line 38: column team_slug not found in cx.folder_teams [AZ601]';
   END IF;
   IF to_regclass('"cx"."files"') IS NULL THEN missing := missing || E'\n  line 43: table cx.files not found [AZ601]';
   ELSIF NOT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = to_regclass('"cx"."files"')
@@ -504,33 +494,43 @@ BEGIN
   END IF;
   IF to_regclass('"cx"."files"') IS NULL THEN missing := missing || E'\n  line 43: table cx.files not found [AZ601]';
   ELSIF NOT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = to_regclass('"cx"."files"')
-                    AND attname = 'folder_id' AND attnum > 0 AND NOT attisdropped) THEN
-    missing := missing || E'\n  line 43: column folder_id not found in cx.files [AZ601]';
+                    AND attname = 'id' AND attnum > 0 AND NOT attisdropped) THEN
+    missing := missing || E'\n  line 43: column id not found in cx.files [AZ601]';
   END IF;
   IF to_regclass('"cx"."files"') IS NULL THEN missing := missing || E'\n  line 44: table cx.files not found [AZ601]';
   ELSIF NOT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = to_regclass('"cx"."files"')
-                    AND attname = 'owner_id' AND attnum > 0 AND NOT attisdropped) THEN
-    missing := missing || E'\n  line 44: column owner_id not found in cx.files [AZ601]';
+                    AND attname = 'org_id' AND attnum > 0 AND NOT attisdropped) THEN
+    missing := missing || E'\n  line 44: column org_id not found in cx.files [AZ601]';
+  END IF;
+  IF to_regclass('"cx"."files"') IS NULL THEN missing := missing || E'\n  line 44: table cx.files not found [AZ601]';
+  ELSIF NOT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = to_regclass('"cx"."files"')
+                    AND attname = 'folder_id' AND attnum > 0 AND NOT attisdropped) THEN
+    missing := missing || E'\n  line 44: column folder_id not found in cx.files [AZ601]';
   END IF;
   IF to_regclass('"cx"."files"') IS NULL THEN missing := missing || E'\n  line 45: table cx.files not found [AZ601]';
   ELSIF NOT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = to_regclass('"cx"."files"')
-                    AND attname = 'uploaded_by' AND attnum > 0 AND NOT attisdropped) THEN
-    missing := missing || E'\n  line 45: column uploaded_by not found in cx.files [AZ601]';
+                    AND attname = 'owner_id' AND attnum > 0 AND NOT attisdropped) THEN
+    missing := missing || E'\n  line 45: column owner_id not found in cx.files [AZ601]';
   END IF;
-  IF to_regclass('"cx"."files"') IS NULL THEN missing := missing || E'\n  line 53: table cx.files not found [AZ601]';
+  IF to_regclass('"cx"."files"') IS NULL THEN missing := missing || E'\n  line 46: table cx.files not found [AZ601]';
+  ELSIF NOT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = to_regclass('"cx"."files"')
+                    AND attname = 'uploaded_by' AND attnum > 0 AND NOT attisdropped) THEN
+    missing := missing || E'\n  line 46: column uploaded_by not found in cx.files [AZ601]';
+  END IF;
+  IF to_regclass('"cx"."files"') IS NULL THEN missing := missing || E'\n  line 54: table cx.files not found [AZ601]';
   ELSIF NOT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = to_regclass('"cx"."files"')
                     AND attname = 'folder_id' AND attnum > 0 AND NOT attisdropped) THEN
-    missing := missing || E'\n  line 53: column folder_id not found in cx.files [AZ601]';
+    missing := missing || E'\n  line 54: column folder_id not found in cx.files [AZ601]';
   END IF;
-  IF to_regclass('"cx"."folders"') IS NULL THEN missing := missing || E'\n  line 59: table cx.folders not found [AZ601]';
+  IF to_regclass('"cx"."folders"') IS NULL THEN missing := missing || E'\n  line 60: table cx.folders not found [AZ601]';
   ELSIF NOT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = to_regclass('"cx"."folders"')
                     AND attname = 'parent_type' AND attnum > 0 AND NOT attisdropped) THEN
-    missing := missing || E'\n  line 59: column parent_type not found in cx.folders [AZ601]';
+    missing := missing || E'\n  line 60: column parent_type not found in cx.folders [AZ601]';
   END IF;
-  IF to_regclass('"cx"."folders"') IS NULL THEN missing := missing || E'\n  line 59: table cx.folders not found [AZ601]';
+  IF to_regclass('"cx"."folders"') IS NULL THEN missing := missing || E'\n  line 60: table cx.folders not found [AZ601]';
   ELSIF NOT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = to_regclass('"cx"."folders"')
                     AND attname = 'parent_id' AND attnum > 0 AND NOT attisdropped) THEN
-    missing := missing || E'\n  line 59: column parent_id not found in cx.folders [AZ601]';
+    missing := missing || E'\n  line 60: column parent_id not found in cx.folders [AZ601]';
   END IF;
   SELECT atttypid, replace(format_type(atttypid, NULL), 'character varying', 'varchar') INTO v_oid, v_type
   FROM pg_attribute WHERE attrelid = to_regclass('"cx"."users"') AND attname = 'id' AND attnum > 0 AND NOT attisdropped;
@@ -570,22 +570,22 @@ BEGIN
   SELECT atttypid, replace(format_type(atttypid, NULL), 'character varying', 'varchar') INTO v_oid, v_type
   FROM pg_attribute WHERE attrelid = to_regclass('"cx"."folders"') AND attname = 'org_id' AND attnum > 0 AND NOT attisdropped;
   IF FOUND AND v_oid <> to_regtype('bigint') THEN
-    missing := missing || E'\n  line 31: cx.folders.org_id is ' || v_type || E', not bigint: write its type after the key, (org_id ' || v_type || ') [AZ602]';
+    missing := missing || E'\n  line 32: cx.folders.org_id is ' || v_type || E', not bigint: write its type after the key, (org_id ' || v_type || ') [AZ602]';
   END IF;
   SELECT atttypid, replace(format_type(atttypid, NULL), 'character varying', 'varchar') INTO v_oid, v_type
   FROM pg_attribute WHERE attrelid = to_regclass('"cx"."folders"') AND attname = 'id' AND attnum > 0 AND NOT attisdropped;
   IF FOUND AND v_oid <> to_regtype('bigint') THEN
-    missing := missing || E'\n  line 31: cx.folders.id is ' || v_type || E', not bigint: write its type after the key, (id ' || v_type || ') [AZ602]';
+    missing := missing || E'\n  line 32: cx.folders.id is ' || v_type || E', not bigint: write its type after the key, (id ' || v_type || ') [AZ602]';
   END IF;
   SELECT atttypid, replace(format_type(atttypid, NULL), 'character varying', 'varchar') INTO v_oid, v_type
   FROM pg_attribute WHERE attrelid = to_regclass('"cx"."files"') AND attname = 'org_id' AND attnum > 0 AND NOT attisdropped;
   IF FOUND AND v_oid <> to_regtype('bigint') THEN
-    missing := missing || E'\n  line 42: cx.files.org_id is ' || v_type || E', not bigint: write its type after the key, (org_id ' || v_type || ') [AZ602]';
+    missing := missing || E'\n  line 43: cx.files.org_id is ' || v_type || E', not bigint: write its type after the key, (org_id ' || v_type || ') [AZ602]';
   END IF;
   SELECT atttypid, replace(format_type(atttypid, NULL), 'character varying', 'varchar') INTO v_oid, v_type
   FROM pg_attribute WHERE attrelid = to_regclass('"cx"."files"') AND attname = 'id' AND attnum > 0 AND NOT attisdropped;
   IF FOUND AND v_oid <> to_regtype('bigint') THEN
-    missing := missing || E'\n  line 42: cx.files.id is ' || v_type || E', not bigint: write its type after the key, (id ' || v_type || ') [AZ602]';
+    missing := missing || E'\n  line 43: cx.files.id is ' || v_type || E', not bigint: write its type after the key, (id ' || v_type || ') [AZ602]';
   END IF;
   IF missing <> '' THEN RAISE EXCEPTION 'the policy does not match this database:%', missing; END IF;
 END $chk$;
@@ -749,6 +749,7 @@ INSERT INTO authz_int.perms VALUES
   ('team', 'share'),
   ('project', 'edit'),
   ('project', 'view'),
+  ('project', 'browse'),
   ('folder', 'share'),
   ('folder', 'edit'),
   ('folder', 'view'),
@@ -1549,7 +1550,7 @@ BEGIN
            JOIN pg_rewrite w ON w.oid = dep.objid AND dep.classid = 'pg_rewrite'::regclass
            JOIN pg_proc p ON p.oid = dep.refobjid AND dep.refclassid = 'pg_proc'::regclass
            WHERE w.ev_class IN ('authz_int."folder__parent__tree_links"'::regclass) AND p.provolatile <> 'i' LOOP
-    RAISE EXCEPTION 'line 31: a condition used for inheritance calls %, which is not IMMUTABLE; read tables with a subquery instead, so changes to them are tracked [AZ603]', d.fn;
+    RAISE EXCEPTION 'line 32: a condition used for inheritance calls %, which is not IMMUTABLE; read tables with a subquery instead, so changes to them are tracked [AZ603]', d.fn;
   END LOOP;
 END $imm$;
 
@@ -3145,7 +3146,7 @@ CREATE VIEW authz_int."project__edit" AS
   (SELECT id FROM authz_int."project__org__admin");
 CREATE VIEW authz_gen."project__edit" WITH (security_barrier) AS SELECT id FROM authz_int."project__edit";
 
--- folder.owner (line 35)
+-- folder.owner (line 36)
 CREATE VIEW authz_int."folder__owner" AS
   SELECT ROW(r."org_id"::bigint, r."id"::bigint)::text AS id FROM "cx"."folders" r WHERE r."owner_id" = (SELECT authz.uid());
 CREATE VIEW authz_gen."folder__owner" WITH (security_barrier) AS SELECT id FROM authz_int."folder__owner";
@@ -3155,7 +3156,7 @@ CREATE VIEW authz_int."folder__org__admin" AS
   SELECT ROW(r."org_id"::bigint, r."id"::bigint)::text AS id FROM "cx"."folders" r WHERE r."org_id" IN (SELECT id FROM authz_int."org__admin");
 CREATE VIEW authz_gen."folder__org__admin" WITH (security_barrier) AS SELECT id FROM authz_int."folder__org__admin";
 
--- folder.share (line 38): owner or org.admin
+-- folder.share (line 39): owner or org.admin
 CREATE VIEW authz_int."folder__share" AS
   (SELECT id FROM authz_int."folder__owner")
   UNION ALL
@@ -3187,7 +3188,7 @@ BEGIN
   RETURN ARRAY(SELECT id FROM authz_int."team__member");
 END $f$;
 
--- folder.editor (line 37)
+-- folder.editor (line 38)
 CREATE VIEW authz_int."folder__editor" AS
   SELECT (CASE WHEN (s."org_id", s."folder_id") IS NOT NULL THEN ROW(s."org_id"::bigint, s."folder_id"::bigint)::text END) AS id FROM "cx"."folder_teams" s WHERE (CASE WHEN (s."org_id", s."team_slug") IS NOT NULL THEN ROW(s."org_id"::bigint, s."team_slug"::text)::text END) = ANY ((SELECT authz_gen."team__member__ids"())::text[]);
 CREATE VIEW authz_gen."folder__editor" WITH (security_barrier) AS SELECT id FROM authz_int."folder__editor";
@@ -3209,7 +3210,7 @@ BEGIN
   (SELECT id FROM authz_int."folder__parent__edit__on_project");
 END $f$;
 
--- folder.edit (line 39): share or editor or parent.edit
+-- folder.edit (line 40): share or editor or parent.edit
 CREATE VIEW authz_int."folder__edit" AS
   SELECT c.descendant AS id FROM authz_int."folder__parent__tree" c
   WHERE c.ancestor IN (SELECT authz_int."folder__edit__start"());
@@ -3229,7 +3230,7 @@ BEGIN
   (SELECT id FROM authz_int."folder__parent__edit__on_project")) s WHERE s.id = c.ancestor));
 END $f$;
 
--- folder.viewer (line 36)
+-- folder.viewer (line 37)
 CREATE VIEW authz_int."folder__viewer" AS
   (SELECT g.object_id::text AS id FROM authz.shares g WHERE g.object_type = 'folder' AND g.relation = 'viewer' AND g.subject_type = 'user' AND g.subject_relation = '' AND g.subject_id = (SELECT authz.uid()::text) AND (g.expires_at IS NULL OR g.expires_at > now()) AND (g.starts_at IS NULL OR g.starts_at <= now()) AND g.caveat IS NULL)
   UNION ALL
@@ -3267,7 +3268,14 @@ CREATE VIEW authz_int."project__view" AS
   SELECT 'project'::text, x::text FROM authz_int."project__view__start"() x);
 CREATE VIEW authz_gen."project__view" WITH (security_barrier) AS SELECT id FROM authz_int."project__view";
 
--- folder.view (line 40): edit or viewer or parent.view
+-- project.browse (line 30): view or signed_in
+CREATE VIEW authz_int."project__browse" AS
+  (SELECT id FROM authz_int."project__view")
+  UNION ALL
+  (SELECT ROW(r."org_id"::bigint, r."id"::bigint)::text AS id FROM "cx"."projects" r WHERE coalesce(((SELECT authz.uid()) IS NOT NULL), false));
+CREATE VIEW authz_gen."project__browse" WITH (security_barrier) AS SELECT id FROM authz_int."project__browse";
+
+-- folder.view (line 41): edit or viewer or parent.view
 CREATE VIEW authz_int."folder__view" AS
   SELECT c.did::text AS id FROM authz_int."folder_project__folder_parent__tree" c
   WHERE c.dtype = 'folder' AND (c.atype, c.aid) IN (
@@ -3276,12 +3284,12 @@ CREATE VIEW authz_int."folder__view" AS
   SELECT 'project'::text, x::text FROM authz_int."project__view__start"() x);
 CREATE VIEW authz_gen."folder__view" WITH (security_barrier) AS SELECT id FROM authz_int."folder__view";
 
--- file.owner (line 44)
+-- file.owner (line 45)
 CREATE VIEW authz_int."file__owner" AS
   SELECT ROW(r."org_id"::bigint, r."id"::bigint)::text AS id FROM "cx"."files" r WHERE r."owner_id" = (SELECT authz.uid());
 CREATE VIEW authz_gen."file__owner" WITH (security_barrier) AS SELECT id FROM authz_int."file__owner";
 
--- file.uploader (line 45)
+-- file.uploader (line 46)
 CREATE VIEW authz_int."file__uploader" AS
   SELECT ROW(r."org_id"::bigint, r."id"::bigint)::text AS id FROM "cx"."files" r WHERE r."uploaded_by" = (SELECT authz_int."bot__me"());
 CREATE VIEW authz_gen."file__uploader" WITH (security_barrier) AS SELECT id FROM authz_int."file__uploader";
@@ -3291,7 +3299,7 @@ CREATE VIEW authz_int."file__folder__edit" AS
   SELECT ROW(r."org_id"::bigint, r."id"::bigint)::text AS id FROM "cx"."files" r WHERE (CASE WHEN (r."org_id", r."folder_id") IS NOT NULL THEN ROW(r."org_id"::bigint, r."folder_id"::bigint)::text END) IN (SELECT id FROM authz_int."folder__edit");
 CREATE VIEW authz_gen."file__folder__edit" WITH (security_barrier) AS SELECT id FROM authz_int."file__folder__edit";
 
--- file.edit (line 46): owner or uploader or folder.edit
+-- file.edit (line 47): owner or uploader or folder.edit
 CREATE VIEW authz_int."file__edit" AS
   (SELECT id FROM authz_int."file__owner")
   UNION ALL
@@ -3310,7 +3318,7 @@ CREATE VIEW authz_int."file__owner__oversee" AS
   SELECT ROW(r."org_id"::bigint, r."id"::bigint)::text AS id FROM "cx"."files" r WHERE r."owner_id" IN (SELECT id FROM authz_int."user__oversee");
 CREATE VIEW authz_gen."file__owner__oversee" WITH (security_barrier) AS SELECT id FROM authz_int."file__owner__oversee";
 
--- file.view (line 47): edit or folder.view or owner.oversee
+-- file.view (line 48): edit or folder.view or owner.oversee
 CREATE VIEW authz_int."file__view" AS
   (SELECT id FROM authz_int."file__owner")
   UNION ALL
@@ -3509,7 +3517,7 @@ BEGIN
   RETURN ARRAY(SELECT * FROM authz_gen."cx.files:update:why"(r_old)) || CASE WHEN p_row IS NULL THEN '{}'::text[] ELSE ARRAY['after the change:'] || ARRAY(SELECT '  ' || l FROM authz_gen."cx.files:update:why"(r_new) l) END;
 END $f$;
 
--- cx.files select (line 50): view
+-- cx.files select (line 51): view
 CREATE POLICY "authz_select" ON "cx"."files" FOR SELECT TO app_user
   USING (((SELECT authz_int.scope_cmd('cx.files', 'select')) AND (coalesce("files"."owner_id" = (SELECT authz.uid()), false)
     OR coalesce("files"."uploaded_by" = (SELECT authz_int."bot__me"()), false)
@@ -3519,7 +3527,7 @@ CREATE POLICY "authz_select" ON "cx"."files" FOR SELECT TO app_user
 
 COMMENT ON POLICY "authz_select" ON "cx"."files" IS 'rowstile';
 
--- cx.files insert (line 51): folder.edit and {owner_id = authz.uid()}
+-- cx.files insert (line 52): folder.edit and {owner_id = authz.uid()}
 CREATE POLICY "authz_insert" ON "cx"."files" FOR INSERT TO app_user
   WITH CHECK (((SELECT authz_int.scope_cmd('cx.files', 'insert')) AND (coalesce((owner_id = (SELECT authz.uid())), false)
     AND authz_gen."folder__edit__has"((CASE WHEN ("files"."org_id", "files"."folder_id") IS NOT NULL THEN ROW("files"."org_id"::bigint, "files"."folder_id"::bigint)::text END))))
@@ -3527,7 +3535,7 @@ CREATE POLICY "authz_insert" ON "cx"."files" FOR INSERT TO app_user
 
 COMMENT ON POLICY "authz_insert" ON "cx"."files" IS 'rowstile';
 
--- cx.files update (line 52): edit
+-- cx.files update (line 53): edit
 CREATE POLICY "authz_update" ON "cx"."files" FOR UPDATE TO app_user
   USING (((SELECT authz_int.scope_cmd('cx.files', 'update')) AND (coalesce("files"."owner_id" = (SELECT authz.uid()), false)
     OR coalesce("files"."uploaded_by" = (SELECT authz_int."bot__me"()), false)
@@ -3539,7 +3547,7 @@ CREATE POLICY "authz_update" ON "cx"."files" FOR UPDATE TO app_user
 
 COMMENT ON POLICY "authz_update" ON "cx"."files" IS 'rowstile';
 
--- cx.files delete (line 54): edit
+-- cx.files delete (line 55): edit
 CREATE POLICY "authz_delete" ON "cx"."files" FOR DELETE TO app_user
   USING (((SELECT authz_int.scope_cmd('cx.files', 'delete')) AND (coalesce("files"."owner_id" = (SELECT authz.uid()), false)
     OR coalesce("files"."uploaded_by" = (SELECT authz_int."bot__me"()), false)
@@ -3631,7 +3639,7 @@ BEGIN
   RETURN ARRAY(SELECT * FROM authz_gen."cx.folders:update:why"(r_old)) || CASE WHEN p_row IS NULL THEN '{}'::text[] ELSE ARRAY['after the change:'] || ARRAY(SELECT '  ' || l FROM authz_gen."cx.folders:update:why"(r_new) l) END;
 END $f$;
 
--- cx.folders select (line 57): view
+-- cx.folders select (line 58): view
 CREATE POLICY "authz_select" ON "cx"."folders" FOR SELECT TO app_user
   USING (((SELECT authz_int.scope_cmd('cx.folders', 'select')) AND (coalesce("folders"."owner_id" = (SELECT authz.uid()), false)
     OR EXISTS (SELECT 1 FROM authz_gen."org__admin" v WHERE v.id = "folders"."org_id")
@@ -3643,7 +3651,7 @@ CREATE POLICY "authz_select" ON "cx"."folders" FOR SELECT TO app_user
 
 COMMENT ON POLICY "authz_select" ON "cx"."folders" IS 'rowstile';
 
--- cx.folders update (line 58): edit
+-- cx.folders update (line 59): edit
 CREATE POLICY "authz_update" ON "cx"."folders" FOR UPDATE TO app_user
   USING (((SELECT authz_int.scope_cmd('cx.folders', 'update')) AND (coalesce("folders"."owner_id" = (SELECT authz.uid()), false)
     OR EXISTS (SELECT 1 FROM authz_gen."org__admin" v WHERE v.id = "folders"."org_id")
@@ -3687,7 +3695,7 @@ BEGIN
   END IF;
 END $f$;
 
--- cx.files update folder_id after (line 53): folder.edit
+-- cx.files update folder_id after (line 54): folder.edit
 -- Whether the rule holds for a row. BEGIN ATOMIC, as the refusals' functions are: the trigger below runs as the app
 -- role, which can't name what is in authz_int in text read at run time (the signed-in service, authz_int."<type>__me")
 CREATE FUNCTION authz_gen."cx.files:column_1:holds"(p_row "cx"."files") RETURNS boolean
@@ -3760,7 +3768,7 @@ BEGIN
   RETURN NEXT CASE WHEN v[5] THEN '  yes  ' ELSE '  no   ' END || '{parent_id is null}';
 END $f$;
 
--- cx.folders update parent_type, parent_id after (line 59): parent.edit or {parent_id is null}
+-- cx.folders update parent_type, parent_id after (line 60): parent.edit or {parent_id is null}
 -- Whether the rule holds for a row. BEGIN ATOMIC, as the refusals' functions are: the trigger below runs as the app
 -- role, which can't name what is in authz_int in text read at run time (the signed-in service, authz_int."<type>__me")
 CREATE FUNCTION authz_gen."cx.folders:column_2:holds"(p_row "cx"."folders") RETURNS boolean
@@ -3876,6 +3884,10 @@ BEGIN
         WHEN 'edit' THEN RETURN EXISTS (SELECT 1 FROM "cx"."projects" o WHERE (o."org_id", o."id") = (((v_text)::authz_gen."project__key")."org_id", ((v_text)::authz_gen."project__key")."id") AND ((coalesce(o."lead_id" = (SELECT authz.uid()), false)
     OR EXISTS (SELECT 1 FROM authz_gen."org__admin" v WHERE v.id = o."org_id"))));
         WHEN 'view' THEN RETURN EXISTS (SELECT 1 FROM "cx"."projects" o WHERE (o."org_id", o."id") = (((v_text)::authz_gen."project__key")."org_id", ((v_text)::authz_gen."project__key")."id") AND ((coalesce(o."lead_id" = (SELECT authz.uid()), false)
+    OR EXISTS (SELECT 1 FROM authz_gen."org__admin" v WHERE v.id = o."org_id")
+    OR EXISTS (SELECT 1 FROM authz_gen."folder__view" v WHERE v.id = (CASE WHEN (o."org_id", o."folder_id") IS NOT NULL THEN ROW(o."org_id"::bigint, o."folder_id"::bigint)::text END)))));
+        WHEN 'browse' THEN RETURN EXISTS (SELECT 1 FROM "cx"."projects" o WHERE (o."org_id", o."id") = (((v_text)::authz_gen."project__key")."org_id", ((v_text)::authz_gen."project__key")."id") AND ((coalesce(o."lead_id" = (SELECT authz.uid()), false)
+    OR coalesce(((SELECT authz.uid()) IS NOT NULL), false)
     OR EXISTS (SELECT 1 FROM authz_gen."org__admin" v WHERE v.id = o."org_id")
     OR EXISTS (SELECT 1 FROM authz_gen."folder__view" v WHERE v.id = (CASE WHEN (o."org_id", o."folder_id") IS NOT NULL THEN ROW(o."org_id"::bigint, o."folder_id"::bigint)::text END)))));
         ELSE RAISE EXCEPTION 'no permission %.% in the policy', p_type, p_perm USING HINT = 'rowstile help AZ707';
@@ -4023,6 +4035,28 @@ BEGIN
     OR EXISTS (SELECT 1 FROM authz_gen."folder__view" v WHERE v.id = (CASE WHEN (o."org_id", o."folder_id") IS NOT NULL THEN ROW(o."org_id"::bigint, o."folder_id"::bigint)::text END)))
         ORDER BY o."org_id", o."id" LIMIT p_limit;
       END IF;
+    WHEN 'project.browse' THEN
+      IF p_limit IS NULL AND p_after IS NULL THEN
+        RETURN QUERY SELECT ROW(o."org_id"::bigint, o."id"::bigint)::text FROM "cx"."projects" o
+        WHERE (coalesce(o."lead_id" = (SELECT authz.uid()), false)
+    OR coalesce(((SELECT authz.uid()) IS NOT NULL), false)
+    OR EXISTS (SELECT 1 FROM authz_gen."org__admin" v WHERE v.id = o."org_id")
+    OR EXISTS (SELECT 1 FROM authz_gen."folder__view" v WHERE v.id = (CASE WHEN (o."org_id", o."folder_id") IS NOT NULL THEN ROW(o."org_id"::bigint, o."folder_id"::bigint)::text END)));
+      ELSIF p_after IS NULL THEN
+        RETURN QUERY SELECT ROW(o."org_id"::bigint, o."id"::bigint)::text FROM "cx"."projects" o
+        WHERE (coalesce(o."lead_id" = (SELECT authz.uid()), false)
+    OR coalesce(((SELECT authz.uid()) IS NOT NULL), false)
+    OR EXISTS (SELECT 1 FROM authz_gen."org__admin" v WHERE v.id = o."org_id")
+    OR EXISTS (SELECT 1 FROM authz_gen."folder__view" v WHERE v.id = (CASE WHEN (o."org_id", o."folder_id") IS NOT NULL THEN ROW(o."org_id"::bigint, o."folder_id"::bigint)::text END)))
+        ORDER BY o."org_id", o."id" LIMIT p_limit;
+      ELSE
+        RETURN QUERY SELECT ROW(o."org_id"::bigint, o."id"::bigint)::text FROM "cx"."projects" o
+        WHERE (o."org_id", o."id") > ((p_after::authz_gen."project__key")."org_id", (p_after::authz_gen."project__key")."id") AND (coalesce(o."lead_id" = (SELECT authz.uid()), false)
+    OR coalesce(((SELECT authz.uid()) IS NOT NULL), false)
+    OR EXISTS (SELECT 1 FROM authz_gen."org__admin" v WHERE v.id = o."org_id")
+    OR EXISTS (SELECT 1 FROM authz_gen."folder__view" v WHERE v.id = (CASE WHEN (o."org_id", o."folder_id") IS NOT NULL THEN ROW(o."org_id"::bigint, o."folder_id"::bigint)::text END)))
+        ORDER BY o."org_id", o."id" LIMIT p_limit;
+      END IF;
     WHEN 'folder.share' THEN
       IF p_limit IS NULL AND p_after IS NULL THEN
         RETURN QUERY SELECT ROW(o."org_id"::bigint, o."id"::bigint)::text FROM "cx"."folders" o
@@ -4156,7 +4190,7 @@ BEGIN
     WHEN 'user' THEN names := ARRAY['oversee']::text[];
     WHEN 'bot' THEN names := ARRAY['manage_keys']::text[];
     WHEN 'team' THEN names := ARRAY['share']::text[];
-    WHEN 'project' THEN names := ARRAY['edit', 'view']::text[];
+    WHEN 'project' THEN names := ARRAY['edit', 'view', 'browse']::text[];
     WHEN 'folder' THEN names := ARRAY['share', 'edit', 'view']::text[];
     WHEN 'file' THEN names := ARRAY['edit', 'view']::text[];
     ELSE RAISE EXCEPTION 'no type % in the policy', p_type USING HINT = 'rowstile help AZ707';
@@ -4303,10 +4337,14 @@ BEGIN
   v_by := coalesce(authz_int.manage_perm(p_type, p_relation,
                                          authz_int.subject_key(p_subject_type, p_subject_id, p_subject_relation)),
                    authz_int.manage_perm(p_type, p_relation));
+  -- what it needs comes from the policy alone: the same words for a hidden object and a missing one
   IF NOT EXISTS (SELECT 1 FROM authz.principal()) OR v_by IS NULL
      OR NOT EXISTS (SELECT 1 FROM authz_int.perms WHERE type = p_type AND perm = v_by)
      OR NOT authz.can(p_type, p_id, v_by) THEN
-    RAISE EXCEPTION 'you cannot share % %', p_type, p_id USING ERRCODE = 'insufficient_privilege', HINT = 'rowstile help AZ705';
+    IF v_by IS NULL THEN
+      RAISE EXCEPTION 'you cannot unshare % on % %', p_relation, p_type, p_id USING ERRCODE = 'insufficient_privilege', HINT = 'rowstile help AZ705';
+    END IF;
+    RAISE EXCEPTION 'you cannot unshare % on % % (needs %)', p_relation, p_type, p_id, v_by USING ERRCODE = 'insufficient_privilege', HINT = 'rowstile help AZ705';
   END IF;
   DELETE FROM authz.shares WHERE object_type = p_type AND object_id = p_id
     AND relation = p_relation AND subject_type = p_subject_type
@@ -4611,6 +4649,11 @@ LANGUAGE sql STABLE STRICT SECURITY DEFINER SET search_path FROM CURRENT ROWS 50
   SELECT x FROM authz_int."folder_project__folder_parent__tree" c, LATERAL authz_int."project__view__who_base"((CASE WHEN c.atype = 'project' THEN c.aid END)::text) x WHERE c.dtype = 'project' AND c.did = p_id::text
 $f$;
 
+CREATE FUNCTION authz_int."project__browse__who"(p_id text) RETURNS SETOF bigint
+LANGUAGE sql STABLE STRICT SECURITY DEFINER SET search_path FROM CURRENT ROWS 50 AS $f$
+  SELECT u."id" FROM "cx"."users" u
+$f$;
+
 CREATE FUNCTION authz_int."folder__share__who"(p_id text) RETURNS SETOF bigint
 LANGUAGE sql STABLE STRICT SECURITY DEFINER SET search_path FROM CURRENT ROWS 50 AS $f$
   (SELECT x FROM authz_int."folder__owner__who"(p_id) x)
@@ -4900,6 +4943,22 @@ BEGIN
         v_done := true; RETURN QUERY SELECT * FROM authz_int."folder__view__why"(v_t.id::text, p_depth + 1 + 1, p_seen || ('folder:view:' || v_t.id));
       END IF;
     END LOOP;
+  END;
+END $f$;
+
+CREATE FUNCTION authz_int."project__browse__why"(p_id text, p_depth int, p_seen text[])
+RETURNS SETOF text LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path FROM CURRENT AS $f$
+DECLARE pad text := repeat('  ', p_depth); v_ok boolean; v_done boolean := false; v_t record;
+        v_holds boolean := p_id IN (SELECT id FROM authz_int."project__browse");
+BEGIN
+  IF p_depth > 60 THEN RETURN NEXT pad || '...'; RETURN; END IF;
+  RETURN NEXT pad || 'project.browse = view or signed_in';
+  BEGIN
+    v_ok := (p_id) IN (SELECT id FROM authz_int."project__view");
+    RETURN NEXT pad || CASE WHEN v_ok THEN 'yes  ' ELSE 'no   ' END || 'view';
+    IF v_ok AND NOT v_done THEN v_done := true; RETURN QUERY SELECT * FROM authz_int."project__view__why"(p_id, p_depth + 1, p_seen); END IF;
+    v_ok := (p_id) IN (SELECT ROW(r."org_id"::bigint, r."id"::bigint)::text AS id FROM "cx"."projects" r WHERE coalesce(((SELECT authz.uid()) IS NOT NULL), false));
+    RETURN NEXT pad || CASE WHEN v_ok THEN 'yes  ' ELSE 'no   ' END || 'signed_in';
   END;
 END $f$;
 
@@ -5340,6 +5399,12 @@ BEGIN
             PERFORM authz_int.sign();
             IF authz.can(p_type, p_id, p_perm) THEN RETURN NEXT v_c; END IF;
           END LOOP;
+        WHEN 'browse' THEN
+          FOR v_c IN SELECT DISTINCT x::text FROM authz_int."project__browse__who"(v_text) x WHERE EXISTS (SELECT 1 FROM "cx"."users" u WHERE u."id" = x) LOOP
+            PERFORM set_config('authz.user_id', v_c, true);
+            PERFORM authz_int.sign();
+            IF authz.can(p_type, p_id, p_perm) THEN RETURN NEXT v_c; END IF;
+          END LOOP;
         ELSE RAISE EXCEPTION 'no permission %.% in the policy', p_type, p_perm USING HINT = 'rowstile help AZ707';
       END CASE;
     WHEN 'folder' THEN
@@ -5455,6 +5520,7 @@ BEGIN
       CASE p_perm
         WHEN 'edit' THEN RETURN QUERY SELECT * FROM authz_int."project__edit__why"(v_text, 1, '{}');
         WHEN 'view' THEN RETURN QUERY SELECT * FROM authz_int."project__view__why"(v_text, 1, '{}');
+        WHEN 'browse' THEN RETURN QUERY SELECT * FROM authz_int."project__browse__why"(v_text, 1, '{}');
         ELSE RAISE EXCEPTION 'no permission %.% in the policy', p_type, p_perm USING HINT = 'rowstile help AZ707';
       END CASE;
     WHEN 'folder' THEN
@@ -6458,22 +6524,22 @@ CREATE OR REPLACE FUNCTION authz.verify() RETURNS boolean LANGUAGE sql STABLE AS
 -- where each rule, relation and invariant is written, for messages (Core.line_sql)
 CREATE TABLE authz_gen.policy_lines (what text PRIMARY KEY, loc text NOT NULL);
 INSERT INTO authz_gen.policy_lines VALUES
-  ('relation file.folder org_id', 'line 43'),
-  ('relation file.owner owner_id', 'line 44'),
-  ('relation file.uploader uploaded_by', 'line 45'),
-  ('relation folder.org org_id', 'line 32'),
-  ('relation folder.owner owner_id', 'line 35'),
-  ('relation folder.parent org_id', 'line 33'),
-  ('rule cx.files delete', 'line 54'),
-  ('rule cx.files insert', 'line 51'),
-  ('rule cx.files update', 'line 52'),
-  ('rule cx.files update folder_id after', 'line 53'),
-  ('rule cx.folders update', 'line 58'),
-  ('rule cx.folders update parent_type, parent_id after', 'line 59'),
-  ('share folder.viewer bot', 'line 36'),
-  ('share folder.viewer bot:*', 'line 36'),
-  ('share folder.viewer team#member', 'line 36'),
-  ('share folder.viewer user', 'line 36'),
+  ('relation file.folder org_id', 'line 44'),
+  ('relation file.owner owner_id', 'line 45'),
+  ('relation file.uploader uploaded_by', 'line 46'),
+  ('relation folder.org org_id', 'line 33'),
+  ('relation folder.owner owner_id', 'line 36'),
+  ('relation folder.parent org_id', 'line 34'),
+  ('rule cx.files delete', 'line 55'),
+  ('rule cx.files insert', 'line 52'),
+  ('rule cx.files update', 'line 53'),
+  ('rule cx.files update folder_id after', 'line 54'),
+  ('rule cx.folders update', 'line 59'),
+  ('rule cx.folders update parent_type, parent_id after', 'line 60'),
+  ('share folder.viewer bot', 'line 37'),
+  ('share folder.viewer bot:*', 'line 37'),
+  ('share folder.viewer team#member', 'line 37'),
+  ('share folder.viewer user', 'line 37'),
   ('share team.member team#member', 'line 20');
 
 DO $k$

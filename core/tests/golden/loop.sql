@@ -2377,10 +2377,14 @@ BEGIN
   v_by := coalesce(authz_int.manage_perm(p_type, p_relation,
                                          authz_int.subject_key(p_subject_type, p_subject_id, p_subject_relation)),
                    authz_int.manage_perm(p_type, p_relation));
+  -- what it needs comes from the policy alone: the same words for a hidden object and a missing one
   IF NOT EXISTS (SELECT 1 FROM authz.principal()) OR v_by IS NULL
      OR NOT EXISTS (SELECT 1 FROM authz_int.perms WHERE type = p_type AND perm = v_by)
      OR NOT authz.can(p_type, p_id, v_by) THEN
-    RAISE EXCEPTION 'you cannot share % %', p_type, p_id USING ERRCODE = 'insufficient_privilege', HINT = 'rowstile help AZ705';
+    IF v_by IS NULL THEN
+      RAISE EXCEPTION 'you cannot unshare % on % %', p_relation, p_type, p_id USING ERRCODE = 'insufficient_privilege', HINT = 'rowstile help AZ705';
+    END IF;
+    RAISE EXCEPTION 'you cannot unshare % on % % (needs %)', p_relation, p_type, p_id, v_by USING ERRCODE = 'insufficient_privilege', HINT = 'rowstile help AZ705';
   END IF;
   DELETE FROM authz.shares WHERE object_type = p_type AND object_id = p_id
     AND relation = p_relation AND subject_type = p_subject_type

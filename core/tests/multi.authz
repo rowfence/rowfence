@@ -22,6 +22,7 @@ type project = mt.projects
   viewer : user, team#member, user:*, anyone, link  shared by edit
   can edit = lead or org.admin or parent.edit
   can view = edit or viewer or parent.view
+  can peek = lead                                              -- not edit: an org admin edits, doesn't peek
 
 type folder = mt.folders where {not archived}
   parent : folder, project = (parent_type, parent_id)           -- inside a folder or a project
@@ -35,12 +36,14 @@ type folder = mt.folders where {not archived}
   can edit  = owner or editor or (parent.edit and {not locked}) or roles
   can view  = edit or viewer or parent.view or roles
   can share = edit
+  can peek  = view                                             -- edit too: on a folder, peek includes edit
 
 type doc = mt.docs (id uuid)
   container : folder, project = (container_type, container_id)
   author    : user = author_id
   can edit = author or container.edit
   can view = edit or container.view
+  can glance = container.peek or container.edit               -- tiers that differ by type: container.edit stays
 
 caveat business_hours = {authz.ctx('mode') = 'business'}
 caveat from_ip        = {authz.ctx('ip') = arg('ip')}

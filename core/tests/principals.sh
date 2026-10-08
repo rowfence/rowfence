@@ -16,10 +16,12 @@ state() { psql -X -q -At -d "$DB" -c "SET ROLE app_user;" "$@" 2>&1 | tail -n 1;
 code() {    # the SQLSTATE of the last statement, or ok
   psql -X -q -At -d "$DB" -v VERBOSITY=sqlstate -c "SET ROLE app_user;" "$@" 2>&1 | grep -o '^ERROR:  [0-9A-Z]*' | tail -n 1 | cut -c9- || true
 }
-expect_code() {  # $1 label, $2 expected SQLSTATE, rest: -c statements
+. tests/words.sh
+expect_code() {  # $1 label, $2 expected "SQLSTATE: the message's words" (or ok), rest: -c statements
   local label=$1 want=$2; shift 2
-  got=$(code "$@"); got=${got:-ok}
-  if [ "$got" = "$want" ]; then echo "ok    $label"; else echo "FAIL  $label: expected $want, got $got"; fails=$((fails + 1)); fi
+  got=$(psql -X -q -At -d "$DB" -v VERBOSITY=verbose -c "SET ROLE app_user;" "$@" 2>&1 | grep '^ERROR:  ' | tail -n 1)
+  got=${got#ERROR:  }; got=${got:-ok}
+  if agrees "$label" "$want" "$got"; then echo "ok    $label"; else echo "FAIL  $label: expected $want, got $got"; fails=$((fails + 1)); fi
 }
 AS_SVC="SET authz.user_id = '7'; SET authz.principal_type = 'service';"
 AS_USER="SET authz.user_id = '1'; SET authz.principal_type = '';"
@@ -90,11 +92,11 @@ check "a service failing the type's where is nobody" "0|" \
 check "users keep user:* and don't get service:*" "1,4" "$AS_USER SELECT string_agg(id::text, ',' ORDER BY id) FROM ps.docs;"
 check "the same id as another type is someone else" "f" \
   "SET authz.user_id = '1'; SET authz.principal_type = 'service'; SELECT authz.can('doc', 1, 'view');"
-expect_code "signed_in stays about users: a service can't insert" 42501 -c "$AS_SVC" \
+expect_code "signed_in stays about users: a service can't insert" "42501: permission denied: service 7 may not insert this row into ps.docs" -c "$AS_SVC" \
   -c "INSERT INTO ps.docs VALUES (10, NULL, NULL, 'x')"
 check "it edits what it may edit" "1" "$AS_SVC WITH u AS (UPDATE ps.docs SET body = 'edited by bot' WHERE id = 1 RETURNING 1) SELECT count(*) FROM u;"
 check "explain names it" "yes  service 7 holds edit on doc 1" "$AS_SVC SELECT e FROM authz.explain('doc', 1, 'edit') e LIMIT 1;"
-expect_code "it can't have user 7's access explained on what it can't share (the same id, another type)" 42501 \
+expect_code "it can't have user 7's access explained on what it can't share (the same id, another type)" "42501: you cannot inspect access to doc 5" \
   -c "$AS_SVC" -c "SELECT authz.explain('doc', 5, 'view', '7')"
 check "a user may have their own explained, by id" "no   user 1 does not hold view on doc 5" \
   "$AS_USER SELECT e FROM authz.explain('doc', 5, 'view', '1') e LIMIT 1;"
@@ -103,7 +105,7 @@ check "it shares as itself: created_by says so" "service:7" \
 check "the audit trail says so too" "service:7" \
   "RESET ROLE; SELECT user_id FROM authz.audit WHERE action = 'share' AND object_id = '1' ORDER BY id DESC LIMIT 1;"
 check "authz.who lists users" "1,3" "RESET ROLE; SELECT string_agg(x, ',' ORDER BY x) FROM authz.who('doc', 1, 'view') x;"
-expect_code "a role the policy doesn't govern can't sign in as a service" 42501 -c "RESET ROLE" -c "SET ROLE other_app" \
+expect_code "a role the policy doesn't govern can't sign in as a service" "42501: permission denied for schema authz" -c "RESET ROLE" -c "SET ROLE other_app" \
   -c "SELECT authz.act_as('service', '7')"
 
 check "invariants are asked as each service too, named as the audit trail names it" "service:7|{1}"   "RESET ROLE; SELECT string_agg(user_id || '|' || object_ids::text, ' ') FROM authz.check_invariants() WHERE invariant LIKE 'never doc: edit and not owner%';"
@@ -149,18 +151,18 @@ KEY=$(state -c "$AS_USER" -c "SELECT authz.create_api_key('deploy', '', NULL, 's
 case "$KEY" in ak_*) echo "ok    its owner makes service 7 a key";; *) echo "FAIL  key: $KEY"; fails=$((fails + 1));; esac
 check "the key signs in as the service" "service:7|service|7|" \
   "BEGIN; SELECT authz.login_key('$KEY') || '|' || (SELECT principal_type || '|' || principal_id FROM authz.principal()) || '|' || coalesce(authz.uid()::text, ''); COMMIT;"
-expect_code "someone else may not" 42501 -c "SET authz.user_id = '2'" -c "SELECT authz.create_api_key('x', '', NULL, 'service', '7')"
-expect_code "nor for a type that doesn't sign in" P0001 -c "$AS_USER" -c "SELECT authz.create_api_key('x', '', NULL, 'doc', '1')"
+expect_code "someone else may not" "42501: you cannot manage the keys of service 7" -c "SET authz.user_id = '2'" -c "SELECT authz.create_api_key('x', '', NULL, 'service', '7')"
+expect_code "nor for a type that doesn't sign in" "P0001: no type doc that signs in (type ... principal) in the policy" -c "$AS_USER" -c "SELECT authz.create_api_key('x', '', NULL, 'doc', '1')"
 check "the owner lists its keys" "deploy" "$AS_USER SELECT string_agg(name, ',') FROM authz.list_api_keys('service', '7');"
 check "the service lists its own" "deploy" "$AS_SVC SELECT string_agg(name, ',') FROM authz.list_api_keys();"
 PSQL -c "UPDATE ps.services SET active = true WHERE id = 9" >/dev/null
 KEY9=$(state -c "$AS_USER" -c "SELECT authz.create_api_key('old', '', NULL, 'service', '9')")
 PSQL -c "UPDATE ps.services SET active = false WHERE id = 9" >/dev/null
 check "a key was made while it was active" "ak_" "SELECT left('$KEY9', 3);"
-expect_code "a key of an inactive service doesn't sign in" 28000 -c "BEGIN" -c "SELECT authz.login_key('$KEY9')"
+expect_code "a key of an inactive service doesn't sign in" "28000: invalid API key" -c "BEGIN" -c "SELECT authz.login_key('$KEY9')"
 KID=$(state -c "$AS_USER" -c "SELECT id FROM authz.list_api_keys('service', '7')")
 PSQL -c "SET ROLE app_user; $AS_USER SELECT authz.revoke_api_key($KID)" >/dev/null
-expect_code "the owner revoked it" 28000 -c "BEGIN" -c "SELECT authz.login_key('$KEY')"
+expect_code "the owner revoked it" "28000: invalid API key" -c "BEGIN" -c "SELECT authz.login_key('$KEY')"
 
 echo "-- JWTs naming a principal type"
 PSQL -c "INSERT INTO authz.settings VALUES ('jwt_secret', 's3cret'), ('jwt_type_claim', 'kind')" >/dev/null
@@ -179,7 +181,7 @@ check "a token for service 8" "service:8|2,3" \
 T=$(jwt '{"sub": "1"}')
 check "a token without the claim is a user's" "1" "BEGIN; SELECT authz.login_jwt('$T'); COMMIT;"
 T=$(jwt '{"sub": "1", "kind": "doc"}')
-expect_code "a token naming a type that doesn't sign in" 28000 -c "BEGIN" -c "SELECT authz.login_jwt('$T')"
+expect_code "a token naming a type that doesn't sign in" "28000: the token names a type that does not sign in" -c "BEGIN" -c "SELECT authz.login_jwt('$T')"
 
 echo "-- the policy"
 bad() {  # $1 label, $2 expected piece of the error, $3 policy

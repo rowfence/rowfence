@@ -27,6 +27,7 @@ type project = cx.projects (org_id, id)
   folder : folder = [org_id, folder_id]                     -- a project may sit in a folder
   can edit = lead or org.admin
   can view = edit or folder.view
+  can browse = view or signed_in                            -- any user signed in; a bot, only where it views
 
 type folder = cx.folders (org_id, id)
   org    : org             = org_id

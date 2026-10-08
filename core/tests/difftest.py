@@ -1086,12 +1086,20 @@ class MultiGen(Gen):
 
     def grants(self) -> str:
         roles = [
+            # org 2's role too, from the start: shared on a folder of org 1 (or of none), as only a direct
+            # insert or a folder moved to another org makes it, it must give nothing
             "INSERT INTO authz.roles (id, owner_type, owner_id, object_type, name) VALUES "
-            "(1, 'org', '1', 'folder', 'reader'), (2, 'org', '1', 'folder', 'writer');",
-            "INSERT INTO authz.role_permissions VALUES (1, 'view'), (2, 'view'), (2, 'edit');",
+            "(1, 'org', '1', 'folder', 'reader'), (2, 'org', '1', 'folder', 'writer'), (3, 'org', '2', 'folder', 'editor3');",
+            "INSERT INTO authz.role_permissions VALUES (1, 'view'), (2, 'view'), (2, 'edit'), (3, 'edit');",
             "SELECT setval(pg_get_serial_sequence('authz.roles', 'id'), 10);",
         ]
-        return "\n".join(roles + [self.grant() for _ in range(30)])
+        # ... and a few such from the start: folders 3, 6, 9 are org 1's, 1 and 4 org 2's, 2 nobody's (initial)
+        cross = [
+            "INSERT INTO authz.shares (object_type, object_id, relation, subject_type, subject_id, subject_relation) "
+            f"VALUES ('folder', '{f}', 'role:{role}', 'user', {self.u()}, '') ON CONFLICT DO NOTHING;"
+            for f, role in ((3, 3), (6, 3), (9, 3), (1, 1), (4, 2), (2, 2))
+        ]
+        return "\n".join(roles + cross + [self.grant() for _ in range(30)])
 
     def subject(self, allowed: list[str]) -> tuple[str, str, str]:
         r = self.r
@@ -1114,10 +1122,10 @@ class MultiGen(Gen):
         if k < 0.3:
             obj, oid, rel = "project", r.choice(projects), "viewer"
             st, sid, sr = self.subject(["user", "team", "user:*", "anyone", "link"])
-        elif k < 0.55:
+        elif k < 0.5:
             obj, oid, rel = "folder", r.choice(folders), "viewer"
             st, sid, sr = self.subject(["user", "team", "user:*", "link"])
-        elif k < 0.7:
+        elif k < 0.6:
             obj, oid, rel = "folder", r.choice(folders), "editor"
             st, sid, sr = self.subject(["user", "team"])
         elif k < 0.85:
