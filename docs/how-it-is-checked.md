@@ -106,6 +106,14 @@ That was done again in October 2026, with twenty more mistakes for what had been
 mistake had been tried on: 64 in all. The suites caught 60. Each of the four they missed got a test, which
 fails with the mistake put back.
 
+Then the reference evaluator, whose answers the suites take as the truth: 40 mistakes put into it. The suites
+caught 26. One of the 14 they missed can't change an answer: the fixed point stopping when a set of ids
+shrinks, which none ever does. The others were answers nothing else asked for (an assignment of another
+org's custom role, `signed_in` for a service, the simple conditions), and how `prove` and the review make up
+and shrink their worlds. The answers worked out by hand and the comparison of conditions with Postgres came
+of that. With them, and four more mistakes for what they changed, the suites catch each of the 44 but that
+one.
+
 ## When something is found
 
 Vulnerabilities are reported privately ([SECURITY.md](../SECURITY.md)) and published as advisories once
