@@ -14,7 +14,7 @@ docs 11
 governance 134
 identity 50
 keep unchanged trees 7
-language server 26
+language server 43
 masks 25
 mcp 37
 migrate vs apply 38

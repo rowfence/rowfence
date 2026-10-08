@@ -315,5 +315,87 @@ with tempfile.TemporaryDirectory() as d:
     ok("'is not null' in a condition is no deny", h and "has a deny" not in h["contents"]["value"], h)
     c.close()
 
+# what an editor asks less often: a type with a where, a deny, completion at the start of a line, after a schema
+# and inside braces, a save, a request the server doesn't know, a parameter of the wrong kind, questions about
+# nothing, and a test file when no policy is named (no rowstile.toml here)
+with tempfile.TemporaryDirectory() as d:
+    small = (
+        "app role app_user\ntype user = app.users\n\n"
+        "type doc = app.docs where {deleted_at is null}\n"
+        "  owner  : user = owner_id\n"
+        "  banned : user = app.bans(doc_id -> user_id)\n"
+        "  can view = owner and not banned\n\n"
+        "rules app.docs\n  select : view\n"
+    )
+    path = os.path.join(d, "policy.authz")
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(small)
+    u = uri(path)
+    c = Client(d)
+    c.request("initialize", {"capabilities": {}})
+    c.notify("textDocument/didOpen", {"textDocument": {"uri": u, "languageId": "authz", "version": 1, "text": small}})
+    ok("a policy with a type's where and a deny has no errors", c.diagnostics(u) == [], c.diagnostics(u))
+    blank = {"textDocument": {"uri": u}, "position": {"line": 2, "character": 0}}  # the empty line
+
+    def where(needle: str, offset: int) -> dict[str, object]:
+        return {"textDocument": {"uri": u}, "position": pos(small, needle, offset)}
+
+    def labels(needle: str, offset: int) -> set[str]:
+        return {i["label"] for i in c.request("textDocument/completion", where(needle, offset)) or []}
+
+    h = c.request("textDocument/hover", where("type doc", 6))
+    ok(
+        "hover on a type says what its where leaves out",
+        h and "rows hold nothing unless `deleted_at is null`" in h["contents"]["value"],
+        h,
+    )
+    h = c.request("textDocument/hover", where("can view", 5))
+    ok("hover on a permission with a deny says so", h and "has a deny" in h["contents"]["value"], h)
+    ok("hover on nothing answers nothing", c.request("textDocument/hover", blank) is None)
+    ok("references of nothing: none", c.request("textDocument/references", blank) == [])
+    dfn = c.request("textDocument/definition", where("owner  : user", len("owner  : ") + 1))
+    ok("definition of a type named in a relation is the type", dfn and dfn["range"]["start"]["line"] == 1, dfn)
+
+    got = c.request("textDocument/completion", blank)
+    ok(
+        "completion on an empty line offers what a line begins with",
+        {"type", "rules", "include"} <= {i["label"] for i in got or []},
+        got,
+    )
+    ok("... and so does a line begun without indent", {"type", "rules"} <= labels("rules app.docs", 3))
+    ok("completion after a schema's dot, with no database: no tables, and no error", labels("= app.bans", 6) == set())
+    ok(
+        "completion inside braces offers the functions a condition may call",
+        {"authz.uid()", "now()"} <= labels("{deleted_at", 4),
+        sorted(labels("{deleted_at", 4)),
+    )
+
+    c.notify("textDocument/didSave", {"textDocument": {"uri": u}})
+    ok("saving checks the file again", c.diagnostics(u) == [])
+    e = c.request("textDocument/rename", {"textDocument": {"uri": u}})
+    ok("a request it doesn't know is answered: not supported", e and e.get("code") == -32601, e)
+    e = c.request("textDocument/hover", {"textDocument": {"uri": 5}, "position": {"line": 0, "character": 0}})
+    ok("a parameter of the wrong kind is answered with an error", e and "uri: text expected" in e.get("message", ""), e)
+    e = c.request("textDocument/hover", {"textDocument": {"uri": u}, "position": {"line": "0", "character": 0}})
+    ok("... and a position that isn't a number", e and "a number expected" in e.get("message", ""), e)
+    ok("... and the server goes on", c.request("textDocument/hover", where("type doc", 6)) is not None)
+
+    tests = os.path.join(d, "t.authz")
+    tu = uri(tests)
+    body = 'test "first"\n  user 1 can view doc 1\n'
+    c.notify("textDocument/didOpen", {"textDocument": {"uri": tu, "languageId": "authz", "version": 1, "text": body}})
+    d3 = c.diagnostics(tu)
+    ok(
+        "a test file with no policy named says where to name it",
+        d3 and "name the policy in rowstile.toml" in d3[0]["message"],
+        d3,
+    )
+    c.notify("textDocument/didClose", {"textDocument": {"uri": tu}})
+    ok(
+        "a closed file's outline is empty",
+        c.request("textDocument/documentSymbol", {"textDocument": {"uri": tu}}) == [],
+    )
+    c.close()
+
 print("lsp: all passed" if not fails else f"lsp: {fails} failed")
 sys.exit(1 if fails else 0)
