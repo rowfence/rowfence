@@ -2496,6 +2496,23 @@ class Readers(unittest.TestCase):
 
 
 class Fmt(unittest.TestCase):
+    def test_an_odd_layout(self) -> None:
+        # blank lines first, a comment before a type, a condition and an expression continued on the next line
+        from authzlib.fmt import format
+
+        src = (
+            "\n\napp role app_user\ntype user = app.users\n-- the documents\ntype doc = app.docs\n"
+            "  owner : user = owner_id\n  can see = owner and {kind = 1\n      and size > 2}\n"
+            "  can view = owner\n      or see\n"
+        )
+        want = (
+            "app role app_user\n\ntype user = app.users\n\n-- the documents\ntype doc = app.docs\n"
+            "  owner : user = owner_id\n  can see  = owner and {kind = 1\n         and size > 2}\n"
+            "  can view = owner\n          or see\n"
+        )
+        self.assertEqual(format(src), want)
+        self.assertEqual(format(want), want)
+
     def test_every_policy_formats_the_same_twice_and_says_the_same(self) -> None:
         from authzlib.fmt import format
         from authzlib.migrate import meaning_lines
