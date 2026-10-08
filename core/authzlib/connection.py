@@ -61,25 +61,8 @@ def number(row: Row, key: str) -> int:
     raise _wrong(row, key, "an integer")
 
 
-def number_or_none(row: Row, key: str) -> int | None:
-    v = row[key]
-    if v is None or (isinstance(v, int) and not isinstance(v, bool)):
-        return v
-    raise _wrong(row, key, "an integer or NULL")
-
-
 def flag(row: Row, key: str) -> bool:
     v = row[key]
     if isinstance(v, bool):
         return v
     raise _wrong(row, key, "a boolean")
-
-
-def texts(row: Row, key: str) -> list[str]:
-    """A text[] (NULL: none); NULL items are left out."""
-    v = row[key]
-    if v is None:
-        return []
-    if isinstance(v, list):
-        return [x for x in v if isinstance(x, str)]
-    raise _wrong(row, key, "a text array")
