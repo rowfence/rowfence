@@ -4185,6 +4185,45 @@ class ParseAgreement(unittest.TestCase):
         self.assertIn("/types/doc/perms/view[0]: the parser reads 'or', the grammar 'and'", problems[0])
 
 
+class Respelling(unittest.TestCase):
+    """genpolicy names a third of its policies' tables and columns as an app's own may be (capitals, words SQL
+    reserves, 63 bytes): the same policies, the names alone changed, written bare in the policy and quoted in SQL."""
+
+    def setUp(self) -> None:
+        sys.path.insert(0, os.path.join(ROOT, "tests"))
+        import genpolicy
+
+        self.g = genpolicy
+
+    def test_the_same_policy_renamed(self) -> None:
+        for seed in range(1, 30):
+            plain, awkward = self.g.make(seed, respell=False), self.g.make(seed, respell=True)
+            self.assertEqual((plain.objs, plain.invariants), (awkward.objs, awkward.invariants), seed)
+            self.assertNotEqual(self.g.policy_text(plain), self.g.policy_text(awkward))
+            parse_policy(self.g.policy_text(awkward), "gen.authz")  # the parser takes it
+        drawn = [self.g.make(seed).spelling.awkward for seed in range(1, 301)]
+        self.assertTrue(60 < sum(drawn) < 140, sum(drawn))  # about a third, drawn apart from the policy
+
+    def test_the_names(self) -> None:
+        self.assertEqual(len(self.g.AWKWARD["t3"].encode()), 63)  # as long as Postgres allows
+        s = self.g.Spelling(awkward=True)
+        self.assertEqual(s.policy_table("t1"), "Gp.select")
+        self.assertEqual(s.table("t1"), '"Gp"."select"')
+        self.assertEqual(s.table("t1_r1"), '"Gp"."Link_t1_r1"')
+        self.assertEqual(
+            s.cond("{exists (select 1 from gp.t1 x where x.id = this.id + 1 and x.b2)}"),
+            '{exists (select 1 from "Gp"."select" x where x."Id" = this."Id" + 1 and x."order")}',
+        )
+        self.assertEqual(self.g.Spelling().cond("{not b3}"), "{not b3}")  # plain: as before
+
+    def test_sql_quotes_every_awkward_name(self) -> None:
+        spec = next(s for s in map(self.g.make, range(1, 50)) if s.spelling.awkward)
+        sql = self.g.schema_text(spec)
+        for name in ("Gp", "user", "select", "Id", "order", "parentId"):
+            self.assertIn(f'"{name}"', sql)
+        self.assertNotRegex(sql, r"(?<![\"\w])(Gp|parentId|Archived)(?![\"\w])", "a name unquoted")
+
+
 class Delivery(unittest.TestCase):
     """What the workflows run, what the packages are built from, and what this folder's README says is tested."""
 

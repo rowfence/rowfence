@@ -9,7 +9,8 @@ shares, to users, the service, `user:*`, `anyone` and other types' members; perm
 `not`, conditions, `signed_in`, `anyone`, `nobody`, arrows to other types, inheritance (stopped by a condition or not,
 across two types or not) and a deny that inherits; rules, the write rules sometimes with a condition that reads
 another governed table (a subquery, a function called by a quoted name, an operator the app made); invariants.
-Then the tables it reads and their data.
+Then the tables it reads and their data. A third of the seeds name those tables and columns as an app's own may be
+(AWKWARD: capitals, words SQL reserves, 63 bytes), the policy otherwise the same.
 
 A policy the compiler refuses is skipped (and counted). So is one whose reads Postgres plans slowly (authz.lint()
 warns about its select rule: a check of it takes minutes to hours), and a seed that goes over --seconds: both are
@@ -28,6 +29,7 @@ import dataclasses
 import json
 import os
 import random
+import re
 import subprocess
 import sys
 import tempfile
@@ -41,6 +43,7 @@ sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.dirname(HERE))
 import difftest  # noqa: E402
 from authzlib import evaluate, parse_policy, prove  # noqa: E402
+from authzlib.sqlutil import q, qt  # noqa: E402
 from difftest import DB, Checker, Gen, Ids, idsql, lit  # noqa: E402
 
 # a permission's definition, as a tree that can be shrunk: an atom's text, or (op, parts)
@@ -49,6 +52,68 @@ SCHEMA = "gp"
 USERS = 5  # users 1..5
 GONE = str(USERS + 1)  # an id the user table doesn't have: links may name it, and it signs in, as nobody
 ROWS = 7  # rows of each object type at the start
+
+# The database's names as a third of the policies spell them, as an app's own may be named: capitals, words SQL
+# reserves, a name as long as Postgres allows (63 bytes). The policy writes a name as it is, and the compiler
+# quotes it in the SQL it writes; these policies' conditions, the data and the checks quote it themselves. A name
+# quoted wrongly anywhere (a quoted function's name was one, an app's capitals another) is then met by the checks.
+AWKWARD = {
+    SCHEMA: "Gp",
+    "users": "user",
+    "bots": "Order",
+    "t1": "select",
+    "t2": "T2",
+    "t3": "T3_" + "long_name_" * 6,
+    "id": "Id",
+    "b1": "B1",
+    "b2": "order",
+    "b3": "Archived",
+    "parent_type": "ParentType",
+    "parent_id": "parentId",
+    "obj_id": "Obj",
+    "subj_id": "Subj",
+    "active": "Active",
+}
+
+
+@dataclass(frozen=True)
+class Spelling:
+    """How a policy names its tables and columns: as genpolicy's plain names (gp.t1, b1), or AWKWARD's."""
+
+    awkward: bool = False
+
+    def name(self, plain: str) -> str:
+        """The name, as the policy writes it."""
+        if not self.awkward:
+            return plain
+        if plain in AWKWARD:
+            return AWKWARD[plain]
+        if plain.startswith("c_"):  # a relation's column
+            return f"C_{plain[2:]}"
+        return f"Link_{plain}" if "_" in plain else plain  # a link table, t1_r1
+
+    def sql(self, plain: str) -> str:
+        """The name, as SQL writes it: quoted, when it is awkward."""
+        return q(self.name(plain)) if self.awkward else plain
+
+    def table(self, plain: str) -> str:
+        """A table, as SQL writes it."""
+        return f"{self.sql(SCHEMA)}.{self.sql(plain)}"
+
+    def policy_table(self, plain: str) -> str:
+        """A table, as the policy writes it."""
+        return f"{self.name(SCHEMA)}.{self.name(plain)}"
+
+    def key(self) -> str:
+        """A type line's key, said when the key column isn't id."""
+        return f" ({self.name('id')})" if self.awkward else ""
+
+    def cond(self, plain: str) -> str:
+        """One of genpolicy's {conditions}, with its names spelled (they are SQL: quoted)."""
+        if not self.awkward:
+            return plain
+        text = plain.replace(f'{SCHEMA}."Flag"', f'{self.sql(SCHEMA)}."Flag"').replace(f"{SCHEMA}.t1", self.table("t1"))
+        return re.sub(r"\b(id|b1|b2|b3|active)\b", lambda m: self.sql(m.group(1)), text)
 
 
 @dataclass
@@ -76,6 +141,7 @@ class Spec:
     bot: bool
     objs: list[Obj]
     invariants: list[tuple[str, Node]] = field(default_factory=list)
+    spelling: Spelling = field(default_factory=Spelling)
 
     def obj(self, name: str) -> Obj:
         return next(o for o in self.objs if o.name == name)
@@ -96,7 +162,15 @@ READS = [
 ]
 
 
-def make(seed: int) -> Spec:
+def make(seed: int, respell: bool | None = None) -> Spec:
+    """The seed's policy. Its names are AWKWARD's for a third of the seeds (respell: for this one, or not), drawn
+    apart from the rest, so that a seed's policy is the same either way."""
+    awkward = random.Random(f"genpolicy/{seed}/spelling").random() < 1 / 3 if respell is None else respell
+    spec = make_plain(seed)
+    return dataclasses.replace(spec, spelling=Spelling(awkward))
+
+
+def make_plain(seed: int) -> Spec:
     r = random.Random(f"genpolicy/{seed}")
     spec = Spec(seed, r.random() < 0.4, r.random() < 0.3, [])
     for k in range(1, r.randint(1, 3) + 1):
@@ -191,67 +265,79 @@ def expr(r: random.Random, atoms: list[str], depth: int) -> Node:
     return (op, parts)
 
 
-def text(n: Node, top: bool = True) -> str:
+def text(n: Node, top: bool = True, s: Spelling | None = None) -> str:
     if isinstance(n, str):
-        return n
+        return (s or Spelling()).cond(n) if n.startswith("{") else n
     op, parts = n
     if op == "not":
-        return "not " + text(parts[0], False)
+        return "not " + text(parts[0], False, s)
     flat: list[Node] = []  # (a or b) or c is written a or b or c
     for x in parts:
         flat += x[1] if not isinstance(x, str) and x[0] == op else [x]
-    s = f" {op} ".join(text(x, False) for x in flat)
-    return s if top else f"({s})"
+    out = f" {op} ".join(text(x, False, s) for x in flat)
+    return out if top else f"({out})"
 
 
 def policy_text(spec: Spec) -> str:
-    out = ["app role app_user", f"type user = {SCHEMA}.users" + (" where {active}" if spec.user_where else "")]
+    s = spec.spelling
+    active, archived = s.cond("{active}"), s.cond("{not b3}")
+    out = [
+        "app role app_user",
+        f"type user = {s.policy_table('users')}{s.key()}" + (f" where {active}" if spec.user_where else ""),
+    ]
     if spec.bot:
-        out.append(f"type bot = {SCHEMA}.bots principal where {{active}}")
+        out.append(f"type bot = {s.policy_table('bots')}{s.key()} principal where {active}")
     for o in spec.objs:
-        out.append(f"type {o.name} = {SCHEMA}.{o.name}" + (" where {not b3}" if o.where else ""))
+        out.append(f"type {o.name} = {s.policy_table(o.name)}{s.key()}" + (f" where {archived}" if o.where else ""))
         for rel in o.rels:
             subj = ", ".join(rel.subjects)
             if rel.name == "parent" and len(rel.subjects) == 2:
-                src = "(parent_type, parent_id)"
+                src = f"({s.name('parent_type')}, {s.name('parent_id')})"
             elif rel.name == "parent":
-                src = "parent_id"
+                src = s.name("parent_id")
             elif rel.kind == "column":
-                src = f"c_{rel.name}"
+                src = s.name(f"c_{rel.name}")
             elif rel.kind == "table":
-                src = f"{SCHEMA}.{o.name}_{rel.name}(obj_id -> subj_id)" + (" where {active}" if rel.where else "")
+                src = f"{s.policy_table(f'{o.name}_{rel.name}')}({s.name('obj_id')} -> {s.name('subj_id')})" + (
+                    f" where {active}" if rel.where else ""
+                )
             else:
                 src = "shared"
             out.append(f"  {rel.name} : {subj}" + (f" = {src}" if src != "shared" else f" shared by {rel.by}"))
         for p, e in o.perms.items():
-            out.append(f"  can {p} = {text(e)}")
+            out.append(f"  can {p} = {text(e, s=s)}")
     for o in spec.objs:
         if o.rules:
-            out.append(f"rules {SCHEMA}.{o.name}")
-            out += [f"  {head} : {text(e)}" for head, e in o.rules]
+            out.append(f"rules {s.policy_table(o.name)}")
+            out += [
+                f"  {' '.join([head.split()[0], *map(s.name, head.split()[1:])])} : {text(e, s=s)}"
+                for head, e in o.rules
+            ]
     if spec.invariants:
         out.append("invariants")
-        out += [f"  never {t}: {text(e)}" for t, e in spec.invariants]
+        out += [f"  never {t}: {text(e, s=s)}" for t, e in spec.invariants]
     return "\n".join(out) + "\n"
 
 
 def schema_text(spec: Spec) -> str:
+    n = spec.spelling
+    i, active = n.sql("id"), n.sql("active")
     s = [
-        f"CREATE SCHEMA {SCHEMA};",
-        f"CREATE TABLE {SCHEMA}.users (id bigint PRIMARY KEY, active boolean NOT NULL DEFAULT true);",
-        f"CREATE TABLE {SCHEMA}.bots (id bigint PRIMARY KEY, active boolean NOT NULL DEFAULT true);",
+        f"CREATE SCHEMA {n.sql(SCHEMA)};",
+        f"CREATE TABLE {n.table('users')} ({i} bigint PRIMARY KEY, {active} boolean NOT NULL DEFAULT true);",
+        f"CREATE TABLE {n.table('bots')} ({i} bigint PRIMARY KEY, {active} boolean NOT NULL DEFAULT true);",
     ]
     for o in spec.objs:
         cols = [
-            "id bigint PRIMARY KEY",
-            "b1 boolean",
-            "b2 boolean",
-            "b3 boolean NOT NULL DEFAULT false",
-            "parent_type text",
-            "parent_id bigint",
+            f"{i} bigint PRIMARY KEY",
+            f"{n.sql('b1')} boolean",
+            f"{n.sql('b2')} boolean",
+            f"{n.sql('b3')} boolean NOT NULL DEFAULT false",
+            f"{n.sql('parent_type')} text",
+            f"{n.sql('parent_id')} bigint",
         ]
-        cols += [f"c_{rel.name} bigint" for rel in o.rels if rel.kind == "column" and rel.name != "parent"]
-        s.append(f"CREATE TABLE {SCHEMA}.{o.name} ({', '.join(cols)});")
+        cols += [f"{n.sql(f'c_{rel.name}')} bigint" for rel in o.rels if rel.kind == "column" and rel.name != "parent"]
+        s.append(f"CREATE TABLE {n.table(o.name)} ({', '.join(cols)});")
         for rel in o.rels:
             if rel.kind == "table":
                 # link rows go with their object and with the group they name, as the limits page tells apps
@@ -259,22 +345,23 @@ def schema_text(spec: Spec) -> str:
                 follow = "ON DELETE CASCADE ON UPDATE CASCADE"
                 group = rel.subjects[0].split("#")[0] if "#" in rel.subjects[0] else ""
                 s.append(
-                    f"CREATE TABLE {SCHEMA}.{o.name}_{rel.name} (obj_id bigint REFERENCES {SCHEMA}.{o.name} {follow}, "
-                    f"subj_id bigint{f' REFERENCES {SCHEMA}.{group} {follow}' if group else ''}, "
-                    "active boolean NOT NULL DEFAULT true, UNIQUE (obj_id, subj_id));"
+                    f"CREATE TABLE {n.table(f'{o.name}_{rel.name}')} ("
+                    f"{n.sql('obj_id')} bigint REFERENCES {n.table(o.name)} {follow}, "
+                    f"{n.sql('subj_id')} bigint{f' REFERENCES {n.table(group)} {follow}' if group else ''}, "
+                    f"{active} boolean NOT NULL DEFAULT true, UNIQUE ({n.sql('obj_id')}, {n.sql('subj_id')}));"
                 )
     # what READS calls: t1's b2, read by a function with a quoted name and by an operator made on it
     s.append(
-        f'CREATE FUNCTION {SCHEMA}."Flag"(p bigint) RETURNS boolean LANGUAGE sql STABLE '
-        f"AS 'SELECT exists (SELECT 1 FROM {SCHEMA}.t1 x WHERE x.id = p AND x.b2)';"
+        f'CREATE FUNCTION {n.sql(SCHEMA)}."Flag"(p bigint) RETURNS boolean LANGUAGE sql STABLE '
+        f"AS 'SELECT exists (SELECT 1 FROM {n.table('t1')} x WHERE x.{i} = p AND x.{n.sql('b2')})';"
     )
-    s.append(f'CREATE OPERATOR public.=!= (FUNCTION = {SCHEMA}."Flag", RIGHTARG = bigint);')
+    s.append(f'CREATE OPERATOR public.=!= (FUNCTION = {n.sql(SCHEMA)}."Flag", RIGHTARG = bigint);')
     s.append(
         "DO $$ BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'app_user') THEN CREATE ROLE app_user; "
         "END IF; END $$;"
     )
-    s.append(f"GRANT USAGE ON SCHEMA {SCHEMA} TO app_user;")
-    s.append(f"GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA {SCHEMA} TO app_user;")
+    s.append(f"GRANT USAGE ON SCHEMA {n.sql(SCHEMA)} TO app_user;")
+    s.append(f"GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA {n.sql(SCHEMA)} TO app_user;")
     return "\n".join(s) + "\n"
 
 
@@ -295,7 +382,7 @@ class GenPolicyGen(Gen):
         return (ids or {}).get(name) or [str(i) for i in range(1, ROWS + 1)]
 
     def row(self, o: Obj, i: int, ids: Ids | None) -> str:
-        r = self.r
+        r, n = self.r, self.spec.spelling
         cols = ["id", "b1", "b2", "b3"]
         vals = [
             str(i),
@@ -317,13 +404,16 @@ class GenPolicyGen(Gen):
             if r.random() < 0.75:
                 cols.append(f"c_{rel.name}")
                 vals.append(r.choice(self.subject_ids(rel.subjects[0], ids)))
-        return f"INSERT INTO {SCHEMA}.{o.name} ({', '.join(cols)}) VALUES ({', '.join(vals)}) ON CONFLICT DO NOTHING;"
+        return (
+            f"INSERT INTO {n.table(o.name)} ({', '.join(map(n.sql, cols))}) VALUES ({', '.join(vals)}) "
+            "ON CONFLICT DO NOTHING;"
+        )
 
     def initial(self) -> str:
-        r = self.r
+        r, n = self.r, self.spec.spelling
         s = [
-            f"INSERT INTO {SCHEMA}.users SELECT i, random() < 0.8 FROM generate_series(1, {USERS}) i;",
-            f"INSERT INTO {SCHEMA}.bots VALUES (1, true), (2, {str(r.random() < 0.5).lower()});",
+            f"INSERT INTO {n.table('users')} SELECT i, random() < 0.8 FROM generate_series(1, {USERS}) i;",
+            f"INSERT INTO {n.table('bots')} VALUES (1, true), (2, {str(r.random() < 0.5).lower()});",
         ]
         for o in self.spec.objs:
             s += [self.row(o, i, None) for i in range(1, ROWS + 1)]
@@ -337,8 +427,8 @@ class GenPolicyGen(Gen):
         obj = r.choice(self.subject_ids(o.name, ids))
         subj = r.choice(self.subject_ids(rel.subjects[0], ids))
         return (
-            f"INSERT INTO {SCHEMA}.{o.name}_{rel.name} VALUES ({obj}, {subj}, {str(r.random() < 0.8).lower()}) "
-            "ON CONFLICT DO NOTHING;"
+            f"INSERT INTO {self.spec.spelling.table(f'{o.name}_{rel.name}')} VALUES ({obj}, {subj}, "
+            f"{str(r.random() < 0.8).lower()}) ON CONFLICT DO NOTHING;"
         )
 
     def grants(self) -> str:
@@ -364,53 +454,53 @@ class GenPolicyGen(Gen):
         )
 
     def change(self, ids: Ids) -> str:
-        r = self.r
+        r, n = self.r, self.spec.spelling
         o = r.choice(self.spec.objs)
         mine = ids.get(o.name) or ["1"]
         x = r.choice(mine)
-        tbl = f"{SCHEMA}.{o.name}"
+        tbl = n.table(o.name)
+        i, b1, b2, b3, active = (n.sql(c) for c in ("id", "b1", "b2", "b3", "active"))
+        ptype, pid, obj = n.sql("parent_type"), n.sql("parent_id"), n.sql("obj_id")
         ops: list[Callable[[], str]] = [
-            lambda: f"UPDATE {tbl} SET b1 = {r.choice(['true', 'false', 'NULL'])} WHERE id = {x};",
-            lambda: f"UPDATE {tbl} SET b2 = NOT b2, b3 = {r.choice(['true', 'false'])} WHERE id = {x};",
-            lambda: f"UPDATE {tbl} SET b1 = random() < 0.5 WHERE id % 2 = {r.randint(0, 1)};",
-            lambda: self.row(o, max(int(i) for i in mine) + 1, ids),
-            lambda: f"DELETE FROM {tbl} WHERE id = {x};",
-            lambda: f"UPDATE {tbl} SET id = {max(int(i) for i in mine) + r.randint(1, 9)} WHERE id = {x};",
+            lambda: f"UPDATE {tbl} SET {b1} = {r.choice(['true', 'false', 'NULL'])} WHERE {i} = {x};",
+            lambda: f"UPDATE {tbl} SET {b2} = NOT {b2}, {b3} = {r.choice(['true', 'false'])} WHERE {i} = {x};",
+            lambda: f"UPDATE {tbl} SET {b1} = random() < 0.5 WHERE {i} % 2 = {r.randint(0, 1)};",
+            lambda: self.row(o, max(int(k) for k in mine) + 1, ids),
+            lambda: f"DELETE FROM {tbl} WHERE {i} = {x};",
+            lambda: f"UPDATE {tbl} SET {i} = {max(int(k) for k in mine) + r.randint(1, 9)} WHERE {i} = {x};",
             lambda: self.grant(ids),
             lambda: self.grant(ids),
             lambda: f"DELETE FROM authz.shares WHERE object_id = {lit(x)};",
             lambda: f"UPDATE authz.shares SET expires_at = {difftest.EXPIRED} WHERE random() < 0.2;",
-            lambda: f"UPDATE {SCHEMA}.users SET active = NOT active WHERE id = {r.randint(1, USERS)};",
-            lambda: f"UPDATE {SCHEMA}.bots SET active = NOT active WHERE id = {r.randint(1, 2)};",
+            lambda: f"UPDATE {n.table('users')} SET {active} = NOT {active} WHERE {i} = {r.randint(1, USERS)};",
+            lambda: f"UPDATE {n.table('bots')} SET {active} = NOT {active} WHERE {i} = {r.randint(1, 2)};",
         ]
         for rel in o.rels:
             if rel.kind == "column" and rel.name == "parent":
                 ops.append(
-                    lambda: (
-                        f"UPDATE {tbl} SET parent_type = {lit(o.name)}, parent_id = {r.choice(mine)} WHERE id = {x};"
-                    )
+                    lambda: f"UPDATE {tbl} SET {ptype} = {lit(o.name)}, {pid} = {r.choice(mine)} WHERE {i} = {x};"
                 )
-                ops.append(lambda: f"UPDATE {tbl} SET parent_type = NULL, parent_id = NULL WHERE id = {x};")
+                ops.append(lambda: f"UPDATE {tbl} SET {ptype} = NULL, {pid} = NULL WHERE {i} = {x};")
                 if len(rel.subjects) == 2:
                     other = rel.subjects[1]
                     ops.append(
                         lambda other=other: (
-                            f"UPDATE {tbl} SET parent_type = {lit(other)}, parent_id = "
-                            f"{r.choice(self.subject_ids(other, ids))} WHERE id = {x};"
+                            f"UPDATE {tbl} SET {ptype} = {lit(other)}, {pid} = "
+                            f"{r.choice(self.subject_ids(other, ids))} WHERE {i} = {x};"
                         )
                     )
             elif rel.kind == "column":
                 ops.append(
                     lambda rel=rel: (
-                        f"UPDATE {tbl} SET c_{rel.name} = "
-                        f"{r.choice([*self.subject_ids(rel.subjects[0], ids), 'NULL'])} WHERE id = {x};"
+                        f"UPDATE {tbl} SET {n.sql(f'c_{rel.name}')} = "
+                        f"{r.choice([*self.subject_ids(rel.subjects[0], ids), 'NULL'])} WHERE {i} = {x};"
                     )
                 )
             elif rel.kind == "table":
-                lt = f"{tbl}_{rel.name}"
+                lt = n.table(f"{o.name}_{rel.name}")
                 ops.append(lambda rel=rel: self.link(o, rel, ids))
-                ops.append(lambda lt=lt: f"DELETE FROM {lt} WHERE obj_id = {x};")
-                ops.append(lambda lt=lt: f"UPDATE {lt} SET active = NOT active WHERE obj_id = {x};")
+                ops.append(lambda lt=lt: f"DELETE FROM {lt} WHERE {obj} = {x};")
+                ops.append(lambda lt=lt: f"UPDATE {lt} SET {active} = NOT {active} WHERE {obj} = {x};")
                 ops.append(lambda lt=lt: f"TRUNCATE {lt};")
         if r.random() < 0.15:
             return "BEGIN;\n" + "\n".join(r.choice(ops)() for _ in range(r.randint(2, 4))) + "\nCOMMIT;"
@@ -501,7 +591,7 @@ def run(spec: Spec, db: DB, steps: int, workdir: str, seconds: float = 900) -> l
         if step == steps:
             break
         ids: Ids = {
-            t.name: [x[0] for x in db.rows(f"SELECT {idsql(t)} FROM {t.table} ORDER BY 1")]
+            t.name: [x[0] for x in db.rows(f"SELECT {idsql(t)} FROM {qt(t.table)} ORDER BY 1")]
             for t in checker.types.values()
         }
         sql = gen.change(ids)
