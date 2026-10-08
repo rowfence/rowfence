@@ -8,8 +8,6 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@prisma/adapter-pg": "7.10.0",
-    "@prisma/client": "7.10.0",
     "@rowstile/client": "*",
     "@rowstile/drizzle": "*",
     "@rowstile/next": "*",
@@ -17,6 +15,8 @@
     "@rowstile/postgres": "*",
     "@rowstile/prisma": "*",
     "@rowstile/react": "*",
+    "@prisma/adapter-pg": "7.10.0",
+    "@prisma/client": "7.10.0",
     "drizzle-orm": "^0.45.3",
     "next": "^16.4.0",
     "pg": "^8.23.0",
