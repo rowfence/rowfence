@@ -59,6 +59,18 @@ CASES: list[tuple[str, str, str, str]] = [
         ),
     ),
     (
+        "a type's line changes: a where added (views on its key are made again, not emptied in place)",
+        "docs",
+        DOCS,
+        edit(DOCS, ("type file = app.files\n", "type file = app.files where {not confidential}\n")),
+    ),
+    (
+        "a tree's type line changes: a where added (the trees that read its views are built again)",
+        "docs",
+        DOCS,
+        edit(DOCS, ("type folder = app.folders\n", "type folder = app.folders where {name <> ''}\n")),
+    ),
+    (
         "a new shared relation used by a permission",
         "docs",
         DOCS,
