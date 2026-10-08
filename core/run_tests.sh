@@ -56,6 +56,9 @@ if [ "$MODE" = soak ]; then
   step "broken policies are refused with a line number, never a crash (200000 cases, seed $SEED)"
   python3 tests/fuzz_parser.py --cases 200000 --seed "$SEED"
   record $? "fuzz parser"
+  step "simple conditions read as Postgres reads them (50000 made up, seed $SEED)"
+  python3 tests/conditions_test.py --cases 50000 --seed "$SEED"
+  record $? "conditions"
   fi
   for gen in docs alt multi composite loop; do
     # two parts, about as long as each other
@@ -234,6 +237,9 @@ AROUND=4; [ "$MODE" = full ] && AROUND=16
 step "random policies in random worlds: the catalog, the session and the role around them ($AROUND policies)"
 python3 tests/around.py --policies "$AROUND" --steps 6 --seed 1 --db authz_around
 record $? "around"
+step "simple conditions read as Postgres reads them (3000 made up)"
+python3 tests/conditions_test.py --cases 3000 --seed 1
+record $? "conditions"
 fi
 fi
 

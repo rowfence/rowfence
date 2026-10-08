@@ -43,7 +43,6 @@ sys.path.insert(0, os.path.dirname(HERE))
 import compile_policy  # noqa: E402
 from authzlib import evaluate  # noqa: E402
 from authzlib.parse import Caveat, Cols, Rule, Type  # noqa: E402
-from authzlib.sqlutil import on_row  # noqa: E402
 
 # the database's answers, read back as JSON: their shape is what the checks compare
 Answer = Any
@@ -167,9 +166,14 @@ class Reference(evaluate.Reference):
         out: list[tuple[tuple[str | int, ...], str]] = []
         for t in self.types.values():
             out.append((("ids", t.name), f"SELECT coalesce(json_agg({idsql(t, 'r')}), '[]') FROM {t.table} r"))
-            where = f"coalesce(({on_row(t.where, 'r')}), false)" if t.where else "true"
+            # a condition's row is the table aliased `this`: `this.id` and a bare column mean what SQL makes of
+            # them, with nothing of the compiler's (sqlutil.on_row) between
+            where = f"coalesce(({t.where}), false)" if t.where else "true"
             out.append(
-                (("valid", t.name), f"SELECT coalesce(json_agg({idsql(t, 'r')}), '[]') FROM {t.table} r WHERE {where}")
+                (
+                    ("valid", t.name),
+                    f"SELECT coalesce(json_agg({idsql(t, 'this')}), '[]') FROM {t.table} this WHERE {where}",
+                )
             )
             for r in t.relations.values():
                 for i, src in enumerate(r.sources):
@@ -183,13 +187,13 @@ class Reference(evaluate.Reference):
                                 f"FROM {t.table} r WHERE {notnull('r', src.column)}{poly}"
                             )
                         elif src.kind == "table":
-                            where = f" AND coalesce(({on_row(src.where, 's')}), false)" if src.where else ""
-                            poly = f" AND s.{src.type_col} = {lit(st)}" if src.type_col else ""
+                            where = f" AND coalesce(({src.where}), false)" if src.where else ""
+                            poly = f" AND this.{src.type_col} = {lit(st)}" if src.type_col else ""
                             sql = (
-                                f"SELECT coalesce(json_agg(json_build_array({idsql(t, 's', src.obj_col)}, "
-                                f"{idsql(self.types[st], 's', src.subj_col)})), '[]') "
-                                f"FROM {src.table} s WHERE {notnull('s', src.obj_col)} "
-                                f"AND {notnull('s', src.subj_col)}{where}{poly}"
+                                f"SELECT coalesce(json_agg(json_build_array({idsql(t, 'this', src.obj_col)}, "
+                                f"{idsql(self.types[st], 'this', src.subj_col)})), '[]') "
+                                f"FROM {src.table} this WHERE {notnull('this', src.obj_col)} "
+                                f"AND {notnull('this', src.subj_col)}{where}{poly}"
                             )
                         else:
                             stype = st
@@ -232,7 +236,7 @@ class Reference(evaluate.Reference):
             out.append(
                 (
                     ("cond", tname, cond),
-                    f"SELECT coalesce(json_agg({idsql(t, 'r')}), '[]') FROM {t.table} r WHERE coalesce(({on_row(cond, 'r')}), false)",
+                    f"SELECT coalesce(json_agg({idsql(t, 'this')}), '[]') FROM {t.table} this WHERE coalesce(({cond}), false)",
                 )
             )
         return out

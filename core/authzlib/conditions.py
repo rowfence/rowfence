@@ -10,12 +10,19 @@ which (evaluate.Data.cond).
 The grammar: or < and < not < a comparison (`=`, `<>`, `!=`, `<`, `<=`, `>`, `>=`), `is [not] null`,
 `[not] in (...)`, of a column (`col`, `this.col`) with a constant (`'text'`, a number, `true`, `false`, `null`)
 or `authz.uid()`; a column alone is a boolean. Values follow SQL's three-valued logic: NULL compares to nothing.
+
+Only what means the same whatever the column's type and collation, which a condition doesn't say: no text in
+order (`{name < 'b'}` follows the database's collation), no text Postgres would read as the column's number or
+boolean (`{size = '10'}`, `{done = 't'}`), no order against authz.uid() (the user key's type decides it). Those
+are left to the database too. A column a relation reads holds the linked ids' text: compared with a number, as a
+number (tests/conditions_test.py asks Postgres the same questions).
 """
 
 from __future__ import annotations
 
 import re
 from collections.abc import Mapping
+from decimal import Decimal, InvalidOperation
 from functools import cache
 from typing import NamedTuple, TypeAlias
 
@@ -187,6 +194,34 @@ class Parser:
         raise NotSimple(str(self.toks[self.i :]))
 
 
+# text Postgres reads as a number when the column is one ('10', ' 1.5e3', '0x1A', 'NaN'), or as a boolean: these
+# words, any start of them ('t', 'of'), whatever the case
+CASTS = re.compile(
+    r"\s*[+-]?(?:\d[\d_]*(?:\.[\d_]*)?(?:e[+-]?\d+)?|\.\d[\d_]*(?:e[+-]?\d+)?|0[xob][\da-f_]+|nan|inf|infinity)\s*",
+    re.IGNORECASE,
+)
+BOOLEANS = ("true", "false", "yes", "no", "on", "off", "1", "0")
+
+
+def plain(v: Scalar) -> bool:
+    """Whether a constant means the same whatever the column's type: not text Postgres could read as a number or
+    a boolean."""
+    if not isinstance(v, str):
+        return True
+    word = v.strip().lower()
+    return not (CASTS.fullmatch(v) or (word and any(b.startswith(word) for b in BOOLEANS)))
+
+
+def number(v: Scalar) -> Decimal | None:
+    """A number as one, and so a linked id's text that is one ('10': owner_id holds the id of its user)."""
+    if isinstance(v, bool) or v is None:
+        return None
+    try:
+        return Decimal(str(v)) if isinstance(v, (int, float)) or re.fullmatch(r"-?\d+", v) else None
+    except InvalidOperation:
+        return None
+
+
 @cache
 def simple(sql: str) -> Node | None:
     """The condition as facts about its row's columns, or None when it is more than that."""
@@ -198,11 +233,21 @@ def simple(sql: str) -> Node | None:
     # a column compared with a column, or a constant on its own, is not one the evaluator reads
     def fine(n: Node) -> bool:
         match n:
-            case Cmp(left=a, right=b):
-                return sum(isinstance(x, Col) for x in (a, b)) == 1 and all(
-                    isinstance(x, (Col, Const, Uid)) for x in (a, b)
+            case Cmp(op=op, left=a, right=b):
+                ordered = op not in ("=", "<>")
+                return (
+                    sum(isinstance(x, Col) for x in (a, b)) == 1
+                    and all(isinstance(x, (Col, Const, Uid)) for x in (a, b))
+                    and all(
+                        plain(x.value) and not (ordered and isinstance(x.value, str))
+                        for x in (a, b)
+                        if isinstance(x, Const)
+                    )
+                    and not (ordered and any(isinstance(x, Uid) for x in (a, b)))
                 )
-            case IsNull(item=x) | In(item=x):
+            case In(item=x, values=values):
+                return isinstance(x, Col) and all(plain(v) for v in values)
+            case IsNull(item=x):
                 return isinstance(x, Col)
             case Bool(items=items):
                 return all(fine(x) for x in items)
@@ -251,11 +296,12 @@ def order(op: str, sign: int) -> bool:
 
 
 def compare(op: str, a: Scalar, b: Scalar) -> bool | None:
-    """a op b as SQL compares them: NULL with anything is NULL; numbers as numbers, the rest as their text."""
+    """a op b as SQL compares them: NULL with anything is NULL; a number with a number (or an id's text that is
+    one) as numbers, the rest as their text."""
     if a is None or b is None:
         return None
-    if isinstance(a, (int, float)) and isinstance(b, (int, float)):
-        x, y = float(a), float(b)
+    x, y = number(a), number(b)
+    if x is not None and y is not None and not (isinstance(a, str) and isinstance(b, str)):
         return order(op, (x > y) - (x < y))
     s, t = str(a).lower() if isinstance(a, bool) else str(a), str(b).lower() if isinstance(b, bool) else str(b)
     return order(op, (s > t) - (s < t))

@@ -31,7 +31,8 @@ User-facing docs: `README.md`, then `docs/reference/` (read them first). Terms i
     - `sqlutil.py` — quoting helpers (`q`, `qt`, `lit`, ...), `this.`, and `reads_more` (whether a condition
       reads more than its row: then it runs with the policy's rights)
     - `conditions.py` — simple conditions (`{not archived}`, `{owner_id = authz.uid()}`) read as facts about
-      the row, for the reference evaluator
+      the row, for the reference evaluator; only what means the same whatever the column's type and collation
+      (`tests/conditions_test.py` asks Postgres the same questions)
     - `connection.py` — the `Db` authzlib works over, and typed readers for the values its rows hold
     - `database.py` — what the command does to a database: apply (only if changed), push, reapply, check, diff,
       test, draft, graph, client, remove, and the migrations; over a `db` with `rows`/`script`/`warn`/`errors`, in
@@ -273,7 +274,8 @@ For one suite, start a container and run it inside:
   generated before `self.view_sql` is expanded.
 - Every behaviour change gets a check in the relevant suite; `tests/difftest.py` compares the database
   against an independent reference evaluator (`authzlib/evaluate.py`, also the review's) — keep it in sync with
-  language changes.
+  language changes. The two share the parser, so `HandAnswers` (`tests/unit_test.py`) holds the evaluator to
+  answers worked out by hand from the reference: a new language form gets a case there.
   A change to generated SQL shows up in `tests/golden/`: update it deliberately and read the diff.
 - Error messages name the policy line and end with a code: `fail(loc, msg, "AZ201")`. A new kind of mistake
   gets a code and a page in `authzlib/errors.py` (the page's mistake must give its code, its fix must compile;

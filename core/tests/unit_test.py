@@ -32,9 +32,11 @@ from authzlib import (  # noqa: E402
     PolicyError,
     database,
     draft,
+    evaluate,
     parse_policy,
     statements,
 )
+from authzlib.conditions import Scalar  # noqa: E402
 from authzlib.connection import Row, Value  # noqa: E402
 from authzlib.review import Review  # noqa: E402
 
@@ -2536,6 +2538,71 @@ class Confidence(unittest.TestCase):
             self.same(folder + "  can view = owner and {size > 10}\n", folder + "  can view = owner and {size >= 10}\n")
         )
 
+    def test_prove_tries_what_a_counterexample_may_need(self) -> None:
+        # two rows of a type; a number either side of a bound; a text no condition names; NULL
+        doc = "type doc = app.docs\n  owner : user = owner_id\n  parent : doc = parent_id\n  can edit = owner\n"
+        cases = [
+            "  can view = owner or parent.view\ninvariants\n  never doc: view and not owner\n",
+            "  can view = {size > 8}\ninvariants\n  never doc: view and {size < 10}\n",
+            "  can view = {kind <> 'a'}\ninvariants\n  never doc: view and {kind <> 'b'}\n",
+            "  can view = not {archived}\ninvariants\n  never doc: view and not {archived = false}\n",
+        ]
+        for case in cases:
+            self.assertEqual(self.proofs(doc + case), [False], case)
+        # the refactor check too: two rows, and a link presented
+        self.assertFalse(self.same(doc + "  can view = owner or parent.view\n", doc + "  can view = owner\n"))
+        shared = (
+            "type doc = app.docs\n  owner : user = owner_id\n  viewer : link shared\n  can share = owner\n"
+            "  can peek = viewer\n"
+        )
+        self.assertFalse(self.same(shared + "  can view = owner or viewer\n", shared + "  can view = owner\n"))
+
+    def test_a_counterexample_is_shrunk_until_nothing_more_goes(self) -> None:
+        from authzlib import prove
+
+        # p is needed while {a} holds; once a is NULL, p can go too: a second pass
+        pol = parse_policy(
+            self.HEAD + "type doc = app.docs\n  p : user = p_id\n  q : user = q_id\n"
+            "  can view = q and (not {a} or p)\n",
+            "p.authz",
+        )
+        ref = evaluate.Reference(pol)
+        ids = {"user": ["1"], "doc": ["1"]}
+        data = evaluate.Data(
+            ids=ids,
+            valid=ids,
+            pairs={("doc", "p", 0, "user", ""): [("1", "1")], ("doc", "q", 0, "user", ""): [("1", "1")]},
+            columns={"user": {"1": {}}, "doc": {"1": {"a": True}}},
+        )
+        small = evaluate.smallest(data, lambda d: "1" in ref.evaluate(d, "1")[("doc", "view")])
+        self.assertEqual(small.pairs, {("doc", "p", 0, "user", ""): [], ("doc", "q", 0, "user", ""): [("1", "1")]})
+        self.assertEqual(small.columns["doc"]["1"], {"a": None})
+        # a link taken away takes its column's value with it: owner_id = authz.uid() holds only while the owner
+        # link is there, so the smallest world keeps it
+        [r] = prove.prove(
+            parse_policy(
+                self.HEAD + "type doc = app.docs\n  owner : user = owner_id\n  can see = owner\n"
+                "  can edit = {owner_id = authz.uid()}\ninvariants\n  never doc: edit\n",
+                "p.authz",
+            )
+        )
+        self.assertEqual(r["world"], ["user: 1", "doc: 1", "doc.owner: doc 1 -> user 1"])
+
+    def test_the_corners_set_a_denied_condition_false(self) -> None:
+        # six conditions that must hold and two that mustn't, on one row: one row in 256 drawn row by row
+        from authzlib import prove
+
+        conds = " and ".join([*[f"{{b{i}}}" for i in range(1, 7)], "not {b7}", "not {b8}"])
+        [r] = prove.prove(
+            parse_policy(
+                self.HEAD + f"type doc = app.docs\n  owner : user = owner_id\n  can view = owner and {conds}\n"
+                "invariants\n  never doc: view\n",
+                "p.authz",
+            )
+        )
+        self.assertFalse(r["holds"])
+        self.assertLessEqual(r["worlds"], 30)
+
     def test_a_counterexample_shows_the_columns_it_needs(self) -> None:
         from authzlib import prove
 
@@ -2647,6 +2714,294 @@ class Confidence(unittest.TestCase):
                 ("folder.view", "viewer"),
                 ("folder.view", "parent.view"),
             ],
+        )
+
+
+class HandAnswers(unittest.TestCase):
+    """The reference evaluator against answers worked out by hand from the language's reference
+    (docs/reference/language.md), not by running anything. difftest holds the database to the evaluator, but both
+    read the policy through one parser: a misreading there would be in both, and they would agree on it. Neither
+    wrote these answers.
+
+    A world, one fact a line:
+        folder: 1, 2, 3                      the ids of a type
+        folder 2 fails its where             a row the type's where leaves out
+        folder 2 parent folder 1             a link: folder 2's parent is folder 1, through the relation's first
+                                             source naming that subject (parent[1]: its second source)
+        folder 1 viewer team#member 2        a link to a group's members; user:* *, anyone *, link tok1
+        {inherit} on folder 2, 4             the rows a condition holds for (none unless said)
+        doc 1: archived = false, size = 11   a row's columns: the type's simple conditions read them
+        role view on folder 1 for user ann from org 1   a custom role that includes view, org 1's
+    The answers: for each one asking ('' is nobody, 'service:1' a service), the ids each permission, relation or rule
+    ('rule app.folders update') holds for."""
+
+    HEAD = "app role app_user\n"
+
+    @staticmethod
+    def value(text: str) -> Scalar:
+        text = text.strip()
+        if text in ("true", "false", "null"):
+            return {"true": True, "false": False, "null": None}[text]
+        if text.startswith("'"):
+            return text[1:-1]
+        return float(text) if "." in text else int(text)
+
+    def world(self, pol: authzlib.parse.Policy, text: str) -> evaluate.Data:
+        from authzlib.conditions import simple
+
+        data = evaluate.Data()
+        for t in pol.types.values():
+            data.ids[t.name] = []
+            for r in t.relations.values():
+                for i, src in enumerate(r.sources):
+                    for st, sr in src.subjects:
+                        data.pairs[(t.name, r.name, i, st, sr or "")] = []
+            if t.roles:
+                for p in t.roles[1]:
+                    for st, sr in t.roles[0]:
+                        data.rolepairs[(t.name, p, st, sr or "")] = []
+        failing: set[tuple[str, str]] = set()
+        conds: dict[tuple[str, str], list[str]] = {}
+        for line in [x.strip() for x in text.strip().splitlines() if x.strip()]:
+            if m := re.fullmatch(r"\{(.*)\} on (\w+) (.*)", line):
+                conds[(m[2], m[1])] = [x.strip() for x in m[3].split(",")]
+            elif m := re.fullmatch(r"(\w+): (.*)", line):
+                data.ids[m[1]] = [x.strip() for x in m[2].split(",")]
+            elif m := re.fullmatch(r"(\w+) (\S+) fails its where", line):
+                failing.add((m[1], m[2]))
+            elif m := re.fullmatch(r"(\w+) (\S+): (.*)", line):
+                data.columns.setdefault(m[1], {})[m[2]] = {
+                    c.strip(): self.value(v) for c, v in (x.split("=") for x in m[3].split(","))
+                }
+            elif m := re.fullmatch(r"role (\w+) on (\w+) (\S+) for (\S+) (\S+)(?: from \w+ (\S+))?", line):
+                st, _, sr = m[4].partition("#")
+                data.rolepairs[(m[2], m[1], st, sr)].append((m[3], m[5], m[6] or ""))
+            elif m := re.fullmatch(r"(\w+) (\S+) (\w+)(?:\[(\d)\])? (\S+) (\S+)", line):
+                tname, oid, rname, i, subject, sid = m.groups()
+                st, sr = (subject[:-2], "*") if subject.endswith(":*") else subject.partition("#")[::2]
+                sources = pol.types[tname].relations[rname].sources
+                n = int(i) if i else next(k for k, s in enumerate(sources) if (st, sr or None) in s.subjects)
+                data.pairs[(tname, rname, n, st, sr)].append((oid, sid))
+            else:
+                raise ValueError(f"not a fact: {line}")
+        for t in pol.types.values():
+            data.valid[t.name] = [i for i in data.ids[t.name] if (t.name, i) not in failing]
+            if t.name in data.columns:
+                data.columns[t.name] = {i: data.columns[t.name].get(i, {}) for i in data.ids[t.name]}
+        for tname, cond in evaluate.Reference(pol).conditions():
+            if not (tname in data.columns and simple(cond) is not None):
+                data.cond[(tname, cond)] = conds.pop((tname, cond), [])
+        self.assertEqual(conds, {}, "conditions the policy doesn't have, or that its columns say")
+        return data
+
+    def check(self, policy: str, world: str, answers: dict[str, dict[str, str]], links: Sequence[str] = ()) -> None:
+        # a policy the compiler takes (parsed apart: compiling splits denies, the evaluator reads them as written)
+        Compiler(parse_policy(self.HEAD + policy, "hand.authz")).compile("hand.authz")
+        pol = parse_policy(self.HEAD + policy, "hand.authz")
+        ref = evaluate.Reference(pol)
+        data = self.world(pol, world)
+        rules = {f"rule {r.table} {r.command}": r for r in pol.rules}
+        for who, expected in answers.items():
+            state = ref.evaluate(data, who, links)
+            for name, ids in expected.items():
+                tname, _, perm = name.partition(".")
+                got = ref.rule(state, rules[name]) if name in rules else state[(tname, perm)]
+                want = {x.strip() for x in ids.split(",") if x.strip()}
+                self.assertEqual(sorted(got), sorted(want), f"{name}, asked as {who or 'nobody'}")
+
+    def test_not_takes_the_item_after_it(self) -> None:
+        self.check(
+            "type user = app.users\ntype doc = app.docs\n  a : user = a_id\n  b : user = b_id\n"
+            "  can p = not a and b\n  can q = not (a and b)\n  can r = a or (b and not a)\n",
+            "user: ann\ndoc: 1, 2, 3, 4\ndoc 1 a user ann\ndoc 1 b user ann\ndoc 2 b user ann\ndoc 3 a user ann\n",
+            {
+                "ann": {"doc.p": "2", "doc.q": "2, 3, 4", "doc.r": "1, 2, 3"},
+                "": {"doc.p": "", "doc.q": "1, 2, 3, 4", "doc.r": ""},
+            },
+        )
+
+    def test_a_condition_stops_inheritance_where_it_fails(self) -> None:
+        self.check(
+            "type user = app.users\ntype folder = app.folders\n  parent : folder = parent_id\n"
+            "  owner : user = owner_id\n  can view = owner or (parent.view and {inherit})\n",
+            "user: ann, bo\nfolder: 1, 2, 3, 4\nfolder 2 parent folder 1\nfolder 3 parent folder 2\n"
+            "folder 4 parent folder 3\nfolder 1 owner user ann\n{inherit} on folder 2, 4\n",
+            {"ann": {"folder.view": "1, 2"}, "bo": {"folder.view": ""}, "": {"folder.view": ""}},
+        )
+
+    def test_a_row_the_where_leaves_out_holds_nothing_and_passes_nothing_on(self) -> None:
+        # an archived folder and what is inside it; no rule allows anything on it either
+        self.check(
+            "type user = app.users\ntype folder = app.folders where {not archived}\n  parent : folder = parent_id\n"
+            "  owner : user = owner_id\n  can view = owner or parent.view\n"
+            "rules app.folders\n  select : view\n  update : anyone\n  delete : nobody\n",
+            "user: ann, bo\nfolder: 1, 2, 3, 4\nfolder 2 parent folder 1\nfolder 3 parent folder 2\n"
+            "folder 4 parent folder 1\nfolder 1 owner user ann\nfolder 2 owner user bo\nfolder 2 fails its where\n",
+            {
+                "ann": {"folder.view": "1, 4", "rule app.folders select": "1, 4", "rule app.folders update": "1, 3, 4"},
+                "bo": {"folder.view": "", "rule app.folders select": "", "rule app.folders delete": ""},
+                "": {"rule app.folders update": "1, 3, 4", "rule app.folders delete": ""},
+            },
+        )
+
+    def test_a_suspended_user_holds_nothing(self) -> None:
+        self.check(
+            "type user = app.users where {active}\ntype folder = app.folders\n  owner : user = owner_id\n"
+            "  viewer : user, user:* shared\n  can share = owner\n  can view = owner or viewer\n  can open = signed_in\n",
+            "user: ann, cy\nuser cy fails its where\nfolder: 1, 2, 3\nfolder 1 owner user cy\nfolder 2 viewer user:* *\n"
+            "folder 3 owner user ann\n",
+            {
+                "ann": {"folder.view": "2, 3", "folder.share": "3", "folder.open": "1, 2, 3"},
+                "cy": {"folder.view": "", "folder.share": "", "folder.open": ""},
+                "": {"folder.view": "", "folder.open": ""},
+            },
+        )
+
+    def test_groups_nest_loop_and_stop_at_a_group_the_where_leaves_out(self) -> None:
+        self.check(
+            "type user = app.users\ntype team = app.teams where {not disbanded}\n"
+            "  member : user = app.team_members(team_id -> user_id)\n"
+            "  member : team#member = app.teams(parent_id -> id)\n"
+            "type folder = app.folders\n  owner : user = owner_id\n  viewer : user, team#member shared\n"
+            "  can share = owner\n  can view = viewer\n",
+            "user: ann, bo, cy\nteam: 1, 2, 3, 4, 5\nteam 3 member user ann\nteam 2 member team#member 3\n"
+            "team 3 member team#member 2\nteam 1 member team#member 4\nteam 4 member user bo\nteam 4 fails its where\n"
+            "team 5 member user cy\nfolder: 1, 2, 3, 4\nfolder 1 viewer team#member 2\nfolder 2 viewer team#member 1\n"
+            "folder 3 viewer team#member 4\nfolder 4 viewer team#member 5\n",
+            {
+                "ann": {"team.member": "2, 3", "folder.view": "1"},
+                "bo": {"team.member": "", "folder.view": ""},
+                "cy": {"team.member": "5", "folder.view": "4"},
+            },
+        )
+
+    def test_who_each_subject_is(self) -> None:
+        # user:* any signed-in user, service:* any signed-in service, anyone also signed out, link who holds the
+        # token; signed_in is about users; a share to service 2 is not one to user 2
+        self.check(
+            "type user = app.users\ntype service = app.services principal\ntype folder = app.folders\n"
+            "  owner : user = owner_id\n  bot : service = bot_id\n"
+            "  viewer : user, service, user:*, service:*, anyone, link shared\n"
+            "  can share = owner\n  can view = owner or bot or viewer\n  can open = signed_in\n",
+            "user: ann, 2\nservice: 1, 2\nfolder: 1, 2, 3, 4, 5, 6, 7\nfolder 1 viewer user:* *\n"
+            "folder 2 viewer anyone *\nfolder 3 viewer link tok1\nfolder 4 viewer link tok2\n"
+            "folder 5 viewer service:* *\nfolder 6 bot service 1\nfolder 7 viewer service 2\n",
+            {
+                "ann": {"folder.view": "1, 2, 3", "folder.open": "1, 2, 3, 4, 5, 6, 7"},
+                "2": {"folder.view": "1, 2, 3", "folder.open": "1, 2, 3, 4, 5, 6, 7"},
+                "service:1": {"folder.view": "2, 3, 5, 6", "folder.open": ""},
+                "service:2": {"folder.view": "2, 3, 5, 7", "folder.open": ""},
+                "": {"folder.view": "2, 3", "folder.open": ""},
+            },
+            links=["tok1"],
+        )
+
+    def test_a_deny_inside_inheritance_covers_everything_below(self) -> None:
+        self.check(
+            "type user = app.users\ntype folder = app.folders\n  parent : folder = parent_id\n"
+            "  owner : user = owner_id\n  can hidden = {secret} or parent.hidden\n"
+            "  can view = (owner or parent.view) and not hidden\n",
+            "user: ann, bo, cy\nfolder: 1, 2, 3, 4, 5\nfolder 2 parent folder 1\nfolder 3 parent folder 2\n"
+            "folder 4 parent folder 3\nfolder 5 parent folder 1\nfolder 1 owner user ann\nfolder 3 owner user bo\n"
+            "folder 2 owner user cy\n{secret} on folder 2\n",
+            {
+                "ann": {"folder.view": "1, 5", "folder.hidden": "2, 3, 4"},
+                "bo": {"folder.view": ""},
+                "cy": {"folder.view": ""},
+            },
+        )
+
+    def test_folders_and_projects_inside_each_other(self) -> None:
+        self.check(
+            "type user = app.users\n"
+            "type project = app.projects\n  owner : user = owner_id\n  parent : folder = folder_id\n"
+            "  can view = owner or parent.view\n"
+            "type folder = app.folders\n  owner : user = owner_id\n  parent : folder, project = (parent_type, parent_id)\n"
+            "  can view = owner or parent.view\n"
+            "type file = app.files\n  folder : folder = folder_id\n  can view = folder.view\n"
+            "rules app.files\n  select : view or {public}\n",
+            "user: ann, bo\nproject: 1, 2\nfolder: 1, 2, 3, 4\nfile: 1, 2, 3\nproject 1 owner user ann\n"
+            "folder 1 parent project 1\nfolder 2 parent folder 1\nproject 2 parent folder 2\nfolder 3 parent project 2\n"
+            "folder 4 owner user bo\nfile 1 folder folder 3\nfile 2 folder folder 4\n{public} on file 3\n",
+            {
+                "ann": {
+                    "project.view": "1, 2",
+                    "folder.view": "1, 2, 3",
+                    "file.view": "1",
+                    "rule app.files select": "1, 3",
+                },
+                "bo": {"project.view": "", "folder.view": "4", "file.view": "2", "rule app.files select": "2, 3"},
+                "": {"file.view": "", "rule app.files select": "3"},
+            },
+        )
+
+    ROLES = (
+        "type user = app.users\ntype org = app.orgs\n  admin : user = app.org_admins(org_id -> user_id)\n"
+        "  can manage_roles = admin\n"
+        "type folder = app.folders\n  org : org = org_id\n  owner : user = owner_id\n  roles : user{from}\n"
+        "  can share = owner or org.admin\n  can view = owner or roles\n  can edit = owner or roles\n"
+    )
+    ROLE_WORLD = (
+        "user: ann, bo\norg: 1, 2\nfolder: 1, 2, 3\nfolder 1 org org 1\nfolder 2 org org 2\n"
+        "role view on folder 1 for user ann from org 1\nrole view on folder 2 for user ann from org 1\n"
+        "role edit on folder 1 for user bo from org 2\nrole edit on folder 3 for user bo from org 1\n"
+        "role view on folder 2 for user bo from org 2\n"
+    )
+
+    def test_roles_from_an_org_count_only_on_its_objects(self) -> None:
+        self.check(
+            self.ROLES.format(**{"from": " from org"}),
+            self.ROLE_WORLD,
+            {"ann": {"folder.view": "1", "folder.edit": ""}, "bo": {"folder.view": "2", "folder.edit": ""}},
+        )
+
+    def test_roles_without_from_count_wherever_they_are_given(self) -> None:
+        self.check(
+            self.ROLES.format(**{"from": ""}),
+            re.sub(r" from org \d", "", self.ROLE_WORLD),
+            {"ann": {"folder.view": "1, 2", "folder.edit": ""}, "bo": {"folder.view": "2", "folder.edit": "1, 3"}},
+        )
+
+    def test_simple_conditions_read_columns_as_sql_does(self) -> None:
+        # NULL holds nothing: {not archived} is false where archived is NULL, not {archived} true there; NULL and
+        # false is false; numbers compare as numbers; authz.uid() is a user's id, never a service's
+        self.check(
+            "type user = app.users\ntype service = app.services principal\ntype doc = app.docs\n"
+            "  owner : user = owner_id\n  bot : service = bot_id\n  can run = bot\n"
+            "  can a = owner and {not archived}\n  can b = owner and not {archived}\n"
+            "  can c = {owner_id = authz.uid()}\n  can d = {size > 10 or kind in ('x', 'w')}\n"
+            "  can e = {kind not in ('x', null)}\n  can f = {kind <> 'x'}\n  can g = {size > 9}\n"
+            "  can h = {not (archived and kind = 'z')}\n  can i = {archived is not null}\n",
+            "user: 1, 2\nservice: 1\ndoc: 1, 2, 3\ndoc 1 owner user 1\ndoc 2 owner user 1\ndoc 3 owner user 1\n"
+            "doc 1: archived = false, size = 11, kind = 'z'\ndoc 2: archived = null, size = null, kind = 'x'\n"
+            "doc 3: archived = true, size = 10, kind = null\n",
+            {
+                "1": {"doc.a": "1", "doc.b": "1, 2", "doc.c": "1, 2, 3", "doc.d": "1, 2", "doc.e": "", "doc.f": "1"},
+                "2": {"doc.a": "", "doc.b": "", "doc.c": "", "doc.d": "1, 2", "doc.e": "", "doc.f": "1"},
+                "service:1": {"doc.c": ""},
+                "": {"doc.c": "", "doc.d": "1, 2", "doc.g": "1, 3", "doc.h": "1, 2", "doc.i": "1, 3"},
+            },
+        )
+
+    def test_what_depends_on_the_column_type_is_left_to_the_database(self) -> None:
+        # text in order follows the collation; text Postgres casts to the column's type; the user key's order. A
+        # linked column's id compared with a number is a number (tests/conditions_test.py asks Postgres)
+        from authzlib.conditions import compare, simple
+
+        for sql in ("name < 'b'", "size = '10'", "done = 't'", "kind in ('x', 'yes')", "owner_id < authz.uid()"):
+            self.assertIsNone(simple(sql), sql)
+        for sql in ("name = 'b'", "size < 10", "done", "kind in ('x', 'w')", "owner_id = authz.uid()", "x = ''"):
+            self.assertIsNotNone(simple(sql), sql)
+        self.assertIs(compare("<", "2", 10), True)
+        self.assertIs(compare("<", "2", "10"), False)
+
+    def test_a_relation_with_two_sources(self) -> None:
+        self.check(
+            "type user = app.users\ntype folder = app.folders\n  viewer : user = viewer_id\n"
+            "  viewer : user = app.folder_viewers(folder_id -> user_id)\n  can view = viewer\n",
+            "user: ann, bo\nfolder: 1, 2, 3\nfolder 1 viewer user ann\nfolder 2 viewer[1] user ann\n"
+            "folder 3 viewer[1] user bo\n",
+            {"ann": {"folder.view": "1, 2"}, "bo": {"folder.view": "3"}},
         )
 
 
