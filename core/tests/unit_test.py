@@ -2672,6 +2672,9 @@ class Confidence(unittest.TestCase):
             "  can peek = viewer\n"
         )
         self.assertFalse(self.same(shared + "  can view = owner or viewer\n", shared + "  can view = owner\n"))
+        # a permission only one side has is no refactor's business (the review says it is added or removed)
+        self.assertTrue(self.same(doc + "  can view = owner\n", doc + "  can view = owner\n  can peek = edit\n"))
+        self.assertTrue(self.same(doc + "  can view = owner\n  can peek = edit\n", doc + "  can view = owner\n"))
 
     def test_a_counterexample_is_shrunk_until_nothing_more_goes(self) -> None:
         from authzlib import prove
