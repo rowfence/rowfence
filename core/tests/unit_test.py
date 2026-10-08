@@ -2147,12 +2147,16 @@ class Wire(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, re.escape(said), msg=dsn):
                 self.pgwire.parse_dsn(dsn)
 
-    def server(self, tls: bool, scram: str | None = None) -> tuple[int, dict[str, object]]:
+    def server(self, tls: bool, scram: str | None = None, auth: str | None = None) -> tuple[int, dict[str, object]]:
         """A made-up server on a local port: answers the TLS request (yes with the test certificate, or no), reads
         the start-up message, says the client is signed in. seen: whether TLS was used, and the start-up parameters.
         scram: it asks for the password "secret" with SCRAM first, offering channel binding ("plus"), not offering
-        it ("plain"), or holding another certificate than the one the client sees ("other": a server in the middle).
-        seen then has the mechanism the client chose and whether it bound the exchange to the certificate."""
+        it ("plain"), or holding another certificate than the one the client sees ("other": a server in the middle);
+        or it answers with a nonce that isn't the client's ("badnonce"), or a proof that is wrong ("badproof").
+        seen then has the mechanism the client chose and whether it bound the exchange to the certificate.
+        auth: it asks for the password in clear ("cleartext") or hashed with MD5 ("md5"), and seen has what the
+        client sent; or it asks in a way the client doesn't know ("gss"), offers SASL without SCRAM-SHA-256
+        ("sasl-other"), or answers the TLS request as no Postgres does ("not postgres")."""
         import base64
         import hashlib
         import hmac
@@ -2185,7 +2189,8 @@ class Wire(unittest.TestCase):
             first = rest[4:].decode()
             header, bare = first[: first.index(",,") + 2], first[first.index(",,") + 2 :]
             seen["mechanism"], seen["header"] = mechanism.decode(), header
-            nonce = dict(kv.split("=", 1) for kv in bare.split(","))["r"] + "server"
+            theirs = dict(kv.split("=", 1) for kv in bare.split(","))["r"]
+            nonce = ("someone else's" if scram == "badnonce" else theirs) + "server"
             server_first = f"r={nonce},s={base64.b64encode(salt).decode()},i={rounds}"
             conn.sendall(b"R" + struct.pack("!ii", 8 + len(server_first), 11) + server_first.encode())
             final = exactly(conn, struct.unpack("!i", exactly(conn, 5)[1:])[0] - 4).decode()
@@ -2209,7 +2214,7 @@ class Wire(unittest.TestCase):
                 conn.sendall(b"E" + struct.pack("!i", 4 + len(refused)) + refused)
                 return False
             proof = hmac.new(hmac.new(salted, b"Server Key", hashlib.sha256).digest(), message, hashlib.sha256).digest()
-            last = b"v=" + base64.b64encode(proof)
+            last = b"v=" + base64.b64encode(bytes(32) if scram == "badproof" else proof)
             conn.sendall(b"R" + struct.pack("!ii", 8 + len(last), 12) + last)
             return True
 
@@ -2220,6 +2225,9 @@ class Wire(unittest.TestCase):
                 length, code = struct.unpack("!ii", exactly(conn, 8))
                 if code == 80877103:
                     seen["asked"] = True
+                    if auth == "not postgres":
+                        conn.sendall(b"H")  # as a web server's "HTTP/1.1 400" begins
+                        return
                     conn.sendall(b"S" if tls else b"N")
                     if tls:
                         context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
@@ -2232,6 +2240,17 @@ class Wire(unittest.TestCase):
                     length, code = struct.unpack("!ii", exactly(conn, 8))
                 seen["start"] = exactly(conn, length - 8).split(b"\0")
                 if scram and not sasl(conn):
+                    return
+                if auth in ("cleartext", "md5"):
+                    asked = struct.pack("!ii", 8, 3) if auth == "cleartext" else struct.pack("!ii", 12, 5) + b"salt"
+                    conn.sendall(b"R" + asked)
+                    seen["password"] = exactly(conn, struct.unpack("!i", exactly(conn, 5)[1:])[0] - 4)[:-1].decode()
+                elif auth in ("gss", "sasl-other"):
+                    mechs = b"SCRAM-SHA-1\0\0"
+                    asked = (
+                        struct.pack("!ii", 8, 7) if auth == "gss" else struct.pack("!ii", 8 + len(mechs), 10) + mechs
+                    )
+                    conn.sendall(b"R" + asked)
                     return
                 conn.sendall(b"R" + struct.pack("!ii", 8, 0) + b"Z" + struct.pack("!i", 5) + b"I")
                 conn.recv(16)
@@ -2325,8 +2344,50 @@ class Wire(unittest.TestCase):
         self.assertEqual(self.pgwire._signature_hash(certificate), "sha256")
         self.assertIsNone(self.pgwire._signature_hash(b"not a certificate"))
 
+    def test_each_way_a_server_asks_for_the_password(self) -> None:
+        import hashlib
+
+        wrong = self.pgwire.ProtocolError
+
+        def connect(port: int, password: str | None = "secret") -> None:
+            self.pgwire.connect(host="127.0.0.1", port=port, user="ann", password=password, timeout=5).close()
+
+        port, seen = self.server(tls=False, auth="cleartext")
+        connect(port)
+        self.assertEqual(seen["password"], "secret")
+        port, seen = self.server(tls=False, auth="md5")  # md5(md5(password + user) + salt), as libpq sends it
+        connect(port)
+        inner = hashlib.md5(b"secretann").hexdigest()
+        self.assertEqual(seen["password"], "md5" + hashlib.md5(inner.encode() + b"salt").hexdigest())
+        for auth, scram, password, said in (
+            ("cleartext", None, None, "the server asks for a password"),
+            ("gss", None, "secret", "unsupported authentication method 7"),
+            ("sasl-other", None, "secret", "unsupported SASL mechanisms"),
+            (None, "badnonce", "secret", "the server's nonce does not extend ours"),
+            (None, "badproof", "secret", "the server could not prove it knows the password"),
+            ("not postgres", None, "secret", "the server didn't answer as Postgres does"),
+        ):
+            port, seen = self.server(tls=False, scram=scram, auth=auth)
+            with self.assertRaisesRegex(wrong, re.escape(said), msg=auth or scram):
+                connect(port, password)
+
+    def test_what_it_refuses_to_send(self) -> None:
+        port, _ = self.server(tls=False)
+        conn = self.pgwire.connect(host="127.0.0.1", port=port, user="ann", timeout=5)
+        try:
+            with self.assertRaisesRegex(ValueError, "SQL cannot contain NUL characters"):
+                conn.script("SELECT 1\0")
+            with self.assertRaisesRegex(ValueError, "parameters cannot contain NUL characters"):
+                conn.query("SELECT $1", ["a\0b"])
+            with self.assertRaisesRegex(ValueError, "the number of %s placeholders and arguments differ"):
+                conn.cursor().execute("SELECT %s, %s", (1,))
+        finally:
+            conn.close()
+
     def test_values_it_reads(self) -> None:
         convert = self.pgwire._convert
+        self.assertEqual(convert(1000, b"{t,f,NULL}"), [True, False, None])  # booleans
+        self.assertEqual(convert(1009, b'{"a\\"b",c}'), ['a"b', "c"])  # a quote escaped inside quotes
         self.assertEqual(convert(1007, b"{1,2,NULL}"), [1, 2, None])
         self.assertEqual(convert(1007, b"{{1,2},{3,4}}"), "{{1,2},{3,4}}")  # two dimensions: as Postgres writes it
         self.assertEqual(convert(1009, b"[0:1]={a,b}"), "[0:1]={a,b}")
