@@ -72,10 +72,15 @@ the stock Postgres image. CI runs it in parts, each on a machine of its own, sid
 `core/ci.sh --coverage 16` runs the suites in an image that also has coverage.py (`core/Dockerfile` built with
 `COVERAGE=1`). Each Python process they start then measures which lines and branches of `authzlib` and `cli` it
 runs, and marks each with the step of `run_tests.sh` that ran it (`ROWSTILE_COVERAGE`; the settings are in
-`tests/coverage.ini`). `tests/coverage_report.py` reads what they measured (`.ci/coverage-16/`) and says:
+`tests/coverage.ini`). Postgres counts the calls of every function too (`track_functions`), and each database is
+asked which of rowstile's functions were called in it before it is dropped (`tests/coverage_functions.sh`, which
+`tests/coverage-bin/` puts in front of `createdb` and `dropdb`). `tests/coverage_report.py` reads what they
+measured (`.ci/coverage-16/`) and says:
 
 - for each file, how many of its lines and branches the suites run;
 - each line and branch that nothing runs;
 - what runs of the code that writes the SQL deciding access, but only in steps that never compare the database's
   answers with the reference evaluator (difftest, genpolicy, around): its SQL was made, and never judged;
+- each kind of rowstile's functions (`authz_gen."<table>:update:refuse"`, a tree's refresh, `authz.share`) that
+  no suite ever calls;
 - with `--diff main`: the lines changed since `main` that nothing runs (exit 1 if there are any).
