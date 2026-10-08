@@ -156,8 +156,8 @@ CASES: list[tuple[str, str, str, str]] = [
         edit(
             MULTI,
             (
-                "  can edit = author or container.edit\n  can view = edit or container.view",
-                "  can edit = author\n  can view = edit or container.view",
+                "  can edit = author or container.edit or roles\n  can view = edit or container.view",
+                "  can edit = author or roles\n  can view = edit or container.view",
             ),
         ),
     ),
