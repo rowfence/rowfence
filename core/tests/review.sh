@@ -268,11 +268,16 @@ case "$out" in "Meaning  1 permission added"*) [ $rc -eq 0 ] && ok "a policy tha
   *) bad "includes at the base" "$out";; esac
 
 echo "-- a base git can't read all of (a repository missing objects: a partial clone that can't fetch them)"
-L="$T/lost"; mkdir -p "$L/db/parts" "$L/db/tests"
+L="$T/lost"; mkdir -p "$L/db/parts" "$L/db/tests/old" "$L/db/more"
 printf 'include "parts/types.authz"\n' > "$L/db/policy.authz"
 printf 'app role web\ntype user = public.users\ntype doc = public.docs\n  owner : user = owner_id\n  can view = owner\n' > "$L/db/parts/types.authz"
 printf 'test "the owner reads"\n  user 1 can view doc 1\n' > "$L/db/tests/a.authz"
-printf 'policy = "db/policy.authz"\ntests = ["db/tests/*.authz"]\n[migrations]\ntool = "sql"\ndir = "db/migrations"\n' > "$L/rowstile.toml"
+# test files the globs don't find, at the base as in the pull request: below a glob's folder, a name that starts
+# with a dot, above a glob's last folder
+printf 'test "legacy"\n  user 2 cannot view doc 1\n' > "$L/db/tests/old/legacy.authz"
+printf 'test "draft"\n  user 3 cannot view doc 1\n' > "$L/db/tests/.draft.authz"
+printf 'test "stray"\n  user 4 cannot view doc 1\n' > "$L/db/more/stray.authz"
+printf 'policy = "db/policy.authz"\ntests = ["db/tests/*.authz", "db/more/*/*.authz"]\n[migrations]\ntool = "sql"\ndir = "db/migrations"\n' > "$L/rowstile.toml"
 LCLI() { ( cd "$L" && python3 "$OLDPWD/cli/rowstile_cli.py" "$@" ); }
 { git -C "$L" init -q -b main && git -C "$L" config user.email t@example.com && git -C "$L" config user.name t &&
   LCLI migrate >/dev/null && git -C "$L" add -A && git -C "$L" commit -q -m base; } || bad "setting up the repository whose base loses objects"
@@ -282,8 +287,11 @@ printf 'test "the owner edits"\n  user 1 can edit doc 1\n' > "$L/db/tests/b.auth
 LCLI migrate >/dev/null
 out=$(LCLI review --base main --json 2>&1); rc=$?
 [ $rc -eq 0 ] && printf '%s' "$out" | python3 -c "import json,sys; t=json.load(sys.stdin)['tests']
-assert [(a['test'], a['check']) for a in t['added']] == [('the owner edits', 'user 1 can edit doc 1')] and not t['removed'], t" &&
+assert [(a['test'], a['check']) for a in t['added']] == [('the owner edits', 'user 1 can edit doc 1')], t" &&
   ok "a test file the base doesn't have: its checks are added, and the review goes on" || bad "a test file added since the base" "$rc $out"
+printf '%s' "$out" | python3 -c "import json,sys; t=json.load(sys.stdin)['tests']; assert t['removed'] == [], t['removed']" &&
+  ok "the base's test files are found as the pull request's: not one below a glob's folder, above its last, or whose name starts with a dot (no check removed)" ||
+  bad "the base's test files found otherwise than the pull request's" "$out"
 cp "$L/db/parts/types.authz" "$T/outside.authz"
 out=$(LCLI review --base main "$T/outside.authz" 2>&1); rc=$?
 case "$out" in *"added    app role"*) [ $rc -eq 0 ] && ok "a policy outside the repository: none at the base, reviewed as new, as before" || bad "a policy outside the repository: exit" "$rc";;

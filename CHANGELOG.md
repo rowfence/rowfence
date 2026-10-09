@@ -84,6 +84,10 @@ Each release upgrades from the one before it. How releases are numbered and made
 - `rowstile review` said "the policy at the base has a mistake" of a new policy whose file name has a `[`, `*` or
   `?` in it: git read the name as a pattern, found nothing, and gave no error. It is reviewed as new, as any
   policy the base doesn't have.
+- `rowstile review` said "1 check removed" of a test file the `tests` glob doesn't find, left as it was by the
+  pull request: one in a folder below the glob's (`db/tests/old/x.authz` for `db/tests/*.authz`), or one whose
+  name starts with a dot. The base's test files were found another way than the pull request's, a `*` matching
+  across folders; they are found the same way now.
 - `rowstile dev` with a connection string it can't read (`--db colour=blue`) stopped with a traceback: it says
   it can't connect, exit 2, as the other commands do. `--port` and `--studio-port` took a number above 65535,
   which stopped Studio with a traceback: it is refused, exit 2. And `rowstile why --as anyone` exited 1, where
