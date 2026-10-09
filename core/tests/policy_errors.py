@@ -160,6 +160,24 @@ COMPILE = [
         10,
     ),
     (
+        "following a relation shared with anyone",
+        "  pub : anyone shared by share\n  can see = owner\n  can view = pub.see\n",
+        "doc.pub links to groups, anyone or links, so there is nothing to follow",
+        12,
+    ),
+    (
+        "... with a link",
+        "  pub : link shared by share\n  can see = owner\n  can view = pub.see\n",
+        "doc.pub links to groups, anyone or links, so there is nothing to follow",
+        12,
+    ),
+    (
+        "... with every signed-in user",
+        "  pub : user:* shared by share\n  can see = owner\n  can view = pub.see\n",
+        "doc.pub links to groups, anyone or links, so there is nothing to follow",
+        12,
+    ),
+    (
         "using a link as if it held users",
         "  can view = parent\n",
         "doc.parent links to doc objects, not users; follow it with a dot",

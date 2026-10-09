@@ -354,6 +354,9 @@ Each release upgrades from the one before it. How releases are numbered and made
   nearly all of them hold, and, for a policy that reads two links deep or more, chains one link longer than it
   reads (at most ten objects). Both take about a fifth to two fifths more time; `rowstile prove` says how large
   its largest world was.
+- `rowstile check`, and everything that compiles a policy, stopped with a Python traceback (`KeyError: 'anyone'`,
+  or `'link'`) on a permission that follows a relation shared with `anyone` or a link: `pub : anyone shared by
+  edit` with `can view = pub.see`. It says what `user:*` there got: AZ301, there is nothing to follow.
 
 ## 0.1.0 (alpha)
 
