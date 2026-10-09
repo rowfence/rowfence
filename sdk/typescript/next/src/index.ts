@@ -12,7 +12,7 @@
  */
 import { connection } from "next/server.js";   // next has no exports map: Node needs the file name
 import {
-  beforeSignIn, problemOf, problemResponse, translate,
+  beforeSignIn, dbError, errorCode, problemOf, problemResponse, translate,
   type AuthzCalls, type Principal, type Problem,
 } from "@rowstile/client";
 
@@ -88,16 +88,32 @@ export interface RoutesOptions {
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 
+/** route()'s answers, and 400 for a call the database says lacks an argument or has a wrong one (AZ710: an access
+ *  request without a reason), with its words: the user's to fix, not the server's failure. */
+function answering(handler: (req: Request) => Promise<Response>): (req: Request) => Promise<Response> {
+  return route(async (req: Request) => {
+    try {
+      return await handler(req);
+    } catch (e) {
+      if (errorCode(e) !== "AZ710") throw e;
+      const problem: Problem = { type: "https://rowstile.dev/problems/bad-argument", title: "Bad Request", status: 400,
+                                 detail: dbError(e)!.message, code: "AZ710" };
+      return new Response(JSON.stringify(problem), { status: 400, headers: { "content-type": "application/problem+json" } });
+    }
+  });
+}
+
 /** The routes @rowstile/react calls, for a catch-all route (app/api/authz/[...authz]/route.ts):
  *  GET perms?type=folder&ids=1&ids=2 (POST perms {type, ids} for a long list), GET shares?type=folder&id=3,
  *  GET events (server-sent events), POST share, POST unshare, POST request. Each answers as the signed-in
  *  user, and only what they may see. The POST routes take application/json only: a form on another site
- *  can't send that without the browser asking this one first. */
+ *  can't send that without the browser asking this one first. A request for access without a reason answers
+ *  400, with the database's words. */
 export function authzRoutes(options: RoutesOptions) {
   const { calls } = options;
   const streams = { open: 0, most: options.maxStreams ?? 1000 };
   const last = (req: Request) => new URL(req.url).pathname.split("/").filter(Boolean).pop() ?? "";
-  const GET = route(async (req: Request) => {
+  const GET = answering(async (req: Request) => {
     const url = new URL(req.url);
     const type = url.searchParams.get("type") ?? "";
     switch (last(req)) {
@@ -113,7 +129,7 @@ export function authzRoutes(options: RoutesOptions) {
         return json({ title: "Not Found", status: 404 }, 404);
     }
   });
-  const POST = route(async (req: Request) => {
+  const POST = answering(async (req: Request) => {
     if (!/^application\/json\b/i.test(req.headers.get("content-type") ?? "")) {
       return json({ title: "Unsupported Media Type", status: 415, detail: "send application/json" }, 415);
     }

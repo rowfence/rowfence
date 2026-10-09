@@ -115,6 +115,7 @@ export const PAGES = {
   "examples/messenger/README.md": "examples/messenger.md",
   "site/problems/refused.md": "problems/refused.md",
   "site/problems/not-found.md": "problems/not-found.md",
+  "site/problems/bad-argument.md": "problems/bad-argument.md",
   "docs/errors/README.md": "errors/index.md",
   ...Object.fromEntries(errorPages.map((f) => [`docs/errors/${f}`, `errors/${f}`])),
   ...(POSTS.length ? { "docs/blog/README.md": "blog/index.md" } : {}),
@@ -177,6 +178,7 @@ export const DESCRIPTIONS = {
   "examples/messenger.md": "A WhatsApp-style messenger on rowstile: direct chats, groups and admins, invite links, blocking, bots with API keys, live updates.",
   "problems/refused.md": "The problem type the rowstile SDKs answer with (403) when Postgres refused a write, with the rule and the reason.",
   "problems/not-found.md": "The problem type the rowstile SDKs answer with (404) when a row isn't there or can't be seen.",
+  "problems/bad-argument.md": "The problem type the rowstile SDKs answer with (400) when the database says a call lacks an argument or has a wrong one.",
   "errors/index.md": "Every rowstile error code: what it means, the mistake, and the same mistake fixed.",
 };
 
