@@ -101,6 +101,7 @@ apps call. Applying, previewing and testing each run in one transaction on the d
 
 from __future__ import annotations
 
+import contextlib
 import glob
 import io
 import json
@@ -307,19 +308,24 @@ class Db:
             )
 
 
+def abandon(conn: pgwire.Connection) -> None:
+    """Ends a transaction left without a commit: rolled back; or, stopped in the middle of a statement (Ctrl-C),
+    that statement ended on the server too, at once, instead of after it has run its course. On a connection that
+    is lost already, nothing more: the error that ended the command is the one it reports."""
+    with contextlib.suppress(pgwire.PgError, pgwire.ProtocolError, OSError):
+        if conn.busy:
+            conn.cancel()
+        else:
+            conn.execute("ROLLBACK")
+
+
 def transaction(conn: pgwire.Connection, work: Callable[[Db], T], keep: bool = True) -> T:
     """work(Db) in one transaction: committed if keep, else rolled back."""
     conn.execute("BEGIN")
     try:
         out = work(Db(conn))
     except BaseException:
-        try:
-            if conn.busy:
-                conn.cancel()  # stopped in the middle of a statement (Ctrl-C): end it on the server too
-            else:
-                conn.execute("ROLLBACK")
-        except (pgwire.PgError, pgwire.ProtocolError, OSError):
-            pass
+        abandon(conn)
         raise
     conn.execute("COMMIT" if keep else "ROLLBACK")
     return out
@@ -1462,10 +1468,7 @@ def review_cmd(cfg: Config, args: list[str], opts: dict[str, str], flags: set[st
         fail(f"{path} at {ref}: {e}")
     finally:
         if conn is not None:
-            try:
-                conn.execute("ROLLBACK")
-            except pgwire.PgError:
-                pass
+            abandon(conn)
             conn.close()
     if "--json" in flags:
         sys.stdout.write(review.as_json(r))
@@ -1674,10 +1677,7 @@ def ask(conn: pgwire.Connection, cmd: str, args: list[str], opts: dict[str, str]
                 # through for no row, which "done" would hide
                 print(f"{conn.tag or 'done'}, as {who}; rolled back")
     finally:
-        try:
-            q("ROLLBACK")
-        except (pgwire.PgError, pgwire.ProtocolError, OSError):
-            pass
+        abandon(conn)
 
 
 def snapshot_path(cfg: Config, opts: dict[str, str]) -> str:
