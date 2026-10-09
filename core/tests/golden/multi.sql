@@ -5582,6 +5582,21 @@ WHERE w.who IS NOT NULL AND n.nspname !~ '^pg_(toast_)?temp_' LOOP
     problem := format('is on the search path of rowstile''s functions that run as the owner, and %s may create in it: a function there can take the place of a built-in one and run as the owner. REVOKE CREATE ON SCHEMA %I FROM %s, or apply with a search path without it', r.who, r.schema, r.who);
     RETURN NEXT;
   END LOOP;
+  -- the audit trail's guard, which fires in every replication role (ENABLE ALWAYS): ENABLE TRIGGER ALL, which a
+  -- data-only pg_restore --disable-triggers ends with, puts it back for ordinary sessions only
+  FOR r IN SELECT t.name, g.tgenabled::text AS mode
+           FROM (VALUES ('authz_audit_append_only'), ('authz_audit_no_truncate')) t (name)
+           LEFT JOIN pg_trigger g ON g.tgrelid = 'authz.audit'::regclass AND g.tgname = t.name
+           WHERE g.tgenabled IS DISTINCT FROM 'A' LOOP
+    severity := 'warning'; object := 'authz.audit';
+    problem := format('the trigger %s %s. rowstile reapply puts it back, in every replication role', r.name,
+      CASE r.mode
+        WHEN 'O' THEN 'guards it in ordinary sessions only: one with session_replication_role = replica may change the trail (ENABLE TRIGGER ALL leaves it so, as at the end of a data-only pg_restore --disable-triggers)'
+        WHEN 'R' THEN 'guards it with session_replication_role = replica only: an ordinary session may change the trail'
+        WHEN 'D' THEN 'that guards it is off: the trail may be changed'
+        ELSE 'that guards it is missing: the trail may be changed' END);
+    RETURN NEXT;
+  END LOOP;
   -- governed tables
   FOR r IN SELECT c.oid::regclass AS tbl, c.relrowsecurity, c.relforcerowsecurity, c.relowner,
                   c.oid = ANY (SELECT to_regclass(x) FROM unnest(ARRAY['"mt"."docs"']::text[]) x) AS governed

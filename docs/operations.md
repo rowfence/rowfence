@@ -110,6 +110,10 @@ tables no longer match the app's tables, and people keep or miss access they sho
 --force` (or `rowstile apply db/policy.authz --force`) computes every inheritance table again, under its
 lock; a plain `apply` keeps the tables it finds unchanged, stale or not.
 
+A data-only restore with `--disable-triggers` ends with `ENABLE TRIGGER ALL`, which leaves the audit trail's
+guard on in ordinary sessions only: a session with `session_replication_role = replica` could change the trail.
+`authz.lint()` says so, and `rowstile reapply` puts the guard back in every replication role.
+
 ## Retention
 
 The audit trail and the change feed grow forever unless trimmed. Schedule (pg_cron, or your app's
