@@ -229,6 +229,12 @@ admin "a Globex user owning an Acme folder breaks it" "6|{4}" \
 got=$(psql -X -q -At -d "$DB" -f <(python3 compile_policy.py example/docs.authz --tests) 2>&1)
 case "$got" in *"FAIL  invariant"*"policy test(s) failed"*) echo "ok    the policy tests fail on it";;
   *) echo "FAIL  policy tests with a broken invariant: $got"; fails=$((fails + 1));; esac
+# an invariant is checked in a view of its own: a permission of its type named never_1 takes nothing from it
+sed 's/^  can break_glass = org.member$/&\n  can never_1 = owner/' example/docs.authz > /tmp/authz_governance_never.authz
+grep -q "^  can never_1 = owner$" /tmp/authz_governance_never.authz || { echo "FAIL  could not make the policy with never_1"; fails=$((fails + 1)); }
+python3 compile_policy.py /tmp/authz_governance_never.authz > /tmp/authz_governance_never.sql && reapply /tmp/authz_governance_never.sql
+admin "... also beside a permission folder.never_1" "6|{4}" "SELECT user_id || '|' || object_ids::text FROM authz.check_invariants()"
+reapply /tmp/authz_governance.sql
 PSQL -c "UPDATE app.folders SET owner_id = 1 WHERE id = 4" >/dev/null
 expect_code "the app role cannot run the invariant check" "42501: permission denied for function check_invariants" -c "SELECT * FROM authz.check_invariants()"
 

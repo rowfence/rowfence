@@ -121,6 +121,10 @@ Each release upgrades from the one before it. How releases are numbered and made
   managed Postgres that made the role but wasn't given it), the tables said "GRANT app_user TO the role Studio
   connects as": they now say what `rowstile test` and `sql --as` say, with the role to grant to, who may run
   the grant, and the code (AZ618).
+- An invariant wasn't checked where a permission or a relation of its type was named `never_1` (`never_2` for
+  the second invariant, and so on): `authz.check_invariants()` and the policy's tests said it held. Where only a
+  mask named such a relation, applying failed instead. Each invariant has a view of its own now. **Upgrading**:
+  apply the policy again (or the next migration).
 - Ctrl-C while `rowstile sql` (or `can`, `explain`, `perms`, `list`, `who`, `explain-rule`) waited on a statement,
   or while `rowstile review --db` worked on its database, stopped only once the statement had run its course. It
   stops at once now and ends the statement on the server, as the other commands did.

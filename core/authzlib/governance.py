@@ -603,9 +603,8 @@ END $f$;"""
         checks: list[str] = []
         for i, inv in enumerate(self.pol.invariants):
             t = self.T(inv.type)
-            view = f"{t.name}__never_{i + 1}"
-            if not self.begin_view(view, inv.loc, f"invariant {i + 1}"):
-                continue
+            # its own view: no name a policy writes has `__` in it (AZ107), so no permission's or relation's is this
+            view = f"{t.name}__never__{i + 1}"
             self.add_view(
                 view,
                 self.set_sql(t, inv.expr, inv.loc),

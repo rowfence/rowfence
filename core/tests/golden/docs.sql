@@ -2544,7 +2544,7 @@ CREATE VIEW authz_int."folder__parent__view" AS
 CREATE VIEW authz_gen."folder__parent__view" WITH (security_barrier) AS SELECT id FROM authz_int."folder__parent__view";
 
 -- invariant (line 87): never folder: share and not org.member
-CREATE VIEW authz_int."folder__never_1" AS
+CREATE VIEW authz_int."folder__never__1" AS
   SELECT r."id" AS id FROM "app"."folders" r
   WHERE r."id" IN (SELECT id FROM authz_int."folder__share")
     AND NOT EXISTS (SELECT 1 FROM (SELECT id FROM authz_int."folder__org__member") x WHERE x.id = r."id");
@@ -4730,7 +4730,7 @@ BEGIN
       PERFORM set_config('authz.principal_type', v_p, true);
       PERFORM set_config('authz.user_id', v_u, true);
       PERFORM authz_int.sign();
-      v_ids := ARRAY(SELECT id::text FROM authz_int."folder__never_1" ORDER BY 1 LIMIT 5);
+      v_ids := ARRAY(SELECT id::text FROM authz_int."folder__never__1" ORDER BY 1 LIMIT 5);
       IF cardinality(v_ids) > 0 THEN
         invariant := 'never folder: share and not org.member (' || coalesce((SELECT l.loc FROM authz_gen.policy_lines l WHERE l.what = 'invariant never folder: share and not org.member'), '?') || ')'; user_id := nullif(CASE WHEN v_p = '' THEN v_u ELSE v_p || ':' || v_u END, ''); object_ids := v_ids;
         RETURN NEXT;
