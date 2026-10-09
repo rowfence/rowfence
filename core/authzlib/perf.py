@@ -80,19 +80,18 @@ def needed_indexes(c: Compiler) -> list[Lookup]:
             out.append((table, columns, why, str(loc)))
 
     for t in c.types.values():
-        own = tuple(k for k, _ in t.key) if t.key else ((t.pk,) if t.pk else ())
         for r in t.relations.values():
             for src in r.sources:
                 lead = (src.type_col,) if src.type_col else ()
                 if src.kind == "column":
-                    columns = lead + cols(c.source_columns(src))
-                    if columns != own:
-                        add(
-                            t.table,
-                            columns,
-                            f"finding the {t.name}s by their {t.name}.{r.name} (lists, select rules)",
-                            r.loc,
-                        )
+                    # (the row's own key too, `owner : user = user_id` on a table keyed by its user's id: its primary
+                    # key serves the lookup, and without one nothing does)
+                    add(
+                        t.table,
+                        lead + cols(c.source_columns(src)),
+                        f"finding the {t.name}s by their {t.name}.{r.name} (lists, select rules)",
+                        r.loc,
+                    )
                 elif src.kind == "table":
                     table = c.source_table(src)
                     add(

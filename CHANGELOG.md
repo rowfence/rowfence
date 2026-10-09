@@ -398,6 +398,10 @@ Each release upgrades from the one before it. How releases are numbered and made
   `rowstile migrate` with a Python traceback (`IndexError`), and `rowstile review` too when the base branch's
   lock had them. `migrate` says which line it can't read and what to do (AZ619), exit 1, and writes nothing; the
   review says why its Deploy part isn't computed, and goes on.
+- `rowstile indexes` said every lookup had an index when a relation reads the row's own key and nothing indexes
+  that key: a table keyed by its user's id, with `owner : user = user_id`, and no primary key. Lists find those
+  rows by the key, with a full scan. It names that index now, as `authz.lint()` did, and `rowstile dev` warns of
+  it at start.
 
 ## 0.1.0 (alpha)
 
