@@ -3111,6 +3111,52 @@ class Confidence(unittest.TestCase):
         )
 
 
+class Plans(unittest.TestCase):
+    """rowstile plans: what it reads in EXPLAIN's JSON (tests/confidence_test.py reads a database's own plans)."""
+
+    def test_a_subplan_run_once_per_row_is_named(self) -> None:
+        # the plan Postgres 16 gives a read of app.files as an org admin with 15,000 files and work_mem at 64kB, cut
+        # down to what plans reads: the set the check looks in no longer fits in memory to be hashed, so it is
+        # looked through again for each row. The governed table's own scan is no warning, nor an initplan (once)
+        from authzlib import perf
+
+        plan: dict[str, Value] = {
+            "Node Type": "Aggregate",
+            "Actual Rows": 1,
+            "Actual Loops": 1,
+            "Plans": [
+                {
+                    "Node Type": "Result",
+                    "Parent Relationship": "InitPlan",
+                    "Subplan Name": "InitPlan 1 (returns $0)",
+                    "Actual Rows": 1,
+                    "Actual Loops": 1,
+                },
+                {
+                    "Node Type": "Seq Scan",
+                    "Parent Relationship": "Outer",
+                    "Relation Name": "files",
+                    "Schema": "app",
+                    "Actual Rows": 15006,
+                    "Actual Loops": 1,
+                    "Rows Removed by Filter": 1,
+                    "Plans": [
+                        {
+                            "Node Type": "Subquery Scan",
+                            "Parent Relationship": "SubPlan",
+                            "Subplan Name": "SubPlan 11",
+                            "Actual Rows": 1,
+                            "Actual Loops": 15003,
+                        }
+                    ],
+                },
+            ],
+        }
+        out: list[str] = []
+        perf.walk(plan, out, "app.files")
+        self.assertEqual(out, ["SubPlan 11 runs once per row (15003 times)"])
+
+
 class HandAnswers(unittest.TestCase):
     """The reference evaluator against answers worked out by hand from the language's reference
     (docs/reference/language.md), not by running anything. difftest holds the database to the evaluator, but both
