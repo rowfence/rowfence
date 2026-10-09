@@ -1,0 +1,21 @@
+// A second app over the same database, on Prisma's defaults as most apps are: no schemas (its tables are on the
+// search_path, in public), and a model's table is its name. For the checks of what @rowstile/prisma does there
+// (tests/sdk.test.ts). Its table is made by the app's migrations (prisma/migrations), which Prisma's diff of the
+// main schema doesn't look at: that schema names only app.
+generator client {
+  provider = "prisma-client"
+  output   = "../../src/generated/plain"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// a key that isn't called id; a date that is unique (one holiday a day), and so a pair with it in
+model holiday {
+  code    String   @id
+  country String
+  day     DateTime @unique @db.Date
+
+  @@unique([country, day])
+}

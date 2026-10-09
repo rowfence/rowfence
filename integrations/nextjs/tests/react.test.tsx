@@ -151,7 +151,7 @@ function One({ ids = [1] as Id[] }) {
   return <p>{perms.loading ? "loading" : perms.error ? `failed: ${perms.error.message}` : ids.map((id) => `${JSON.stringify(id)}:${perms(id).perms.join(",")}`).join(" ")}</p>;
 }
 
-test("live: a change asks again, once for a burst of them, and so does a stream opened again", async () => {
+test("live: a change asks again, once for changes close together, and so does a stream opened again", async () => {
   vi.stubGlobal("EventSource", Events);
   const answers = [{ "1": ["view"] }, { "1": ["edit", "view"] }, { "1": [] }];
   const f = answering(() => Response.json(answers.shift()));
@@ -161,9 +161,14 @@ test("live: a change asks again, once for a burst of them, and so does a stream 
     const source = Events.last!;
     expect(source.url).toBe("/authz/events");
     source.emit("open");                                          // the first time: nothing was missed
+    await new Promise((r) => setTimeout(r, 100));
+    expect(f.asked.length).toBe(1);
     source.emit("changed");
-    source.emit("changed");                                       // two changes at once: asked again once
+    await new Promise((r) => setTimeout(r, 10));
+    source.emit("changed");                                       // two changes 10 ms apart: asked again once
     await waitFor(() => expect(screen.getByText("1:edit,view")).toBeTruthy());
+    await new Promise((r) => setTimeout(r, 100));
+    expect(f.asked.length).toBe(2);
     source.emit("open");                                          // opened again after a gap: what changed meanwhile
     await waitFor(() => expect(screen.getByText("1:")).toBeTruthy());
     expect(f.asked).toEqual(Array(3).fill("GET /authz/perms?type=project&ids=1"));

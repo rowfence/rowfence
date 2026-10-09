@@ -419,6 +419,10 @@ Each release upgrades from the one before it. How releases are numbered and made
   the 404: `where: { id: { gt: 5 } }` said `app.notes 5 not found`, and `where: { body: "x" }` said `app.notes x
   not found`. It names the table, and the id only when the filter is one (`where: { id: 5 }`).
   `findUniqueOrThrow` names the key as before.
+- `@rowstile/prisma`: a `findUniqueOrThrow` by a key that is a date (a `DateTime` field that is the model's id,
+  or unique) that found no row named the row `()` in its 404: `public.holiday () not found`. The SDK can't
+  write a date as the database does, so the 404 names the table alone, as for a key with a date among its
+  fields.
 - `@rowstile/next`: an event stream (`authzRoutes`' `events`) whose page went away stopped listening to the
   change feed twice, once when its stream was cancelled and again when its request was aborted (and once more
   for a change told after that): a feed of your own given as `changes` was unsubscribed as many times. Once

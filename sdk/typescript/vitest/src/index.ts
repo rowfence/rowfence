@@ -107,7 +107,8 @@ export async function databasePerWorker(url: string, options: { appUrl?: string;
       }
     }
   } finally {
-    await admin.end().catch(() => undefined);
+    // (pg's end() resolves, on a client ended above too: no check can make it fail here, left out of the measure)
+    await admin.end().catch(/* v8 ignore next */ () => undefined);
   }
   return { url: withDatabase(url, name), appUrl: options.appUrl ? withDatabase(options.appUrl, name) : undefined };
 }
