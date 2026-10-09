@@ -2404,6 +2404,15 @@ class Wire(unittest.TestCase):
             self.pgwire.connect(**self.pgwire.parse_dsn(dsn.format(port=port))).close()
             self.assertEqual(self.started_with(seen, b"options"), b"-c search_path=app", dsn)
 
+    def test_pgoptions_as_psql_reads_it(self) -> None:
+        # where the connection string gives no options, PGOPTIONS does, as libpq has it; given ones come first
+        with mock.patch.dict(os.environ, {"PGOPTIONS": "-c search_path=env"}):
+            port, seen = self.server(tls=False)
+            self.pgwire.connect(**self.pgwire.parse_dsn(f"host=127.0.0.1 port={port} sslmode=disable")).close()
+            self.assertEqual(self.started_with(seen, b"options"), b"-c search_path=env")
+            dsn = f"host=127.0.0.1 port={port} options='-c search_path=app'"
+            self.assertEqual(self.pgwire.parse_dsn(dsn)["options"], "-c search_path=app")
+
     def test_tls_as_sslmode_says(self) -> None:
         connect = self.pgwire.connect
         crt = os.path.join(ROOT, "tests", "fixtures", "wire_test.crt")

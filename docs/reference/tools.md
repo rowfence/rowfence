@@ -52,8 +52,8 @@ dir  = "alembic/versions"              # where the tool keeps them (each tool ha
 ```
 
 The database is `--db` (before or after the command), else `rowstile.toml`'s, else `DATABASE_URL`, else the
-`PG*` variables (`PGHOST`, `PGPORT`, `PGUSER`, `PGPASSWORD`, `PGDATABASE`, `PGSSLMODE`, `PGSSLROOTCERT`,
-`PGCHANNELBINDING`; not a password file or a service file). Those variables, and the one `database = "env:NAME"`
+`PG*` variables (`PGHOST`, `PGPORT`, `PGUSER`, `PGPASSWORD`, `PGDATABASE`, `PGOPTIONS`, `PGSSLMODE`,
+`PGSSLROOTCERT`, `PGCHANNELBINDING`; not a password file or a service file). Those variables, and the one `database = "env:NAME"`
 names, may be in `.env.local` or `.env` beside `rowstile.toml` (in the current folder while there is none), where
 Next.js, Prisma and many others keep them: the environment comes first, then `.env.local`, then `.env`, and
 `rowstile dev` says when the database came from a file. Nothing else in those files is read, a file that

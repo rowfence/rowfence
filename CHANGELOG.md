@@ -20,6 +20,9 @@ Each release upgrades from the one before it. How releases are numbered and made
   database came from a file, and so does a connection that fails. Nothing else in those files is read, a
   file that is a link out of the folder isn't read, and with `--db` neither is. A Next.js or Prisma app
   keeps its URLs there: `npx rowstile init` and `npx rowstile dev` failed for want of them. (#96)
+- The command reads `PGOPTIONS`, as psql does, where the connection string gives no options: a session's
+  settings (`-c search_path=app`) applied with the policy were psql's alone. From the environment or `.env`, like
+  the other `PG*` variables.
 - `rowstile <command> --help` prints that command's lines of the usage and where the database comes from,
   where it printed the whole usage. `rowstile init --help` says which schema `init` reads when none is
   named: `public`.
