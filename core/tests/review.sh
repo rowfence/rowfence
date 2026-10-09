@@ -98,6 +98,35 @@ sed -i 's/can edit  = share or editor or (parent.edit and {inherit})/can edit  =
 out=$(CLI review --base main 2>&1)
 case "$out" in "Meaning  unchanged: every permission and rule grants the same in"*) ok "a refactor: meaning unchanged, checked in small worlds";; *) bad "refactor" "$out";; esac
 
+echo "-- a pull request whose policy reads a column its own migration of the app adds"
+G checkout -q -- db && G clean -q -fd db
+sed -i 's/^  owner  : user   = owner_id$/  owner  : user   = author_id/' "$P/db/policy.authz"
+CLI migrate >/dev/null
+out=$(CLI --db "dbname=$DB" review --base main 2>&1); rc=$?
+case "$out" in *"Traceback"*) bad "a column the review database doesn't have yet: a traceback" "$out";;
+  *"Access   not computed: the policy does not match this database:"*"column author_id not found in app.files [AZ601]"*"Tests    not run: the migration fails: "*"**It fails on the review database: "*)
+  [ $rc -eq 0 ] && ok "a column the review database doesn't have yet: Access not computed, and why; the review goes on, exit 0" ||
+    bad "a column the review database doesn't have yet: exit" "$rc";;
+  *) bad "a column the review database doesn't have yet" "$out";; esac
+[ "$(PSQL -c "SELECT count(*) || '/' || max(lock) FROM authz.policy_versions")" = "$before" ] &&
+  ok "... and the review database is left as it was" || bad "review left changes after a failed diff"
+G checkout -q -- db && G clean -q -fd db
+
+echo "-- a pull request that lets a service in (a bot that signs in, which the app's own migration adds)"
+PSQL -c "CREATE TABLE app.bots (id bigint PRIMARY KEY)" -c "CREATE TABLE app.folder_bots (folder_id bigint, bot_id bigint)" \
+  -c "INSERT INTO app.bots VALUES (7)" -c "INSERT INTO app.folder_bots VALUES (2, 7)"
+sed -i -e 's/^type org = app.orgs$/type bot = app.bots principal\n\ntype org = app.orgs/' \
+  -e 's/^  editor      : team#member = app.folder_team_access(folder_id -> team_id) where {access = .edit.}$/&\n  bot_viewer  : bot         = app.folder_bots(folder_id -> bot_id)/' \
+  -e 's/^           or linked_into.view  -- links pass on view, not edit$/           or linked_into.view or bot_viewer  -- links pass on view, not edit/' "$P/db/policy.authz"
+CLI migrate >/dev/null
+out=$(CLI --db "dbname=$DB" review --base main --markdown 2>&1)
+case "$out" in *"**Access**: 1 bot gains \`view\` on 1 file; 1 bot gains \`view\` on 1 folder. Nobody loses access."*)
+  ok "Access says who gains: a bot, not a user";; *) bad "Access of a service" "$out";; esac
+case "$out" in *"| gains | \`folder\` view | 1 bot | 1 | bot 7, folder 2: bot_viewer, bot_viewer: a row in app.folder_bots names |"*)
+  ok "... and how it gains, asked as the bot, from what grants it alone";; *) bad "how a service gains" "$out";; esac
+G checkout -q -- db && G clean -q -fd db
+PSQL -c "DROP TABLE app.folder_bots, app.bots"
+
 echo "-- rowstile fmt"
 G checkout -q -- db
 out=$(CLI fmt --check 2>&1); rc=$?

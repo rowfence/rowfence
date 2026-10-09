@@ -1557,6 +1557,16 @@ class Review(unittest.TestCase):
         self.assertIn(("app role", "app role web"), [(c["what"], c["after"]) for c in changed])
         self.assertIn("type user", [c["what"] for c in changed])
         self.assertNotRegex(self.review.text(r), r"(?m)^\s+changed\s")
+        # with its first migration (a lock file at the head, none at the base): the tables it locks are the app's,
+        # not the ones rowstile keeps (its audit trail's triggers, its shares')
+        from authzlib import migrate
+
+        head_lock = migrate.lock_of(database.migratable(text, {})[1])
+        [m] = self.review.review(None, (text, {}, {}), None, head_lock, None, worlds=10)["deploy"]["migrations"]
+        self.assertEqual(
+            sorted(m["locks"]),
+            [f'"app"."{t}"' for t in ("files", "folder_links", "folders", "orgs", "teams", "users")],
+        )
 
     def test_comments_only(self) -> None:
         r = self.run_review(replaced(self.text, "app role app_user\n", "app role app_user   -- the app's role\n\n"))
@@ -1599,7 +1609,8 @@ class Review(unittest.TestCase):
             "  user $ann can view folder 1\n"
         )
         after = {"tests/a.authz": good.replace("can view", "cannot view"), "tests/b.authz": 'test "broken"\n  given\n'}
-        r = self.run_review(self.text, {"tests/a.authz": good}, after)
+        # (one that only the base has, which the pull request takes out, is the base's: not named)
+        r = self.run_review(self.text, {"tests/a.authz": good, "tests/old.authz": 'test "old"\n  given\n'}, after)
         t = r["tests"]
         # a check is on its file's line, not on a line of the policy
         self.assertEqual([(x["test"], x["line"]) for x in t["flipped"]], [("owners", "tests/a.authz line 3")])
@@ -1667,6 +1678,11 @@ class Review(unittest.TestCase):
         )
         self.assertEqual(r["deploy"]["migrations"], [])
         self.assertIn("no lock file, so no migrations: `rowstile apply`", self.review.summary(r)["Deploy"])
+        # a change that means something: its details, and none for migrations there are none of
+        r = self.run_review(replaced(self.text, "  can break_glass = org.member\n", ""), lock=False)
+        md = self.review.markdown(r)
+        self.assertIn("<details><summary>Meaning</summary>", md)
+        self.assertNotIn("<summary>Deploy</summary>", md)
 
     def test_tests_that_flip(self) -> None:
         before = {"t.authz": 'test "carol"\n  user 3 can view file 11\n  user 3 cannot view file 12\n'}
@@ -1822,6 +1838,7 @@ rules app.folders
             ("rules app.folders\n  select : view\n  update : edit\n", ""),  # no rules: the table stays closed
             ("  update : edit\n", "  update : edit\n  update owner_id : edit\n"),  # a column rule narrows
             ("can view = edit or viewer", "can view = viewer or edit"),
+            (" where {not archived}", " where {not archived and not deleted}"),  # fewer rows count
         ):
             self.assertEqual(self.small(old, new)["risk"], [], new)
 
@@ -1979,6 +1996,242 @@ test
         )
         notes = self.review.annotations(r, "db/policy.authz")
         self.assertRegex(notes, r"^::warning file=db/org.authz,line=4,title=rowstile review::a permission widened")
+
+    def test_a_column_rule_is_known_however_its_head_is_written(self) -> None:
+        """`update owner_id before : ...` says what `update owner_id : ...` says, and `update a,b` what `update a, b`
+        says. The review named a rule by its text, and looked for what allows more by the rule as read: the two
+        names didn't meet, and such a column rule loosened went unflagged."""
+        base = replaced(
+            self.SMALL,
+            "  update : edit\n",
+            "  update : edit\n  update owner_id before : owner\n  update org_id,status : owner\n",
+        )
+        for old, new, name in (
+            ("update owner_id before : owner", "update owner_id before : edit", "app.folders update owner_id"),
+            ("update org_id,status : owner", "update org_id,status : edit", "app.folders update org_id, status"),
+        ):
+            r = self.review.review((base, {}, {}), (replaced(base, old, new), {}, {}), worlds=120)
+            self.assertEqual([c["what"] for c in r["meaning"]["changed"]], [f"rule {name}"], name)
+            self.assertIn(
+                ("a write rule loosened", f"`{name}` allows more than before"),
+                [(f["why"], f["flag"].split(" (e.g. ")[0]) for f in r["risk"]],
+                name,
+            )
+        # written the other way, it is the same rule
+        same = replaced(replaced(base, "owner_id before :", "owner_id :"), "org_id,status", "org_id, status")
+        self.assertEqual(self.review.review((base, {}, {}), (same, {}, {}), worlds=40)["meaning"]["equivalent"], "text")
+
+    def test_what_changes_beside_a_condition_it_cannot_read(self) -> None:
+        """A small world draws the rows a condition it can't read holds for by the condition's text, so a reworded one
+        holds for other rows there whatever it says, and what reads it differed there too: a permission that only
+        reordered its `or` around one was said to allow more, with a made-up example; one that only read it was
+        named as the difference that makes it no refactor (when its name came first); an `after` rule too, as
+        `update check`, a word the language refuses."""
+        lock = "{exists (select 1 from app.locks l where l.folder_id = this.id)}"
+        member = "{exists (select 1 from app.org_members m where m.org_id = this.org_id)}"
+        base = replaced(
+            self.SMALL,
+            "  can view = edit or viewer\n",
+            f"  can view = edit or viewer\n  can open = owner and not {lock}\n  can archive = open or org.admin\n",
+        )
+        base = replaced(base, "  update : edit\n", f"  update : edit\n  update org_id after : {member}\n")
+        reworded = replaced(base, "this.id)}", "this.id and true)}").replace("this.org_id)}", "this.org_id and true)}")
+        r = self.review.review(
+            (base, {}, {}), (replaced(reworded, "open or org.admin", "org.admin or open"), {}, {}), worlds=120
+        )
+        self.assertEqual(r["meaning"].get("unreadable"), ["folder.open", "rule app.folders update org_id after"])
+        self.assertIsNone(r["meaning"]["equivalent"])  # what it can't compare is no "unchanged"
+        self.assertNotIn("counterexample", r["meaning"])
+        self.assertEqual({f["why"] for f in r["risk"]}, {"a condition it can't read changed"})
+        self.assertNotIn("not a refactor", self.review.text(r))
+        # what changed beside them is compared as ever: a widening, and its example
+        wider = replaced(reworded, "can view = edit or viewer\n", "can view = edit or viewer or org.see\n")
+        r = self.review.review((base, {}, {}), (wider, {}, {}), worlds=120)
+        self.assertEqual(r["meaning"].get("counterexample", {}).get("what"), "folder.view")
+        self.assertIn("a permission widened", {f["why"] for f in r["risk"]})
+        # a rule written `after` is named so
+        r = self.review.review((base, {}, {}), (replaced(base, f"after : {member}", "after : view"), {}, {}))
+        self.assertIn("not a refactor: rule app.folders update org_id after differs for ", self.review.text(r))
+
+    def test_text_between_dollar_quotes_is_compared_as_written(self) -> None:
+        # $$a  b$$ is a string, as 'a  b' is: its spaces are what it says, not the policy's layout
+        base = replaced(self.SMALL, "{status = 'a  b'}", "{status = $$a  b$$}")
+        r = self.review.review((base, {}, {}), (replaced(base, "$$a  b$$", "$$a b$$"), {}, {}), worlds=40)
+        self.assertIsNone(r["meaning"]["equivalent"])
+        self.assertEqual([c["what"] for c in r["meaning"]["changed"]], ["folder.remove"])
+        self.assertEqual(r["meaning"].get("unreadable"), ["folder.remove"])  # a condition it doesn't read itself
+
+    def test_a_widening_beside_a_condition_it_cannot_read_is_put_down_to_the_where(self) -> None:
+        # a type's where taken off, and a condition it can't read reworded: what allows more does so because more rows
+        # count, not because of the reworded condition (nor of what reads it)
+        base = replaced(
+            self.SMALL,
+            "  can view = edit or viewer\n",
+            "  can view = edit or viewer\n  can open = owner and not {exists (select 1 from app.locks l where "
+            "l.folder_id = this.id)}\n  can archive = open or org.admin\n",
+        )
+        head = replaced(replaced(base, " where {not archived}", ""), "this.id)}", "this.id and true)}")
+        r = self.review.review((base, {}, {}), (head, {}, {}), worlds=120)
+        self.assertEqual(
+            sorted(f["why"] for f in r["risk"]), ["a condition it can't read changed", "a type's where loosened"]
+        )
+
+    def test_a_rule_that_denies_through_a_permission(self) -> None:
+        # `delete : edit and not frozen`: a narrower frozen lets more be deleted
+        base = replaced(self.SMALL, "  update : edit\n", "  update : edit\n  delete : edit and not frozen\n")
+        base = replaced(base, "  can view = edit or viewer\n", "  can view = edit or viewer\n  can frozen = {locked}\n")
+        r = self.review.review(
+            (base, {}, {}), (replaced(base, "= {locked}", "= {locked} and {hard}"), {}, {}), worlds=120
+        )
+        self.assertIn(
+            {"what": "rule app.folders delete", "via": ["folder.frozen"], "line": "line 20"}, r["meaning"]["through"]
+        )
+        self.assertIn(
+            (
+                "a rule loosened through what it uses",
+                "`app.folders delete` allows more than before through `folder.frozen`",
+            ),
+            [(f["why"], f["flag"].split(" (e.g. ")[0]) for f in r["risk"]],
+        )
+
+    def test_a_lock_another_version_wrote_is_current_when_nothing_changes(self) -> None:
+        # a pull request that upgrades rowstile, whose lock file says the new version: no migration, and not behind
+        from authzlib import migrate
+
+        lock = migrate.lock_of(database.migratable(self.text, {})[1])
+        old = replaced(lock, f"# rowstile {authzlib.__version__}:", "# rowstile 0.0.9:")
+        for base_lock, head_lock in ((old, lock), (lock, old)):
+            d = self.review.review((self.text, {}, {}), (self.text, {}, {}), base_lock, head_lock, None)["deploy"]
+            self.assertEqual((d["migrations"], d["lock_current"]), ([], True))
+
+    def test_the_comment_says_which_trees_are_rebuilt(self) -> None:
+        # links that come from shares too: the tree can't be built beside the one in use, it is rebuilt under lock
+        r = self.run_review(
+            replaced(
+                self.text,
+                "  linked_into : folder      = app.folder_links(folder_id -> parent_id)  -- also shown inside these\n",
+                "  linked_into : folder      = app.folder_links(folder_id -> parent_id)  -- also shown inside these\n"
+                "  linked_into : folder shared by share\n",
+            )
+        )
+        self.assertEqual([m["rebuilds"] for m in r["deploy"]["migrations"]], [["folder__linked_into_parent__tree"]])
+        self.assertIn(
+            "  - rebuilds `folder__linked_into_parent__tree`, its tables locked meanwhile\n", self.review.markdown(r)
+        )
+
+    def test_what_is_removed_has_no_after(self) -> None:
+        r = self.small("  can manage = admin\n", "")
+        self.assertTrue(self.review.text(r).endswith("\n  removed  org.manage\n             before: admin\n"))
+
+    def test_a_widening_risk_finds_is_no_refactor(self) -> None:
+        """Meaning and Risk draw their small worlds apart: when Risk finds an example the comparison didn't (here,
+        none at all), Meaning doesn't say unchanged."""
+        with mock.patch.object(self.review, "compare", return_value=None):
+            r = self.small("can view = edit or viewer", "can view = edit or viewer or org.see")
+        self.assertIsNone(r["meaning"]["equivalent"])
+        self.assertIn("a permission widened", {f["why"] for f in r["risk"]})
+        self.assertIn("**Meaning**: 1 permission changed", self.review.markdown(r))
+
+    def test_a_widening_the_comparison_found_is_flagged(self) -> None:
+        """The other way round: when Risk's worlds (here, none) miss what the comparison found, the review said
+        "not a refactor" and "nothing flagged" at once, of a permission that allows more."""
+        for old, new, what, flag in (
+            ("can view = edit or viewer", "can view = edit or viewer or org.see", "folder.view", "`folder.view`"),
+            ("  select : view\n", "  select : view or org.see\n", "rule app.folders select", "`app.folders select`"),
+        ):
+            with mock.patch.object(self.review, "grants_more", side_effect=lambda *_: {}):
+                r = self.small(old, new)
+            ce = r["meaning"].get("counterexample")
+            assert ce is not None
+            self.assertEqual((ce["what"], ce["before"], ce["after"]), (what, False, True))
+            self.assertIn(
+                f"{flag} allows more than before (e.g. user {ce['user']} on folder {ce['object']})",
+                [f["flag"] for f in r["risk"]],
+            )
+
+    def test_a_permission_opened_to_someone_not_signed_in(self) -> None:
+        # signed_in, anyone and nobody are words the review reads: from signed_in to anyone is a widening for someone
+        # not signed in, not "a condition it can't read changed (`{authz.uid() IS NOT NULL}` -> `{true}`)"
+        base = (
+            "app role app_user\ntype user = app.users\ntype doc = app.docs\n  owner : user = owner_id\n"
+            "  can view = owner or signed_in\nrules app.docs\n  select : view\n"
+        )
+        r = self.review.review((base, {}, {}), (replaced(base, "or signed_in", "or anyone"), {}, {}), worlds=40)
+        self.assertNotIn("unreadable", r["meaning"])
+        self.assertEqual(
+            (r["risk"][0]["why"], r["risk"][0]["flag"]),
+            ("a permission widened", "`doc.view` allows more than before (e.g. nobody signed in on doc 1)"),
+        )
+        self.assertNotIn("a condition it can't read changed", {f["why"] for f in r["risk"]})
+        self.assertIn("  not a refactor: doc.view differs for nobody signed in on doc 1\n", self.review.text(r))
+
+    def test_a_base_with_a_mistake_is_said_in_the_language_it_is_written_in(self) -> None:
+        # a base in the language before this one: this one would only say to write its old forms anew
+        old = replaced(self.OLD, "can view = (edit or viewer) and", "can view = (edit or viewer or nosuch) and")
+        with self.assertRaisesRegex(
+            self.review.BaseMistake,
+            r"^the policy at the base has a mistake: line 13: folder has no relation or permission 'nosuch' .*\[AZ203\]$",
+        ):
+            self.review.review((old, {}, {}), (self.NEW, {}, {}), worlds=10)
+        # one that neither reads: as this one says it
+        broken = replaced(self.OLD, "type folder = app.folders\n", "type folder app.folders\n")
+        with self.assertRaisesRegex(self.review.BaseMistake, r"line 1: write `app role app_user`.*\[AZ101\]$"):
+            self.review.review((broken, {}, {}), (self.NEW, {}, {}), worlds=10)
+
+    def test_the_review_data_in_words(self) -> None:
+        """Who gains and loses, said as who they are: a service is no user, nor is someone not signed in (both were
+        counted as users). And a project without a lock file has its policy applied whole on the review data: when
+        that fails, Tests said "the migration fails", and Deploy nothing."""
+        rows = [
+            {"change": "gains", "user_id": "bot:7", "type": "folder", "what": "permission view", "id": "1"},
+            {"change": "gains", "user_id": "bot:7", "type": "folder", "what": "permission view", "id": "2"},
+            {"change": "gains", "user_id": None, "type": "folder", "what": "permission view", "id": "1"},
+            {"change": "gains", "user_id": "3", "type": "folder", "what": "permission view", "id": "1"},
+            {"change": "loses", "user_id": "bot:7", "type": "file", "what": "permission edit", "id": "11"},
+        ]
+        head = replaced(self.text, "  can break_glass = org.member\n", "")
+        for error, deploy in (
+            ("column x not found", " **It fails on the review database: column x not found**"),
+            (None, " Applied on the review database in 0.2 s."),
+        ):
+            ran = {"deployed": None if error else 0.2, "error": error, "tests": [], "how": {}}
+            with (
+                mock.patch.object(database, "diff", return_value=rows),
+                mock.patch.object(database, "review_run", return_value=ran),
+            ):
+                r = self.review.review((self.text, {}, {}), (head, {}, {}), None, None, mock.Mock(), worlds=10)
+            s = self.review.summary(r)
+            self.assertEqual(
+                s["Access"],
+                "1 user, 1 bot and someone not signed in gain `view` on 2 folders. 1 bot loses `edit` on 1 file.",
+            )
+            self.assertIn(
+                "| gains | `folder` view | 1 user, 1 bot and someone not signed in | 2 | bot 7, folder 1; bot 7, folder 2 |",
+                self.review.markdown(r),
+            )
+            self.assertTrue(s["Deploy"].startswith("no lock file, so no migrations: "), s["Deploy"])
+            self.assertTrue(s["Deploy"].endswith(deploy), s["Deploy"])
+            if error:
+                self.assertEqual(s["Tests"], f"not run: applying the policy fails: {error}.")
+
+    def test_how_someone_gains_is_what_grants_it(self) -> None:
+        # authz.explain's answer (as the database gave it): {inherit} holds, inside a part that doesn't, so it is no
+        # part of how bot 7 holds view (the comment said "bot 7, folder 2: {inherit}, bot_viewer, ...")
+        explained = [
+            "yes  bot 7 holds view on folder 2",
+            "  folder.view = edit or viewer or (parent.view and {inherit}) or linked_into.view or bot_viewer",
+            "  no   edit",
+            "  no   (parent.view and {inherit})",
+            "    no   parent.view",
+            "           parent is a folder you can't see",
+            "    yes  {inherit}",
+            "  yes  bot_viewer",
+            "    yes  bot_viewer: a row in app.folder_bots names",
+        ]
+        self.assertEqual(
+            database.granting(explained),
+            ["yes  bot 7 holds view on folder 2", "yes  bot_viewer", "yes  bot_viewer: a row in app.folder_bots names"],
+        )
 
 
 class Graph(unittest.TestCase):

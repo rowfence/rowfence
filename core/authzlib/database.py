@@ -983,6 +983,24 @@ def snapshot(db: Db, limit: int = 500) -> list[str]:
     return [f"{t} {o} {p}: {', '.join(held[(t, o, p)])}" for t, o, p in sorted(held, key=order)]
 
 
+def granting(lines: list[str]) -> list[str]:
+    """The lines of authz.explain's answer that say why it holds: each `yes` with nothing but `yes` above it (a
+    `yes` under a `no`, as `{inherit}` in a `(parent.view and {inherit})` that doesn't hold, grants nothing)."""
+    out: list[str] = []
+    above: list[tuple[int, bool]] = []  # the yes and no lines this one is under: (indent, yes)
+    for line in lines:
+        said = line.strip()
+        if not said.startswith(("yes ", "no ")):
+            continue  # what a permission is, or a note
+        indent = len(line) - len(line.lstrip())
+        above = [a for a in above if a[0] < indent]
+        yes = said.startswith("yes ")
+        if yes and all(y for _, y in above):
+            out.append(said)
+        above.append((indent, yes))
+    return out
+
+
 def review_run(
     db: Db,
     policy: str,
@@ -1015,17 +1033,25 @@ def review_run(
                 out["error"] = getattr(e, "message", str(e))
                 raise Undo from e
             for user, type_, id_, perm in explain:
+                kind, other, pid = user.partition(":")  # another principal than a user: type:id
+                lines: list[str] = []
                 try:
                     with savepoint(db, "authz_review_explain"):
+                        if other:  # asked signed in as it (explain's p_user is a user's id), signed out after
+                            db.rows("SELECT authz.act_as($1, $2)", [kind, pid])
                         lines = [
                             text(r, "l")
                             for r in db.rows(
-                                "SELECT l FROM authz.explain($1, $2, $3, $4) l", [type_, id_, perm, user or None]
+                                "SELECT l FROM authz.explain($1, $2, $3, $4) l",
+                                [type_, id_, perm, None if other else user or None],
                             )
                         ]
+                        raise Undo
+                except Undo:
+                    pass
                 except db.errors:
                     continue
-                out["how"][(user, type_, id_, perm)] = [x.strip() for x in lines if x.strip().startswith("yes")][1:4]
+                out["how"][(user, type_, id_, perm)] = granting(lines)[1:4]
             out["tests"] = test(db, tests)
             raise Undo
     except Undo:
