@@ -75,11 +75,19 @@ jobs:
       - uses: rowstile/rowstile/review-ci/github@v0.1.0-dev   # the release you use
 ```
 
+The review reads the base's policy, the files it includes, its tests and its lock file with git. A file the
+base doesn't have is new: a policy, or a test file added since. <!-- checked: tests/review.sh "the pull request that adds the policy: each declaration added"; tests/review.sh "a test file the base doesn't have: its checks are added, and the review goes on" -->
+But when git can't read one the base has, or
+can't list the base's folders (a partial clone that can't fetch them, a repository missing objects), the
+review stops, exit 2, and says what git can't read and how to fetch it. <!-- checked: tests/review.sh "a policy git lists at the base and can't read: the review stops, exit 2, and says how to fetch it"; tests/review.sh "a file it includes (not a mistake of the base's)"; tests/review.sh "its lock file (not Deploy as if the base had none)"; tests/review.sh "a test file (not the base's tests without it)"; tests/review.sh "a folder git can't list (which test files it holds is unknown)"; tests/review.sh "the folder the policy is in (whether the policy is there is unknown)"; tests/unit_test.py "test_review_stops_where_git_cant_read_the_base" -->
+Read as missing, the policy would be
+reviewed as new and the base's tests left out. So check out the whole history, with no `filter`, as above.
+
 The review reports; it doesn't gate. It exits 0 whatever it finds: a widened permission, a failing test and a
 lock file behind the policy are all in what it prints, for a person to read. <!-- checked: tests/review.sh "rowstile review runs, and exits 0 whatever it found (it reports, the tests gate)" -->
 (It exits 1 for a policy that
 doesn't compile, 2 when it can't run: no `--base` where there is no `main` or `master` to compare with, a commit
-git doesn't know, a database it can't reach.) <!-- checked: tests/review.sh "a mistake in the pull request's policy: check's message, exit 1"; tests/review.sh "and where there is no main or master, asks which commit"; tests/review.sh "a base git doesn't know: said, exit 2 (not the whole policy as new)"; tests/review.sh "a review database that isn't there: can't connect, exit 2" -->
+git doesn't know, a file at the base git can't read, a database it can't reach.) <!-- checked: tests/review.sh "a mistake in the pull request's policy: check's message, exit 1"; tests/review.sh "and where there is no main or master, asks which commit"; tests/review.sh "a base git doesn't know: said, exit 2 (not the whole policy as new)"; tests/review.sh "a policy git lists at the base and can't read: the review stops, exit 2"; tests/review.sh "a review database that isn't there: can't connect, exit 2" -->
 What
 fails a pull request is the other two commands CI runs: `rowstile test`, which exits 1 when a check fails, and
 `rowstile migrate --check`, which exits 1 when the policy changed and no migration was written. <!-- checked: tests/cli.sh "a failing test fails the command, exit 1"; tests/migrations.sh "exit 1, and what changed" -->

@@ -267,6 +267,64 @@ out=$( (cd "$I" && python3 "$OLDPWD/cli/rowstile_cli.py" review --base main db/p
 case "$out" in "Meaning  1 permission added"*) [ $rc -eq 0 ] && ok "a policy that includes files: the base's are read from git too" || bad "includes at the base: exit" "$rc";;
   *) bad "includes at the base" "$out";; esac
 
+echo "-- a base git can't read all of (a repository missing objects: a partial clone that can't fetch them)"
+L="$T/lost"; mkdir -p "$L/db/parts" "$L/db/tests"
+printf 'include "parts/types.authz"\n' > "$L/db/policy.authz"
+printf 'app role web\ntype user = public.users\ntype doc = public.docs\n  owner : user = owner_id\n  can view = owner\n' > "$L/db/parts/types.authz"
+printf 'test "the owner reads"\n  user 1 can view doc 1\n' > "$L/db/tests/a.authz"
+printf 'policy = "db/policy.authz"\ntests = ["db/tests/*.authz"]\n[migrations]\ntool = "sql"\ndir = "db/migrations"\n' > "$L/rowstile.toml"
+LCLI() { ( cd "$L" && python3 "$OLDPWD/cli/rowstile_cli.py" "$@" ); }
+{ git -C "$L" init -q -b main && git -C "$L" config user.email t@example.com && git -C "$L" config user.name t &&
+  LCLI migrate >/dev/null && git -C "$L" add -A && git -C "$L" commit -q -m base; } || bad "setting up the repository whose base loses objects"
+# the pull request: a permission, and a test file the base doesn't have
+printf '  can edit = owner\n' >> "$L/db/parts/types.authz"
+printf 'test "the owner edits"\n  user 1 can edit doc 1\n' > "$L/db/tests/b.authz"
+LCLI migrate >/dev/null
+out=$(LCLI review --base main --json 2>&1); rc=$?
+[ $rc -eq 0 ] && printf '%s' "$out" | python3 -c "import json,sys; t=json.load(sys.stdin)['tests']
+assert [(a['test'], a['check']) for a in t['added']] == [('the owner edits', 'user 1 can edit doc 1')] and not t['removed'], t" &&
+  ok "a test file the base doesn't have: its checks are added, and the review goes on" || bad "a test file added since the base" "$rc $out"
+cp "$L/db/parts/types.authz" "$T/outside.authz"
+out=$(LCLI review --base main "$T/outside.authz" 2>&1); rc=$?
+case "$out" in *"added    app role"*) [ $rc -eq 0 ] && ok "a policy outside the repository: none at the base, reviewed as new, as before" || bad "a policy outside the repository: exit" "$rc";;
+  *) bad "a policy outside the repository" "$out";; esac
+cp "$L/db/parts/types.authz" "$L/db/policy[2].authz"
+out=$(LCLI review --base main "db/policy[2].authz" 2>&1); rc=$?
+case "$out" in *"added    app role"*) [ $rc -eq 0 ] && ok "a new policy whose name has a [ in it: reviewed as new (git doesn't read the name as a pattern)" || bad "a new policy named with a [: exit" "$rc";;
+  *) bad "a new policy named with a [" "$out";; esac
+mv "$L/db/policy[2].authz" "$L/:!policy.authz"
+out=$(LCLI review --base main ':!policy.authz' 2>&1); rc=$?
+case "$out" in *"added    app role"*) [ $rc -eq 0 ] && ok "... nor one at the top whose name starts with :! (git doesn't read it as a pathspec's magic)" || bad "a new policy named :!...: exit" "$rc";;
+  *) bad "a new policy named :!..." "$out";; esac
+rm "$L/:!policy.authz"
+cp -a "$L" "$T/lost.kept"
+fetch=": this repository is missing objects of that commit (a partial clone that can't fetch them? fetch the base's history: fetch-depth: 0 with actions/checkout, and no filter)"
+lost() {  # the review in a copy of the repository missing one object of the base: the one at path $1 there
+  rc=""
+  rm -rf "$L" && cp -a "$T/lost.kept" "$L" && sha=$(git -C "$L" rev-parse "main:$1") &&
+    rm -f "$L/.git/objects/${sha:0:2}/${sha:2}" || { out="the object at $1 not taken out"; return; }
+  out=$(LCLI review --base main 2>&1); rc=$?
+}
+lost db/policy.authz
+[ "$rc" = 2 ] && [ "$out" = "rowstile review: git can't read db/policy.authz at main$fetch" ] &&
+  ok "a policy git lists at the base and can't read: the review stops, exit 2, and says how to fetch it (not the policy as new)" ||
+  bad "a policy git can't read at the base" "$rc $out"
+lost db/parts/types.authz
+[ "$rc" = 2 ] && [ "$out" = "rowstile review: git can't read db/parts/types.authz at main$fetch" ] &&
+  ok "... a file it includes (not a mistake of the base's)" || bad "an included file git can't read at the base" "$rc $out"
+lost db/policy.lock
+[ "$rc" = 2 ] && [ "$out" = "rowstile review: git can't read db/policy.lock at main$fetch" ] &&
+  ok "... its lock file (not Deploy as if the base had none)" || bad "a lock file git can't read at the base" "$rc $out"
+lost db/tests/a.authz
+[ "$rc" = 2 ] && [ "$out" = "rowstile review: git can't read db/tests/a.authz at main$fetch" ] &&
+  ok "... a test file (not the base's tests without it)" || bad "a test file git can't read at the base" "$rc $out"
+lost db/tests
+[ "$rc" = 2 ] && [ "$out" = "rowstile review: git can't list the files at main$fetch" ] &&
+  ok "... a folder git can't list (which test files it holds is unknown)" || bad "a folder git can't list at the base" "$rc $out"
+lost db
+[ "$rc" = 2 ] && [ "$out" = "rowstile review: git can't read db/policy.authz at main$fetch" ] &&
+  ok "... the folder the policy is in (whether the policy is there is unknown)" || bad "the policy's folder git can't list at the base" "$rc $out"
+
 echo "-- a review database whose owner may not switch to the app role"
 # since PostgreSQL 16 a role that makes another gets ADMIN on it, not SET (the suites' owner has
 # createrole_self_grant, which would hide it); the tests run as the app role

@@ -1398,13 +1398,34 @@ def git(*args: str) -> str | None:
     return p.stdout if p.returncode == 0 else None
 
 
+def base_unreadable(what: str, ref: str) -> NoReturn:
+    """The review stops where git can't read the base: read as missing, the policy there would be reviewed as new,
+    and its tests left out."""
+    fail(
+        f"rowstile review: git can't {what} at {ref}: this repository is missing objects of that commit (a partial "
+        "clone that can't fetch them? fetch the base's history: fetch-depth: 0 with actions/checkout, and no filter)",
+        2,
+    )
+
+
 def at_base(ref: str, path: str) -> str | None:
-    """A file's text at a commit (None if it isn't there), for a path relative to here."""
+    """A file's text at a commit (None if it isn't there), for a path relative to here. One git lists there and
+    can't read, or one in a folder git can't list (a repository missing objects: a partial clone that can't fetch
+    them), stops the review."""
     try:
         rel = os.path.relpath(path).replace(os.sep, "/")
     except ValueError:
         return None  # on another drive (Windows): not a file of the repository this folder is in
-    return git("show", f"{ref}:./{rel}" if not rel.startswith("..") else f"{ref}:{rel}")
+    # --: a file of the commit, never a pattern (a name with [ or * that isn't there showed nothing, and no error)
+    text = git("show", f"{ref}:./{rel}" if not rel.startswith("..") else f"{ref}:{rel}", "--")
+    if text is None:  # not there, or there and unreadable: the folders it is in, alone, tell which
+        name = in_repository(path)
+        if name == ".." or name.startswith("../"):
+            return None  # above the repository's top folder: not one of its files
+        entry = git("--literal-pathspecs", "ls-tree", "-z", "--full-tree", ref, "--", name)
+        if entry != "":  # listed (its text can't be read), or a folder on its way git can't list (None)
+            base_unreadable(f"read {relative(path)}", ref)
+    return text
 
 
 def in_repository(path: str) -> str:
@@ -1429,8 +1450,9 @@ def base_policy(ref: str, path: str) -> tuple[str | None, dict[str, str]]:
 
 
 def base_tests(cfg: Config, ref: str) -> dict[str, str]:
-    """The test files rowstile.toml names, as they were at a commit. What git can't read there (a repository
-    missing objects, a partial clone that can't fetch them) is left out: the review goes on without it."""
+    """The test files rowstile.toml names, as they were at a commit. One git lists there and can't read, or a
+    folder of the commit git can't list (a repository missing objects: a partial clone that can't fetch them),
+    stops the review: the base's tests would be read without it."""
     import fnmatch
 
     here = git("rev-parse", "--show-prefix")  # this folder, from the top one
@@ -1438,16 +1460,18 @@ def base_tests(cfg: Config, ref: str) -> dict[str, str]:
     assert here is not None
     # from the top folder, wherever this runs; -z: names as they are (git quotes one with an accent otherwise)
     listed = git("ls-tree", "-r", "-z", "--name-only", "--full-tree", ref)
-    if listed is None:  # the commit's folders can't be read
-        return {}
+    if listed is None:  # which test files the commit holds can't be known
+        base_unreadable("list the files", ref)
     out: dict[str, str] = {}
     for pattern in cfg.test_globs():
         rel_pattern = in_repository(cfg.file(pattern))
         for name in listed.split("\0"):
             if name and fnmatch.fnmatch(name, rel_pattern):
+                shown = posixpath.relpath(name, here.strip() or ".")  # named as read_tests names it
                 text = git("show", f"{ref}:{name}")
-                if text is not None:  # (None: listed, and its text can't be read)
-                    out[posixpath.relpath(name, here.strip() or ".")] = text  # named as read_tests names it
+                if text is None:  # listed, and its text can't be read
+                    base_unreadable(f"read {shown}", ref)
+                out[shown] = text
     return out
 
 
