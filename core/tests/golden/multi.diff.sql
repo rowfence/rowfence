@@ -520,6 +520,10 @@ BEGIN
 END $u$;
 
 CREATE OR REPLACE FUNCTION authz.uid() RETURNS uuid LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path FROM CURRENT AS $uid$ BEGIN RETURN (SELECT u."id" FROM "mt"."users" u WHERE u."id" = (CASE WHEN authz_int.session_ok() AND coalesce(pg_catalog.current_setting('authz.principal_type', true), '') IN ('', 'user') AND pg_catalog.pg_input_is_valid(pg_catalog.current_setting('authz.user_id', true), 'uuid') THEN pg_catalog.current_setting('authz.user_id', true)::uuid END) AND coalesce((u.active), false)); END $uid$;
+-- what it reads, read now (Postgres reads a PL/pgSQL function's queries when they first run)
+DO $read$ BEGIN
+  PERFORM 1 FROM "mt"."users" u WHERE coalesce((u.active), false) LIMIT 0;
+END $read$;
 
 CREATE SCHEMA authz_gen;
 CREATE SCHEMA authz_int;
@@ -980,6 +984,10 @@ BEGIN
     ELSE RETURN true;
   END CASE;
 END $f$;
+-- what it reads, read now (Postgres reads a PL/pgSQL function's queries when they first run)
+DO $read$ BEGIN
+  PERFORM 1 FROM (SELECT NULL::bigint AS object_id, NULL::text AS subject_type, NULL::text AS subject_id, NULL::text AS subject_relation) share WHERE coalesce((subject_type <> 'user' or subject_id = '*' or exists (select 1 from mt.users u where u.id::text = subject_id and u.active)), false) LIMIT 0;
+END $read$;
 
 -- `roles : ... from rel`: a role counts on an object only if what rel links the object to owns it
 CREATE FUNCTION authz_int.role_owned(p_type text, p_id text, p_owner_type text, p_owner_id text) RETURNS boolean

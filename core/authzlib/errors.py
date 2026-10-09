@@ -563,7 +563,8 @@ CODES = {
         "compiled: a column that isn't there (`{nme = 'x'}`), a function it can't find, a syntax error. The "
         "message names the condition's line and gives Postgres's reason (and its hint, such as the column it "
         "meant). Fix the condition. Conditions on a relation's table (`where {...}`) name that table's columns; "
-        "the others, the columns of the type's own table.",
+        "a `shared if {...}`, the share's (`object_id`, `subject_type`, `subject_id`, `subject_relation`); the "
+        "others, the columns of the type's own table.",
         "",
         "",
         when="apply",

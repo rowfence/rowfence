@@ -49,6 +49,20 @@ def denied(item: Expr) -> str:
     return item.item.name
 
 
+def read_now(rows: list[str]) -> str:
+    """What follows a PL/pgSQL function that holds conditions of the policy no view or rule holds (a type's where
+    in authz.uid(), a `shared ... if`): Postgres reads such a function's queries only when they first run, so each
+    condition, `FROM <rows> WHERE <it>`, is read here, and one that doesn't run (a column that isn't there) is
+    refused when applying (AZ613), not on the app's first query. In the part of the function, which a migration
+    that changes it runs whole."""
+    if not rows:
+        return ""
+    return (
+        "\n-- what it reads, read now (Postgres reads a PL/pgSQL function's queries when they first run)\n"
+        "DO $read$ BEGIN" + "".join(f"\n  PERFORM 1 FROM {x} LIMIT 0;" for x in rows) + "\nEND $read$;"
+    )
+
+
 class OutputMixin(RefusalMixin, InsightMixin, GovernanceMixin, IdentityMixin, LintMixin, TreeMixin):
     # --- what sharing a relation needs ---------------------------------------
     def positive_refs(self, node: Expr, out: set[str]) -> set[str]:
@@ -194,6 +208,7 @@ CREATE TRIGGER {q("authz_update_" + str(idx))} BEFORE UPDATE ON {qt(rule.table)}
         body = f"BEGIN RETURN (SELECT u.{q(self.pk(u))} FROM {qt(u.table)} u WHERE u.{q(self.pk(u))} = ({cast}){where}); END"
         attrs = "LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path FROM CURRENT"
         failing = ", or a user that fails the type''s where," if u.where else ""
+        read = read_now([f"{qt(u.table)} u WHERE coalesce(({on_row(u.where, 'u')}), false)"] if u.where else [])
         return f"""-- Who is asking: SELECT authz.act_as('user', '42') first in each transaction (a signed session).
 -- An id the user table doesn't have{failing} counts as nobody.
 DO $u$
@@ -203,7 +218,7 @@ BEGIN
     RAISE EXCEPTION 'authz.uid() returns another type than this policy''s user ids ({u.pktype}); drop it first (DROP FUNCTION authz.uid() CASCADE drops what uses it) [AZ606]';
   END IF;
 END $u$;
-CREATE OR REPLACE FUNCTION authz.uid() RETURNS {u.pktype} {attrs} AS $uid$ {body} $uid$;"""
+CREATE OR REPLACE FUNCTION authz.uid() RETURNS {u.pktype} {attrs} AS $uid$ {body} $uid$;{read}"""
 
     # --- the API app code calls ----------------------------------------------
     def can_sql(self, t: Type, perm: str) -> str:
@@ -352,6 +367,7 @@ END $f$;
         internal functions sharing uses; and authz.share, unshare and the rest of the sharing API."""
         rows: list[str] = []
         ifs: list[str] = []
+        if_rows: list[str] = []  # each condition, on a share's row (read_now)
         for t in self.types.values():
             for r in t.relations.values():
                 for src in r.sources:
@@ -371,6 +387,11 @@ END $f$;
                                 f"      RETURN (SELECT coalesce(({row_cond(src.shared_if, 'share')}), false) FROM (SELECT "
                                 f"p_object_id::{t.pktype} AS object_id, p_subject_type AS subject_type, "
                                 f"p_subject_id AS subject_id, p_subject_relation AS subject_relation) share);"
+                            )
+                            if_rows.append(
+                                f"(SELECT NULL::{t.pktype} AS object_id, NULL::text AS subject_type, NULL::text AS "
+                                f"subject_id, NULL::text AS subject_relation) share "
+                                f"WHERE coalesce(({row_cond(src.shared_if, 'share')}), false)"
                             )
         roles = [(t.name, subject_key(st, sr)) for t in self.types.values() if t.roles for st, sr in t.roles[0]]
         grantable = [(t.name, p) for t in self.types.values() if t.roles for p in t.roles[1]]
@@ -415,7 +436,7 @@ BEGIN
 {chr(10).join(ifs) if ifs else "    WHEN NULL THEN NULL;"}
     ELSE RETURN true;
   END CASE;
-END $f$;"""
+END $f$;{read_now(list(dict.fromkeys(if_rows)))}"""
         owned = [t for t in self.types.values() if t.roles and t.roles_from]
         role_owned = "\n".join(
             f"    WHEN {lit(t.name)} THEN RETURN p_owner_type = {lit(self.role_owner_type(t))} AND p_owner_id IN "
@@ -1352,6 +1373,7 @@ END $keep$;"""
                 + (", or one failing the type's where," if t.where else "")
                 + " counts as nobody)\n"
                 f"CREATE FUNCTION authz_int.{q(t.name + '__me')}() RETURNS {t.pktype} {attrs} AS $me$ {body} $me$;"
+                + read_now([f"{qt(t.table)} w WHERE coalesce(({on_row(t.where, 'w')}), false)"] if t.where else [])
             )
             cases.append(f"    WHEN {lit(t.name)} THEN principal_id := authz_int.{q(t.name + '__me')}()::text;")
         whens = "\n".join(cases)

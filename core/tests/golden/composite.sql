@@ -707,6 +707,10 @@ CREATE TRIGGER authz_shares_canon BEFORE INSERT OR UPDATE OF object_type, object
 
 -- the signed-in bot, if a bot is signed in (an id its table doesn't have, or one failing the type's where, counts as nobody)
 CREATE FUNCTION authz_int."bot__me"() RETURNS bigint LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path FROM CURRENT AS $me$ BEGIN RETURN (SELECT w."id" FROM "cx"."bots" w WHERE w."id" = (CASE WHEN authz_int.session_ok() AND pg_catalog.current_setting('authz.principal_type', true) = 'bot' AND pg_catalog.pg_input_is_valid(pg_catalog.current_setting('authz.user_id', true), 'bigint') THEN pg_catalog.current_setting('authz.user_id', true)::bigint END) AND coalesce((w.active), false)); END $me$;
+-- what it reads, read now (Postgres reads a PL/pgSQL function's queries when they first run)
+DO $read$ BEGIN
+  PERFORM 1 FROM "cx"."bots" w WHERE coalesce((w.active), false) LIMIT 0;
+END $read$;
 -- Who is signed in, whatever their type: SELECT * FROM authz.principal()
 CREATE OR REPLACE FUNCTION authz.principal() RETURNS TABLE (principal_type text, principal_id text)
 LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path FROM CURRENT AS $f$

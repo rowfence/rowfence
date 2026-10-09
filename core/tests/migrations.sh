@@ -114,6 +114,19 @@ case "$out" in *"policy.authz: applied (the whole policy)")
   [ "$(PSQL -c "SELECT count(*) FROM pg_policy WHERE polrelid = 'app.files'::regclass AND polname = 'authz_select'")" = 1 ] &&
   ok "push where a rule's policy was dropped by hand: the whole policy, which makes it again" || bad "push after a dropped policy: it is still gone";;
   *) bad "push after a dropped policy" "$out";; esac
+# a user type's where that doesn't run: the migration that makes authz.uid() again reads it (Postgres would read it on
+# the app's first query), and refuses it with its line, as applying the whole policy does (the user type without its
+# permission, impersonate, whose view would read the where too)
+cp "$P/db/policy.authz" "$T/keep.authz"
+sed -i -e 's/^type user = app.users$/type user = app.users where {this.nme is not null}/' \
+  -e '/^  -- support: an org admin/,/b.user_id = this.id)}$/d' "$P/db/policy.authz"
+grep -q 'impersonate' "$P/db/policy.authz" && bad "the example's user type still has impersonate"
+out=$(CLI push 2>&1); rc=$?
+case "$out" in *"policy line $(grep -n '^type user = ' "$P/db/policy.authz" | cut -d: -f1): the condition {this.nme is not null} doesn't run: column u.nme does not exist [AZ613]"*)
+  [ $rc -eq 1 ] && [ "$(PSQL -c "SELECT count(*) FROM pg_proc WHERE oid = 'authz.uid()'::regprocedure AND prosrc LIKE '%nme%'")" = 0 ] &&
+  ok "push of a user type's where that doesn't run: refused with its line, authz.uid() as it was" || bad "push of a bad where: exit or state" "$rc";;
+  *) bad "push of a user type's where that doesn't run" "$out";; esac
+cp "$T/keep.authz" "$P/db/policy.authz"
 # removing the policy doesn't make a database a development one: what it took is still on record
 fresh "${DB}_4"
 PGOPTIONS="-c client_min_messages=error" psql -X -q -1 -v ON_ERROR_STOP=1 -d "${DB}_4" -f "$first" >/dev/null 2>&1
