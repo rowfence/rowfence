@@ -250,6 +250,11 @@ SELECT test.ok('erin (Acme admin) defines "reviewer" (view) and "writer" (view, 
 SELECT test.ok('a role cannot include what the policy does not let roles grant (share)',
   test.error($$SELECT authz.create_role('org', '1', 'folder', 'boss', ARRAY['share'])$$)
     = 'P0001: custom roles on folder cannot grant share');
+SELECT test.ok('... and there are none for a type without custom roles, even granting nothing, nor for a type the policy doesn''t have',
+  test.error($$SELECT authz.create_role('org', '1', 'team', 'nothing', ARRAY[]::text[])$$)
+    = 'P0001: no custom roles on team in the policy'
+  AND test.error($$SELECT authz.create_role('org', '1', 'foldr', 'reviewer', ARRAY['view'])$$)
+    = 'P0001: no custom roles on foldr in the policy');
 SELECT test.ok('Acme''s roles are listed for Acme members', (SELECT count(*) FROM authz.roles_of('org', '1')) = 2);
 SELECT set_config('test.reviewer', (SELECT id::text FROM authz.roles_of('org', '1') WHERE name = 'reviewer'), false);
 SELECT set_config('test.writer', (SELECT id::text FROM authz.roles_of('org', '1') WHERE name = 'writer'), false);

@@ -64,6 +64,10 @@ Each release upgrades from the one before it. How releases are numbered and made
 
 ### Fixed
 
+- `authz.create_role` made a role for a type without custom roles, or for one the policy doesn't have, when
+  the role granted nothing: a role nobody could be given. Given a permission, it refused, saying roles there
+  "cannot grant" it. It says "no custom roles on team in the policy" (AZ707) for both now. **Upgrading**: apply
+  the policy again (or the next migration).
 - `authz.can`, `authz.who` and `authz.explain` said "no type team in the policy" for a type the policy has but
   that has no permissions, and `authz.perms` and `perms_of` refused it the same way. They say "no permission
   team.view in the policy" now, as `authz.list` did, and `perms` gives none. **Upgrading**: apply the policy

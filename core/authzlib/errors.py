@@ -669,8 +669,9 @@ CODES = {
     "AZ707": Code(
         "Not in the policy",
         "An `authz.*` function was called with a name the policy in force doesn't have: a type, a permission, a "
-        "scope, a caveat, a table with rules, a type that signs in, or the `manage_roles` / `manage_keys` "
-        "permission it needs. Often the app and the database disagree on the policy: apply the migrations.",
+        "scope, a caveat, a table with rules, a type that signs in, custom roles on a type, or the `manage_roles` "
+        "/ `manage_keys` permission it needs. Often the app and the database disagree on the policy: apply the "
+        "migrations.",
         when="runtime",
     ),
     "AZ708": Code(
