@@ -20,6 +20,7 @@ import json
 import os
 import re
 import secrets
+import socket
 import sys
 import threading
 import traceback
@@ -88,6 +89,21 @@ def word(ident: str) -> str:
     return ident if re.fullmatch(r"[^\s{}']+", ident) else "'" + ident.replace("'", "''") + "'"
 
 
+class Server(ThreadingHTTPServer):
+    """Studio's server, whose port on 127.0.0.1 is held by Studio alone. On Windows SO_REUSEADDR lets a socket
+    bind an address and port another one listens on already, so there it is left off, and SO_EXCLUSIVEADDRUSE
+    asked for: a port another program holds is refused, and no other program may bind Studio's while it runs.
+    Elsewhere SO_REUSEADDR stays, which there only lets a restart take the port again while it waits after a
+    close."""
+
+    allow_reuse_address = sys.platform != "win32"
+
+    def server_bind(self) -> None:
+        if sys.platform == "win32":
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        super().server_bind()
+
+
 class Studio:
     def __init__(
         self,
@@ -105,7 +121,7 @@ class Studio:
         # the policy in force, compiled once: (its text and files, the compiler)
         self._compiled: tuple[tuple[str, str], Compiler] | None = None
         self.lock = threading.Lock()
-        self.server: ThreadingHTTPServer | None = None
+        self.server: Server | None = None
 
     # --- the database ----------------------------------------------------------------------------------
     def connect(self) -> pgwire.Connection:
@@ -615,7 +631,7 @@ class Studio:
                 if self.allowed():
                     self.api("POST")
 
-        self.server = ThreadingHTTPServer(("127.0.0.1", self.port), Handler)
+        self.server = Server(("127.0.0.1", self.port), Handler)
         self.port = self.server.server_address[1]
         if background:
             threading.Thread(target=self.server.serve_forever, daemon=True).start()
