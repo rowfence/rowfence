@@ -157,6 +157,12 @@ Each release upgrades from the one before it. How releases are numbered and made
   managed Postgres that made the role but wasn't given it), the tables said "GRANT app_user TO the role Studio
   connects as": they now say what `rowstile test` and `sql --as` say, with the role to grant to, who may run
   the grant, and the code (AZ618).
+- The audit trail's guard holds in every replication role. Its triggers were ordinary ones, which
+  `session_replication_role = replica` turns off, so a superuser who set it could change or delete entries
+  without the DDL the reference says that takes. They fire whatever the session sets now (`ENABLE ALWAYS`),
+  and `authz.trim_audit` turns the guard back on that way; a logical replication subscription that copies the
+  trail still applies the trims made where it is published. **Upgrading**: apply the policy again (or the next
+  migration).
 - An invariant wasn't checked where a permission or a relation of its type was named `never_1` (`never_2` for
   the second invariant, and so on): `authz.check_invariants()` and the policy's tests said it held. Where only a
   mask named such a relation, applying failed instead. Each invariant has a view of its own now. **Upgrading**:

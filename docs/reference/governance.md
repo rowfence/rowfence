@@ -3,11 +3,12 @@
 - **Audit trail** (`authz.audit`): who did what, as whom (the real user during
   "view as"), with the reason from `SET LOCAL authz_ctx.reason = '...'`. Changes to
   relationship tables and columns are recorded too (as relate/unrelate), including
-  TRUNCATE. Nobody can update or delete rows, not even a superuser without first
-  dropping or disabling the trigger (DDL, which DDL logging and event triggers see); the one
-  exception is `authz.trim_audit(keep)`, which removes entries older than that and records that
-  it did (it disables the trigger for its delete, so it holds the trail's lock until the
-  transaction ends: run it at a quiet time).
+  TRUNCATE. Nobody can update or delete rows, whatever the session sets (`session_replication_role`
+  too), not even a superuser without first dropping or disabling the trigger (DDL, which DDL logging
+  and event triggers see). The exceptions are `authz.trim_audit(keep)`, which removes entries older
+  than that and records that it did (it disables the trigger for its delete, so it holds the trail's
+  lock until the transaction ends: run it at a quiet time), and a logical replication subscription
+  that copies the trail, which applies the trims made where it is published (making one is DDL too).
 - **Change feed** (`authz.changes`): every object whose access may have changed,
   including everything below a moved folder, with a position to resume from.
   `{*}` means every object of that type (after a TRUNCATE). `authz.trim_changes()`
