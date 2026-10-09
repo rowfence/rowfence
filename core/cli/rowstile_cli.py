@@ -3,7 +3,7 @@
 
     rowstile dev     [--once] [--no-studio] [--studio-port N]
                                                    on each save: check, diff, push, test, write the clients;
-                                                   Studio on http://localhost:4983 beside it
+                                                   Studio on http://127.0.0.1:4983 beside it
     rowstile studio  [--port N] [--write]          Studio: the tables as anyone, why and how to grant, the graph,
                                                    the access diff, shares and requests (read-only unless --write)
     rowstile migrate [POLICY.authz] [--name NAME] [--check] [--tool T] [--dir D] [--one-phase]

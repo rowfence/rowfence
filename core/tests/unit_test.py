@@ -5464,6 +5464,17 @@ class StudioPort(unittest.TestCase):
             # there it only lets a restart take the port again while it waits after a close
             self.assertNotEqual(s.server.socket.getsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR), 0)
 
+    def test_the_url_names_the_address_studio_listens_on(self) -> None:
+        # not localhost, which a browser may try as ::1 first, where Studio doesn't listen
+        import studio
+
+        s = studio.Studio(None, port=0, token="t0k")
+        s.start()
+        self.addCleanup(s.stop)
+        assert s.server is not None
+        host, port = s.server.server_address[:2]
+        self.assertEqual((host, s.url()), ("127.0.0.1", f"http://127.0.0.1:{port}/?token=t0k"))
+
     @unittest.skipUnless(sys.platform == "win32", WINDOWS_ONLY)
     def test_a_port_another_program_holds_is_refused(self) -> None:
         import studio

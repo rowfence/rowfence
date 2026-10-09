@@ -534,7 +534,9 @@ class Studio:
 
     # --- serving -----------------------------------------------------------------------------------------
     def url(self) -> str:
-        return f"http://localhost:{self.port}/?token={self.token}"
+        """The address Studio listens on, with the token: 127.0.0.1, not localhost, which a browser may try as
+        ::1 first, where Studio doesn't listen (a page opened at localhost by hand is still answered)."""
+        return f"http://127.0.0.1:{self.port}/?token={self.token}"
 
     def start(self, background: bool = True) -> str:
         studio = self
