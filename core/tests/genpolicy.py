@@ -9,8 +9,12 @@ shares, to users, the service, `user:*`, `anyone` and other types' members; perm
 `not`, conditions, `signed_in`, `anyone`, `nobody`, arrows to other types, inheritance (stopped by a condition or not,
 across two types or not) and a deny that inherits; rules, the write rules sometimes with a condition that reads
 another governed table (a subquery, a function called by a quoted name, an operator the app made); invariants.
-Then the tables it reads and their data. A third of the seeds name those tables and columns as an app's own may be
-(AWKWARD: capitals, words SQL reserves, 63 bytes), the policy otherwise the same.
+Some also say what no draw above does, drawn apart so that the rest stays as it was (also()): a starting point with
+a `not` in a permission that inherits, and a relation declared again for an earlier type through a link table (a
+`parent`, or a relation to users). Then the tables it reads and their data. A third of the seeds name those tables
+and columns as an app's own may be (AWKWARD: capitals, words SQL reserves, 63 bytes), the policy otherwise the same.
+Now and then a seed's policy has a twin, checked after it over fewer steps (variants()): the same with no rule at
+all, or with no permission at all, its rules naming relations.
 
 A policy the compiler refuses is skipped (and counted). So is one whose reads Postgres plans slowly (authz.lint()
 warns about its select rule: a check of it takes minutes to hours), and a seed that goes over --seconds: both are
@@ -170,6 +174,57 @@ def make(seed: int, respell: bool | None = None) -> Spec:
     return dataclasses.replace(spec, spelling=Spelling(awkward))
 
 
+def variants(seed: int) -> list[tuple[str, Spec]]:
+    """The seed's policy, and now and then (drawn apart) a twin of it that no policy is otherwise: with no rule at
+    all, or with no permission at all (each type's rules naming its relations). A twin is checked over fewer
+    steps (TWIN_STEPS): it is there for what its SQL leaves out."""
+    spec = make(seed)
+    x = random.Random(f"genpolicy/{seed}/twins")
+    out = [("", spec)]
+    if x.random() < 0.15:
+        out.append(
+            ("without rules", dataclasses.replace(spec, objs=[dataclasses.replace(o, rules=[]) for o in spec.objs]))
+        )
+    if x.random() < 0.15:
+        out.append(("without permissions", without_permissions(spec, x)))
+    return out
+
+
+TWIN_STEPS = 3
+
+
+def without_permissions(spec: Spec, x: random.Random) -> Spec:
+    """The policy with no permission on any type: each keeps the relations a rule may name alone (from columns and
+    link tables, to users, the service and groups that stay), and its rules name them, or {conditions}."""
+    names = [o.name for o in spec.objs]
+    kept: dict[str, list[Rel]] = {}
+    for o in spec.objs:
+        # shares need a permission to share them, and links to rows of a type are followed by one: they go, and so
+        # does a group whose members were shared
+        kept[o.name] = [
+            rel
+            for rel in o.rels
+            if rel.kind in ("column", "table")
+            and rel.name not in ("up", "parent")
+            and not any(s in names for s in rel.subjects)
+            and all(any(m.name == "member" for m in kept.get(s.split("#")[0], [])) for s in rel.subjects if "#" in s)
+        ]
+    groups = {s for rels in kept.values() for rel in rels for s in rel.subjects if "#" in s}
+    objs: list[Obj] = []
+    for o in spec.objs:
+        atoms = list(dict.fromkeys(rel.name for rel in kept[o.name])) or ["{b1}"]
+        rules: list[tuple[str, Node]] = [
+            (head, "{b1}" if head == "insert" else expr(x, atoms, 1)) for head, _ in o.rules
+        ]
+        # every relation is used (AZ208): one no rule names goes into the select rule, but a group, used as one
+        named = " ".join(text(e) for _, e in rules).replace("(", " ").replace(")", " ").split()
+        for name in atoms:
+            if name not in named and f"{o.name}#{name}" not in groups and not name.startswith("{"):
+                rules = [(h, ("or", [e, name]) if h == "select" else e) for h, e in rules]
+        objs.append(Obj(o.name, o.where, kept[o.name], {}, rules))
+    return dataclasses.replace(spec, objs=objs, invariants=[])
+
+
 def make_plain(seed: int) -> Spec:
     r = random.Random(f"genpolicy/{seed}")
     spec = Spec(seed, r.random() < 0.4, r.random() < 0.3, [])
@@ -248,7 +303,35 @@ def make_plain(seed: int) -> Spec:
         inv = (o.name, ("and", [a, r.choice([("not", [b]), "{b1}", ("not", ["{b2}"])])]))
         if inv not in spec.invariants:
             spec.invariants.append(inv)
+    also(spec, random.Random(f"genpolicy/{seed}/also"))
     return spec
+
+
+def also(spec: Spec, x: random.Random) -> None:
+    """What some policies say besides, drawn apart from the rest (x), so that each seed's policy keeps all it drew
+    before: a starting point with a `not` in a permission that inherits (`(r1 and not {b1}) or ... or
+    parent.p2`); `parent` declared again for an earlier type, through a link table (a type's row inside another's);
+    and a relation to users declared again for objects, through a link table (alone in a rule, its users)."""
+    for k, o in enumerate(spec.objs):
+        earlier = [e.name for e in spec.objs[:k]]
+        users = [rel.name for rel in o.rels if rel.kind == "column" and rel.name not in ("up", "parent")]
+        inherits = [
+            p for p, e in o.perms.items() if not isinstance(e, str) and e[0] == "or" and e[1][-1] == f"parent.{p}"
+        ]
+        start = ""
+        if inherits and x.random() < 0.3:
+            p, start = x.choice(inherits), x.choice(users) if users else "{b2}"
+            item: Node = ("and", [start, ("not", ["{b1}"])])
+            e = o.perms[p]
+            assert not isinstance(e, str)
+            o.perms[p] = ("or", [item, *e[1]])
+        # (a deny that inherits through parent can't through another type's: no second source of it there)
+        denied = any(not isinstance(e, str) and e[0] == "and" and ("not", ["p1"]) in e[1] for e in o.perms.values())
+        if earlier and has(o, "parent") and not denied and x.random() < 0.5:
+            o.rels.append(Rel("parent", "table", [x.choice(earlier)], x.random() < 0.4))
+        others = [u for u in users if u != start]
+        if earlier and others and x.random() < 0.2:
+            o.rels.append(Rel(x.choice(others), "table", [x.choice(earlier)]))
 
 
 def has(o: Obj, rel: str) -> bool:
@@ -291,9 +374,9 @@ def policy_text(spec: Spec) -> str:
         out.append(f"type {o.name} = {s.policy_table(o.name)}{s.key()}" + (f" where {archived}" if o.where else ""))
         for rel in o.rels:
             subj = ", ".join(rel.subjects)
-            if rel.name == "parent" and len(rel.subjects) == 2:
+            if rel.kind == "column" and rel.name == "parent" and len(rel.subjects) == 2:
                 src = f"({s.name('parent_type')}, {s.name('parent_id')})"
-            elif rel.name == "parent":
+            elif rel.kind == "column" and rel.name == "parent":
                 src = s.name("parent_id")
             elif rel.kind == "column":
                 src = s.name(f"c_{rel.name}")
@@ -683,49 +766,55 @@ def main() -> None:
     seeds = [args.only] if args.only is not None else range(args.seed, args.seed + args.policies)
     refused: dict[str, int] = {}
     failed = passed = 0
-    slow: list[int] = []
+    slow: list[str] = []
+    twins: dict[str, int] = {}  # checked, by what they leave out
     with tempfile.TemporaryDirectory() as workdir:
-
-        def fails(s: Spec) -> bool:
-            try:
-                return bool(run(s, db, args.steps, workdir, args.seconds))
-            except (Refused, Slow):
-                return False
-
         for seed in seeds:
-            spec = make(seed)
-            if args.only is not None:
-                print(policy_text(spec))
-            try:
-                problems = run(spec, db, args.steps, workdir, args.seconds)
-            except Slow as e:
-                slow.append(seed)
-                print(f"seed {seed}: not checked ({e})", flush=True)
-                continue
-            except Refused as e:
-                code = str(e).rsplit("[", 1)[-1].rstrip("]") if "[" in str(e) else str(e)[:60]
-                refused[code] = refused.get(code, 0) + 1
+            for label, spec in variants(seed):
+                name = f"seed {seed}" + (f" {label}" if label else "")
+                steps = min(args.steps, TWIN_STEPS) if label else args.steps
+
+                def fails(s: Spec, steps: int = steps) -> bool:
+                    try:
+                        return bool(run(s, db, steps, workdir, args.seconds))
+                    except (Refused, Slow):
+                        return False
+
                 if args.only is not None:
-                    print(f"refused: {e}")
-                continue
-            if not problems:
-                passed += 1
-                continue
-            failed += 1
-            print(f"seed {seed}: the database and the evaluator disagree")
-            for p in problems:
-                print("   ", p)
-            if not args.no_shrink:
-                small = shrink(spec, fails)
-                print(f"  the smallest policy found that still fails (seed {seed}):")
-                print("    " + policy_text(small).replace("\n", "\n    ").rstrip())
-                for p in run(small, db, args.steps, workdir):
+                    print(f"{name}:\n{policy_text(spec)}")
+                try:
+                    problems = run(spec, db, steps, workdir, args.seconds)
+                except Slow as e:
+                    slow.append(name)
+                    print(f"{name}: not checked ({e})", flush=True)
+                    continue
+                except Refused as e:
+                    code = str(e).rsplit("[", 1)[-1].rstrip("]") if "[" in str(e) else str(e)[:60]
+                    refused[code] = refused.get(code, 0) + 1
+                    if args.only is not None:
+                        print(f"refused: {e}")
+                    continue
+                if label:
+                    twins[label] = twins.get(label, 0) + 1
+                if not problems:
+                    passed += 1
+                    continue
+                failed += 1
+                print(f"{name}: the database and the evaluator disagree")
+                for p in problems:
                     print("   ", p)
+                if not args.no_shrink:
+                    small = shrink(spec, fails)
+                    print(f"  the smallest policy found that still fails ({name}):")
+                    print("    " + policy_text(small).replace("\n", "\n    ").rstrip())
+                    for p in run(small, db, steps, workdir):
+                        print("   ", p)
     print(
         f"genpolicy seeds {seeds[0]}..{seeds[-1]}: {passed} passed, {failed} failed, "
         f"{sum(refused.values())} refused by the compiler"
         + (f" ({refused})" if refused else "")
-        + (f", {len(slow)} too slow to check (seeds {', '.join(map(str, slow))})" if slow else "")
+        + (f", {len(slow)} too slow to check ({', '.join(slow)})" if slow else "")
+        + (f"; twins checked: {', '.join(f'{n} {k}' for k, n in sorted(twins.items()))}" if twins else "")
     )
     sys.exit(1 if failed else 0)
 
