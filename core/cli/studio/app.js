@@ -10,7 +10,7 @@
 /** @typedef {{database: string, as: string, writable: boolean, types: Type[], tables: string[], principals: string[], policy_file: string | null}} Overview */
 /** @typedef {{id: string | null, visible: boolean, values: Record<string, unknown>, masked: string[], perms: string[]}} Row */
 /** @typedef {{table: string, type: string | null, columns: string[], rows: Row[], offset: number, more: boolean, total: number, visible_total: number}} Rows */
-/** @typedef {{text: string, grants: boolean, more_objects: number, more_people: number, also: string[], fewer_people: number, lines: string[], kinds: string[]}} Way */
+/** @typedef {{text: string, grants: boolean, more_objects: number, more_people: number, also: string[], elsewhere: {type: string, perm: string, n: number}[], fewer_people: number, lines: string[], kinds: string[]}} Way */
 /** @typedef {{holds: boolean, explain: string[], needs: string, tried: boolean, notes: string[], ways: Way[]}} Why */
 /** @typedef {{check: string, named: string}} Test */
 /** @typedef {{change: string, type: string, what: string, users: number, objects: number}} Summary */
@@ -219,9 +219,10 @@ async function why(type, id, perm, out) {
     if (a.ways.length) {
       parts.push(el("p", {}, a.tried ? "Would be granted by (each tried, then undone):" : "Might be granted by (not tried: Studio is read-only here):"));
       parts.push(el("ul", { class: "ways" }, a.ways.map((w) => el("li", {}, w.text, " ", el("code", { class: "muted" }, w.lines.join(", ")),
-        (w.also.length || w.more_objects || w.more_people || w.fewer_people) ? el("div", { class: "also" },
+        (w.also.length || w.more_objects || w.elsewhere.length || w.more_people || w.fewer_people) ? el("div", { class: "also" },
           [w.also.length ? `also gives ${w.also.join(", ")} on it` : "",
            w.more_objects ? `also gives ${perm} on ${w.more_objects} more ${type}${w.more_objects === 1 ? "" : "s"} to them` : "",
+           ...w.elsewhere.map((e) => `also gives ${e.perm} on ${e.n} more ${e.type}${e.n === 1 ? "" : "s"} to them`),
            w.more_people ? `and to ${w.more_people} more ${w.more_people === 1 ? "person" : "people"} on this ${type}` : "",
            w.fewer_people ? `takes it from ${w.fewer_people} ${w.fewer_people === 1 ? "person" : "people"}` : ""].filter(Boolean).join(", ")) : null))));
     } else {

@@ -206,11 +206,16 @@ def main() -> None:
 
     asked, out = granted_by("--as", "user:6", "folder", "2", "view")
     check(
-        "the way that gives the least comes first: a viewer, before an editor",
+        "the way that gives the least comes first: a viewer (and the file in the folder), before an editor",
         asked
-        and asked[0].startswith("share viewer on folder 2 with user 6")
-        and "also gives" not in asked[0]
+        and asked[0] == "share viewer on folder 2 with user 6 (also gives view on 1 more file for user:6)  [line 43]"
         and any(w.startswith("share editor on folder 2 with user 6 (also gives edit on it") for w in asked),
+        out,
+    )
+    check(
+        "... with all it gives: an editor's share higher up gives edit on the folders and the files below too",
+        "share editor on folder 1 with user 6 (also gives edit on it, and view, edit on 3 more folders, and view, "
+        "edit on 3 more files for user:6)  [line 45]" in asked,
         out,
     )
     asked, out = granted_by("--as", "user:3", "folder", "3", "share")
@@ -230,6 +235,13 @@ def main() -> None:
     check(
         "... and when the row is there, left out by the condition, its column changes",
         any(w.startswith("set role = 'admin' on user 3's row of app.org_members for org 1") for w in ways_of_share),
+        said_of_share,
+    )
+    check(
+        "... with all it gives: every folder and file of the org, and its members to impersonate",
+        "set role = 'admin' on user 3's row of app.org_members for org 1 (also gives edit on it, and share, edit on "
+        "5 more folders, and view on 2 more folders, and impersonate on 4 more users, and share, edit on 5 more files, "
+        "and view on 3 more files for user:3)  [line 32]" in ways_of_share,
         said_of_share,
     )
     asked, out = granted_by("--as", "user:2", "folder", "5", "edit")
@@ -547,6 +559,12 @@ def main() -> None:
             and all(x["grants"] for x in w["ways"])
             and w["ways"][0]["more_objects"] > 0
             and shares() == before,
+            w,
+        )
+        check(
+            "... each with all it gives: the editor's share on the folder gives edit on the file inside too",
+            w["ways"][0]["text"] == "share editor on folder 3 with user 3"
+            and w["ways"][0].get("elsewhere") == [{"type": "file", "perm": "edit", "n": 1}],
             w,
         )
         body = {"type": "folder", "id": "3", "relation": "editor", "subject_type": "user", "subject_id": "3"}
@@ -1148,18 +1166,23 @@ CREATE TABLE cn.page_readers (page_id bigint REFERENCES cn.pages, user_id bigint
 CREATE TABLE cn.projects (org_id bigint, id bigint, lead_id bigint REFERENCES cn.users, PRIMARY KEY (org_id, id));
 CREATE TABLE cn.project_members (org_id bigint, project_id bigint, user_id bigint REFERENCES cn.users,
   PRIMARY KEY (org_id, project_id, user_id), FOREIGN KEY (org_id, project_id) REFERENCES cn.projects);
+CREATE TABLE cn.project_groups (org_id bigint, project_id bigint, group_id bigint REFERENCES cn.groups,
+  PRIMARY KEY (org_id, project_id, group_id), FOREIGN KEY (org_id, project_id) REFERENCES cn.projects);
 GRANT USAGE ON SCHEMA cn TO app_user;
 GRANT SELECT ON ALL TABLES IN SCHEMA cn TO app_user;
 -- ann (1) owns docs 1 to 5, each inside the one before, and doc 6, archived; bo (2) is in group 2, which is in
--- group 1; dee (4) is no longer active; bot 1 may view doc 4
+-- group 1, as group 3 is; dee (4) is no longer active; bot 1 may view doc 4; ann leads project (1,5) and is one of
+-- its members, and group 3's members are its members too
 INSERT INTO cn.users VALUES (1, true), (2, true), (3, true), (4, false);
 INSERT INTO cn.bots VALUES (1, 1);
-INSERT INTO cn.groups VALUES (1, NULL), (2, 1);
+INSERT INTO cn.groups VALUES (1, NULL), (2, 1), (3, 1);
 INSERT INTO cn.group_members VALUES (2, 'user', 2);
 INSERT INTO cn.docs VALUES (1, NULL, 1, false), (2, 1, 1, false), (3, 2, 1, false), (4, 3, 1, false),
   (5, 4, 1, false), (6, NULL, 1, true);
 INSERT INTO cn.pages VALUES (1, NULL, true), (2, 1, false);
 INSERT INTO cn.projects VALUES (1, 5, 1);
+INSERT INTO cn.project_members VALUES (1, 5, 1);
+INSERT INTO cn.project_groups VALUES (1, 5, 3);
 """
 WHY_POLICY = """app role app_user
 
@@ -1194,6 +1217,7 @@ type page = cn.pages
 type project = cn.projects (org_id, id)
   lead   : user = lead_id
   member : user = cn.project_members([org_id, project_id] -> user_id)
+  member : grp#member = cn.project_groups([org_id, project_id] -> group_id)
   editor : user, grp#member shared if {subject_type = 'user'}
   can share = lead
   can edit  = lead or member or editor
@@ -1268,6 +1292,15 @@ def corners(db: str) -> None:
         and any(w.startswith("set owner_id of doc 5 to 4") for w in ways),
         said,
     )
+    check(
+        "the owner of the doc above gives all an owner holds there: after the doc's own owner, which gives less",
+        ways[:2]
+        == [
+            "set owner_id of doc 5 to 4 (also gives archive, edit, share on it)  [line 15]",
+            "set owner_id of doc 4 to 4 (also gives view, archive, edit, share on 1 more doc for user:4)  [line 15]",
+        ],
+        said,
+    )
     rc, said, _, after = why("--as", "user:3", "doc", "5", "view")
     check(
         "a row the table refuses (a column no change fills): said, with the database's reason; for the doc and the "
@@ -1299,7 +1332,17 @@ def corners(db: str) -> None:
     )
     check(
         "... a share with the person, and none with the group they are in: `shared if` takes people only",
-        "share editor on project (1,5) with user 2  [line 34]" in ways and not any("grp#member" in w for w in ways),
+        "share editor on project (1,5) with user 2  [line 35]" in ways and not any("grp#member" in w for w in ways),
+        said,
+    )
+    check(
+        "two ways that each give one other permission: the one that gives it on fewer objects first (lead: share on "
+        "the project; group 3: belonging to it)",
+        ways[3:]
+        == [
+            "set lead_id of project (1,5) to 2 (also gives share on it)  [line 32]",
+            "add user 2 to cn.group_members for grp 3 (also gives belong on 1 more grp for user:2)  [line 9]",
+        ],
         said,
     )
     rc, said, ways, after = why("--as", "user:3", "page", "2", "read")
