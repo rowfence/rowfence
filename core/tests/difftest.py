@@ -21,6 +21,9 @@ one transaction) and after every change compares, for every user:
 against a reference evaluator written directly from the language's meaning:
 relations and permissions are sets of object ids, computed together as the
 least fixpoint of the policy. It shares only the parser with the compiler.
+
+With --decisions it says at the end which parts of the policy never decided an
+answer in those checks, whose SQL the run never judged (tests/decisions.py).
 """
 
 from __future__ import annotations
