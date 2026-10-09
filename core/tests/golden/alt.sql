@@ -746,27 +746,39 @@ BEGIN
   END IF;
   v_before := now() - p_keep;
   -- the one way past the trigger is DDL, as the owner, here: nothing a session can set lets a DELETE through
-  -- (ALTER TABLE takes an exclusive lock on the trail until the transaction ends)
+  -- (ALTER TABLE takes an exclusive lock on the trail until the transaction ends); it is on again as it was, in
+  -- every replication role
   ALTER TABLE authz.audit DISABLE TRIGGER authz_audit_append_only;
   DELETE FROM authz.audit a WHERE a.at < v_before;
   GET DIAGNOSTICS n = ROW_COUNT;
-  ALTER TABLE authz.audit ENABLE TRIGGER authz_audit_append_only;
+  ALTER TABLE authz.audit ENABLE ALWAYS TRIGGER authz_audit_append_only;
   INSERT INTO authz.audit (db_role, user_id, action, detail)
   VALUES (authz_int.caller_role(), authz_int.actor(), 'trim_audit',
           jsonb_build_object('before', v_before, 'rows', n));
   RETURN n;
 END $f$;
 
--- The audit trail only grows, except through authz.trim_audit()
+-- The audit trail only grows, except through authz.trim_audit(). Its triggers fire in every replication role
+-- (ENABLE ALWAYS): session_replication_role = replica, which turns ordinary triggers off, leaves them on. A
+-- subscription's worker applies its publisher's rows in that role, and the trims made there with them: a process
+-- Postgres lists as one (pg_stat_subscription), which no session can make itself
 CREATE FUNCTION authz_int.audit_is_append_only() RETURNS trigger
-LANGUAGE plpgsql AS $f$
+LANGUAGE plpgsql SET search_path = pg_catalog, pg_temp AS $f$
 BEGIN
+  IF EXISTS (SELECT 1 FROM pg_catalog.pg_stat_subscription s WHERE s.pid = pg_catalog.pg_backend_pid()) THEN
+    IF TG_OP = 'UPDATE' THEN
+      RETURN NEW;
+    END IF;
+    RETURN OLD;
+  END IF;
   RAISE EXCEPTION 'the audit trail cannot be changed' USING ERRCODE = 'insufficient_privilege', HINT = 'rowstile help AZ711';
 END $f$;
 CREATE TRIGGER authz_audit_append_only BEFORE UPDATE OR DELETE ON authz.audit
   FOR EACH ROW EXECUTE FUNCTION authz_int.audit_is_append_only();
+ALTER TABLE authz.audit ENABLE ALWAYS TRIGGER authz_audit_append_only;
 CREATE TRIGGER authz_audit_no_truncate BEFORE TRUNCATE ON authz.audit
   FOR EACH STATEMENT EXECUTE FUNCTION authz_int.audit_is_append_only();
+ALTER TABLE authz.audit ENABLE ALWAYS TRIGGER authz_audit_no_truncate;
 
 -- shares and role assignments
 CREATE FUNCTION authz_int.on_grant() RETURNS trigger

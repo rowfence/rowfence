@@ -86,6 +86,14 @@ admin "shares dropped when the policy is applied (their row is gone) are recorde
 expect_code "the trail cannot be edited, even by an administrator" "42501: the audit trail cannot be changed" -c "RESET ROLE" -c "DELETE FROM authz.audit"
 expect_code "... or emptied" "42501: the audit trail cannot be changed" -c "RESET ROLE" -c "TRUNCATE authz.audit"
 expect_code "... or an entry changed" "42501: the audit trail cannot be changed" -c "RESET ROLE" -c "UPDATE authz.audit SET reason = 'nothing happened'"
+# the guard holds in every replication role: session_replication_role = replica (a superuser's to set) turns
+# ordinary triggers off, not these
+if [ -n "${PGSUPERUSER:-}" ]; then
+  REPLICA=(-U "$PGSUPERUSER" -c "RESET ROLE" -c "SET session_replication_role = replica")
+  expect_code "... nor by a superuser in replica role: an entry deleted" "42501: the audit trail cannot be changed" "${REPLICA[@]}" -c "DELETE FROM authz.audit"
+  expect_code "... an entry changed" "42501: the audit trail cannot be changed" "${REPLICA[@]}" -c "UPDATE authz.audit SET reason = 'nothing happened'"
+  expect_code "... or the trail emptied" "42501: the audit trail cannot be changed" "${REPLICA[@]}" -c "TRUNCATE authz.audit"
+fi
 expect_code "the app role cannot read it" "42501: permission denied for table audit" -c "SELECT count(*) FROM authz.audit"
 
 echo "-- the change feed"
@@ -400,8 +408,12 @@ admin "... and the trim is recorded" "trim_audit|$N" \
 expect_code "the trail still cannot be edited otherwise" "42501: the audit trail cannot be changed" -c "RESET ROLE" -c "DELETE FROM authz.audit"
 expect_code "... whatever the session sets" "42501: the audit trail cannot be changed" -c "RESET ROLE" -c "SET authz_int.trim_before = '2999-01-01'" \
   -c "DELETE FROM authz.audit"
-admin "... and the trigger is on again after a trim" "O" \
+admin "... and the trigger is on again after a trim, in every replication role" "A" \
   "SELECT tgenabled FROM pg_trigger WHERE tgrelid = 'authz.audit'::regclass AND tgname = 'authz_audit_append_only'"
+if [ -n "${PGSUPERUSER:-}" ]; then
+  expect_code "... so a superuser in replica role still can't delete an entry" "42501: the audit trail cannot be changed" "${REPLICA[@]}" \
+    -c "DELETE FROM authz.audit"
+fi
 expect_code "the app role cannot trim" "42501: permission denied for function trim_audit" -c "SELECT authz.trim_audit(interval '0')"
 # emptying a governed table whose own columns hold relations (a file's folder and owner): last, the files are gone
 POS=$(PSQL -c "SELECT coalesce(max(pos), 0) FROM authz.changes")
