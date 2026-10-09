@@ -387,6 +387,18 @@ admin "... and one a failed build left unfinished doesn't" "1" \
   "SELECT count(*) FROM authz.lint() WHERE object = 'app.team_members.user_id' AND problem LIKE 'no index starts with this column%'"
 PSQL -c "DROP INDEX app.team_members_user_id_idx" -c "DELETE FROM app.team_members WHERE (team_id, user_id) = (11, 1)" \
      -c "CREATE INDEX team_members_user_id_idx ON app.team_members (user_id)" >/dev/null
+# the audit trail's guard back for ordinary sessions only, as ENABLE TRIGGER ALL leaves it (a data-only pg_restore
+# --disable-triggers ends with it): lint says so, and rowstile reapply puts it back in every replication role
+# (applied by the command first: reapply applies again what the command applied)
+bash tests/coverage_functions.sh "$DB"
+python3 cli/rowstile_cli.py --db "dbname=$DB" apply example/docs.authz >/dev/null 2>&1
+PSQL -c "ALTER TABLE authz.audit ENABLE TRIGGER authz_audit_append_only" >/dev/null
+admin "lint finds the audit trail's guard on in ordinary sessions only, and says what puts it back" "warning" \
+  "SELECT severity FROM authz.lint() WHERE object = 'authz.audit'
+     AND problem LIKE 'the trigger authz_audit_append_only guards it in ordinary sessions only:%. rowstile reapply puts it back, in every replication role'"
+bash tests/coverage_functions.sh "$DB"
+python3 cli/rowstile_cli.py --db "dbname=$DB" reapply >/dev/null 2>&1
+admin "... and nothing once rowstile reapply has run" "0" "SELECT count(*) FROM authz.lint() WHERE object = 'authz.audit'"
 
 echo "-- retention"
 POS=$(PSQL -c "SELECT max(pos) FROM authz.changes")

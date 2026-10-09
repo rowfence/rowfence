@@ -161,8 +161,9 @@ Each release upgrades from the one before it. How releases are numbered and made
   `session_replication_role = replica` turns off, so a superuser who set it could change or delete entries
   without the DDL the reference says that takes. They fire whatever the session sets now (`ENABLE ALWAYS`),
   and `authz.trim_audit` turns the guard back on that way; a logical replication subscription that copies the
-  trail still applies the trims made where it is published. **Upgrading**: apply the policy again (or the next
-  migration).
+  trail still applies the trims made where it is published. `authz.lint()` warns when the guard isn't on in
+  every replication role (a data-only `pg_restore --disable-triggers` leaves it on in ordinary sessions only),
+  and says that `rowstile reapply` puts it back. **Upgrading**: apply the policy again (or the next migration).
 - An invariant wasn't checked where a permission or a relation of its type was named `never_1` (`never_2` for
   the second invariant, and so on): `authz.check_invariants()` and the policy's tests said it held. Where only a
   mask named such a relation, applying failed instead. Each invariant has a view of its own now. **Upgrading**:
