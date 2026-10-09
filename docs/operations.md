@@ -90,7 +90,10 @@ is for development databases.
    it makes the same, there is nothing to write, and `rowstile migrate --check` passes as before.
    (Databases that don't take migrations: `rowstile reapply`.)
 
-The tests (`core/tests/apply.sh`) apply a policy another version applied, and check nothing else changed.
+The tests (`core/tests/upgrade.sh`) install the release before this one and make databases with it, then
+upgrade them: with the next migration, with `rowstile reapply`, with `rowstile apply`, and with `rowstile push`
+for a development database. Each then holds what this version makes on a new database, and the shares, API keys
+and requests made before still work.
 
 ## Backups
 

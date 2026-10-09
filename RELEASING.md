@@ -28,8 +28,9 @@ An alpha or a candidate is installed by asking for it: `npm i rowstile@next`, `p
 `rowstile==0.2.0a1`), the image by its version. A version's alphas come before its candidates, and the
 command orders them so: `0.2.0-alpha.2`, then `0.2.0-rc.1`, then `0.2.0`.
 
-Every release upgrades from the one before it, and that is tested. What 1.0 promises beyond that is decided
-before 1.0.
+Every release upgrades from the one before it, and that is tested: `core/tests/upgrade.sh` installs the newest
+release on PyPI older than the checkout's version, and upgrades databases it made. What 1.0 promises beyond that
+is decided before 1.0.
 
 A build from `main` records its version with a hash of the compiler's sources (`0.2.0-dev+3f2a9c1e8b7d`), so
 `rowstile apply` never takes a database applied by one build as up to date for another.

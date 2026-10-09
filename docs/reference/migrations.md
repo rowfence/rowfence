@@ -51,7 +51,7 @@ enough. <!-- checked: tests/apply.sh "rowstile apply, on a database with no exte
 - **The first migration** is the whole policy, which also applies over a database that already has
   one (applied with `rowstile apply`). <!-- checked: tests/unit_test.py "test_the_first_is_the_whole_policy"; tests/migrations.sh "which says it is the whole policy" -->
 - **Upgrading rowstile** is the next migration when the new version makes something differently:
-  `rowstile migrate --check` says so, and `rowstile migrate` writes it. <!-- checked: tests/unit_test.py "test_a_changed_step_every_migration_runs_is_a_migration" -->
+  `rowstile migrate --check` says so, and `rowstile migrate` writes it. <!-- checked: tests/unit_test.py "test_a_changed_step_every_migration_runs_is_a_migration"; tests/upgrade.sh "exit 1, the new version makes something differently"; tests/upgrade.sh "migrate writes the migration from the old lock file to this version" -->
   A new version that makes the same
   needs no migration. <!-- checked: tests/migrations.sh "exit 0 after an upgrade that makes the same"; tests/unit_test.py "test_a_new_version_alone_needs_no_migration" -->
   The other way round is refused: a command older than the version that last wrote the

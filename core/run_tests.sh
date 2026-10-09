@@ -189,6 +189,9 @@ record $? "children"
 step "policy changes as migrations: each tool's files, in order, out of order, push, trees built beside"
 tests/migrations.sh
 record $? "migrations"
+step "upgrading: databases the release before made (from PyPI), pushed to, applied and migrated by this version"
+tests/upgrade.sh
+record $? "upgrade"
 step "rowstile review and fmt: a pull request in a git repository, with a review database"
 tests/review.sh
 record $? "review"
