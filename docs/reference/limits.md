@@ -36,7 +36,7 @@ above takes 290 ms instead of 32). The audit trail and change feed add about 15 
 - **Nested groups are expanded per query**, walking up from the user's own groups: with 20,000
   teams in chains ten deep, opening a folder given to the top of one takes 1.7 ms (1.5 ms with chains
   one deep) and `authz.can` 0.2 ms (`benchmark.sql`). A stored closure would only pay off for much
-  deeper or wider nesting, and couldn't honour expiring shares.
+  deeper or wider nesting, and couldn't honour expiring shares. <!-- unchecked: why rowstile is built this way, not what it does -->
 - **A read costs what its reader holds.** A rule looks the object's ancestors up among the folders where the
   reader's permission starts (the ones they own, are shared, or reach through a team), and that set is worked
   out for each query: about a millisecond per thousand. With a million folders and everything in memory,
@@ -46,7 +46,7 @@ above takes 290 ms instead of 32). The audit trail and change feed add about 15 
 - **Reads through the rules run on one CPU.** rowstile's functions aren't marked parallel safe: a session's
   signature is bound to its backend, which a parallel worker isn't. So Postgres never splits a read through
   the rules between workers: counting 200,000 files took 28 ms through them, 5.5 ms as the owner with two
-  workers.
+  workers. <!-- checked: tests/adversarial.sh "none parallel safe" -->
 - **A big policy needs room in Postgres's lock table.** Applying it whole (or a first migration) takes a lock
   on each object it makes, in one transaction, and the table holds `max_locks_per_transaction` for each
   connection: 6,400 by default. GitLab's thousand tables, drafted by `rowstile init`, make about 45,000; applying
@@ -55,7 +55,7 @@ above takes 290 ms instead of 32). The audit trail and change feed add about 15 
   restart; on managed Postgres, a parameter).
 - **Identity providers**: `authz.sync_members` takes the member list; there is no SCIM
   endpoint. JWTs are HS256 only (no RS256/JWKS in plpgsql); for asymmetric tokens,
-  verify in your backend and sign in from there ([Identity](identity.md)), or use an API key.
+  verify in your backend and sign in from there ([Identity](identity.md)), or use an API key. <!-- checked: tests/identity.sh "alg none" -->
 - **Writes cost more**: each closure table is maintained on every structural write,
   and structural writes to one type are serialized. Inheritance conditions that read
   other tables are re-evaluated for every row of the type when those tables change.
@@ -72,7 +72,8 @@ above takes 290 ms instead of 32). The audit trail and change feed add about 15 
 - **Partitions go through their table**: apply turns row-level security on, with no rules
   of their own, for the partitions of a governed table and the tables that inherit from it,
   so the app role reads and writes them only through the table (whose rules and triggers
-  are on it). Postgres copies a table's row triggers to its partitions, not to a table that
+  are on it). <!-- checked: tests/children.sh "and the partition is closed: the app role reads it through its table"; tests/adversarial.sh "reading it directly, once applied again"; tests/adversarial.sh "adding to it directly" -->
+  Postgres copies a table's row triggers to its partitions, not to a table that
   inherits from it (`CREATE TABLE ... INHERITS`): apply gives those the row triggers too, so
   a rule on a column is checked on the rows stored there. A partition made after apply has
   its table's rules and triggers from the start, for what is read and written through the
@@ -90,7 +91,7 @@ above takes 290 ms instead of 32). The audit trail and change feed add about 15 
 - **Link rows are trusted as they are**: a row in a link table (`team_members`,
   `folder_teams`) grants what it says even when the object it names was deleted. Give link
   tables foreign keys to their objects with `ON DELETE CASCADE` (and `ON UPDATE CASCADE` for
-  keys that change), as you would anyway. Shares are removed with their objects by rowstile.
+  keys that change), as you would anyway. Shares are removed with their objects by rowstile. <!-- checked: tests/scenario.sql "so it goes with its row"; tests/principals.sh "deleting a user deletes the shares to them" -->
   (A type with a `where` looks its rows up, so a leftover row naming one of its objects counts
   for nothing; don't rely on it.)
 - **A permission named many times over is slow to plan.** Each permission is a view, and Postgres
@@ -104,14 +105,17 @@ above takes 290 ms instead of 32). The audit trail and change feed add about 15 
   pays for each of them.
   Planning is paid by every query that isn't a prepared statement. One that is gets planned in full its first
   five runs on a connection, and then Postgres usually keeps the plan: a read that took 13 ms to plan took
-  0.1 ms from its sixth run. Whether queries are prepared is the driver's doing, not the policy's. asyncpg and
+  0.1 ms from its sixth run. <!-- unchecked: how Postgres plans prepared statements, and a time measured by hand -->
+  Whether queries are prepared is the driver's doing, not the policy's. asyncpg and
   postgres.js prepare every query, and psycopg one it has run five times. node-postgres prepares only a query
   given a `name`, and Prisma's `pg` adapter only with its `statementNameGenerator` option: without them, each
-  query is planned anew. So is every query behind a pooler that keeps no prepared statements, where the drivers
-  are told to make none ([Behind a pooler](../operations.md#behind-a-pooler)).
-  `authz.lint()` warns when a table's select rule passes 50 (applying shows it). Name each permission once on
+  query is planned anew. <!-- unchecked: how other projects' drivers behave, which no check here holds them to -->
+  So is every query behind a pooler that keeps no prepared statements, where the drivers
+  are told to make none ([Behind a pooler](../operations.md#behind-a-pooler)). <!-- unchecked: how poolers and drivers behave, which no check here holds them to -->
+  `authz.lint()` warns when a table's select rule passes 50 (applying shows it). <!-- checked: tests/unit_test.py "test_many_expansions_are_a_lint_warning" -->
+  Name each permission once on
   the way: `can edit = owner or editor`, `can view = edit or viewer`, not `view` written out again inside
-  three others. The same name twice in one `and` or `or` counts once.
+  three others. The same name twice in one `and` or `or` counts once. <!-- checked: tests/unit_test.py "test_an_operand_named_twice_is_written_once" -->
 - **Composite keys cost more to check** than single-column ones: ids are built as text per row
   (20,000 folders keyed `(org_id, id)`: a list of 7,000 takes about 0.4 s). The benchmark
   gate is measured on single keys.
@@ -122,10 +126,11 @@ rowstile is a preview until 1.0. A minor release (0.1 to 0.2) may change the pol
 functions, the SDKs, the error codes and the file formats (`rowstile.toml`, the lock file). What it does keep:
 
 - **Each release upgrades from the one before it**: a database applied by 0.1 is migrated by 0.2, and the
-  suites test it. Skipping a release is not tested.
+  suites test it. <!-- unchecked: no suite yet starts from a database another release made; apply.sh and migrations.sh only change the version a database or a lock file names -->
+  Skipping a release is not tested.
 - **The changelog says what changed**, and its **Upgrading** says what to do: a policy line to rewrite, a call
   to rename, a migration to make.
-- **A patch (0.1.1) only fixes.** Nothing to do when upgrading.
-- **Security fixes go into the latest release only** ([SECURITY.md](../../SECURITY.md)).
+- **A patch (0.1.1) only fixes.** <!-- unchecked: how releases are made (RELEASING.md), which no test can hold --> Nothing to do when upgrading.
+- **Security fixes go into the latest release only** ([SECURITY.md](../../SECURITY.md)). <!-- unchecked: how fixes are released (SECURITY.md), which no test can hold -->
 
 What 1.0 promises is decided before 1.0, and this section is replaced by it.

@@ -3,33 +3,33 @@
 | command | what |
 |---|---|
 | `rowstile init [--schema app] [--users app.users]` | a first policy drafted from your tables and foreign keys, a test file, `rowstile.toml`, and a note for coding agents in `AGENTS.md` (see below) |
-| `rowstile dev [--once] [--studio-port 4983]` | on every save of the policy or its tests: check, show who gains and loses access, push, test, write the clients; a mistake stops it before applying. With `[migrations]`, it writes the migration once you stop editing. Studio runs beside it, and can write, as with `rowstile studio --write` (`--no-studio`: not; on a port another program holds, dev says so and goes on without it) |
-| `rowstile studio [--port 4983] [--write]` | Studio, a local web page: the app's tables as anyone (the rows they can't see greyed; a masked column they may not read shown empty, marked `masked`, as they get it), why they hold a permission or not and what would grant it, the policy as a graph, the policy file's access diff on this data, shares and pending requests, and a test from "Ann should see this". Read-only unless `--write` (then shares and decisions are made as the person you view as); it listens on 127.0.0.1 only, and the address it prints carries a token |
-| `rowstile why --as user:42 folder 7 edit` | yes and why; or no, why not, and the smallest changes to the data that would grant it: each is tried in a savepoint and undone, and comes with what else it would grant |
-| `rowstile migrate [p.authz] [--name N] [--check]` | the policy's changes since the lock file, as a migration for your tool (no database needed); `--check` exits 1 when a change has no migration (for CI) |
-| `rowstile push [p.authz] [--development]` | a development database brought to the policy by the same migration (never production); `--development` marks a database that already has a policy as one, once |
-| `rowstile review [--base main] [--markdown\|--json\|--annotations] [--db DSN]` | what the change since `--base` does: meaning, access (on a review database), risk, tests, deploy; the pull request comment with `--markdown` |
-| `rowstile fmt [--check] [files]` | writes policies and test files one way; `--check` exits 1 when one isn't (for CI) |
-| `rowstile apply [p.authz] [--force]` | apply it whole, with the files it includes (read from disk by the command), unless it is in force already (the same text and build, and what it made still there: row-level security on, its policies and triggers). `--force` applies in any case and computes every inheritance table again, which a plain apply keeps: what to run when `authz.verify()` says false |
-| `rowstile check p.authz` | only report mistakes, as `file: line N: message [AZ201]`; exit 1 if there are any |
+| `rowstile dev [--once] [--studio-port 4983]` | on every save of the policy or its tests: check, show who gains and loses access, push, test, write the clients; a mistake stops it before applying. <!-- checked: tests/devx.sh "compiles, applies, tests, writes the client"; tests/devx.sh "says before each push who gains and loses what: rows by table, permissions by type"; tests/devx.sh "a mistake stops it before applying, exit 1" --> With `[migrations]`, it writes the migration once you stop editing. <!-- checked: tests/devx.sh "and writes the migration once the saves stop"; tests/migrations.sh "a save, then quiet: the migration is written, named after what changed" --> Studio runs beside it, and can write, as with `rowstile studio --write` (`--no-studio`: not; on a port another program holds, dev says so and goes on without it) |
+| `rowstile studio [--port 4983] [--write]` | Studio, a local web page: the app's tables as anyone (the rows they can't see greyed; a masked column they may not read shown empty, marked `masked`, as they get it), why they hold a permission or not and what would grant it, the policy as a graph, the policy file's access diff on this data, shares and pending requests, and a test from "Ann should see this". <!-- checked: tests/studio_test.py "the rows as bob: some hidden, each with his permissions"; tests/studio_test.py "a viewer sees the rows, and the masked column as they get it: empty, and named"; tests/studio_test.py "why not, and the changes that might grant it, none tried (read-only)"; tests/studio_test.py "the access diff of a changed file: who gains what, on this data, and nothing applied"; tests/studio_test.py "the shares and requests"; tests/studio_test.py "a test from what should hold: the check on the data there now" --> Read-only unless `--write` (then shares and decisions are made as the person you view as); it listens on 127.0.0.1 only, and the address it prints carries a token <!-- checked: tests/studio_test.py "read-only: no shares made"; tests/studio_test.py "it says it can write, and does"; tests/studio_test.py "a share as the folder's owner, and carol can edit it"; tests/unit_test.py "test_the_url_names_the_address_studio_listens_on"; tests/studio_test.py "the API needs the token" --> |
+| `rowstile why --as user:42 folder 7 edit` | yes and why; or no, why not, and the smallest changes to the data that would grant it: each is tried in a savepoint and undone, and comes with what else it would grant <!-- checked: tests/studio_test.py "the smallest change first: a share on the folder itself"; tests/studio_test.py "with what else it grants, and the policy line it adds to"; tests/studio_test.py "nothing it tried stays" --> |
+| `rowstile migrate [p.authz] [--name N] [--check]` | the policy's changes since the lock file, as a migration for your tool (no database needed); `--check` exits 1 when a change has no migration (for CI) <!-- checked: tests/migrations.sh "rowstile migrate writes the first migration and db/policy.lock, with no database"; tests/migrations.sh "exit 1, and what changed" --> |
+| `rowstile push [p.authz] [--development]` | a development database brought to the policy by the same migration (never production); `--development` marks a database that already has a policy as one, once <!-- checked: tests/migrations.sh "a database the migrations set up isn't pushed to until someone marks it as a development database"; tests/migrations.sh "marks it, and brings it along with the migration it would write"; tests/migrations.sh "a second change is pushed too" --> |
+| `rowstile review [--base main] [--markdown\|--json\|--annotations] [--db DSN]` | what the change since `--base` does: meaning, access (on a review database), risk, tests, deploy; the pull request comment with `--markdown` <!-- checked: tests/review.sh "Meaning: what changed, and what changes through it"; tests/review.sh "Access: who gains what, on the review data"; tests/review.sh "the comment, with its marker and details" --> |
+| `rowstile fmt [--check] [files]` | writes policies and test files one way; `--check` exits 1 when one isn't (for CI) <!-- checked: tests/review.sh "exit 1, and which file"; tests/review.sh "fmt writes it; then" --> |
+| `rowstile apply [p.authz] [--force]` | apply it whole, with the files it includes (read from disk by the command), unless it is in force already (the same text and build, and what it made still there: row-level security on, its policies and triggers). <!-- checked: tests/cli.sh "apply reads the included files from disk"; tests/apply.sh "again: unchanged"; tests/apply.sh "or row-level security turned off on a table with rules"; tests/apply.sh "or a trigger it made on an app table dropped" --> `--force` applies in any case and computes every inheritance table again, which a plain apply keeps: what to run when `authz.verify()` says false <!-- checked: tests/apply.sh "applies the same text again"; tests/apply.sh "applying again keeps them as they are (unchanged tables are kept)"; tests/apply.sh "and so does apply" --> |
+| `rowstile check p.authz` | only report mistakes, as `file: line N: message [AZ201]`; exit 1 if there are any <!-- checked: tests/cli.sh "check names the included file and line, exit 1"; tests/cli.sh "check: ok, exit 0"; tests/cli.sh "check, graph and client of a file need no database" --> |
 | `rowstile help AZ201` | what a mistake's code means, and the same mistake fixed ([error codes](../errors/README.md); `help errors` lists them) |
-| `rowstile prove [p.authz] [--worlds N]` | every invariant in many small worlds, with no database: the smallest counterexample (exit 1), or that none was found. A data check (`authz.check_invariants()`) says the data keeps it; prove says whether the policy does |
+| `rowstile prove [p.authz] [--worlds N]` | every invariant in many small worlds, with no database: the smallest counterexample (exit 1), or that none was found. <!-- checked: tests/confidence_test.py "an invariant the policy doesn't guarantee: exit 1, and the smallest counterexample"; tests/confidence_test.py "one it does: exit 0" --> A data check (`authz.check_invariants()`) says the data keeps it; prove says whether the policy does <!-- checked: tests/governance.sh "the example data keeps the invariant"; tests/governance.sh "a Globex user owning an Acme folder breaks it"; tests/mcp_test.py "prove: the docs example's counterexample (an owner outside the org may share)" --> |
 | `rowstile test --coverage` | the tests, then the branches of each permission no passing check makes true, with their lines (`rowstile dev` shows how many on each save). The checks that count are the `can` ones (`user 1 can view folder 3`): a `cannot`, or a statement run `as` someone, covers nothing |
 | `rowstile snapshot [--check]` | who holds what on this database's data, one sorted line per object and permission (`access.snapshot` beside the policy): on review data, commit it, and a pull request that changes access changes it; `--check` exits 1 when it is out of date |
 | `rowstile indexes [--check]` | the lookups the policy makes into the app's tables that no index serves, why, and the line to add for your migration tool (rowstile doesn't add indexes to your tables: your ORM's diff would see them); `dev` warns at start |
 | `rowstile plans [--as user:1]`, `rowstile bench` | each governed table read as someone, timed, with full scans and per-row subplans named; p50 and p95 of reads, lists, checks and updates (undone) as people in the data |
-| `rowstile diff p.authz [--users 1,2]` | who gains and loses what (see [Governance](governance.md)); changes nothing |
-| `rowstile lint` | what `authz.lint()` finds, the worst first; exit 1 on an error or a warning |
-| `rowstile test [tests.authz ...]` | the current policy's tests, these named tests, and the invariants; exit 1 if any fails |
+| `rowstile diff p.authz [--users 1,2]` | who gains and loses what (see [Governance](governance.md)); changes nothing <!-- checked: tests/cli.sh "diff lists who loses what"; tests/cli.sh "diff changed nothing" --> |
+| `rowstile lint` | what `authz.lint()` finds, the worst first; exit 1 on an error or a warning <!-- checked: tests/cli.sh "lint where it finds nothing says so, exit 0"; tests/cli.sh "and where it finds a warning, exit 1" --> |
+| `rowstile test [tests.authz ...]` | the current policy's tests, these named tests, and the invariants; exit 1 if any fails <!-- checked: tests/cli.sh "test passes and shows each check"; tests/cli.sh "a failing test fails the command, exit 1"; tests/devx.sh "test runs named test files, exit 0" --> |
 | `rowstile can\|explain\|perms\|list --as user:42 ...`, `rowstile who ...` | ask the database as someone |
-| `rowstile explain-rule --as user:42 app.files insert --row '{...}'` | why a write is (or would be) refused |
+| `rowstile explain-rule --as user:42 app.files insert --row '{...}'` | why a write is (or would be) refused <!-- checked: tests/docs_test.sh "explain-rule says which rule and what is missing"; tests/cli.sh "explain-rule shows a row a Windows shell took the quotes out of, and how to write it there" --> |
 | `rowstile sql --as user:42 "SELECT ..."` | a statement as the app role, signed in as someone; rolled back |
 | `rowstile lsp` | the language server: errors while typing, hover, go to definition, references, outline, completion (of tables and columns too, with `database` in `rowstile.toml`: not `--db`, `DATABASE_URL` or the `PG*` variables) |
 | `rowstile mcp` | the MCP server, for coding agents (see below) |
 | `rowstile graph [p.authz]`, `rowstile client py\|ts [p.authz]` | diagram and typed helpers |
 | `rowstile reapply [--force]`, `rowstile remove --yes` | the policy in force again, after an upgrade (`--force`: and every inheritance table computed again); to take the policy out |
 | `core/compile_policy.py p.authz` | without a database: the SQL to apply with psql (one transaction) |
-| `core/compile_policy.py p.authz --check` | only report mistakes, as `file: line N: message` |
+| `core/compile_policy.py p.authz --check` | only report mistakes, as `file: line N: message` <!-- checked: tests/reference.sh "compile_policy.py, as tools.md writes it, only reports a mistake: file, line, message, exit 1" --> |
 | `core/compile_policy.py p.authz --tests [tests.authz ...]` | the tests and invariants as SQL (run after applying) |
 | `core/compile_policy.py p.authz --diff [--users 1,2]` | who gains and loses what (see [Governance](governance.md)) |
 | `core/compile_policy.py p.authz --graph` | a Mermaid diagram of types, relations and permissions |
@@ -56,28 +56,36 @@ The database is `--db` (before or after the command), else `rowstile.toml`'s, el
 `PGSSLROOTCERT`, `PGCHANNELBINDING`, and the others libpq reads; not a password file or a service file). Those nine variables, and the one `database = "env:NAME"`
 names, may be in `.env.local` or `.env` beside `rowstile.toml` (in the current folder while there is none), where
 Next.js, Prisma and many others keep them: the environment comes first, then `.env.local`, then `.env`, and
-`rowstile dev` says when the database came from a file. Nothing else in those files is read, a file that
-is a link out of the folder isn't read at all, and with `--db` neither is: the command line named the database. Values are as dotenv writes them: quotes, `#` comments,
+`rowstile dev` says when the database came from a file. <!-- checked: tests/cli.sh "the environment comes before both"; tests/cli.sh "rowstile dev says the database came from .env" -->
+Nothing else in those files is read, a file that
+is a link out of the folder isn't read at all, and with `--db` neither is: the command line named the database. <!-- checked: tests/unit_test.py "test_env_files_are_read_for_the_database_only"; tests/cli.sh "a .env that is a link out of the folder isn't read, and the failure says so"; tests/cli.sh "the files aren't read then" -->
+Values are as dotenv writes them: quotes, `#` comments,
 `export`, and `${NAME}` filled in. A URL's `?sslmode=`, `?host=`, `?port=` and the like are read. Each of
 libpq's settings, in a connection string, a URL or a `PG*` variable, is done as libpq does it, left alone where
 that changes neither what is checked nor where the command connects (`application_name`, `keepalives`, `sslsni`
 and the like), or refused, naming it: a service, a password file where no password is given, a host address apart
-from its name (`hostaddr`), several hosts, client certificates, GSS encryption, OAuth. A value in a string of
+from its name (`hostaddr`), several hosts, client certificates, GSS encryption, OAuth. <!-- checked: tests/unit_test.py "test_each_libpq_setting_is_honoured_left_alone_or_refused"; tests/unit_test.py "test_what_it_cannot_honour_is_refused_not_dropped"; tests/unit_test.py "test_a_url_and_its_options" -->
+A value in a string of
 keywords is quoted as for libpq (`password='it\'s'`).
 
-TLS is used when the server has it and required with `sslmode=require`. The server's certificate is checked
+TLS is used when the server has it and required with `sslmode=require`. <!-- checked: tests/unit_test.py "test_tls_as_sslmode_says" -->
+The server's certificate is checked
 against a root certificate: the one `sslrootcert` names, else `root.crt` in libpq's folder (`~/.postgresql`, or
 `%APPDATA%\postgresql` on Windows), with `require` too when there is one, as libpq does; `verify-ca` and
 `verify-full` don't go on without one. `sslrootcert=system` checks it against the system's roots and checks its
-name, as `verify-full`, and a weaker `sslmode` with it is refused. A certificate `sslcrl`, `sslcrldir` or
-`root.crl` lists as revoked is refused. Over TLS the password exchange is bound to the server's certificate when
+name, as `verify-full`, and a weaker `sslmode` with it is refused. <!-- checked: tests/unit_test.py "test_the_servers_certificate_as_libpq_checks_it" -->
+A certificate `sslcrl`, `sslcrldir` or
+`root.crl` lists as revoked is refused. <!-- checked: tests/unit_test.py "test_the_servers_certificate_as_libpq_checks_it"; tests/unit_test.py "test_libpqs_folder" -->
+Over TLS the password exchange is bound to the server's certificate when
 the server offers it (`channel_binding=prefer`, the default, as in libpq; `disable` never does), so a connection
-string from Neon's dashboard works as it is. With `channel_binding=require`, a server that asks for the password
-any other way, or signs the command in without asking, is refused before anything is sent to it. `require_auth`
-says which ways the server may ask, and `target_session_attrs` which session will do, as in libpq.
+string from Neon's dashboard works as it is. <!-- checked: tests/unit_test.py "test_scram_is_bound_to_the_tls_channel" -->
+With `channel_binding=require`, a server that asks for the password
+any other way, or signs the command in without asking, is refused before anything is sent to it. <!-- checked: tests/unit_test.py "test_what_it_refuses_to_send"; tests/unit_test.py "test_each_way_a_server_asks_for_the_password" -->
+`require_auth`
+says which ways the server may ask, and `target_session_attrs` which session will do, as in libpq. <!-- checked: tests/unit_test.py "test_require_auth_as_libpq_reads_it"; tests/unit_test.py "test_target_session_attrs_as_libpq_checks_it" -->
 
 The files `rowstile.toml` names to be read (the policy, the tests, the lock) are in its folder or
-below; a setting it doesn't know, or one of the wrong type, is an error.
+below; a setting it doesn't know, or one of the wrong type, is an error. <!-- checked: tests/cli.sh "a policy outside rowstile.toml's folder is not read"; tests/cli.sh "a misspelt setting is named"; tests/cli.sh "a setting in the wrong table is refused" -->
 [Getting started](../getting-started.md) goes through all of it; [the cookbook](../cookbook.md) has tested patterns and
 [troubleshooting](../troubleshooting.md) what people run into.
 
@@ -95,15 +103,20 @@ route with no permission check and adds one.
 
 The note sits between `<!-- rowstile:begin -->` and `<!-- rowstile:end -->`. An `AGENTS.md` that is there
 keeps its text and gets the section at its end; one that has the markers is left as it is, so the section
-is yours to edit, and `init` run again changes nothing. Delete the section if you don't want it.
+is yours to edit, and `init` run again changes nothing. <!-- checked: tests/devx.sh "and an AGENTS.md that is there keeps its text, with the section added"; tests/devx.sh "a second init changes nothing in it"; tests/unit_test.py "test_written_added_and_kept" -->
+Delete the section if you don't want it.
 
 ## Coding agents: `rowstile mcp`
 
 `rowstile mcp` is a Model Context Protocol server (stdin and stdout) with the command's own tools: `check`,
-`prove`, `review`, `test`, `why`, `lint`, and `push` to a development database. Each call runs the command
-once, in the folder the agent started it in, so `rowstile.toml` names the policy and the database. `check`
-also returns the mistake's file and line. A finding (a mistake, a failing test, a counterexample) is an
-answer with `ok: false`; a call that couldn't run (no policy file, no database) is an error. An agent is given
+`prove`, `review`, `test`, `why`, `lint`, and `push` to a development database. <!-- checked: tests/mcp_test.py "each with its input and output"; tests/reference.sh "the MCP server tools.md's settings start lists the tools the page names" -->
+Each call runs the command
+once, in the folder the agent started it in, so `rowstile.toml` names the policy and the database. <!-- checked: tests/mcp_test.py "check: the policy rowstile.toml names compiles" -->
+`check`
+also returns the mistake's file and line. <!-- checked: tests/mcp_test.py "a mistake: an answer (not a failed call), with the file, the line and the message" -->
+A finding (a mistake, a failing test, a counterexample) is an
+answer with `ok: false`; a call that couldn't run (no policy file, no database) is an error. <!-- checked: tests/mcp_test.py "a failing test: an answer (not a failed call), naming the check"; tests/mcp_test.py "a policy file that isn't there: a failed call" -->
+An agent is given
 the command to start it, in its own settings for MCP servers:
 
 ```json
@@ -111,6 +124,6 @@ the command to start it, in its own settings for MCP servers:
 ```
 
 Each release publishes the server's entry to the official MCP registry, as `io.github.rowstile/rowstile`, for
-clients that find servers there. The entry names the npm package, which brings its own Python.
+clients that find servers there. The entry names the npm package, which brings its own Python. <!-- checked: tests/unit_test.py "test_the_mcp_registrys_entry_names_the_npm_package" -->
 
-`push` is the only tool that changes anything, and it is marked so; production takes migrations.
+`push` is the only tool that changes anything, and it is marked so; production takes migrations. <!-- checked: tests/mcp_test.py "push is the only one that changes anything"; tests/mcp_test.py "push to a database nobody marked: refused" -->

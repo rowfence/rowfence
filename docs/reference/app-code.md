@@ -7,7 +7,8 @@ suite. TypeScript apps use [the TypeScript SDK](../../sdk/typescript/README.md):
 transaction in, and a client extension), `/pg`, `/postgres` (postgres.js), `/drizzle`, `/next` (signed-in reads
 kept out of caches, 403 and 404 from route handlers and server actions), `/react` (`usePerms`, `<Can>`, a
 headless share dialog, live updates) and `/vitest`; `integrations/nextjs` is their conformance suite, and
-`rowstile client` writes only the policy's names for them (`src/authz.gen.ts`). Underneath, and for every
+`rowstile client` writes only the policy's names for them (`src/authz.gen.ts`). <!-- checked: tests/unit_test.py "test_typescript_sdk_gets_only_the_names" -->
+Underneath, and for every
 other stack:
 
 Everything is a SQL function in schema `authz`, callable by the app role, acting as
@@ -22,7 +23,7 @@ column that needs quoting), and the generated clients take a tuple or array.
 | list in pages, in key order | `authz.list('file', 'view', NULL, 1000)`, then `authz.list('file', 'view', '<last id>', 1000)` (a NULL size: no limit; a cursor that isn't an id, or a negative size: AZ710) |
 | who has access (for people who may share it) | `authz.who('folder', 3, 'view')` |
 | why, or what is missing | `authz.explain('file', 11, 'edit')`; for someone else: `..., 'edit', '7')` |
-| why a write is or would be refused | `authz.explain_rule('app.files', 'update', '11', '{"name": "x"}')`: NULL if the row isn't there or you can't see it (404); an insert: `authz.explain_rule('app.files', 'insert', NULL, '{"folder_id": 6}')` |
+| why a write is or would be refused | `authz.explain_rule('app.files', 'update', '11', '{"name": "x"}')`: NULL if the row isn't there or you can't see it (404); an insert: `authz.explain_rule('app.files', 'insert', NULL, '{"folder_id": 6}')` <!-- checked: tests/devx.sh "a row that isn't there: NULL (404, not 403)"; tests/devx.sh "and one the user can't see: NULL too"; tests/devx.sh "an update that would be allowed: yes" --> |
 | which of these people may see it (live updates) | `authz.who_among('file', 11, 'view', ARRAY['1', '2'])`: it signs each one in with `authz.act_as`, so it is for whoever may call that (the app role, a backend trusted to sign people in) |
 | the sharing dialog | `authz.list_shares('folder', 3)` |
 | share and unshare | `authz.share('file', 13, 'viewer', 'user', 4, '', now() + interval '1 day')` (then when it starts, a caveat and its arguments: [the language](language.md)), `authz.unshare(...)` |
@@ -31,20 +32,20 @@ column that needs quoting), and the generated clients take a tuple or array.
 | custom roles | `authz.create_role('org', 1, 'folder', 'reviewer', ARRAY['view'])` returns the role's id (needs `manage_roles` on the org); share it as `authz.share('folder', 3, 'role:<id>', 'user', 7)`; `authz.set_role_permissions(id, ARRAY[...])`, `authz.delete_role(id)`, `authz.roles_of('org', 1)` |
 | API keys | `authz.create_api_key('laptop', 'read')` (shown once), `authz.list_api_keys()`, `authz.revoke_api_key(id)` |
 | sign in | `authz.login_key('ak_...')`, `authz.login_jwt('eyJ...')` (HS256; settings in `authz.settings`) |
-| support "view as" | `authz.view_as('42', 'ticket 1234')`: read-only, audited, needs `can impersonate` on the user |
+| support "view as" | `authz.view_as('42', 'ticket 1234')`: read-only, audited, needs `can impersonate` on the user <!-- checked: tests/identity.sh "and cannot change anything"; tests/identity.sh "the audit trail has the reason"; tests/identity.sh "carol cannot view as erin" --> |
 | ask for access | `authz.request_access('folder', 3, 'viewer', 'for the audit', '7 days')`, `authz.cancel_request(id)` |
 | decide requests | `authz.pending_requests()`, `authz.decide_request(id, true, 'ok')`: approving makes a share that ends after the requested time |
 | emergency access | `authz.break_glass('folder', 6, 'viewer', 'INC-7 outage', '1 hour')`: needs `break_glass`, one day at most, audited, announced on channel `authz_alerts` |
 | access reviews | `authz.start_review('folder', 3)`, `authz.review_items(id)`, `authz.review_decide(id, item, false)`, `authz.close_review(id)` |
 
-Administrators (the policy's owner and superusers; the app role is refused) also have:
+Administrators (the policy's owner and superusers; the app role is refused) also have: <!-- checked: tests/governance.sh "the app role cannot run lint"; tests/governance.sh "the app role cannot trim"; tests/governance.sh "the app role cannot run the invariant check"; tests/identity.sh "the app role cannot sync" -->
 
 | task | function |
 |---|---|
 | inheritance tables match a rebuild | `authz.verify()` |
-| the change feed (for caches, search indexes, sync jobs) | poll `authz.changes_since(pos)` ([where to start](governance.md)); `LISTEN authz_changes` only after `INSERT INTO authz.settings VALUES ('notify_changes', 'on')` (every notifying commit waits its turn) |
-| the audit trail | `SELECT * FROM authz.audit` (append-only; every share, unshare, role, membership change, request, review, break-glass, view-as, API key) |
-| retention (schedule these: pg_cron, or the app's jobs) | `authz.trim_changes()` keeps 7 days of the feed (or the setting `changes_keep`); `authz.trim_audit(interval '2 years')` removes older audit entries and records that it did |
+| the change feed (for caches, search indexes, sync jobs) | poll `authz.changes_since(pos)` ([where to start](governance.md)); `LISTEN authz_changes` only after `INSERT INTO authz.settings VALUES ('notify_changes', 'on')` (every notifying commit waits its turn) <!-- checked: tests/governance.sh "by default the feed doesn't NOTIFY (it would queue every commit): consumers poll"; tests/governance.sh "with notify_changes on, listeners hear of a change (NOTIFY authz_changes)" --> |
+| the audit trail | `SELECT * FROM authz.audit` (append-only; every share, unshare, role, membership change, request, review, break-glass, view-as, API key) <!-- checked: tests/governance.sh "the trail cannot be edited, even by an administrator"; tests/governance.sh "a share is recorded, with who made it"; tests/governance.sh "memberships kept in your tables are recorded too"; tests/multi_scenario.sql "the audit trail has the roles made"; tests/governance.sh "the audit trail has the requests, their answers and the reviews"; tests/governance.sh "the trail has it, with the reason"; tests/identity.sh "the audit trail has the reason"; tests/identity.sh "the audit trail has the keys made and the one revoked" --> |
+| retention (schedule these: pg_cron, or the app's jobs) | `authz.trim_changes()` keeps 7 days of the feed (or the setting `changes_keep`); `authz.trim_audit(interval '2 years')` removes older audit entries and records that it did <!-- checked: tests/governance.sh "the feed keeps 7 days by default: older entries are trimmed"; tests/governance.sh "how long the feed keeps entries is a setting"; tests/governance.sh "older ones go"; tests/governance.sh "and the trim is recorded" --> |
 | group sync from an identity provider | `authz.sync_members('team', '10', 'member', ARRAY['1', '2'])` makes the group's rows in the relation's table (`app.team_members`) this list: it deletes and inserts there. For a relation read from one table, without `where`; shares are not touched |
 | invariants | `authz.check_invariants()` |
 | ways around RLS | `authz.lint()`: see [Checking the database](governance.md#checking-the-database) |
@@ -64,7 +65,7 @@ your code; regenerate when the policy changes (the file manager's tests fail whe
   error into a `Refused`. Rows come back as dicts. The file manager and the messenger use it.
 
 **Refusals say why.** A write the rules refuse raises SQLSTATE 42501 with the rule and what is
-missing, as the signed-in user may know it (nothing about rows they can't see):
+missing, as the signed-in user may know it (nothing about rows they can't see): <!-- checked: tests/devx.sh "a refused insert says which rule, and which part of it"; tests/devx.sh "and says nothing about a folder the user can't see"; tests/adversarial.sh "a write refused in a hidden folder explains as for a missing one"; tests/reference.sh "the refusal app-code.md shows is the docs app's, word for word" -->
 
 ```
 ERROR:  permission denied: user 1 may not insert this row into app.files
@@ -74,9 +75,12 @@ DETAIL:  no   insert : folder.edit and owner  (line 80)
 ```
 
 The error's table, schema and constraint (`authz_insert`, `authz_update`) fields are set, which is what
-`refusal(error)` reads. An allowed write never runs this (the check is `rule OR refuse(row)`). Updates
+`refusal(error)` reads. <!-- checked: tests/devx.sh "with the table and the policy in the error's fields" -->
+An allowed write never runs this (the check is `rule OR refuse(row)`). <!-- checked: tests/devx.sh "an allowed update is not refused" -->
+Updates
 and deletes the rules don't allow change no rows instead (row-level security leaves them out):
 `az.expect(result, table, command, id)` then raises `NotFound` or `Refused` with `authz.explain_rule`'s
 answer, worded like the refused insert above: `permission denied: user 3 may not update row 11 of
-app.files`. A key of several columns is written as the database writes it, `(1,2)`.
+app.files`. <!-- checked: tests/adversarial.sh "updating a hidden row changes nothing"; tests/tools_test.py "expect, a row the user may not change: Refused, with why"; tests/tools_test.py "worded as the database words a refused insert: who, the command, the row, the table" -->
+A key of several columns is written as the database writes it, `(1,2)`. <!-- checked: tests/tools_test.py "a key in a message is as the database writes it: quoted only where Postgres would" -->
 - **TypeScript: preview.** The same calls in camelCase; may change before it is supported.

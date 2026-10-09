@@ -230,6 +230,9 @@ record $? "docs"
 step "the cookbook's recipes: each one's policy applies, its tests pass, and its page shows only what is tested"
 tests/cookbook.sh
 record $? "cookbook"
+step "the reference runs as written: its policies compile, its SQL and its commands run, each block or why not"
+tests/reference.sh
+record $? "reference"
 
 fi
 GENS="docs alt multi composite loop cross"; every_version || GENS=docs

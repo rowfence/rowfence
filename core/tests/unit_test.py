@@ -5575,15 +5575,6 @@ class DocPages(unittest.TestCase):
     out as `rowstile fmt` writes them, and each authz.* call a page writes is one the functions take."""
 
     REPO = os.path.dirname(ROOT)
-    # the types the language page's example names and leaves to its include
-    REST = (
-        "type org = app.orgs\n  member : user = app.org_members(org_id -> user_id)\n"
-        "  admin  : user = app.org_members(org_id -> user_id) where {role = 'admin'}\n  can manage_roles = admin\n"
-        "type project = app.projects\n  owner : user = owner_id\n  can share = owner\n  can edit = share\n"
-        "  can view = edit\n"
-        "type file = app.files\n  folder : folder = folder_id\n  owner : user = owner_id\n"
-        "  can share = owner or folder.share\n  can edit = share or folder.edit\n  can view = edit or folder.view\n"
-    )
 
     def page(self, *rel: str) -> str:
         with open(os.path.join(self.REPO, *rel), encoding="utf-8") as fh:
@@ -5591,7 +5582,9 @@ class DocPages(unittest.TestCase):
 
     def test_the_language_pages_example_compiles(self) -> None:
         example = search(r"```authz\n(.*?)```", self.page("docs", "reference", "language.md"), re.S).group(1)
-        c = Compiler(parse_policy(example, "language.authz", files={"roles.authz": self.REST}))
+        # the types it names and leaves to its include, as tests/reference.sh gives them
+        rest = read("tests/fixtures/roles.authz")
+        c = Compiler(parse_policy(example, "language.authz", files={"roles.authz": rest}))
         c.compile("language.authz")
         c.compile_tests("language.authz")
         # its tests name users by number (user 3, 9001): the user type's key is the default one
@@ -5767,6 +5760,249 @@ class DocPages(unittest.TestCase):
                 ):
                     wrong.append(f"{'/'.join(page)}: authz.{name}({', '.join(args)}): no form of it takes these")
         self.assertEqual(wrong, [], "calls the pages write that the functions don't take")
+
+
+class Promises(unittest.TestCase):
+    """Every promise the pages that promise make (docs/reference/*.md, docs/threat-model.md,
+    docs/how-it-is-checked.md) names the check that holds it, or says why none does, in a comment readers don't see
+    at its end (GitHub and the site hide it):
+
+        a concurrent delete can't slip in between. <!-- checked: tests/concurrency.sh "the share waits for the delete, then is refused" -->
+        rowstile has had self-review only. <!-- unchecked: a fact about the project, not about the code -->
+
+    `checked:` names one check or more, `PATH "TEXT"` each, a `;` between them: PATH is a file under core/
+    (tests/apply.sh) or the repository's root (.github/workflows/ci.yml), and TEXT is what that file holds of the
+    check, its label as the suite prints it after `ok` (or a part of it), or a test's name. `unchecked:` says why,
+    in three words or more.
+
+    The rule. A promise is a sentence of a page's prose that says always, never, can't or cannot, only, refuses or
+    refused, keeps or kept, removes or removed, each as a word of its own: "read-only" and "append-only" say only;
+    "keep" and "remove", which bid the reader do something, make no promise. The prose is the page without its
+    code (fenced blocks, blocks indented four spaces after a blank line, `inline code`, link targets) and without
+    its comments, and it comes in blocks: a paragraph, a list item, a table row, a heading. A sentence ends at ".",
+    "!" or "?" (with what closes there: quotes, brackets, emphasis) before a space or the end of its block. The
+    tags right after a sentence, before the next one begins, are that sentence's, and so are tags inside it; a tag
+    that follows no sentence (a blank line before it) ends none. A tag is written on its sentence's line: one that
+    begins a line would end the paragraph there, and what follows would be a paragraph of its own.
+
+    A tag holds no "--", ">", "|" or backtick: VitePress and GitHub show a comment with "--" in it as text, the
+    site's search index keeps what follows a ">" in one, a "|" cuts a table's cell, and a backtick may open code."""
+
+    REPO = os.path.dirname(ROOT)
+    WORDS = re.compile(r"\b(?:always|never|can't|cannot|only|refuses|refused|keeps|kept|removes|removed)\b", re.I)
+    TAG = re.compile(r"<!--\s*(checked|unchecked):(.*?)-->", re.S)
+    COMMENT = re.compile(r"<!--.*?-->", re.S)
+    END = re.compile(r"[.!?][\"')\]*_]*(?=\s|$)")
+    CHECK = re.compile(r'(\S+) "([^"]+)"')
+
+    def pages(self) -> list[str]:
+        found = sorted(glob.glob(os.path.join(self.REPO, "docs", "reference", "*.md")))
+        found += [os.path.join(self.REPO, "docs", name) for name in ("threat-model.md", "how-it-is-checked.md")]
+        return [os.path.relpath(p, self.REPO).replace(os.sep, "/") for p in found]
+
+    @staticmethod
+    def blocks(text: str) -> list[tuple[int, str]]:
+        """(first line, text) of each block of a page's prose: a paragraph, list item, table row or heading, its
+        lines joined, without the page's code blocks."""
+        out: list[tuple[int, str]] = []
+        lines: list[str] = []
+        start, fence, code, blank = 0, "", False, True
+
+        def close() -> None:
+            if lines:
+                out.append((start, " ".join(lines)))
+            lines.clear()
+
+        for n, line in enumerate(text.split("\n"), 1):
+            s = line.strip()
+            was_blank, blank = blank, not s
+            if fence:
+                fence = "" if s.startswith(fence) else fence
+                continue
+            if m := re.match(r"```+|~~~+", s):
+                close()
+                fence = m.group(0)
+                continue
+            if not s:
+                close()
+                continue
+            if line.startswith("    ") and (code or (was_blank and not lines)):
+                code = True
+                continue
+            code = False
+            if s.startswith("|") or re.match(r"#{1,6} ", s):  # a table's row, a heading: a line each
+                close()
+                if not re.fullmatch(r"\|[\s:|-]+", s):
+                    out.append((n, s))
+                continue
+            if re.match(r"[-*+] |\d+[.)] ", s):
+                close()
+            if not lines:
+                start = n
+            lines.append(s)
+        close()
+        return out
+
+    @classmethod
+    def sentences(cls, block: str) -> list[tuple[str, list[str]]]:
+        """(sentence, the tags that end it) for each sentence of a block of prose; tags that follow no sentence
+        come as a sentence of their own, with no words."""
+        text = re.sub(r"(`+).+?\1", "CODE", block)
+        text = re.sub(r"\]\([^)]*\)", "]", text)
+        comments: list[str] = []
+
+        def hide(m: re.Match[str]) -> str:
+            comments.append(m.group(0))
+            return f"\x00{len(comments) - 1}\x00"
+
+        def tags(piece: str) -> list[str]:
+            return [c for i in re.findall(r"\x00(\d+)\x00", piece) if cls.TAG.fullmatch(c := comments[int(i)])]
+
+        text = cls.COMMENT.sub(hide, text)
+        pieces, pos = [], 0
+        for m in cls.END.finditer(text):
+            pieces.append(text[pos : m.end()])
+            pos = m.end()
+        pieces.append(text[pos:])
+        out: list[tuple[str, list[str]]] = []
+        for piece in pieces:
+            lead = re.match(r"\s*(?:\x00\d+\x00\s*)+", piece)
+            if lead and tags(lead.group(0)):
+                if out and out[-1][0]:
+                    out[-1][1].extend(tags(lead.group(0)))
+                else:
+                    out.append(("", tags(lead.group(0))))
+                piece = piece[lead.end() :]
+            words = re.sub(r"\x00\d+\x00", "", piece).strip()
+            if words:
+                out.append((words, tags(piece)))
+        return out
+
+    @classmethod
+    def promises(cls, text: str) -> tuple[list[tuple[int, str]], list[tuple[int, str]]]:
+        """In a page's text: (line, sentence) of each promise no tag ends, and (line, tags) of tags that end no
+        sentence."""
+        untagged: list[tuple[int, str]] = []
+        lost: list[tuple[int, str]] = []
+        for line, block in cls.blocks(text):
+            for sentence, tags in cls.sentences(block):
+                if not sentence:
+                    lost.append((line, " ".join(tags)))
+                elif not tags and cls.WORDS.search(sentence):
+                    untagged.append((line, sentence))
+        return untagged, lost
+
+    def tag_problems(self, tag: str) -> list[str]:
+        """What is wrong with a tag: its form, or a check it names that isn't there."""
+        m = self.TAG.fullmatch(tag)
+        if m is None:
+            return [f"not a tag: {tag}"]
+        held = [c for c in ("--", ">", "|", "`") if c in tag[4:-3]]
+        if held:
+            return [f"{tag}: holds {' and '.join(held)}, which a page can't hide in a comment"]
+        kind, body = m.group(1), m.group(2).strip()
+        if kind == "unchecked":
+            return [] if len(body.split()) > 2 else [f"{tag}: say why none does, in words"]
+        if not re.fullmatch(r'\S+ "[^"]+"(?:\s*;\s*\S+ "[^"]+")*', body):
+            return [f'{tag}: name each check as PATH "TEXT", with a ; between them']
+        problems: list[str] = []
+        for path, label in self.CHECK.findall(body):
+            there = [p for p in (os.path.join(ROOT, path), os.path.join(self.REPO, path)) if os.path.isfile(p)]
+            if not there:
+                problems.append(f"{tag}: no file {path}, under core/ or the repository's root")
+                continue
+            with open(there[0], encoding="utf-8") as fh:
+                if label not in fh.read():
+                    problems.append(f"{tag}: {path} holds no {label!r}")
+        return problems
+
+    def test_every_promise_says_what_holds_it(self) -> None:
+        untagged: list[str] = []
+        lost: list[str] = []
+        tagged = 0
+        for page in self.pages():
+            with open(os.path.join(self.REPO, page), encoding="utf-8") as fh:
+                text = fh.read()
+            missing, orphans = self.promises(text)
+            untagged += [f"{page}:{n}: {s}" for n, s in missing]
+            lost += [f"{page}:{n}: {t}" for n, t in orphans]
+            tagged += len(self.TAG.findall(text))
+        # the loops above find nothing if the pages or their tags aren't found: then nothing would be checked
+        self.assertGreater(tagged, 150, "the pages' tags aren't found")
+        self.assertEqual(
+            untagged, [], "promises that name no check: end each with <!-- checked: ... --> or <!-- unchecked: why -->"
+        )
+        self.assertEqual(lost, [], "tags that end no sentence (a blank line before them?)")
+
+    def test_each_tag_names_checks_that_are_there(self) -> None:
+        wrong: list[str] = []
+        for page in self.pages():
+            with open(os.path.join(self.REPO, page), encoding="utf-8") as fh:
+                text = fh.read()
+            for m in self.TAG.finditer(text):
+                line = text.count("\n", 0, m.start()) + 1
+                wrong += [f"{page}:{line}: {p}" for p in self.tag_problems(m.group(0))]
+                # a comment that begins a line ends the paragraph or list item it is in (an HTML block): what
+                # follows it would be a paragraph of its own
+                if not text[text.rfind("\n", 0, m.start()) + 1 : m.start()].strip():
+                    wrong.append(f"{page}:{line}: begins a line: write it after its sentence, on the same line")
+        self.assertEqual(wrong, [])
+
+    def test_the_rule(self) -> None:
+        page = "\n".join(
+            [
+                "# A heading that never ends",
+                "",
+                "One sentence. Another that refuses nothing! <!-- unchecked: made up here -->",
+                "And one more, on the next line, that keeps",
+                'going. <!-- checked: tests/x.sh "y" -->',
+                "",
+                "- a read-only item",
+                "- an item with `never` in code, and a [link](never.md)",
+                "- Keep the key in the backend, and remove it when done.",
+                "",
+                "| who | what |",
+                "|---|---|",
+                "| the app | can't, ever <!-- unchecked: made up here --> |",
+                "| others | cannot |",
+                "",
+                "```sql",
+                "SELECT 'never';",
+                "```",
+                "",
+                "    rowstile never   # an indented block",
+                "",
+                "(It is always so.) <!-- unchecked: made up here --> And this kept going.",
+                "",
+                '<!-- checked: tests/x.sh "y" -->',
+            ]
+        )
+        untagged, lost = self.promises(page)
+        self.assertEqual(
+            untagged,
+            [
+                (1, "# A heading that never ends"),
+                (7, "- a read-only item"),
+                (14, "| others | cannot |"),
+                (22, "And this kept going."),
+            ],
+        )
+        self.assertEqual(lost, [(24, '<!-- checked: tests/x.sh "y" -->')])
+        good = '<!-- checked: tests/apply.sh "rowstile apply, on a database with no extension" -->'
+        self.assertEqual(self.tag_problems(good), [])
+        self.assertEqual(self.tag_problems(good.replace("-->", '; tests/cli.sh "check: ok, exit 0" -->')), [])
+        for bad, said in (
+            ('<!-- checked: tests/apply.sh "apply --force" -->', "holds --"),
+            ('<!-- checked: tests/apply.sh "a -> b" -->', "holds >"),
+            ('<!-- checked: tests/apply.sh "no check says this" -->', "tests/apply.sh holds no"),
+            ('<!-- checked: tests/nowhere.sh "y" -->', "no file tests/nowhere.sh"),
+            ("<!-- checked: tests/apply.sh -->", "name each check as"),
+            ("<!-- unchecked: because -->", "say why none does"),
+        ):
+            with self.subTest(bad):
+                problems = self.tag_problems(bad)
+                self.assertEqual(len(problems), 1, problems)
+                self.assertIn(said, problems[0])
 
 
 class Why(unittest.TestCase):

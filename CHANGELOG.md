@@ -373,6 +373,14 @@ Each release upgrades from the one before it. How releases are numbered and made
 - Studio's access diff of a policy file with an expression nested too deep to read answered with Python's words
   (500), and a traceback where Studio runs (`rowstile dev`'s terminal): it says what the command says, "an
   expression in the policy is nested too deep to read".
+- Four things the docs promised were said wrong. The threat model said a condition in `rules` runs with the app
+  role's privileges: a condition reads with the policy's rights in rules as in permissions, as the language's
+  page says. It said the change feed was append-only for everyone: the app role can't touch it, and the
+  administrators may trim it. An API key's first ten characters are kept beside its hash, to tell keys apart,
+  where the identity page said only the hash was. And `rowstile review` without `--base` compares with `main`
+  (or `master`): it exits 2 only where there is neither, not whenever `--base` is left out. Each promise of the
+  reference, the threat model and the page on how rowstile is checked now names the check that holds it, and
+  every code block of the reference runs (`core/tests/reference.sh`).
 
 ## 0.1.0 (alpha)
 
