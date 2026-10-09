@@ -445,6 +445,12 @@ Each release upgrades from the one before it. How releases are numbered and made
   = app.projects (org_id, id)`): "no single change to shares or links grants it", where setting the project's
   `lead_id`, or adding a row to its members' table, would. They offer both.
 - `rowstile why` called a condition after `not` (`and not {archived}`) a deny. It names the condition.
+- `rowstile why` (and Studio, where it may write) said only part of what a change gives: the permission asked
+  about on more objects of its type, and the others on the object itself. Making someone the owner of a folder
+  higher up said "also gives edit on it, and share on 3 more folders", and nothing of the edit it gives on those
+  folders or of the files in them; making someone an org's admin didn't say they could then impersonate its
+  members. It says every permission the change gives them, on every object, and the change that gives the least
+  comes first.
 
 ## 0.1.0 (alpha)
 

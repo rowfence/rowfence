@@ -3,8 +3,9 @@
 The permission's expression says where access can come from: a share, a row in a link table, a column, a
 group the person could join, or the same permission on the object above. Each candidate change is tried in
 a savepoint, as the policy's owner, then checked with authz.can as the person, and undone: only the ones
-that grant it are kept, with what else they would grant (more objects for the person, more people on the
-object). A preview that writes and rolls back belongs to the command, not to the runtime.
+that grant it are kept, with what else they would grant: every other permission the person would hold, on the
+object and on any other, and who else would hold the permission on the object, or no longer would. A preview
+that writes and rolls back belongs to the command, not to the runtime.
 """
 
 from __future__ import annotations
@@ -79,10 +80,22 @@ def holding(t: Type, columns: Cols, oid: str) -> list[tuple[str, str]]:
     return [(c, f"{key}.{q(k)}") for c, (k, _) in zip(columns, t.key, strict=True)]
 
 
+def more_of(items: Sequence[tuple[str, str, int]], first: str) -> list[str]:
+    """(type, permission, n) in words, the permissions gained on as many objects of a type together, the one asked
+    about (first) before the others: "view, edit on 3 more folders"."""
+    groups: dict[tuple[str, int], list[str]] = {}
+    for tn, pn, n in items:
+        groups.setdefault((tn, n), []).append(pn)
+    return [
+        f"{', '.join(sorted(ps, key=lambda p: (p != first, p)))} on {n} more {tn}{'s' if n != 1 else ''}"
+        for (tn, n), ps in groups.items()
+    ]
+
+
 @dataclass
 class Held:
-    objects: int  # how many objects of the type the person holds the permission on
-    people: set[str]  # who holds it on the object
+    objects: dict[tuple[str, str], int]  # how many objects of each type the person holds each permission on
+    people: set[str]  # who holds the permission asked about on the object
     perms: set[str]  # every permission the person holds on the object
 
 
@@ -103,6 +116,8 @@ class Way:
     more_people: int = 0  # other people who gain it on this object
     fewer_people: int = 0  # people who lose it on this object (a column that changes hands)
     also: list[str] = field(default_factory=list)  # the other permissions the person gains on this object
+    # the other permissions the person gains on other objects: (type, permission, on how many)
+    elsewhere: list[tuple[str, str, int]] = field(default_factory=list)
     error: str | None = None
 
     @property
@@ -312,10 +327,20 @@ class Grants:
 
     # --- trying them ---------------------------------------------------------------------------------
     def counts(self, t: Type, oid: str, perm: str) -> Held:
-        """What is held now: how many objects the person holds perm on, who holds it on this one, and every
-        permission the person holds on this one."""
+        """What is held now: how many objects of each type the person holds each permission on, who holds perm on
+        this one, and every permission the person holds on this one."""
+        from .database import text_array
+
+        kinds = [(x.name, p) for x in self.c.types.values() for p in self.c.public_perms(x)]
         self.sign_in()
-        objects = number(self.db.rows("SELECT count(*) AS n FROM authz.list($1, $2)", [t.name, perm])[0], "n")
+        objects = {
+            (text(r, "t"), text(r, "p")): number(r, "n")
+            for r in self.db.rows(
+                "SELECT k.t, k.p, (SELECT count(*) FROM authz.list(k.t, k.p)) AS n "
+                "FROM unnest($1::text[], $2::text[]) k(t, p)",
+                [text_array(tn for tn, _ in kinds), text_array(pn for _, pn in kinds)],
+            )
+        }
         held = self.db.rows("SELECT p FROM unnest(authz.perms($1, $2)) p", [t.name, oid])
         self.sign_in(False)
         people = self.db.rows("SELECT x FROM authz.who($1, $2, $3) x", [t.name, oid, perm])
@@ -336,10 +361,19 @@ class Grants:
                 if way.grants:
                     after = self.counts(t, oid, perm)
                     me = {self.pid} if self.ptype == "user" else set()  # authz.who lists users
-                    way.more_objects = max(0, after.objects - before.objects - 1)
                     way.more_people = len(after.people - before.people - me)
                     way.fewer_people = len(before.people - after.people)
                     way.also = sorted(after.perms - before.perms - {perm})
+                    # what it gives on other objects: what is held now on how many, but this one (asked about, or
+                    # said as "on it")
+                    more = {k: n - before.objects[k] for k, n in after.objects.items()}
+                    for p in [perm, *way.also]:
+                        more[(t.name, p)] -= 1
+                    way.more_objects = max(0, more.pop((t.name, perm)))
+                    # (this object's type first, then the policy's order)
+                    way.elsewhere = sorted(
+                        ((tn, pn, n) for (tn, pn), n in more.items() if n > 0), key=lambda x: x[0] != t.name
+                    )
                 raise Undo
         except Undo:
             pass
@@ -385,13 +419,14 @@ def how_to_grant(c: Compiler, db: Db, ptype: str, pid: str, type_name: str, oid:
     before = g.counts(t, oid, perm)
     for way in candidates[:TRIES]:
         g.attempt(way, t, oid, perm, before)
-    # the way that gives the least beside what was asked comes first
+    # the way that gives the least beside what was asked comes first: the fewest other permissions, on the object
+    # and on others (and the fewest people who lose it), then the fewest other objects and people
     answer.ways = sorted(
         [w for w in candidates if w.grants],
         key=lambda w: (
             len(w.changes),
-            len(w.also) + w.fewer_people,
-            w.more_people + w.more_objects,
+            len(w.also) + len(w.elsewhere) + w.fewer_people,
+            w.more_people + w.more_objects + sum(n for _, _, n in w.elsewhere),
             sum(ch.cost for ch in w.changes),
         ),
     )[:SHOWN]
@@ -418,10 +453,9 @@ def describe(answer: Answer, who: str, type_name: str, oid: str, perm: str) -> s
             also = []
             if w.also:
                 also.append(f"{', '.join(w.also)} on it")
-            if w.more_objects:
-                also.append(
-                    f"{perm} on {w.more_objects} more {type_name}{'s' if w.more_objects != 1 else ''} for {who}"
-                )
+            more = more_of(([(type_name, perm, w.more_objects)] if w.more_objects else []) + w.elsewhere, perm)
+            if more:
+                also.append(f"{', and '.join(more)} for {who}")
             if w.more_people:
                 also.append(f"{perm} on it to {w.more_people} more {'people' if w.more_people != 1 else 'person'}")
             lines = sorted({str(ch.loc) for ch in w.changes})

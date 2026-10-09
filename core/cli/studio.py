@@ -333,6 +333,7 @@ class Studio:
                         "more_objects": w.more_objects,
                         "more_people": w.more_people,
                         "also": list[Json](w.also),
+                        "elsewhere": [{"type": tn, "perm": pn, "n": n} for tn, pn, n in w.elsewhere],
                         "fewer_people": w.fewer_people,
                         "lines": list[Json](sorted({str(ch.loc) for ch in w.changes})),
                         "kinds": list[Json]([ch.kind for ch in w.changes]),
