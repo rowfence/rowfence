@@ -14,8 +14,8 @@ them into --out (the first DIR if not given): .coverage, coverage.json (coverage
     in steps that don't compare the database's answers with the reference evaluator (ORACLE): its SQL was made,
     and difftest, genpolicy and around never judged it;
   - what the database runs: the kinds of rowstile's functions (authz_gen."<table>:update:refuse", a tree's
-    refresh, authz.share) no suite ever called, from the counts tests/coverage_functions.sh kept (functions.tsv
-    beside each DIR or data file).
+    refresh, authz.share) no suite ever called, and those whose every call raised, from the counts
+    tests/coverage_functions.sh kept (functions.tsv beside each DIR or data file).
 
 With --diff REF it also prints the lines changed since REF (git diff REF...HEAD) that nothing runs, and exits 1 if
 there are any.
@@ -86,6 +86,7 @@ class Called:
     args: str
     calls: int
     how: str = ""  # its language, then definer and set when it has them: "plpgsql definer set", "sql"
+    entered: bool = False  # called at all: Postgres has a count for it, which a call that raised leaves at 0
 
     def counted(self) -> bool:
         """Whether Postgres counts its calls: not a plain SQL function, which it may inline into the query."""
@@ -102,9 +103,12 @@ def functions_measured(paths: Sequence[str]) -> list[Called]:
         with open(path, encoding="utf-8") as fh:
             for line in fh:
                 parts = line.rstrip("\n").split("\t")
-                if len(parts) in (6, 7) and parts[5].isdigit():
-                    how = parts[6] if len(parts) == 7 else ""
-                    out.append(Called(parts[0], parts[1], parts[2], parts[3], parts[4], int(parts[5]), how))
+                if len(parts) in (6, 7, 8) and parts[5].isdigit():
+                    how = parts[6] if len(parts) >= 7 else ""
+                    calls = int(parts[5])
+                    # (written before the file said whether it was called at all: only a call that returned says so)
+                    entered = parts[7] == "t" if len(parts) == 8 else calls > 0
+                    out.append(Called(parts[0], parts[1], parts[2], parts[3], parts[4], calls, how, entered))
     return out
 
 
@@ -135,39 +139,57 @@ class Kind:
 
     made: int = 0  # in how many databases
     called: int = 0  # how many of those called it
+    raised: int = 0  # how many of the others called it, every call raising (a guard that refuses)
     steps: set[str] = field(default_factory=set)  # the steps that made a database where it was called
     counted: bool = False  # whether Postgres counts its calls (Called.counted)
 
 
 def by_kind(called: Sequence[Called]) -> dict[str, Kind]:
-    """What the suites did with each kind of function."""
-    out: dict[str, Kind] = {}
+    """What the suites did with each kind of function. A database measured twice (before applying a policy again,
+    and when it is dropped) is one database, which called a function if either measure says so."""
+    databases: dict[tuple[str, str, str], list[Called]] = {}
     for c in called:
-        k = out.setdefault(kind(c.schema, c.name, c.args), Kind())
+        databases.setdefault((kind(c.schema, c.name, c.args), c.step, c.db), []).append(c)
+    out: dict[str, Kind] = {}
+    for (name, step, _), cs in databases.items():
+        k = out.setdefault(name, Kind())
         k.made += 1
-        k.counted = k.counted or c.counted()
-        if c.calls:
+        k.counted = k.counted or any(c.counted() for c in cs)
+        if any(c.calls for c in cs):
             k.called += 1
-            k.steps.add(c.step)
+            k.steps.add(step)
+        elif any(c.entered for c in cs):
+            k.raised += 1
     return out
 
 
 def calls_summary(kinds: dict[str, Kind]) -> str:
     counted = [k for k in kinds.values() if k.counted]
-    return f"{sum(1 for k in counted if k.called)} of {len(counted)} kinds of function called"
+    raised = sum(1 for k in counted if not k.called and k.raised)
+    return f"{sum(1 for k in counted if k.called)} of {len(counted)} kinds of function called" + (
+        f", and {raised} more whose every call raised" if raised else ""
+    )
 
 
 def functions_report(called: Sequence[Called]) -> list[str]:
     kinds = by_kind(called)
-    never = sorted(name for name, k in kinds.items() if k.counted and not k.called)
+    raised = sorted(name for name, k in kinds.items() if k.counted and not k.called and k.raised)
+    never = sorted(name for name, k in kinds.items() if k.counted and not k.called and not k.raised)
     uncounted = sorted(name for name, k in kinds.items() if not k.counted)
     out = [
         "What the database runs: rowstile's functions in the suites' databases, by what made them (Postgres's counts,",
         f"track_functions): {calls_summary(kinds)}.",
         "",
-        "Never called, or every call raised (Postgres counts only the calls that return: a guard's that refuses, not),",
-        "or called only before the database's last apply (Postgres counts each function apart, and applying a policy",
-        "makes its functions anew: a suite that applies twice is counted for what it did after the second):",
+        "Called, but every call raised (Postgres counts only the calls that return: a guard's that refuses, not):",
+    ]
+    out += [
+        f"  {name}  (made in {kinds[name].made} database(s), called in {kinds[name].raised})" for name in raised
+    ] or ["  (none)"]
+    out += [
+        "",
+        "Never called, or called only before the database's last apply (Postgres counts each function apart, and",
+        "applying a policy makes its functions anew: a suite that applies again measures first, or it is counted for",
+        "what it did after its last apply):",
     ]
     out += [f"  {name}  (made in {kinds[name].made} database(s))" for name in never] or ["  (none)"]
     out += ["", "Not counted: plain SQL functions, which Postgres may inline into the query that calls them:"]
