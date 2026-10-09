@@ -140,6 +140,12 @@ as a `where` with more than the key):
             await authz_sa.expect(s, result, "app.notes", "delete", note_id)
 ```
 
+An ORM delete (`await s.delete(note)`) the rules refuse is not an error in SQLAlchemy, unless the model has a
+version column: it only warns, `SAWarning: DELETE statement on table 'notes' expected to delete 1 row(s); 0
+were matched`. The row stays, and the request answers as if it was deleted. Delete with `delete()` and
+`expect`, as above. To see such a delete in your tests, make the warning an error: in pytest's settings,
+`filterwarnings = ["error::sqlalchemy.exc.SAWarning"]`.
+
 An insert that reads the new row back (`flush()` uses `RETURNING`) also needs the select rule: if the user may
 insert but not read the row, the 403 names the select rule.
 
