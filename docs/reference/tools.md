@@ -62,7 +62,8 @@ is a link out of the folder isn't read at all, and with `--db` neither is: the c
 the server has it, required with `sslmode=require`, and the server's certificate checked with `verify-ca` and
 `verify-full`. Over TLS the password exchange is bound to the server's certificate when the server offers it
 (`channel_binding=prefer`, the default, as in libpq; `require` refuses a server that doesn't, `disable` never
-does), so a connection string from Neon's dashboard works as it is. Client certificates are refused, not ignored. The files `rowstile.toml` names to be read (the policy, the tests, the lock) are in its folder or
+does), so a connection string from Neon's dashboard works as it is. A value in a string of keywords is quoted as for
+libpq (`password='it\'s'`). Client certificates and several hosts are refused, not ignored. The files `rowstile.toml` names to be read (the policy, the tests, the lock) are in its folder or
 below; a setting it doesn't know, or one of the wrong type, is an error.
 [Getting started](../getting-started.md) goes through all of it; [the cookbook](../cookbook.md) has tested patterns and
 [troubleshooting](../troubleshooting.md) what people run into.

@@ -217,6 +217,15 @@ Each release upgrades from the one before it. How releases are numbered and made
   CONCURRENTLY` left unfinished, for one that serves a lookup the permissions make, and said nothing of a
   lookup that reads the whole table. `rowstile indexes` didn't count them, and lint doesn't now. **Upgrading**:
   apply the policy again (or the next migration).
+- A connection string of keywords (`host=... dbname=...`) is split into its settings as libpq splits it:
+  spaces around `=`, a quote in a value written `\'` (`password='it\'s'`), and a `"` as it is. Those were
+  refused. And `password='it''s'`, which the command's own message suggested, was read as `its`; it is refused
+  now, as psql refuses it.
+- Several hosts (`host=a,b`, or `postgresql://a:5432,b:5432/db`) are refused, saying the command connects to
+  one. They failed with "Name or service not known", or in a URL with a message about a `#` in the password.
+- `rowstile sql` showed an array of arrays of text or booleans wrong: `ARRAY[['a','b'],['c','d']]` as
+  `['{a', 'b']`, and booleans all false. It shows them as Postgres writes them, braces in braces, as it did
+  numbers.
 
 ## 0.1.0 (alpha)
 

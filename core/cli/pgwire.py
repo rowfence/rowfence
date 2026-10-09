@@ -15,7 +15,6 @@ import hmac
 import json
 import os
 import re
-import shlex
 import socket
 import ssl
 import stringprep
@@ -59,8 +58,8 @@ class ProtocolError(Exception):
 
 def _parse_array(text: str) -> list[str | None]:
     """Parse a one-dimensional Postgres array literal ({a,"b c",NULL}) into a list of str/None."""
-    if not text or text[0] != "{":
-        raise ProtocolError(f"not an array: {text!r}")
+    if not text.startswith("{") or text.startswith("{{"):  # an array of arrays starts {{: an element never does
+        raise ProtocolError(f"not an array of one dimension: {text!r}")
     out: list[str | None] = []
     i, n = 1, len(text)
     if text == "{}":
@@ -114,6 +113,26 @@ def _convert(oid: int, value: bytes | None) -> Value:
     except (ValueError, IndexError, ProtocolError):
         return text  # two dimensions, or bounds ([0:1]={a,b}): as Postgres writes it
     return text
+
+
+def _text(value: object) -> str:
+    """A parameter as text, as psycopg sends it: a list as an array ({"a","b \\"c\\"",NULL}), true or false; a dict
+    as JSON; anything else as str() writes it."""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, dict):
+        return json.dumps(value)
+    if isinstance(value, list):
+        items = (
+            "NULL"
+            if x is None
+            else _text(x)
+            if isinstance(x, list)
+            else '"' + _text(x).replace("\\", "\\\\").replace('"', '\\"') + '"'
+            for x in value
+        )
+        return "{" + ",".join(items) + "}"
+    return str(value)
 
 
 class Connection:
@@ -276,7 +295,7 @@ class Connection:
 
     # --- queries ------------------------------------------------------------
     def query(self, sql: str, args: Sequence[object] = ()) -> list[tuple[Value, ...]]:
-        """Run one statement with $1..$n parameters (sent as text: str() of each, JSON for a dict or list); returns a list of tuples."""
+        """Run one statement with $1..$n parameters (sent as text, see _text); returns a list of tuples."""
         rows, _ = self.query_described(sql, args)
         return rows
 
@@ -286,11 +305,7 @@ class Connection:
             if a is None:
                 bind += struct.pack("!i", -1)
             else:
-                if isinstance(a, bool):
-                    a = "true" if a else "false"
-                elif isinstance(a, (dict, list)):
-                    a = json.dumps(a)
-                v = str(a).encode()
+                v = _text(a).encode()
                 if b"\0" in v:
                     raise ValueError("parameters cannot contain NUL characters")
                 bind += struct.pack("!i", len(v)) + v
@@ -583,14 +598,55 @@ REFUSED = {
     "gssencmode": "GSS encryption",
     "requirepeer": "requirepeer",
 }
+BLANKS = " \t\n\r\f\v"  # what separates the settings of a keyword string (C's isspace, as libpq reads it)
+QUOTING = (
+    "put a value with spaces in single quotes, and a quote or a backslash in a value after a backslash "
+    "(password='it\\'s'), or use a postgresql:// URL"
+)
+
+
+def _keywords(text: str) -> list[tuple[str, str]]:
+    """The settings of a keyword string, read as libpq reads one: key=value, spaces around = allowed; a value in
+    single quotes may hold spaces; a backslash takes the character after it as it is (\\' and \\\\, in quotes or
+    not), and any other character is itself (a " too)."""
+    out: list[tuple[str, str]] = []
+    i, n = 0, len(text)
+    while i < n:
+        if text[i] in BLANKS:
+            i += 1
+            continue
+        start = i
+        while i < n and text[i] != "=" and text[i] not in BLANKS:
+            i += 1
+        key = text[start:i]
+        while i < n and text[i] in BLANKS:
+            i += 1
+        if i == n or text[i] != "=":
+            raise ValueError(f'can\'t read the connection string: "{key}" has no "=" after it: {QUOTING}')
+        i += 1
+        while i < n and text[i] in BLANKS:
+            i += 1
+        quoted = i < n and text[i] == "'"
+        i += quoted
+        value: list[str] = []
+        while i < n and (text[i] != "'" if quoted else text[i] not in BLANKS):
+            if text[i] == "\\":
+                i += 1  # a backslash at the very end takes nothing
+            value.append(text[i : i + 1])
+            i += 1
+        if quoted and i >= n:
+            raise ValueError(f"can't read the connection string: a quote isn't closed: {QUOTING}")
+        i += quoted  # the closing quote
+        out.append((key, "".join(value)))
+    return out
 
 
 def parse_dsn(text: str | None) -> ConnectArgs:
-    """connect() arguments from "host=... port=... user=... password=... dbname=... sslmode=..." or a
-    postgresql:// URL (its ?options too), with PGHOST, PGPORT, PGUSER, PGPASSWORD, PGDATABASE, PGOPTIONS,
-    PGSSLMODE, PGSSLROOTCERT and PGCHANNELBINDING for whatever is left out. Raises ValueError for a setting it can't honour: an unknown one in a
-    keyword string, or one of REFUSED. A URL's other options (an ORM's own: ?schema=, ?pgbouncer=) are left to
-    whoever they are for."""
+    """connect() arguments from "host=... port=... user=... password=... dbname=... sslmode=..." (read as libpq
+    reads it) or a postgresql:// URL (its ?options too), with PGHOST, PGPORT, PGUSER, PGPASSWORD, PGDATABASE,
+    PGOPTIONS, PGSSLMODE, PGSSLROOTCERT and PGCHANNELBINDING for whatever is left out. Raises ValueError for a
+    setting it can't honour: an unknown one in a keyword string, one of REFUSED, or several hosts. A URL's other
+    options (an ORM's own: ?schema=, ?pgbouncer=) are left to whoever they are for."""
     out: dict[str, str] = {}
 
     def setting(k: str, v: str, strict: bool) -> None:
@@ -601,9 +657,17 @@ def parse_dsn(text: str | None) -> ConnectArgs:
         elif strict and k not in ("application_name", "target_session_attrs"):
             raise ValueError(f"unknown connection setting '{k}' (use host, port, user, password, dbname, sslmode)")
 
+    def one(hosts: str) -> str:
+        if "," in hosts:
+            raise ValueError(
+                f"the connection asks for several hosts ({hosts}), which the rowstile command doesn't do: name one"
+            )
+        return hosts
+
     if text and re.match(r"postgres(ql)?://", text):
         # a URL: postgresql://user:password@host:port/dbname?sslmode=require
         u = urllib.parse.urlsplit(text)
+        one(u.netloc.rpartition("@")[2])
         try:
             port = u.port
         except ValueError:
@@ -622,17 +686,9 @@ def parse_dsn(text: str | None) -> ConnectArgs:
         for k, v in urllib.parse.parse_qsl(u.query, keep_blank_values=True):
             setting(k, v, strict=False)
         text = ""
-    try:
-        parts = shlex.split(text or "")
-    except ValueError:
-        raise ValueError(
-            "can't read the connection string: put a value with spaces or quotes in single quotes "
-            "(password='it''s'), or use a postgresql:// URL"
-        ) from None
-    for part in parts:
-        k, _, v = part.partition("=")
+    for k, v in _keywords(text or ""):
         setting(k, v, strict=True)
-    out.setdefault("host", os.environ.get("PGHOST", "/var/run/postgresql"))
+    host = one(out.setdefault("host", os.environ.get("PGHOST", "/var/run/postgresql")))
     out.setdefault("port", os.environ.get("PGPORT", "5432"))
     user = out.setdefault("user", os.environ.get("PGUSER", "postgres"))
     password = out.get("password", os.environ.get("PGPASSWORD"))
@@ -649,7 +705,7 @@ def parse_dsn(text: str | None) -> ConnectArgs:
             else f"connect_timeout is a number of seconds, not {out['timeout']!r}"
         )
     return {
-        "host": out["host"],
+        "host": host,
         "port": int(out["port"]),
         "user": user,
         "password": password,

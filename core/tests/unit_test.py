@@ -2480,6 +2480,13 @@ class Wire(unittest.TestCase):
         os.environ["PGSSLMODE"] = "require"
         self.assertEqual(parse("host=h")["sslmode"], "require")
         del os.environ["PGSSLMODE"]
+        # a keyword string as libpq reads it (psql given the same string reaches the same database as the same
+        # user): spaces around =, a value in single quotes, \' and \\ in a value, and a " as it is
+        got = parse("host = h dbname='my db' user=it\\'s password='a\\\\b\\'c\"d'")
+        self.assertEqual(
+            (got["host"], got["database"], got["user"], got["password"]), ("h", "my db", "it's", "a\\b'c\"d")
+        )
+        self.assertEqual(parse("host=h password='it\\'s'")["password"], "it's")  # as the message below shows it
 
     def test_what_it_cannot_honour_is_refused_not_dropped(self) -> None:
         for dsn, said in (
@@ -2488,8 +2495,13 @@ class Wire(unittest.TestCase):
             ("postgresql://h/app?channel_binding=maybe", "channel_binding=maybe"),
             ("host=h colour=blue", "unknown connection setting 'colour'"),
             ("postgresql://u:pa#ss@h/app", "must be written %23"),
-            ('host=h password=p"w', "single quotes"),
             ("host=h port=abc", "numbers"),
+            # SQL's doubled quote isn't libpq's (psql refuses it too): it was read as "its"
+            ("host=h password='it''s'", '"\'s\'" has no "=" after it: put a value with spaces in single quotes'),
+            ("host=h password='secret", "a quote isn't closed"),
+            # libpq tries each host in turn; this client connects to one, and says so rather than looking up "h1,h2"
+            ("host=h1,h2 dbname=app", "the connection asks for several hosts (h1,h2), which the rowstile command"),
+            ("postgresql://u@h1:5432,h2:5432/app", "several hosts (h1:5432,h2:5432)"),
         ):
             with self.assertRaisesRegex(ValueError, re.escape(said), msg=dsn):
                 self.pgwire.parse_dsn(dsn)
@@ -2718,6 +2730,12 @@ class Wire(unittest.TestCase):
             certificate = ssl.PEM_cert_to_DER_cert(fh.read())
         self.assertEqual(self.pgwire._signature_hash(certificate), "sha256")
         self.assertIsNone(self.pgwire._signature_hash(b"not a certificate"))
+        # RSA-PSS names its hash in its parameters; SHA-1, also when none is named, counts as SHA-256 (RFC 5929).
+        # Made with openssl req -x509 -newkey rsa-pss -sigopt rsa_padding_mode:pss -sha384 (and -sha1); a server
+        # holding each signed in with channel_binding=require, from psql and from this client alike
+        for name, hashed in (("wire_pss_sha384.crt", "sha384"), ("wire_pss_sha1.crt", "sha256")):
+            with open(os.path.join(ROOT, "tests", "fixtures", name), encoding="ascii") as fh:
+                self.assertEqual(self.pgwire._signature_hash(ssl.PEM_cert_to_DER_cert(fh.read())), hashed, name)
 
     def test_each_way_a_server_asks_for_the_password(self) -> None:
         import hashlib
@@ -2759,12 +2777,167 @@ class Wire(unittest.TestCase):
         finally:
             conn.close()
 
+    @staticmethod
+    def said(kind: bytes, body: bytes = b"") -> bytes:
+        """One message as a server sends it: its kind, its length, its body."""
+        import struct
+
+        return kind + struct.pack("!i", 4 + len(body)) + body
+
+    def talking(
+        self, start: bytes, answers: Sequence[bytes | None] = (), listen: bool = True
+    ) -> tuple[int, dict[str, object], Callable[[], None]]:
+        """A made-up server for what comes after the handshake (no TLS, no password asked): it reads the start-up
+        message and sends `start`; then for each of `answers` it reads one query (up to its Sync) and sends that
+        answer, or, for None, closes the connection without one; then it waits until the client goes. seen: each
+        query's messages, and the CancelRequest a second connection brought within half a second (None: none),
+        unless listen is False: then nobody listens once the client is connected. The function returned waits until
+        the made-up server is done."""
+        import socket
+        import struct
+        import threading
+
+        listener = socket.socket()
+        listener.bind(("127.0.0.1", 0))
+        listener.listen(2)
+        port = listener.getsockname()[1]
+        queries: list[list[tuple[bytes, bytes]]] = []
+        seen: dict[str, object] = {"queries": queries, "cancel": None}
+
+        def exactly(conn: socket.socket, n: int) -> bytes:
+            data = b""
+            while len(data) < n:
+                chunk = conn.recv(n - len(data))
+                if not chunk:
+                    raise ConnectionError("closed")
+                data += chunk
+            return data
+
+        def serve() -> None:
+            conn, _ = listener.accept()
+            if not listen:
+                listener.close()
+            try:
+                conn.settimeout(5)
+                exactly(conn, struct.unpack("!i", exactly(conn, 4))[0] - 4)  # the start-up message
+                conn.sendall(start)
+                for answer in answers:
+                    query: list[tuple[bytes, bytes]] = []
+                    while not query or query[-1][0] != b"S":
+                        kind = exactly(conn, 1)
+                        query.append((kind, exactly(conn, struct.unpack("!i", exactly(conn, 4))[0] - 4)))
+                    queries.append(query)
+                    if answer is None:
+                        return
+                    conn.sendall(answer)
+                while conn.recv(1024):
+                    pass
+            except OSError:
+                pass
+            finally:
+                conn.close()
+                if listen:
+                    listener.settimeout(0.5)
+                    try:
+                        cancel, _ = listener.accept()
+                        cancel.settimeout(5)
+                        seen["cancel"] = exactly(cancel, 16)
+                        cancel.close()
+                    except OSError:
+                        pass
+                    listener.close()
+
+        thread = threading.Thread(target=serve, daemon=True)
+        thread.start()
+        return port, seen, lambda: thread.join(5)
+
+    def test_what_the_server_says_once_signed_in(self) -> None:
+        import struct
+
+        said = self.said
+        signed_in, ready = said(b"R", struct.pack("!i", 0)), said(b"Z", b"I")
+        warning = said(b"N", b"SWARNING\0Mcareful\0\0")
+        done_with = said(b"C", b"SELECT 1\0") + ready
+        # a warning while it starts (a database's setting the server can't take: psql shows it) is read past, and
+        # what the server says after it is kept
+        port, seen, done = self.talking(
+            signed_in + warning + said(b"S", b"server_version\x0016\0") + said(b"K", struct.pack("!ii", 41, 42)) + ready
+        )
+        conn = self.pgwire.connect(host="127.0.0.1", port=port, sslmode="disable", timeout=5)
+        self.assertEqual((conn.params, conn.backend), ({"server_version": "16"}, (41, 42)))
+        conn.close()
+        # one while a statement runs goes to on_notice (rowstile sql shows a WARNING, as psql does), and the rows
+        # come after it
+        column = said(b"T", struct.pack("!h", 1) + b"n\0" + struct.pack("!ihihih", 0, 0, 23, 4, -1, 0))
+        row = said(b"D", struct.pack("!hi", 1, 1) + b"7")
+        port, seen, done = self.talking(
+            signed_in + ready, [said(b"1") + said(b"2") + column + warning + row + done_with]
+        )
+        conn = self.pgwire.connect(host="127.0.0.1", port=port, sslmode="disable", timeout=5)
+        notices: list[dict[str, str]] = []
+        conn.on_notice = notices.append
+        self.assertEqual(conn.query("SELECT 7"), [(7,)])
+        self.assertEqual(notices, [{"S": "WARNING", "M": "careful"}])
+        conn.close()
+        # parameters as psycopg sends them: a list as an array (the generated Python client's who_among, through
+        # this client's cursor), a dict as JSON
+        port, seen, done = self.talking(signed_in + ready, [said(b"1") + said(b"2") + said(b"n") + done_with])
+        conn = self.pgwire.connect(host="127.0.0.1", port=port, sslmode="disable", timeout=5)
+        conn.query("SELECT $1, $2, $3, $4, $5", [["a", 'b"c', None, "d\\e"], {"k": [1]}, True, None, [[1], [None]]])
+        conn.close()
+        done()
+        queries = cast("list[list[tuple[bytes, bytes]]]", seen["queries"])
+        bind = next(body for kind, body in queries[0] if kind == b"B")
+        at = bind.index(b"\0", bind.index(b"\0") + 1) + 1  # after the portal's name and the statement's
+        at += 2 + 2 * struct.unpack("!h", bind[at : at + 2])[0]  # the formats
+        count, at = struct.unpack("!h", bind[at : at + 2])[0], at + 2
+        sent: list[bytes | None] = []
+        for _ in range(count):
+            n = struct.unpack("!i", bind[at : at + 4])[0]
+            sent.append(None if n < 0 else bind[at + 4 : at + 4 + n])
+            at += 4 + max(n, 0)
+        self.assertEqual(sent, [b'{"a","b\\"c",NULL,"d\\\\e"}', b'{"k": [1]}', b"true", None, b'{{"1"},{NULL}}'])
+        # a server that goes away in the middle of a statement without a word (it crashed, or the network did)
+        port, seen, done = self.talking(signed_in + ready, [None])
+        conn = self.pgwire.connect(host="127.0.0.1", port=port, sslmode="disable", timeout=5)
+        with self.assertRaisesRegex(self.pgwire.ProtocolError, "^the server closed the connection$"):
+            conn.query("SELECT 1")
+        conn.sock.close()
+
+    def test_cancel(self) -> None:
+        """Ctrl-C in the command: a CancelRequest with the session's key, on a connection of its own; then this one
+        is closed."""
+        import struct
+
+        said = self.said
+        key = said(b"K", struct.pack("!ii", 41, 42))
+        start = said(b"R", struct.pack("!i", 0)) + key + said(b"Z", b"I")
+        for given, listen, sent in (
+            (start, True, struct.pack("!iiii", 16, 80877102, 41, 42)),
+            (start.replace(key, b""), True, None),  # no key from the server (or the pooler): nothing to cancel with
+            (start, False, None),  # nobody takes the request (the server went away): no error, and closed all the same
+        ):
+            port, seen, done = self.talking(given, listen=listen)
+            conn = self.pgwire.connect(host="127.0.0.1", port=port, sslmode="disable", timeout=5)
+            conn.cancel()
+            done()
+            self.assertEqual((seen["cancel"], conn.sock.fileno()), (sent, -1), (listen, sent))
+
+    def test_a_socket_on_windows(self) -> None:
+        # Windows has no Unix sockets: a host that is a folder (/var/run/postgresql is the default when nothing
+        # names the database) is refused, saying what to write instead
+        said = "^host=/var/run/postgresql is a Unix socket, which Windows doesn't have: use host=localhost$"
+        with mock.patch.object(sys, "platform", "win32"), self.assertRaisesRegex(self.pgwire.ProtocolError, said):
+            self.pgwire.connect(host="/var/run/postgresql", timeout=1)
+
     def test_values_it_reads(self) -> None:
         convert = self.pgwire._convert
         self.assertEqual(convert(1000, b"{t,f,NULL}"), [True, False, None])  # booleans
         self.assertEqual(convert(1009, b'{"a\\"b",c}'), ['a"b', "c"])  # a quote escaped inside quotes
         self.assertEqual(convert(1007, b"{1,2,NULL}"), [1, 2, None])
         self.assertEqual(convert(1007, b"{{1,2},{3,4}}"), "{{1,2},{3,4}}")  # two dimensions: as Postgres writes it
+        self.assertEqual(convert(1009, b"{{a,b},{c,d}}"), "{{a,b},{c,d}}")  # ... text and booleans too (rowstile sql
+        self.assertEqual(convert(1000, b"{{t,f},{f,t}}"), "{{t,f},{f,t}}")  # showed ['{a', 'b'] and [False, False])
         self.assertEqual(convert(1009, b"[0:1]={a,b}"), "[0:1]={a,b}")
         self.assertEqual(self.pgwire._saslprep("pa\u00adss\u2168"), "passIX")  # as psql prepares a password for SCRAM
         self.assertEqual(self.pgwire._saslprep("caf\u00e9"), "caf\u00e9")
