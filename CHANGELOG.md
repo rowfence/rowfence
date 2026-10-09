@@ -67,6 +67,23 @@ Each release upgrades from the one before it. How releases are numbered and made
 
 ### Fixed
 
+- A file the command couldn't write was said as a lost database (`rowstile snapshot --out` naming a folder,
+  `rowstile client` writing to a folder, `rowstile init` where `db` is a file), or stopped the command with a
+  traceback (`rowstile migrate`, and `rowstile client` from the policy file; in `rowstile dev`, the migration
+  written once you stop editing, which ended the loop). It names the file and why: `out: Is a directory`, exit
+  2; `rowstile dev` says so and goes on. `rowstile snapshot` makes the folder it writes in, as `migrate` and
+  `client` do: `[review] snapshot = "review/access.snapshot"` said the database was lost.
+- `rowstile dev` kept a connection the server had ended in the middle of a push (a restart, or
+  `pg_terminate_backend`): it gave the server's message and "nothing applied", the next save failed with "lost
+  the database: [Errno 9] Bad file descriptor", and only the one after worked. It says it lost the database,
+  and the next save connects again. A policy with an expression nested too deep to read stopped `rowstile dev`
+  with a traceback, the loop with it; it is said as `rowstile check` says it. And who loses rows was said as
+  "3 user(s) lose rows readable on 3 app.filess": it is "rows readable in app.files (3 rows)", as the review
+  says it.
+- `rowstile review --db` on a database whose owner may not switch to the app role said so without the `GRANT`
+  to run, which `rowstile test` gives: it gives it now.
+- `rowstile migrate --check` listed twenty changes and stopped there, as if they were all: it says how many
+  more, as `rowstile migrate` does.
 - The language server stopped, and the editor said it had crashed, when a test file was opened while
   `rowstile.toml`'s `policy` named a file outside its folder (which the command refuses). The test file shows
   why on its first line now. A `policy` that names a file that isn't there is shown the same way, where it was a

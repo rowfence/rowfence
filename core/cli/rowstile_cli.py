@@ -546,6 +546,12 @@ def relative(path: str) -> str:
         return path
 
 
+def file_problem(e: OSError) -> str | None:
+    """'path: why' for a file the command couldn't read or write (a folder where it writes a file, say); None for
+    an error that names no file, as a connection's does."""
+    return None if e.filename is None else f"{relative(str(e.filename))}: {e.strerror}"
+
+
 # --- asking as someone ---------------------------------------------------------------------------
 def principal(who: str) -> tuple[str, str]:
     """'user:42' -> ('user', '42'); 'anyone' -> ('user', '')."""
@@ -705,7 +711,10 @@ class Dev:
         except OSError as e:
             self.say("x", f"{relative(self.policy)}: {e.strerror}")
             return False
-        msg = database.check(text, files)
+        try:
+            msg = database.check(text, files)
+        except RecursionError:
+            msg = "an expression in the policy is nested too deep to read"
         if msg:
             where = msg.removeprefix("policy ")
             line = re.match(r"(?:(\S+) )?line (\d+):", where)
@@ -766,10 +775,18 @@ class Dev:
             self.say("x", str(e) + (f"\n{e.hint}" if e.hint else "") + "\n" + self.left(pushed))
             return False
         except pgwire.PgError as e:
+            if e.fields.get("S") in ("FATAL", "PANIC"):  # the server ended the session: the next pass connects again
+                self.say("x", f"lost the database: {e.message}")
+                self.conn = None
+                return False
             detail = e.fields.get("D")
             self.say("x", e.message + (f"\n{detail}" if detail else "") + "\n" + self.left(pushed))
             return False
         except (OSError, pgwire.ProtocolError) as e:
+            said = file_problem(e) if isinstance(e, OSError) else None
+            if said:  # a client file it couldn't write: the database is still there
+                self.say("x", said)
+                return False
             self.say("x", f"lost the database: {e}")
             self.conn = None
             return False
@@ -792,6 +809,8 @@ class Dev:
             return
         parts = [
             f"{users} user(s) {change.rstrip('s')} {what} on {objs} {type_}{'' if objs == 1 else 's'}"
+            if what.startswith("permission ")
+            else f"{users} user(s) {change.rstrip('s')} {what} in {type_} ({objs} row{'' if objs == 1 else 's'})"
             for change, type_, what, users, objs in rows[:8]
         ]
         more = f"\n... and {len(rows) - 8} more (rowstile diff)" if len(rows) > 8 else ""
@@ -874,6 +893,8 @@ class Dev:
             migrate_cmd(self.cfg, self.policy, text, files, {}, False)
         except SystemExit:
             pass
+        except OSError as e:  # a file it couldn't write: said, as migrate says it, and the loop goes on
+            print(file_problem(e) or str(e), file=sys.stderr)
 
 
 # --- main ----------------------------------------------------------------------------------------
@@ -1137,6 +1158,8 @@ def main(argv: list[str]) -> None:
         fail(str(e) + (f"\nHINT: {e.hint}" if e.hint else ""))
     except Unreadable as e:
         fail(str(e), 2)
+    except OSError as e:
+        fail(file_problem(e) or str(e), 2)
     except RecursionError:
         fail(f"rowstile {cmd}: an expression in the policy is nested too deep to read", 1)
 
@@ -1336,7 +1359,8 @@ def main(argv: list[str]) -> None:
         hint = e.fields.get("H")
         fail(e.message + (f"\nDETAIL: {detail}" if detail else "") + (f"\nHINT: {hint}" if hint else ""))
     except (OSError, pgwire.ProtocolError) as e:
-        fail(f"lost the database: {e}", 2)
+        said = file_problem(e) if isinstance(e, OSError) else None
+        fail(said or f"lost the database: {e}", 2)
     except Unreadable as e:
         fail(str(e), 2)
     except RecursionError:
@@ -1461,7 +1485,7 @@ def review_cmd(cfg: Config, args: list[str], opts: dict[str, str], flags: set[st
         base = None if base_text is None else (base_text, base_files, base_tests(cfg, ref))  # None: the policy is new
         r = review.review(base, (head_text, head_files, head_tests), base_lock, head_lock, db)
     except database.Error as e:
-        fail(str(e))
+        fail(str(e) + (f"\nHINT: {e.hint}" if e.hint else ""))
     except review.PolicyError as e:
         fail(f"{path}: {e}")
     except review.BaseMistake as e:
@@ -1526,6 +1550,14 @@ def lock_path(cfg: Config, policy_path: str) -> str:
     return cfg.inside(lock, "[migrations] lock") if lock else os.path.splitext(policy_path)[0] + ".lock"
 
 
+def print_changes(summary: list[str]) -> None:
+    """A migration's changes: the first twenty, and how many more."""
+    for line in summary[:20]:
+        print(f"  {line}")
+    if len(summary) > 20:
+        print(f"  ... and {len(summary) - 20} more")
+
+
 def migration_name(summary: list[str]) -> str:
     """A name from what changed: the one line that changed, else 'policy'."""
     if len(summary) == 1 and summary[0][:2] in ("+ ", "- "):
@@ -1570,8 +1602,7 @@ def migrate_cmd(
     summary = ms[-1].summary
     if check:
         print(f"{relative(path)} has changes no migration has: run rowstile migrate")
-        for line in summary[:20]:
-            print(f"  {line}")
+        print_changes(summary)
         return 1
     name = opts.get("--name") or migration_name(summary)
     ms = database.migrations(text, files, old, name, not one_phase, downgrade)
@@ -1587,10 +1618,7 @@ def migrate_cmd(
     os.makedirs(os.path.dirname(lock) or ".", exist_ok=True)
     with open(lock, "w", encoding="utf-8", newline="\n") as fh:
         fh.write(ms[-1].lock)
-    for line in summary[:20]:
-        print(f"  {line}")
-    if len(summary) > 20:
-        print(f"  ... and {len(summary) - 20} more")
+    print_changes(summary)
     if len(ms) == 2:
         print(
             f"builds {', '.join(ms[0].rebuilt)} beside the ones in use (the app keeps working), then swaps "
@@ -1716,6 +1744,7 @@ def snapshot_cmd(conn: pgwire.Connection, cfg: Config, opts: dict[str, str], che
         for x in sorted(before - after)[:20]:
             print(f"  - {x}")
         sys.exit(1)
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     with open(path, "w", encoding="utf-8", newline="\n") as fh:
         fh.write(text)
     print(f"wrote {relative(path)} ({len(lines)} lines)")

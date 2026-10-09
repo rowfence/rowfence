@@ -5,11 +5,11 @@ adversarial 86
 apply 108
 capitals 35
 children 56
-cli 119
+cli 121
 concurrency 12
 confidence 41
 cookbook 79
-devx 87
+devx 92
 docs 11
 governance 140
 identity 50
@@ -24,9 +24,9 @@ multi scenario 80
 policy errors 178
 principals 45
 races 4
-review 38
+review 40
 scenario 93
 signed sessions 36
 studio 106
 tools 36
-unit 291
+unit 292
