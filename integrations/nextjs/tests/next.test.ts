@@ -138,8 +138,14 @@ describe("authzRoutes, for @rowstile/react", () => {
     expect(await (await post("1", "unshare", share)).json()).toEqual({ ok: true });
     const asked = await (await post("3", "request", { type: "project", id: "2", relation: "viewer", reason: "the review" })).json();
     expect(asked.id).toMatch(/^\d+$/);
-    // a request without a reason: the database says what is missing (AZ710)
-    await expect(post("2", "request", { type: "project", id: "1", relation: "viewer" })).rejects.toThrow("say why you need it");
+    // a request without a reason: the database says what is missing (AZ710), which is the user's to fix: 400
+    const why = await post("2", "request", { type: "project", id: "1", relation: "viewer" });
+    expect([why.status, why.headers.get("content-type"), await why.json()]).toEqual([400, "application/problem+json", {
+      type: "https://rowstile.dev/problems/bad-argument", title: "Bad Request", status: 400, detail: "say why you need it",
+      code: "AZ710",
+    }]);
+    // a share the policy doesn't declare (AZ706) is the app's mistake, not the user's: it stays an error
+    await expect(post("1", "share", { ...share, relation: "member" })).rejects.toThrow("does not allow sharing project.member");
     expect((await post("1", "nothing", {})).status).toBe(404);
   });
 

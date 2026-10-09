@@ -210,7 +210,8 @@ function Buttons() {
 ```
 
 `useShares` and a headless `<ShareDialog>` share and unshare as the database allows; `useAccessRequest` asks
-for access. They stay current over server-sent events.
+for access. They stay current over server-sent events. A request without a reason answers 400 with the
+database's words, "say why you need it" (its fields: <https://rowstile.dev/problems/bad-argument>).
 
 Your own code shares with `db.$authz.share`: the object, the relation, then who it is shared with (a type and
 an id; for a team's members, `"team", 7, "member"`). Who may share is the policy's (`viewer : user shared by

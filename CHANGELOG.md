@@ -423,6 +423,10 @@ Each release upgrades from the one before it. How releases are numbered and made
   change feed twice, once when its stream was cancelled and again when its request was aborted (and once more
   for a change told after that): a feed of your own given as `changes` was unsubscribed as many times. Once
   now.
+- `@rowstile/next`: an access request without a reason, sent to `authzRoutes`' `request` route (what the React
+  kit's `useAccessRequest` calls), answered 500, and `useAccessRequest` failed with "Internal Server Error". It
+  answers 400 with the database's words, "say why you need it", and code AZ710 (a problem body of the new type
+  <https://rowstile.dev/problems/bad-argument>), which `useAccessRequest` fails with.
 - `rowstile.sqlalchemy`: `why_stale()` could answer about a write another thread made outside a request or
   `acting_as` block, naming its row. The ORM's writes outside a block (an engine `install()`ed with `user=`, as
   in a Flask app or a worker thread) went to one list for the whole process. Each thread (or task) now has its
