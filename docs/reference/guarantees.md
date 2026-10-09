@@ -30,6 +30,11 @@
   with the triggers off (`session_replication_role = replica`, `ALTER TABLE ... DISABLE TRIGGER`, a bulk
   load or a restore that turns them off): `authz.verify()` then says false, and `rowstile reapply --force`
   computes the tables again.
+- **What is written in replica mode isn't followed.** A superuser, or a role allowed to set
+  `session_replication_role`, may write with it set to `replica`, where Postgres runs no ordinary trigger: the
+  audit trail gets no line for the shares and memberships changed so, the change feed doesn't announce them, and
+  the inheritance tables don't follow (above). The audit trail itself can't be changed that way: its guard holds
+  in every replication role.
 - **No loops through columns**, even across several rows or two concurrent
   transactions. Loops through link tables are allowed and harmless.
 - **Stored decisions don't depend on time or user.** Conditions that limit
