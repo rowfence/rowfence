@@ -549,6 +549,28 @@ COMPILE = [
         10,
     ),
     ("a mask without columns", "rules alt.docs\n  select : share\n  mask : share\n", "write masks as: mask col1", 12),
+    (
+        "a deny on a permission that inherits through another type",
+        "  project : project = project_id\n  can hidden = {locked} or parent.hidden\n"
+        "  can view = (owner or parent.view or project.view) and not hidden\n"
+        "type project = alt.projects\n  lead : user = lead_id\n  docs : doc = alt.doc_projects(proj_id -> doc_no)\n"
+        "  can view = lead or docs.view\n",
+        "doc.view has a deny, so it can only inherit within doc (like parent.view), not through permissions of other "
+        "types",
+        12,
+    ),
+    (
+        "a rule using a link as if it held users",
+        "rules alt.docs\n  select : owner or parent\n",
+        "doc.parent links to doc objects, not users; follow it with a dot",
+        11,
+    ),
+    (
+        "... also when the link has a column and a link table",
+        "  parent : doc = alt.doc_links(child -> parent)\nrules alt.docs\n  select : owner and not parent\n",
+        "doc.parent links to doc objects, not users; follow it with a dot",
+        12,
+    ),
 ]
 
 # whole policies, without BASE: (what, policy, expected piece of the message, expected line)

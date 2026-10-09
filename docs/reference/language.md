@@ -122,7 +122,8 @@ test "a folder's owner edits what is inside"    -- brings its own data, rolled b
   hidden folder and everything below it, even from people who hold it higher up. The deny
   must inherit the same way (`can hidden = blocked or parent.hidden`), so it covers
   everything below; a deny on one object that only cuts inheritance there is refused, with
-  a message saying so. A condition joined the same way holds at every level:
+  a message saying so. A permission with a deny inherits within its own type, not through
+  another type's permission (`project.view`). A condition joined the same way holds at every level:
   `(viewer or parent.view) and {not archived}` stops at an archived folder.
 - **Custom roles**: `roles : user, team#member` says who may hold roles people create at runtime
   (`authz.create_role('org', 1, 'folder', 'reviewer', ARRAY['view'])`) and share like relations. A
