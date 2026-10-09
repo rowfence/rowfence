@@ -85,6 +85,7 @@ admin "shares dropped when the policy is applied (their row is gone) are recorde
   "SELECT action || '|' || reason FROM authz.audit WHERE object_id = '999' ORDER BY id DESC LIMIT 1"
 expect_code "the trail cannot be edited, even by an administrator" "42501: the audit trail cannot be changed" -c "RESET ROLE" -c "DELETE FROM authz.audit"
 expect_code "... or emptied" "42501: the audit trail cannot be changed" -c "RESET ROLE" -c "TRUNCATE authz.audit"
+expect_code "... or an entry changed" "42501: the audit trail cannot be changed" -c "RESET ROLE" -c "UPDATE authz.audit SET reason = 'nothing happened'"
 expect_code "the app role cannot read it" "42501: permission denied for table audit" -c "SELECT count(*) FROM authz.audit"
 
 echo "-- the change feed"
@@ -210,6 +211,9 @@ check "dave is still an editor" "t" "SET authz.user_id = 4; SELECT authz.can('fo
 as 1 -c "SELECT authz.create_link('folder', 3, 'editor')" >/dev/null
 LINK=$(as 1 -c "SELECT id FROM authz.list_links('folder', 3)")
 check "erin (share) sees the editors' link alice made" "$LINK|editor|1"   "SET authz.user_id = 5; SELECT id || '|' || relation || '|' || created_by FROM authz.list_links('folder', 3)"
+REV3=$(as 5 -c "SELECT authz.start_review('folder', '3')")
+check "... and a review of the folder lists it as (link), as the audit trail does" "editor|link|(link)" \
+  "SET authz.user_id = 5; SELECT relation || '|' || subject_type || '|' || subject_id FROM authz.review_items($REV3) WHERE subject_type = 'link'"
 expect_code "... but cannot turn it off (not manage_editors)" "42501: you cannot turn off link " -c "SET authz.user_id = 5"   -c "SELECT authz.revoke_link('folder', 3, '$LINK')"
 expect_code "a read-only session turns no link off" "42501: this session is read-only (viewing as someone else, or a read-only token)" -c "SET authz.user_id = 1" -c "SET authz.scopes = 'read'"   -c "SELECT authz.revoke_link('folder', 3, '$LINK')"
 admin "the link is still there" "1" "SELECT count(*) FROM authz.shares WHERE object_type = 'folder' AND object_id = '3' AND subject_type = 'link'"
