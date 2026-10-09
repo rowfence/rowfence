@@ -208,6 +208,11 @@ Each release upgrades from the one before it. How releases are numbered and made
 - `rowstile init`'s draft said "the loop of foreign keys it is in has no owner anywhere" of a table whose
   only foreign keys point at a table nobody changes through the app (products in categories), where there
   is no loop. It says "nobody edits what it is in" there.
+- `authz.lint()` failed on a type keyed by two columns that sits in a tree by both (`parent : folder =
+  [org_id, parent_id]`) when no `update ... after` rule checks where a row moves: "column "org_id, parent_id"
+  of relation "folders" does not exist". `rowstile apply`, `push` and `dev` ask lint as they apply, so such a
+  policy couldn't be applied at all. Lint names the pair now, with the rule to add (`update org_id, parent_id
+  after : parent.edit`). **Upgrading**: apply the policy again (or the next migration).
 
 ## 0.1.0 (alpha)
 

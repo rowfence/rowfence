@@ -505,7 +505,9 @@ BEGIN
 {keyless}{heavy}  -- columns that move a row under another, with nothing checking where it moves to
   FOR r IN SELECT * FROM (VALUES {move_rows or "(NULL::text, NULL::text, NULL::text, NULL::text)"}) v(tbl, col, rel, loc)
            WHERE tbl IS NOT NULL LOOP
-    IF has_column_privilege(v_role, r.tbl, r.col, 'UPDATE') THEN
+    -- (a composite key's columns are 'org_id, parent_id': any of them it may update)
+    IF EXISTS (SELECT 1 FROM pg_attribute a WHERE a.attrelid = to_regclass(r.tbl) AND a.attnum > 0 AND NOT a.attisdropped
+               AND a.attname::text = ANY (string_to_array(r.col, ', ')) AND has_column_privilege(v_role, r.tbl, a.attnum, 'UPDATE')) THEN
       severity := 'warning'; object := to_regclass(r.tbl)::text || '.' || r.col;
       problem := format('moves a row under another (%s, %s), and nothing checks where it moves to, so anyone who may update a row may put it inside something they may not change: add a rule such as "update %s after : %s.edit"', r.rel, {self.line_sql(None, None, "r.loc")}, r.col, r.rel);
       RETURN NEXT;
