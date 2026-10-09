@@ -138,6 +138,14 @@ def lit(s: object) -> str:
     return "'" + str(s).replace("'", "''") + "'"
 
 
+def text_array(items: Sequence[str]) -> str:
+    return "ARRAY[" + ", ".join(lit(i) for i in items) + "]::text[]"
+
+
+# a custom role's id no role has: changing or deleting it is refused as one the user may not manage is
+MISSING_ROLE = "999999"
+
+
 # ----------------------------------------------------------------------
 # The reference evaluator
 # ----------------------------------------------------------------------
@@ -347,6 +355,22 @@ class Checker:
             (pid for kind, pid in (evaluate.principal_of(u, self.types) for u in self.users) if kind == "user" and pid),
             "",
         )
+        # the custom roles API, tried by the same user: the types that may own roles (manage_roles), the types that
+        # have them with the permissions a role there may give (every other turn, one more it may not), and the
+        # roles there are, owned by such a type
+        self.role_owners = [t.name for t in self.types.values() if "manage_roles" in t.perms]
+        self.role_perms: dict[str, list[str]] = {}
+        for t in self.types.values():
+            if t.roles:
+                more = [p for p, x in t.perms.items() if p not in t.roles[1] and not x.hidden][:1]
+                self.role_perms[t.name] = t.roles[1] + (more if self.checks // len(self.users) % 2 else [])
+        self.roles_now = {
+            rid: (owner_type, owner_id, object_type)
+            for rid, owner_type, owner_id, object_type in self.db.rows(
+                "SELECT id, owner_type, owner_id, object_type FROM authz.roles ORDER BY id"
+            )
+            if owner_type in self.role_owners
+        }
         # the rows explain is asked about by each user themselves, whether they may see them or not: picked here
         sample = {
             t.name: [
@@ -411,6 +435,29 @@ class Checker:
                         [u, "create_link", tname, rname],
                         f"SELECT coalesce(json_agg(json_build_array(i, difftest_app.try_create_link({lit(tname)}, i, "
                         f"{lit(rname)}))), '[]') FROM unnest({ids}) i",
+                    )
+                # the custom roles API, the same way: a role made for each type that has them by each owner tried,
+                # each role there is given its type's permissions and deleted (and one that isn't there), and the
+                # roles each owner tried has
+                for owner in self.role_owners if u == sharer else ():
+                    ids = "ARRAY[" + ", ".join(lit(i) for i in sample[owner]) + "]::text[]"
+                    for tname, perms in self.role_perms.items():
+                        emit(
+                            [u, "create_role", tname, owner],
+                            f"SELECT coalesce(json_agg(json_build_array(i, difftest_app.try_create_role({lit(owner)}, "
+                            f"i, {lit(tname)}, {text_array(perms)}))), '[]') FROM unnest({ids}) i",
+                        )
+                    emit(
+                        [u, "roles_of", owner],
+                        f"SELECT coalesce(json_agg(json_build_array(i, difftest_app.try_roles_of({lit(owner)}, i))), "
+                        f"'[]') FROM unnest({ids}) i",
+                    )
+                for rid in [*self.roles_now, MISSING_ROLE] if u == sharer and self.role_owners else ():
+                    perms = self.role_perms.get(self.roles_now[rid][2], []) if rid in self.roles_now else []
+                    emit(
+                        [u, "role", rid],
+                        f"SELECT json_build_array(difftest_app.try_set_role_permissions({rid}, {text_array(perms)}), "
+                        f"difftest_app.try_delete_role({rid}))",
                     )
                 # authz.explain_rule's verdict on an update that changes nothing, and on a delete, as the app asks it
                 for table in dict.fromkeys(r.table for r in self.rules):
@@ -594,6 +641,29 @@ class Checker:
             "EXCEPTION WHEN OTHERS THEN RETURN CASE WHEN SQLSTATE = 'P0099' THEN 'ok' ELSE SQLSTATE || ': ' || SQLERRM END; "
             "END; END $f$;"
         )
+        # the custom roles API, the same way
+        for name, args, call in (
+            (
+                "create_role",
+                "ot text, oi text, t text, ps text[]",
+                "authz.create_role(ot, oi, t, 'difftest tried', ps)",
+            ),
+            ("set_role_permissions", "r bigint, ps text[]", "authz.set_role_permissions(r, ps)"),
+            ("delete_role", "r bigint", "authz.delete_role(r)"),
+        ):
+            lines.append(
+                f"CREATE OR REPLACE FUNCTION difftest_app.try_{name}({args}) RETURNS text "
+                f"LANGUAGE plpgsql AS $f$ BEGIN BEGIN PERFORM {call}; "
+                "RAISE EXCEPTION USING ERRCODE = 'P0099', MESSAGE = 'done'; "
+                "EXCEPTION WHEN OTHERS THEN RETURN CASE WHEN SQLSTATE = 'P0099' THEN 'ok' ELSE SQLSTATE || ': ' || SQLERRM END; "
+                "END; END $f$;"
+            )
+        lines.append(  # and the roles an owner has: 'ok' and their ids, or the refusal
+            "CREATE OR REPLACE FUNCTION difftest_app.try_roles_of(ot text, oi text) RETURNS text "
+            "LANGUAGE plpgsql AS $f$ BEGIN "
+            "RETURN 'ok ' || coalesce((SELECT string_agg(r.id::text, ',' ORDER BY r.id) FROM authz.roles_of(ot, oi) r), ''); "
+            "EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || SQLERRM; END $f$;"
+        )
         return lines
 
     def shareable(self, subject: str = "user") -> dict[tuple[str, str], tuple[str, list[str]]]:
@@ -643,6 +713,65 @@ class Checker:
         if not all(holds(p) for p in required):
             return "42501: you cannot grant"
         return "ok"
+
+    def role_problems(self, snap: Snapshot, u: str, state: evaluate.State, signed_in: bool) -> list[str]:
+        """The custom roles API as user u tried it (when it was their turn): making, changing and deleting a role
+        needs a user signed in who holds manage_roles on its owner (by the reference); then what the policy alone
+        says, in the guards' order (whose roles count on the type, what a role there may give). roles_of: the
+        owner's roles, to whoever manages it or may view it."""
+        problems: list[str] = []
+
+        def holds(owner: str, i: str, perm: str) -> bool:
+            t = self.types[owner]
+            return signed_in and perm in t.perms and i in state[(owner, perm)] & self.ref.ids(t)
+
+        def cannot_grant(tname: str, perms: list[str]) -> str:
+            roles = self.types[tname].roles
+            bad = [p for p in perms if not roles or p not in roles[1]]
+            return f"P0001: custom roles on {tname} cannot grant {', '.join(bad)}" if bad else ""
+
+        for owner in self.role_owners:
+            for tname, perms in self.role_perms.items():
+                from_type = self.ref.role_owner_type(self.types[tname])
+                for i, got in snap.get((u, "create_role", tname, owner), []):
+                    if not holds(owner, i, "manage_roles"):
+                        want = f"42501: you cannot manage roles of {owner} {i}"
+                    elif from_type and from_type != owner:
+                        want = (
+                            f"P0001: custom roles on {tname} belong to a {from_type} (the policy says where they come "
+                            f"from), not to a {owner}"
+                        )
+                    else:
+                        want = cannot_grant(tname, perms) or "ok"
+                    if got != want:
+                        problems.append(
+                            f"user {u}: authz.create_role('{owner}', {i}, '{tname}', {perms}) says {got!r}, "
+                            f"expected {want!r}"
+                        )
+            for i, got in snap.get((u, "roles_of", owner), []):
+                if holds(owner, i, "manage_roles") or holds(owner, i, "view"):
+                    mine = [rid for rid, (o, oid, _) in self.roles_now.items() if o == owner and oid == i]
+                    want = "ok " + ",".join(sorted(mine, key=int))
+                else:
+                    want = f"42501: you cannot see roles of {owner} {i}"
+                if got != want:
+                    problems.append(f"user {u}: authz.roles_of('{owner}', {i}) says {got!r}, expected {want!r}")
+        for rid in [*self.roles_now, MISSING_ROLE]:
+            got = snap.get((u, "role", rid))
+            if got is None:
+                continue
+            cannot = f"42501: you cannot manage role {rid}"
+            role = self.roles_now.get(rid)
+            if role is None or not holds(role[0], role[1], "manage_roles"):
+                want = [cannot, cannot]
+            else:
+                want = [cannot_grant(role[2], self.role_perms.get(role[2], [])) or "ok", "ok"]
+            if got != want:
+                problems.append(
+                    f"user {u}: authz.set_role_permissions and delete_role of role {rid} ({role}) say {got}, "
+                    f"expected {want}"
+                )
+        return problems
 
     def rule_allows(self, state: evaluate.State, table: str, cmd: str, i: str) -> bool:
         """Whether table's rules let cmd through on row i as it is: a delete by its rule; an update that changes
@@ -738,6 +867,7 @@ class Checker:
                         problems.append(
                             f"user {u}: authz.create_link('{tname}', {i}, '{rname}') says {got!r}, expected {want!r}"
                         )
+            problems += self.role_problems(snap, u, state, signed_in)
             # perms_of: the public permissions held on each object, no more (a type without any: none)
             for t in self.types.values():
                 public = [p for p, x in t.perms.items() if not x.hidden]
