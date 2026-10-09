@@ -1,8 +1,10 @@
 // @vitest-environment jsdom
 // The React kit against the running app's routes (authzRoutes): a list's buttons in one call, <Can>, the
-// headless share dialog, access requests, and the change feed that keeps them current.
+// headless share dialog, access requests, and the change feed that keeps them current. Then, without the
+// server, what the routes don't do on cue: errors, live updates, keys of several columns.
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, beforeEach, expect, test } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import type { Id } from "@rowstile/client";
 import { AuthzProvider, Can, ShareDialog, useAccessRequest, usePerms } from "@rowstile/react";
 import { SERVER, as, seed } from "./data";
 
@@ -112,6 +114,129 @@ test("useAccessRequest: asking for access", async () => {
   render(<AuthzProvider fetch={asUser("3")} live={false}><Ask /></AuthzProvider>);
   await act(async () => screen.getByText("idle").click());
   await waitFor(() => expect(screen.getByText("sent")).toBeTruthy());
+});
+
+// --- without the server: answers of the test's own, for what the routes don't do on cue ---------------------
+/** A fetch that answers as the routes might, and keeps what it was asked. */
+function answering(answer: (path: string, init?: RequestInit) => Response) {
+  const asked: string[] = [];
+  const f: typeof fetch = async (input, init) => {
+    asked.push(`${init?.method ?? "GET"} ${String(input)}${init?.body ? " " + String(init.body) : ""}`);
+    return answer(String(input), init);
+  };
+  return Object.assign(f, { asked });
+}
+
+/** jsdom has no EventSource: one the test drives. */
+class Events {
+  static last: Events | undefined;
+  listeners: Record<string, (() => void)[]> = {};
+  closed = false;
+  constructor(public url: string) {
+    Events.last = this;
+  }
+  addEventListener(type: string, listener: () => void) {
+    (this.listeners[type] ??= []).push(listener);
+  }
+  emit(type: string) {
+    for (const listener of this.listeners[type] ?? []) listener();
+  }
+  close() {
+    this.closed = true;
+  }
+}
+
+function One({ ids = [1] as Id[] }) {
+  const perms = usePerms("project", ids);
+  return <p>{perms.loading ? "loading" : perms.error ? `failed: ${perms.error.message}` : ids.map((id) => `${JSON.stringify(id)}:${perms(id).perms.join(",")}`).join(" ")}</p>;
+}
+
+test("live: a change asks again, once for a burst of them, and so does a stream opened again", async () => {
+  vi.stubGlobal("EventSource", Events);
+  const answers = [{ "1": ["view"] }, { "1": ["edit", "view"] }, { "1": [] }];
+  const f = answering(() => Response.json(answers.shift()));
+  try {
+    const { unmount } = render(<AuthzProvider fetch={f} endpoint="/authz"><One /></AuthzProvider>);
+    await waitFor(() => expect(screen.getByText("1:view")).toBeTruthy());
+    const source = Events.last!;
+    expect(source.url).toBe("/authz/events");
+    source.emit("open");                                          // the first time: nothing was missed
+    source.emit("changed");
+    source.emit("changed");                                       // two changes at once: asked again once
+    await waitFor(() => expect(screen.getByText("1:edit,view")).toBeTruthy());
+    source.emit("open");                                          // opened again after a gap: what changed meanwhile
+    await waitFor(() => expect(screen.getByText("1:")).toBeTruthy());
+    expect(f.asked).toEqual(Array(3).fill("GET /authz/perms?type=project&ids=1"));
+    unmount();
+    expect(source.closed).toBe(true);
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});
+
+test("the page's own fetch by default, no live updates without EventSource, and a hook outside the provider", async () => {
+  const f = answering(() => Response.json({ "1": ["view"] }));
+  vi.stubGlobal("fetch", f);
+  const said = vi.spyOn(console, "error").mockImplementation(() => undefined);
+  try {
+    render(<AuthzProvider><One /></AuthzProvider>);
+    await waitFor(() => expect(screen.getByText("1:view")).toBeTruthy());
+    expect(f.asked).toEqual(["GET /api/authz/perms?type=project&ids=1"]);
+    expect(() => render(<One />)).toThrow("@rowstile/react: wrap the app in <AuthzProvider>");
+  } finally {
+    vi.unstubAllGlobals();
+    said.mockRestore();
+  }
+});
+
+test("an answer that isn't ok: its problem's detail, else its title, else its status", async () => {
+  const f = answering((path) => (path.endsWith("ids=1") ? Response.json({ title: "Forbidden", status: 403, detail: "" }, { status: 403 })
+    : new Response("<html>", { status: 502, statusText: "Bad Gateway" })));
+  render(<AuthzProvider fetch={f} live={false}><One ids={[1]} /><One ids={[2]} /></AuthzProvider>);
+  await waitFor(() => expect(screen.getByText("failed: Forbidden")).toBeTruthy());
+  await waitFor(() => expect(screen.getByText("failed: Bad Gateway")).toBeTruthy());
+});
+
+test("a key of several columns, as the database writes it; an empty list asks nothing", async () => {
+  const f = answering(() => Response.json({ '("1","a\\"b")': ["view"], "4": ["edit"] }));
+  render(<AuthzProvider fetch={f} live={false}><One ids={[[1, 'a"b'], [4], 5]} /><One ids={[]} /></AuthzProvider>);
+  await waitFor(() => expect(screen.getByText('[1,"a\\"b"]:view [4]:edit 5:')).toBeTruthy());
+  expect(screen.queryByText("loading")).toBeNull();                // the empty list: answered at once, with nothing,
+  expect(f.asked).toEqual([`GET /api/authz/perms?type=project&ids=${encodeURIComponent('("1","a\\"b")')}&ids=4&ids=5`]);   // unasked
+});
+
+test("the share dialog: another user's shares never shown, an error, a share, asked again", async () => {
+  let listed = 0;
+  const f = answering((path) => {
+    if (!path.includes("/shares")) return Response.json({ ok: true });
+    listed += 1;
+    if (listed === 2) return Response.json({ title: "Forbidden", status: 403, detail: "you cannot see the shares of project 1" }, { status: 403 });
+    return Response.json(listed === 1 ? [{ relation: "viewer", subject_type: "user", subject_id: "2", subject_relation: "" }] : []);
+  });
+  let dialog: Parameters<Parameters<typeof ShareDialog>[0]["children"]>[0] | undefined;
+  const page = (user: string) => (
+    <AuthzProvider fetch={f} live={false} user={user}>
+      <ShareDialog type="project" id={1}>
+        {(d) => { dialog = d; return <p>{d.loading ? "loading" : d.error ? d.error.message : d.shares.map((s) => s.subject_id).join(",") || "nobody"}</p>; }}
+      </ShareDialog>
+    </AuthzProvider>);
+  const { rerender } = render(page("1"));
+  await waitFor(() => expect(screen.getByText("2")).toBeTruthy());
+  rerender(page("3"));                                             // another user: not the earlier one's, even for a moment
+  expect(screen.getByText("loading")).toBeTruthy();
+  await waitFor(() => expect(screen.getByText("you cannot see the shares of project 1")).toBeTruthy());
+  await act(() => dialog!.share("viewer", "team", 7, "member"));
+  await waitFor(() => expect(screen.getByText("nobody")).toBeTruthy());
+  act(() => dialog!.refresh());
+  await waitFor(() => expect(listed).toBe(4));
+  expect(f.asked).toContain('POST /api/authz/share {"type":"project","id":"1","relation":"viewer","subjectType":"team","subjectId":"7","subjectRelation":"member"}');
+});
+
+test("an access request refused: failed, and the error is the caller's to see", async () => {
+  const f = answering(() => Response.json({ title: "Forbidden", status: 403, detail: "you may not ask for project 2" }, { status: 403 }));
+  render(<AuthzProvider fetch={f} live={false}><Ask /></AuthzProvider>);
+  await act(async () => screen.getByText("idle").click());
+  await waitFor(() => expect(screen.getByText("failed")).toBeTruthy());
 });
 
 test("live updates: the change feed says when access may have changed", async () => {

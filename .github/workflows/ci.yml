@@ -132,7 +132,8 @@ jobs:
         with: {fetch-depth: 0}
       - uses: ./review-ci/github
         with: {version: source, working-directory: examples/filemanager}
-  # The Python SDK's conformance suite: FastAPI, SQLAlchemy async and asyncpg, Alembic (integrations/fastapi)
+  # The Python SDK's conformance suite: FastAPI, SQLAlchemy async and asyncpg, Alembic (integrations/fastapi). It
+  # fails unless its checks run every line and branch of the SDK; the report it prints is kept
   conformance-python:
     needs: unit
     runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
@@ -141,8 +142,16 @@ jobs:
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7   # v10.2.0
         with: {version: "0.12.21"}
       - run: flock /tmp/rowstile-ci-conformance-python.lock bash integrations/fastapi/test.sh
+        env: {CONFORMANCE_COVERAGE: "${{ runner.temp }}/sdk-coverage-python"}
+      - if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a   # v7.0.1
+        with:
+          name: sdk-coverage-python
+          path: ${{ runner.temp }}/sdk-coverage-python/report.txt
+          if-no-files-found: ignore
   # The TypeScript SDK's conformance suite: Next.js, Prisma 7 (Prisma Migrate), pg, postgres.js, Drizzle, the
-  # React kit, Vitest (integrations/nextjs)
+  # React kit, Vitest (integrations/nextjs). It fails unless its checks run every line, branch and function of the
+  # SDK; the report it prints is kept, with each file's details (coverage-final.json)
   conformance-typescript:
     needs: unit
     runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
@@ -153,6 +162,15 @@ jobs:
           node-version: "24"
       - run: npm ci --no-audit --no-fund
       - run: flock /tmp/rowstile-ci-conformance-typescript.lock bash integrations/nextjs/test.sh
+        env: {CONFORMANCE_COVERAGE: "${{ runner.temp }}/sdk-coverage-typescript"}
+      - if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a   # v7.0.1
+        with:
+          name: sdk-coverage-typescript
+          path: |
+            ${{ runner.temp }}/sdk-coverage-typescript/report.txt
+            ${{ runner.temp }}/sdk-coverage-typescript/coverage-final.json
+          if-no-files-found: ignore
       # @rowstile/vitest's matchers type-check with each Vitest it supports (4, 5)
       - run: npx tsc -b sdk/typescript && bash sdk/typescript/vitest/types-test/types.sh
   # The playground: the compiler in Pyodide and its SQL in PGlite, headless (every example's tests pass), then the
