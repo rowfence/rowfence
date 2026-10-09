@@ -31,7 +31,10 @@ Fixes go to `main` first, then to the release branch.
 - **The generated SQL, on purpose.** A change to what the compiler writes shows up in `core/tests/golden/`:
   run `python3 core/tests/unit_test.py --update` and read the diff before you commit it.
 - **The docs.** If users see the change, the page that describes it says so. Code in the docs is tested
-  (`docs/getting-started.md`, the cookbook, the stack pages), so it must still run.
+  (`docs/getting-started.md`, the cookbook, the stack pages, the reference), so it must still run. A promise
+  on the reference's pages, the threat model or the page on how rowstile is checked (a sentence that says
+  always, never, can't, only, refuses, keeps or removes) ends with a comment naming the check that holds it, or
+  saying why none does: `Promises` in `core/tests/unit_test.py` says how.
 - **A line in [CHANGELOG.md](CHANGELOG.md)** under **Unreleased**, if users will notice: under Added, Changed,
   Fixed or Upgrading (what someone upgrading must do). A check asks for it when a pull request changes what
   users run; a maintainer adds the label `no changelog` when they won't notice.

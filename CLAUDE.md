@@ -307,6 +307,11 @@ For one suite, start a container and run it inside:
   are typedefs matching what the Python sends (`studio.py`, `core.mjs`); keep them in step.
 - Words: see `core/CONTEXT.md` (share, not grant; role means a runtime role; app role for the Postgres one).
 - Prose style in docs and messages: plain words, short sentences.
+- Promises in the docs: on `docs/reference/`, `docs/threat-model.md` and `docs/how-it-is-checked.md`, a sentence
+  that says always, never, can't, only, refuses, keeps or removes ends with
+  `<!-- checked: tests/<suite> "<its label>" -->` (text that suite's file holds) or `<!-- unchecked: why -->`,
+  written after it on the line it ends on, no `--` or `>` inside (`Promises` in `tests/unit_test.py` has the rule). Every code block of `docs/reference/`
+  runs in `tests/reference.sh`, or a comment right before it says why not: `<!-- not run: why -->`.
 
 - Refused writes: every `WITH CHECK` is `check OR authz_gen."<table>:<cmd>:refuse"(ROW(t.*)::table)`;
   the explaining functions are BEGIN ATOMIC in `authz_gen` (the app role can't use `authz_int` by name at run

@@ -23,14 +23,15 @@ they would agree. So the evaluator is held to answers that neither of them wrote
   was written apart from the parser. [`tests/parse_agreement.py`](../core/tests/parse_agreement.py) has both
   read every policy in the repository and two hundred random ones, and compares what they read: the types,
   each relation's sources, the permissions with their grouping, the rules, the tests. They read each one alike.
-  (The grammar takes more than the parser does, as an editor must: what the parser refuses isn't compared.)
+  (The grammar takes more than the parser does, as an editor must: what the parser refuses isn't compared.) <!-- checked: tests/parse_agreement.py "policy the parser refuses is not compared" -->
 - **Random data**: [`tests/difftest.py`](../core/tests/difftest.py) fills six policies' tables with random
   rows and makes a hundred random changes to each (moves, links, loops, groups inside groups, inheritance
   through two types at once, shares that start and end, ids that change, `TRUNCATE`, several statements in
   one transaction). After each change,
   `authz.can`, `authz.list`, `authz.explain`, `authz.who`, what row-level security lets each user read, every
   rule's condition and the masked views are compared with the evaluator's answer. `authz.explain` is asked by
-  each user too: about a row they can't see, it must say nothing more than about a missing one. So is
+  each user too: about a row they can't see, it must say nothing more than about a missing one. <!-- checked: tests/difftest.py "explain self"; tests/adversarial.sh "explaining a folder she can't see (but may break the glass on) reads as a missing one" -->
+  So is
   `authz.explain_rule`: nothing about such a row, and on the others, for an update or a delete, the rules' own
   answer.
 - **Random policies**: [`tests/genpolicy.py`](../core/tests/genpolicy.py) writes policies at random, with
@@ -44,7 +45,7 @@ they would agree. So the evaluator is held to answers that neither of them wrote
   default privileges of the owner's; a login role that is a member of the app role and signs each user in;
   planner settings, a read-only transaction, a search path that starts with a schema of decoys; and, halfway,
   something changed behind the policy's back (a grant on rowstile's own tables, row-level security turned
-  off, a new partition). Besides the comparisons above, asked in that session, it tries real writes as the
+  off, a new partition). <!-- checked: tests/around.py "class World"; tests/around.py "read-only reads" --> Besides the comparisons above, asked in that session, it tries real writes as the
   app role on every row and undoes them, checks that no share outlives its row, that a role the policy
   doesn't name gets nothing, and that `authz.lint()` reports what changed and `rowstile apply` puts it right.
   A few on every run, sixty with new seeds every night.
@@ -56,7 +57,8 @@ they would agree. So the evaluator is held to answers that neither of them wrote
   other, custom roles with and without `from`, NULL in conditions.
 - **Conditions, against Postgres**: `rowstile prove` and the review read simple conditions (`{not archived}`,
   `{size > 10}`, `{owner_id = authz.uid()}`) themselves, in worlds they make up. difftest never does: it
-  asks the database. So [`tests/conditions_test.py`](../core/tests/conditions_test.py) makes conditions up at
+  asks the database. <!-- unchecked: how difftest is written, which reading it shows -->
+  So [`tests/conditions_test.py`](../core/tests/conditions_test.py) makes conditions up at
   random over columns of each kind, and each one the evaluator reads itself must get Postgres's answer on
   every row: three thousand on every run, fifty thousand with new seeds every night.
 
@@ -71,16 +73,16 @@ what).
   a hidden row exists. It also checks the catalog each policy leaves: which functions run with their owner's
   rights, and that the app role may call the API and nothing else.
 - [`tests/sessions.sh`](../core/tests/sessions.sh) checks that the app role can't choose who is signed in
-  by setting a variable, widen an API key's scopes, or reuse a sign-in in another transaction or connection.
+  by setting a variable, widen an API key's scopes, or reuse a sign-in in another transaction or connection. <!-- checked: tests/sessions.sh "changing authz.user_id after signing in is an error"; tests/sessions.sh "clearing its scopes is an error, not a way to write"; tests/sessions.sh "a signature from an earlier transaction is refused in the next one"; tests/sessions.sh "and one from another connection too" -->
 - [`tests/identity.sh`](../core/tests/identity.sh) covers API keys and JWTs: a bad signature, an expired
   token, one without an expiry, `alg: none`.
 - Every refusal the runtime can raise is asked for by its words by some check, not only by its error code (two
   guards that answer with the same code look alike): `Guards` in
-  [`tests/unit_test.py`](../core/tests/unit_test.py) fails when one isn't.
+  [`tests/unit_test.py`](../core/tests/unit_test.py) fails when one isn't. <!-- checked: tests/unit_test.py "test_each_guard_is_asked_for_by_its_words" -->
 
 ## Trees, under load
 
-Inherited permissions are kept in tables by triggers, and those tables must match the tree at every commit.
+Inherited permissions are kept in tables by triggers, and those tables must match the tree at every commit. <!-- checked: tests/races.sh "50 races, inheritance tables exact after each"; tests/stress.sh "the inheritance tables match a rebuild" -->
 [`tests/races.sh`](../core/tests/races.sh) races every pair of tree writes in two sessions at each isolation
 level, and [`tests/stress.sh`](../core/tests/stress.sh) lets sixteen clients write one tree at once; after
 each, the tables are compared with a rebuild, and the biggest moves on the tree they leave are timed alone.
@@ -91,8 +93,10 @@ each, the tables are compared with a rebuild, and the biggest moves on the tree 
 in") and looks for a small world in which one fails: a few users, a few rows, every way of linking them, and
 at each size worlds where every condition holds on every row or on none (a counterexample that needs several
 at once is rare in worlds drawn row by row); then worlds where most links hold (a long `and` of them), and
-chains of objects one link longer than the policy reads deep. It answers with the smallest counterexample, or
-says that there is none among the worlds tried. It is a search,
+chains of objects one link longer than the policy reads deep. <!-- checked: tests/confidence_test.py "an invariant the policy doesn't guarantee: exit 1, and the smallest counterexample"; tests/unit_test.py "test_prove_finds_a_counterexample_that_needs_conditions_at_once"; tests/unit_test.py "test_prove_tries_what_a_counterexample_may_need" -->
+It answers with the smallest counterexample, or
+says that there is none among the worlds tried. <!-- checked: tests/unit_test.py "test_prove_finds_the_smallest_counterexample"; tests/unit_test.py "test_prove_says_when_none_is_found" -->
+It is a search,
 not a proof for worlds of any size, and it reads the policy, not your data.
 
 ## What ships, and what the docs say
@@ -101,21 +105,24 @@ not a proof for worlds of any size, and it reads the policy, not your data.
   checks that the migration leaves exactly what applying the new policy whole leaves: functions and their
   privileges, views, triggers, policies, the inheritance rows.
 - **The parser**: [`tests/fuzz_parser.py`](../core/tests/fuzz_parser.py) feeds it thousands of broken
-  policies; each is accepted, or refused with a line number, never a crash.
+  policies; each is accepted, or refused with a line number, never a crash. <!-- checked: tests/fuzz_parser.py "refused without a line number" -->
 - **The docs**: the getting-started guide runs as written, every line the cookbook shows is in a policy that
-  is applied and tested, and every line of code on the stack pages is in an app whose tests pass.
+  is applied and tested, and every line of code on the stack pages is in an app whose tests pass. <!-- checked: tests/docs_test.sh "every block of the guide runs"; tests/cookbook.sh "every line its page shows is in its tested policy or tests"; tests/unit_test.py "test_every_line_is_in_a_tested_app" -->
+  Every block of code in the reference runs too, or says why it can't, and each promise these pages make, and
+  the reference's, names the check that holds it in a comment readers don't see, or says why none does. <!-- checked: tests/reference.sh "every block of the reference runs, or says why not"; tests/unit_test.py "test_every_promise_says_what_holds_it"; tests/unit_test.py "test_each_tag_names_checks_that_are_there" -->
 - **Three versions of Postgres**: every suite on PostgreSQL 16 for each change, and on 17 and 18
   [every night](../.github/workflows/nightly.yml), with the races, the stress test and the random policies.
 - **The suites themselves**: each passes as many checks as
   [`tests/check_counts.txt`](../core/tests/check_counts.txt) says, no fewer and no more, or the run fails. A
   suite that stopped checking something (a glob that matches nothing, a loop over an empty list) can't stay
-  green unseen.
+  green unseen. <!-- checked: tests/unit_test.py "test_fewer_or_more_is_said"; tests/unit_test.py "test_each_suite_written_is_one_run_tests_records" -->
 
 ## What a review of every file found
 
 Before the first public release, every file was read with one question: what does the documentation promise
 here, and does a test hold the code to it? It found 153 things to fix. Eleven were wrong access: a row seen or
-written that the policy didn't allow, or refused when it allowed it. Ten of those eleven were found by reading,
+written that the policy didn't allow, or refused when it allowed it. <!-- unchecked: a record of what a review found -->
+Ten of those eleven were found by reading,
 one by the random policies. All 153 are fixed.
 
 Then the suites themselves were tested: 44 mistakes were put into the compiler on purpose, one at a time. The
@@ -127,7 +134,8 @@ fails with the mistake put back.
 
 Then the reference evaluator, whose answers the suites take as the truth: 40 mistakes put into it. The suites
 caught 26. One of the 14 they missed can't change an answer: the fixed point stopping when a set of ids
-shrinks, which none ever does. The others were answers nothing else asked for (an assignment of another
+shrinks, which none ever does. <!-- unchecked: a record of what a run of mistakes put in on purpose found -->
+The others were answers nothing else asked for (an assignment of another
 org's custom role, `signed_in` for a service, the simple conditions), and how `prove` and the review make up
 and shrink their worlds. The answers worked out by hand and the comparison of conditions with Postgres came
 of that. With them, and four more mistakes for what they changed, the suites catch each of the 44 but that

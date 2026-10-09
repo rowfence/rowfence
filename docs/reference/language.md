@@ -69,7 +69,8 @@ test "a folder's owner edits what is inside"    -- brings its own data, rolled b
 - **Rows that count**: `where {...}` on a type line says which rows do. A row that fails it holds nothing
   and passes nothing on: a suspended user, an archived folder and what is inside it, a disbanded team's
   members (also through the team that holds it). No rule allows anything on it either: the app role can't
-  read, change or delete an archived folder, so it can't un-archive one. Leave such rows to a job that runs
+  read, change or delete an archived folder, so it can't un-archive one. <!-- checked: tests/difftest.py "CrossGen"; tests/unit_test.py "test_a_rule_gives_no_row_the_type_leaves_out" -->
+  Leave such rows to a job that runs
   as the owner, or say it in permissions instead (`can edit = ... and {not archived}`).
 - **Relations** link rows to users or groups: from a column, from another table
   (`app.team_members(team_id -> user_id)`, or with the columns named:
@@ -81,7 +82,8 @@ test "a folder's owner edits what is inside"    -- brings its own data, rolled b
 - **Shares**: a `shared` relation is given with `authz.share()` by whoever holds `share` on the object, so the
   type needs a `can share`, or the relation names another permission: `shared by edit`. `shared if {...}` is a
   condition on the share being made (`object_id`, `subject_type`, `subject_id`, `subject_relation`), which
-  `authz.share` checks: "only to active users". Shares may expire or start later. A **caveat** is a
+  `authz.share` checks: "only to active users". <!-- checked: tests/multi_scenario.sql "shared if: no sharing with inactive users" -->
+  Shares may expire or start later. A **caveat** is a
   condition that goes with one share and is checked at each request:
   `authz.share('folder', 3, 'viewer', 'user', 4, '', NULL, NULL, 'from_ip', '{"ip": "10.0.0.1"}')` gives
   `viewer` while `caveat from_ip` holds, `arg('ip')` being what the share was made with.
@@ -93,7 +95,7 @@ test "a folder's owner edits what is inside"    -- brings its own data, rolled b
   (`bot : service = bot_id`, `reader : user, service shared`), and `service:*` means any
   signed-in service. `signed_in` and `user:*` stay about users.
 - **Permissions** combine relations with `or`, `and`, `not` and parentheses, which say what goes first
-  where `and` and `or` meet: `owner or (parent.edit and {inherit})` (without them it is refused).
+  where `and` and `or` meet: `owner or (parent.edit and {inherit})` (without them it is refused). <!-- checked: tests/policy_errors.py "and next to or"; tests/policy_errors.py "and next to or, the other way" -->
   `rel.perm` follows a relation (`parent.edit`, `org.admin`, or to a user's own: `manager.oversee`,
   `author.has_blocked`), `signed_in` means any user signed in, `anyone` anyone at all, signed in
   or not (for rules on directories), and `nobody` nobody (`update id : nobody`), `{...}` is any SQL
@@ -110,7 +112,8 @@ test "a folder's owner edits what is inside"    -- brings its own data, rolled b
   `shared if`. A caveat has no row.
 - **Conditions read with the policy's rights**, wherever they are checked (a rule, a permission, `authz.can`,
   another type's rule through `rel.perm`), as relations do: a subquery sees every row of the tables it reads,
-  not only those the signed-in user may. A condition that is NULL holds nothing: `{not archived}` is false
+  not only those the signed-in user may. <!-- checked: tests/devx.sh "a rule condition that reads a governed table runs with the policy's rights, as a function"; tests/apply.sh "a condition in a permission sees every membership in its table's rules too" -->
+  A condition that is NULL holds nothing: `{not archived}` is false
   where `archived` is NULL, `not {archived}` is true there. Where a relation says the same, write the
   relation: `insert : folder.edit and owner` rather than `{owner_id = authz.uid()}`, which `rowstile prove`
   and the review read as a fact about the row; your own row is a relation too (`self : user = id`, then
@@ -122,7 +125,8 @@ test "a folder's owner edits what is inside"    -- brings its own data, rolled b
   hidden folder and everything below it, even from people who hold it higher up. The deny
   must inherit the same way (`can hidden = blocked or parent.hidden`), so it covers
   everything below; a deny on one object that only cuts inheritance there is refused, with
-  a message saying so. A permission with a deny inherits within its own type, not through
+  a message saying so. <!-- checked: tests/policy_errors.py "a deny that doesn't cover what is below"; tests/unit_test.py "test_a_deny_inside_inheritance_covers_everything_below" -->
+  A permission with a deny inherits within its own type, not through
   another type's permission (`project.view`). A condition joined the same way holds at every level:
   `(viewer or parent.view) and {not archived}` stops at an archived folder.
 - **Custom roles**: `roles : user, team#member` says who may hold roles people create at runtime
@@ -132,20 +136,23 @@ test "a folder's owner edits what is inside"    -- brings its own data, rolled b
   to holders of a role that includes it, and the deny holds for them too, as it is written. Creating a
   role needs `manage_roles` on its owner (`can manage_roles = admin` on the org type), and gives the
   role's id: the role is shared as the relation `role:<id>` (`authz.share('folder', 3, 'role:12',
-  'user', 7)`), by someone who holds `share` on the object and everything the role grants. `from org`
+  'user', 7)`), by someone who holds `share` on the object and everything the role grants. <!-- checked: tests/multi_scenario.sql "cannot give the archivist role, for he does not hold archive"; tests/multi_scenario.sql "alice is no Acme admin: she cannot define roles for Acme" -->
+  `from org`
   says whose roles count on an object: only those of the org its `org` relation links it to now (a
-  column or a table, to one type). `authz.share` refuses another owner's role, an assignment of one
-  grants nothing, and a folder moved to another org stops honouring the first org's roles. Without
+  column or a table, to one type). <!-- checked: tests/unit_test.py "test_roles_from_an_org_count_only_on_its_objects"; tests/multi_scenario.sql "until folder 1 moves to Globex" -->
+  `authz.share` refuses another owner's role, an assignment of one
+  grants nothing, and a folder moved to another org stops honouring the first org's roles. <!-- checked: tests/multi_scenario.sql "alice cannot give Globex"; tests/multi_scenario.sql "and one written into authz.shares gives dave nothing while folder 1 is Acme"; tests/difftest.py "MultiGen" -->
+  Without
   `from`, any role for the type counts wherever it is given, so an app must offer only the owner's
-  roles.
+  roles. <!-- checked: tests/unit_test.py "test_roles_without_from_count_wherever_they_are_given" -->
 - **Rules** say what each command needs, per table, with column-level variants and
   masks. The plain `update` rule must hold on the row before and after the change (as
   Postgres checks both), unless `update after : ...` says what must hold after it. A column rule checks the
   row before the change (`update owner_id : share`, or
   `update owner_id before : share`) or after it (`update folder_id after : folder.edit`: where
-  a row moves to); `authz.lint()` warns about a move nothing checks the destination of.
+  a row moves to); `authz.lint()` warns about a move nothing checks the destination of. <!-- checked: tests/governance.sh "lint finds a move nothing checks the destination of" -->
   **Invariants** state what must never be true, for everyone who can sign in (each user, each
-  service or other principal) and for nobody.
+  service or other principal) and for nobody. <!-- checked: tests/principals.sh "invariants are asked as each service too, named as the audit trail names it"; tests/principals.sh "and as nobody: the row with no user" -->
 - **Tests**: the unnamed `test` section checks the data already in the database, with lines
   `user|<principal type> X can|cannot PERM TYPE ID` (or `anyone ...`). A named test,
   `test "..."`, brings its own: `given name = {SQL ... RETURNING id}` rows (as whoever applies
@@ -153,39 +160,47 @@ test "a folder's owner edits what is inside"    -- brings its own data, rolled b
   checks, and `as user X allowed|refused
   {SQL}` or `as user X sees N {SELECT ...}`, which run as the app role signed in as X. A write is
   refused if a rule or a missing privilege stops it, or if it changes no row (the rows it meant are
-  hidden from X). Any other error, a unique key say, fails the check whichever was expected. Each named test runs in a transaction that is rolled back.
+  hidden from X). <!-- checked: tests/devx.sh "a write after WITH or a comment that changes no row is refused, and one the app role has no privilege for"; tests/devx.sh "an 'allowed' that is refused shows the refusal and why" -->
+  Any other error, a unique key say, fails the check whichever was expected. Each named test runs in a transaction that is rolled back.
   After who a line is about, `with scope read` (or several: `with scope read, files`) checks it as a key or
   a token limited to those scopes would be: `user 3 with scope read cannot edit file 11`,
   `as user 3 with scope read refused {UPDATE ...}`. A scope the policy doesn't have is a mistake (AZ503).
   Named tests may live in their own files (only `test "..."` blocks); `rowstile test` and
-  `rowstile dev` run them, never `apply`. A failing check explains itself.
+  `rowstile dev` run them, never `apply`. <!-- checked: tests/devx.sh "test runs named test files, exit 0"; tests/unit_test.py "test_what_a_test_file_is_refused_for"; tests/apply.sh "apply runs no test" -->
+  A failing check explains itself. <!-- checked: tests/devx.sh "a failing check names its file and line, and explains itself" -->
 
 ## Permissions the runtime asks for
 
 Permission names are yours to choose, but five are asked for by name. The compiler refuses one declared
-where nothing would ask for it (AZ307).
+where nothing would ask for it (AZ307). <!-- checked: tests/policy_errors.py "impersonate on a type other than user"; tests/policy_errors.py "manage_keys on a type that doesn't sign in"; tests/policy_errors.py "break_glass with nothing to give"; tests/policy_errors.py "manage_roles with no roles to make" -->
 
 | permission | on | lets its holders |
 |---|---|---|
-| `share` | a type with `shared` relations | share them (unless `shared by` names another), see who has access (`authz.who`, `authz.list_shares`), decide access requests |
-| `break_glass` | a type with a relation shared with users | give themselves that relation for a while with `authz.break_glass`: audited, announced |
-| `impersonate` | the user type | view the app as that user with `authz.view_as`: read-only, audited |
-| `manage_keys` | a type that signs in | make and revoke its API keys (`authz.create_api_key(..., 'service', '7')`) |
-| `manage_roles` | the type that owns custom roles (`roles : user from org`) | create, change and delete those roles |
+| `share` | a type with `shared` relations | share them (unless `shared by` names another), see who has access (`authz.who`, `authz.list_shares`), decide access requests <!-- checked: tests/scenario.sql "carol (viewer) cannot list who has access"; tests/governance.sh "erin (share, but not manage_editors) cannot unshare"; tests/governance.sh "erin (who may share Secrets) sees it to decide" --> |
+| `break_glass` | a type with a relation shared with users | give themselves that relation for a while with `authz.break_glass`: audited, announced <!-- checked: tests/governance.sh "carol breaks the glass, and the alert goes out"; tests/governance.sh "the trail has it, with the reason"; tests/governance.sh "frank (Globex) cannot break the glass on an Acme folder" --> |
+| `impersonate` | the user type | view the app as that user with `authz.view_as`: read-only, audited <!-- checked: tests/identity.sh "and cannot change anything"; tests/identity.sh "the audit trail has the reason"; tests/identity.sh "carol cannot view as erin" --> |
+| `manage_keys` | a type that signs in | make and revoke its API keys (`authz.create_api_key(..., 'service', '7')`) <!-- checked: tests/principals.sh "its owner makes service 7 a key"; tests/principals.sh "someone else may not"; tests/principals.sh "the owner revoked it" --> |
+| `manage_roles` | the type that owns custom roles (`roles : user from org`) | create, change and delete those roles <!-- checked: tests/multi_scenario.sql "alice is no Acme admin: she cannot define roles for Acme"; tests/multi_scenario.sql "erin adds edit to reviewer: dave can now edit"; tests/multi_scenario.sql "erin deletes the role: its assignments go with it" --> |
 
 ## Masked columns
 
 `rules app.files view app.files_visible` plus `mask body : edit` creates a view with
-the rows `select` allows, where `body` is NULL unless the rule holds. The app role
+the rows `select` allows, where `body` is NULL unless the rule holds. <!-- checked: tests/multi_scenario.sql "sees doc 01 in the masked view, but not its text"; tests/multi_scenario.sql "the view has exactly the rows she may select" -->
+The app role
 loses SELECT on `body` in the table itself (the other columns stay), so the view is
-the only way to read it. Applying refuses to go on if the column would still be
-readable through PUBLIC or another role. A later `GRANT` that makes it readable again
+the only way to read it. <!-- checked: tests/masks.sh "the app role cannot read the masked column from the table"; tests/multi_scenario.sql "the text cannot be read from the table directly" -->
+Applying refuses to go on if the column would still be
+readable through PUBLIC or another role. <!-- checked: tests/masks.sh "a mask PUBLIC could read around is refused"; tests/masks.sh "and applying refuses it, as for PUBLIC" -->
+A later `GRANT` that makes it readable again
 isn't refused (that would need an event trigger, and so a superuser): `authz.lint()`
-reports it, and applying again takes it back. Removing the mask gives the table-wide
-SELECT back.
+reports it, and applying again takes it back. <!-- checked: tests/masks.sh "and applying again takes it back"; tests/apply.sh "and later grants aren't refused any more" -->
+Removing the mask gives the table-wide
+SELECT back. <!-- checked: tests/masks.sh "gives back table-wide SELECT and drops the view"; tests/apply.sh "remove gives back the table-wide SELECT the mask replaced" -->
 
 The view is the app's to build on: a view of your own over it, or a function that reads it. Applying and
-migrations replace it in place, so those go on working when the policy changes. Two things can't be done in
+migrations replace it in place, so those go on working when the policy changes. <!-- checked: tests/apply.sh "replaced in place, the app's view stays"; tests/migrate_test.py "a mask that changes, under a view of the app's" -->
+Two things can't be done in
 place, and are refused with what is built on the view named (AZ617): taking the masked view out of the policy,
 and a change of the table's columns that the view can't follow (a column renamed; a new column is
-fine). Drop what you built, apply, and make it again.
+fine). <!-- checked: tests/apply.sh "a policy without the masked view, while the app's view is on it: refused, naming it, nothing changed"; tests/apply.sh "a column renamed under the app's view: refused, naming what is built on the masked view"; tests/apply.sh "and when the table gets a column (the view gets it too)" -->
+Drop what you built, apply, and make it again.
