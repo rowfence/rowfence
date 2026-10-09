@@ -175,10 +175,8 @@ def read(compiler: Compiler, policy: str, files: dict[str, str]) -> Compiled:
             if SETTINGS.match(stmt):
                 continue
             target = attached_to(stmt, made_so_far) or cur
-            if target is None:
-                if mode == "tree":
-                    continue  # the tree's own checks: they run with it
-                raise ValueError(f"a statement that makes nothing, with nothing before it: {stmt[:120]}")
+            # (a part that makes something starts by making it: what makes nothing goes with the object before it)
+            assert target is not None, f"a statement that makes nothing, with nothing before it: {stmt[:120]}"
             target.stmts.append((comments, stmt))
         if mode == "tree":
             cur = None
@@ -442,13 +440,10 @@ def migration(compiled_sql: str, c: Compiled, old: Lock, name: str = "policy", l
         if not more:
             break
         for o in more:
+            # (a tree's objects read the app's tables and the tree's own objects alone, as trees.py writes them)
+            assert not o.tree, f"{o.ident}, of the tree {o.tree}, reads what goes"
             if in_place(o):
                 restub.add(o.ident)  # it stays, reading nothing, while what it read goes: nothing on it has to go
-            elif o.tree:
-                rebuild.add(o.tree)
-                for x in (t for t in trees if t.name == o.tree):
-                    removed |= {k for k, info in old.objects.items() if info["tree"] == x.name}
-                    gone |= {y.name for y in x.objs}
             else:
                 drop.add(o.ident)
                 create.add(o.ident)
@@ -560,9 +555,8 @@ def migration(compiled_sql: str, c: Compiled, old: Lock, name: str = "policy", l
         )
     parts += body
     for t in swapped:
-        at = next(i for i, x in enumerate(parts) if x == t.sql)
-        if t.next:
-            parts.insert(at + 1, t.next["catch_up"])
+        assert t.next is not None  # (a tree is swapped in only where the migration before built it beside)
+        parts.insert(parts.index(t.sql) + 1, t.next["catch_up"])
     if swapped:
         parts.append(
             "DROP SCHEMA IF EXISTS authz_keep CASCADE;\n"

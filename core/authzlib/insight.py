@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 
 from .compiler import Core, only_on
-from .parse import KEYWORDS, Expr, Relation, Source, Type
+from .parse import KEYWORDS, And, Expr, Or, Relation, Source, Type
 from .sqlutil import lit, q, qt, row_cond, union
 
 DEFINER_FROM_CURRENT = "SECURITY DEFINER SET search_path FROM CURRENT"
@@ -27,9 +27,9 @@ def expr_text(node: Expr) -> str:
             return WORD_OF.get(sql, "{" + sql + "}")
         case ("not", item):
             return "not " + expr_text(item)
-        case ("and", items) | ("or", items):
-            return "(" + f" {node[0]} ".join(expr_text(x) for x in items) + ")"
-    raise AssertionError(f"not an expression: {node!r}")
+        case _:
+            assert isinstance(node, (And, Or)), f"not an expression: {node!r}"
+            return "(" + f" {node.kind} ".join(expr_text(x) for x in node.items) + ")"
 
 
 class InsightMixin(Core):
@@ -71,12 +71,12 @@ class InsightMixin(Core):
                 if not sets:
                     return None
                 return sets[0] if len(sets) == 1 else " INTERSECT ".join(f"({x})" for x in sets)
-            case ("or", items):
-                found = [self.who_items(t, x, obj) for x in items]
+            case _:
+                assert isinstance(node, Or), f"not an expression: {node!r}"
+                found = [self.who_items(t, x, obj) for x in node.items]
                 if any(s is None for s in found):
                     return None
                 return union([s for s in found if s is not None])
-        raise AssertionError(f"not an expression: {node!r}")
 
     def target_sql(self, t: Type, r: Relation, src: Source, st: str, obj: str) -> list[str]:
         """Ids of the st objects that r links object obj to, through one source."""
@@ -91,13 +91,12 @@ class InsightMixin(Core):
                 f"SELECT {sid} AS id FROM {qt(self.source_table(src))} s WHERE {self.key_is(t, 's', obj, src.obj_col)} "
                 f"AND {sid} IS NOT NULL{where}"
             ]
-        if src.kind == "shared":
-            return [
-                f"SELECT g.subject_id::{s.pktype} AS id FROM authz.shares g WHERE g.object_type = {lit(t.name)} "
-                f"AND g.object_id = ({obj})::text AND g.relation = {lit(r.name)} AND g.subject_type = {lit(st)} "
-                f"AND g.subject_relation = ''"
-            ]
-        return []
+        assert src.kind == "shared", f"a {src.kind} source"  # (an arrow follows no custom roles' relation)
+        return [
+            f"SELECT g.subject_id::{s.pktype} AS id FROM authz.shares g WHERE g.object_type = {lit(t.name)} "
+            f"AND g.object_id = ({obj})::text AND g.relation = {lit(r.name)} AND g.subject_type = {lit(st)} "
+            f"AND g.subject_relation = ''"
+        ]
 
     def rel_who_sql(self, t: Type, r: Relation, obj: str) -> str:
         """Users that may hold relation r on object obj (nested groups expanded)."""

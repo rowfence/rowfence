@@ -256,6 +256,12 @@ class Core:
     def T(self, name: str) -> Type:
         return self.types[name]
 
+    def governing(self, table: str) -> Type:
+        """The type whose permissions a table's rules name."""
+        found = [t for t in self.types.values() if t.table == table]
+        assert len(found) == 1, "validate refuses rules for a table no type or two types map to (AZ401)"
+        return found[0]
+
     @staticmethod
     def public_perms(t: Type) -> list[str]:
         """The permissions the policy declares, without the ones the compiler made."""
@@ -502,8 +508,7 @@ class Core:
             base = t.perms[base_name]
             edges = self.perm_edges(t, base) or frozenset()
             for x in negs:
-                if not (isinstance(x, Not) and isinstance(x.item, Ref)):
-                    continue  # split_denies refused anything else
+                assert isinstance(x, Not) and isinstance(x.item, Ref), "split_denies refuses any other deny (AZ306)"
                 name = x.item.name
                 self.lookup(t, name, base.loc)
                 if name not in t.perms:
@@ -674,7 +679,8 @@ class Core:
         """The permissions the runtime asks for by name (beside `share`, which shared relations check) are
         declared where it asks: anywhere else nothing would ever use them, or what they allow could never be done."""
         owners_of_roles = {self.role_owner_type(t) for t in self.types.values() if t.roles and t.roles_from}
-        roles_anywhere = any(t.roles and not t.roles_from for t in self.types.values())
+        # the types whose custom roles any owner may make (a roles line without `from`)
+        roles_anywhere = [t for t in self.types.values() if t.roles and not t.roles_from]
         for t in self.types.values():
             if "impersonate" in t.perms and t.name != "user":
                 fail(
@@ -719,7 +725,7 @@ class Core:
                         "AZ307",
                     )
         if roles_anywhere and not any("manage_roles" in t.perms for t in self.types.values()):
-            t = next(t for t in self.types.values() if t.roles and not t.roles_from)
+            t = roles_anywhere[0]
             assert t.roles is not None
             fail(
                 t.roles[2],
@@ -798,9 +804,7 @@ class Core:
                     if sr and sr != "*":
                         used.add((st, sr))
         for rule in self.rules:
-            governing = [t for t in self.types.values() if t.table == rule.table]
-            assert len(governing) == 1, "validate refuses rules for a table no type or two types map to (AZ401)"
-            walk(governing[0], rule.expr, rule.loc)
+            walk(self.governing(rule.table), rule.expr, rule.loc)
         for inv in self.pol.invariants:
             walk(self.T(inv.type), inv.expr, inv.loc)
         for test in self.tests:
@@ -956,7 +960,7 @@ class Core:
                 fail(
                     first.loc,
                     "permissions "
-                    + ", ".join(f"{a}.{b}" for a, b in sorted(comp))
+                    + ", ".join([f"{a}.{b}" for a, b in sorted(comp)])
                     + " inherit through each other; a recursion can use one permission per type",
                     "AZ302",
                 )
@@ -1665,7 +1669,9 @@ class Core:
                 on = only_on(item)
                 names = on if on is not None else [st for st, _ in r.subjects()]
                 return max(max(1, self.item_cost(self.T(st), Ref("ref", perm))) for st in names)
-            case ("ref", name):
+            case _:
+                assert isinstance(item, Ref), f"not an expression: {item!r}"
+                name = item.name
                 if name in t.relations:
                     rn = t.relations[name]
                     direct = all(src.kind == "column" for src in rn.sources) and all(
@@ -1676,7 +1682,6 @@ class Core:
                     return 2
                 perm_ = t.perms.get(name)
                 return max((self.item_cost(t, i) for i in self.top_items(perm_)), default=0) if perm_ else 2
-        return 2
 
     def start_function(self, t: Type, perm: Perm, flatten: Flatten) -> str:
         name = f"{t.name}__{perm.name}__start"
@@ -1744,8 +1749,7 @@ class Core:
         permission's view, where one that inherits stays a name (its view walks a tree, which its operands
         written out here would not)."""
         key = (t.name, perm.name)
-        if key in stack:
-            fail(perm.loc, f"{t.name}.{perm.name} depends on itself", "AZ302")
+        assert key not in stack, "analyze_recursion refuses a permission that depends on itself (AZ302)"
         out = []
         for item in self.top_items(perm):
             if isinstance(item, Ref) and item.name in t.perms and not (views and (t.name, item.name) in self.recursive):
@@ -1847,14 +1851,14 @@ class Core:
                 )
             case ("arrow", rel, perm_name) | ("arrow_on", rel, perm_name, _):
                 return self.row_arrow(t, alias, node, rel, perm_name, loc, point, invoker)
-            case ("ref", name):
-                self.lookup(t, name, loc)
-                if name in t.relations:
-                    return self.row_relation(t, t.relations[name], alias, loc, point)
-                perm = t.perms[name]
+            case _:
+                assert isinstance(node, Ref), f"not an expression: {node!r}"
+                self.lookup(t, node.name, loc)
+                if node.name in t.relations:
+                    return self.row_relation(t, t.relations[node.name], alias, loc, point)
+                perm = t.perms[node.name]
                 items = self.cheapest_first(t, self.prune(t, self.flat_items(t, perm, stack)))
                 return or_join([self.row_sql(t, alias, item, perm.loc, point=point, invoker=invoker) for item in items])
-        raise AssertionError(f"not an expression: {node!r}")
 
     def definer_cond(self, t: Type, sql: str, alias: str) -> str:
         """A condition that reads more than its row's columns, where the app role checks it: a call of a function

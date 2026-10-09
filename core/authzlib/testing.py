@@ -30,13 +30,14 @@ class TestMixin(Core):
             try:
                 pol = parse_policy(text, name, files={})
             except PolicyError as e:
-                if str(e).startswith("line "):
-                    e.args = (f"{name} {e}",)  # a mistake in a test file is named with its file, like an included one
+                # a mistake in a test file is named with its file, like an included one (it says `line N: ...`: the
+                # file is read as the policy, whose own lines say no file)
+                e.args = (f"{name} {e}",)
                 raise
             for sc in pol.scenarios:
+                assert sc.loc is not None  # (only the unnamed test section has no line of its own)
                 for loc in [sc.loc] + [st.loc for st in sc.steps]:
-                    if loc is not None:
-                        loc.file = name
+                    loc.file = name
             if (
                 pol.types
                 or pol.rules

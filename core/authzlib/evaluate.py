@@ -26,7 +26,7 @@ from dataclasses import dataclass, field
 from typing import TypeAlias, TypedDict, TypeVar, cast
 
 from .conditions import Node, Scalar, columns_of, simple, truth, uses_uid
-from .parse import KEYWORDS, ROLES, Expr, Policy, Relation, Rule, Source, Type
+from .parse import KEYWORDS, ROLES, Expr, Or, Policy, Relation, Rule, Source, Type
 
 # a relation or permission of a type, and the ids that hold it
 Name: TypeAlias = "tuple[str, str]"
@@ -38,6 +38,9 @@ RolePairsKey: TypeAlias = "tuple[str, str, str, str]"  # (type, permission, subj
 CondKey: TypeAlias = "tuple[str, str]"  # (type, condition)
 K = TypeVar("K")
 V = TypeVar("V")
+# what the policies read here hold, being ones the compiler compiles: an arrow follows objects of the policy's types,
+# never groups, type:*, anyone or links (AZ301) nor a subject of no type (AZ201)
+FOLLOWS = "an arrow follows objects of the policy's types (AZ301, AZ201)"
 
 
 @dataclass
@@ -95,7 +98,7 @@ def linked_column(src: Source) -> str | None:
 def role_owner_type(t: Type) -> str | None:
     """The type of the roles' owner, `roles : ... from rel`: what rel links to (None without `from`)."""
     r = t.relations.get(t.roles_from) if t.roles_from else None
-    return next((st for src in r.sources for st, _ in src.subjects), None) if r else None
+    return r.subjects()[0][0] if r else None
 
 
 def principal_of(user: str, types: Mapping[str, Type]) -> tuple[str, str]:
@@ -114,6 +117,9 @@ class Reference:
 
     def __init__(self, pol: Policy) -> None:
         self.pol, self.types, self.rules = pol, pol.types, pol.rules
+        self.of_table: dict[str, Type] = {}  # a table's type (one, where it has rules: AZ401)
+        for t in pol.types.values():
+            self.of_table.setdefault(t.table, t)
         self.order = self.strata()
         self.data = Data()
         self.links: set[str] = set()
@@ -138,10 +144,9 @@ class Reference:
                     found.add((t.name, name))
                 case ("arrow", rel, perm):
                     found.add((t.name, rel))
-                    for src in t.relations[rel].sources:
-                        for st, sr in src.subjects:
-                            if sr is None and st in self.types:
-                                found.add((st, perm))
+                    for st, sr in t.relations[rel].subjects():
+                        assert sr is None and st in self.types, FOLLOWS
+                        found.add((st, perm))
                 case ("not", item):
                     walk(t, key, item, True)
                 case ("and", items) | ("or", items):
@@ -191,9 +196,8 @@ class Reference:
         for v in graph:
             if v not in index:
                 visit(v)
-        for comp in order:
-            if any((a, b) in negated for a in comp for b in comp):
-                raise RuntimeError(f"{comp}: a negation inside a loop has no plain meaning")
+        # what a `not` reads comes before it: the compiler refuses a not inside a recursion (AZ302)
+        assert not any((a, b) in negated for comp in order for a in comp for b in comp), "a not inside a recursion"
         return order
 
     def conditions(self) -> list[CondKey]:
@@ -220,7 +224,7 @@ class Reference:
         return sorted(found)
 
     def type_of_table(self, table: str) -> Type:
-        return next(t for t in self.types.values() if t.table == table)
+        return self.of_table[table]
 
     # evaluation ----------------------------------------------------------
     def evaluate(self, data: Data, user: str, links: Iterable[str] = ()) -> State:
@@ -231,7 +235,10 @@ class Reference:
             (t.name, name): frozenset() for t in self.types.values() for name in list(t.relations) + list(t.perms)
         }
         for comp in self.order:
-            for _ in range(1000):
+            # a least fixpoint: no `not` in the group reads a name of it (strata), so each round only adds, and the
+            # rounds end
+            changed = True
+            while changed:
                 changed = False
                 for tname, name in comp:
                     t = self.types[tname]
@@ -239,10 +246,6 @@ class Reference:
                     if new != state[(tname, name)]:
                         state[(tname, name)] = new
                         changed = True
-                if not changed:
-                    break
-            else:
-                raise RuntimeError("the reference evaluator did not reach a fixpoint")
         return state
 
     def rule(self, state: State, rule: Rule) -> set[str]:
@@ -308,8 +311,7 @@ class Reference:
     def role_holders(self, state: State, t: Type, perm: str) -> set[str]:
         """The objects of t on which the principal holds a custom role that includes perm: what `roles` means in
         `can perm = ... or roles`."""
-        if not t.roles:
-            raise ValueError(f"{t.name}.{perm}: roles, but no roles line")
+        assert t.roles, "the compiler refuses `roles` on a type without a roles line (AZ210)"
         out: set[str] = set()
         owners = self.role_owners(t)
         for st, sr in t.roles[0]:
@@ -346,9 +348,9 @@ class Reference:
                 out: set[str] = set()
                 for i, src in enumerate(r.sources):
                     for target, sr in src.subjects:
-                        if sr is None and target in self.types:
-                            held = state[(target, perm)]
-                            out |= {o for o, s in self.pairs(t, r.name, i, target, None) if s in held}
+                        assert sr is None and target in self.types, FOLLOWS
+                        held = state[(target, perm)]
+                        out |= {o for o, s in self.pairs(t, r.name, i, target, None) if s in held}
                 return out
             case ("cond", sql) if sql == KEYWORDS["anyone"]:
                 return self.ids(t)  # anyone at all, signed in or not
@@ -371,9 +373,9 @@ class Reference:
                 return self.ids(t) - self.eval_expr(state, t, item, defining)
             case ("and", items):
                 return set.intersection(*[self.eval_expr(state, t, x, defining) for x in items])
-            case ("or", items):
-                return set.union(*[self.eval_expr(state, t, x, defining) for x in items])
-        raise ValueError(f"the reference evaluator doesn't evaluate {node!r}")
+            case _:
+                assert isinstance(node, Or), f"the reference evaluator doesn't evaluate {node!r}"
+                return set.union(*[self.eval_expr(state, t, x, defining) for x in node.items])
 
 
 # --- small worlds ----------------------------------------------------------------------------------

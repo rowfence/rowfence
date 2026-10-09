@@ -156,11 +156,10 @@ SELECT p.oid::regprocedure::text, gw.who, a.privilege_type,
         for t in self.types.values():
             for r in t.relations.values():
                 for src in r.sources:
-                    if src.kind == "table":
+                    if src.kind == "table":  # (never a custom roles' relation: its source is the roles)
                         table = self.source_table(src)
                         link_tables.add(table)
-                        if not r.synthetic:
-                            link_readers.setdefault(table, []).append(f"{t.name}.{r.name}")
+                        link_readers.setdefault(table, []).append(f"{t.name}.{r.name}")
                         index_cols.append(
                             (
                                 table,
@@ -259,7 +258,7 @@ SELECT p.oid::regprocedure::text, gw.who, a.privilege_type,
         for rule in self.rules:
             if rule.command != "select" or rule.columns:
                 continue
-            t = next(t for t in self.types.values() if t.table == rule.table)
+            t = self.governing(rule.table)
             n = self.expansions(self.rule_sql(t, q(rule.table.split(".")[1]), rule))
             if n > MANY_EXPANSIONS:
                 said = (

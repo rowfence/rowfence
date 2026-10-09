@@ -8,6 +8,10 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .parse import PolicyError
 
 # examples are compiled after these lines, unless they declare the user type themselves
 PRELUDE = "app role app_user\ntype user = app.users\n"
@@ -731,21 +735,28 @@ def split(message: str) -> tuple[str, str | None]:
     return (message[: m.start()], m.group(1)) if m else (message, None)
 
 
-def message(code: str) -> str | None:
-    """What the compiler says about the page's mistake (None for mistakes only a database finds)."""
+def said(text: str, files: dict[str, str], when: str) -> PolicyError | None:
+    """What compiling an example says: its mistake (in the policy, or in its tests on a page about tests), or None
+    when it compiles (as each page's fix does: the unit tests ask)."""
     from . import Compiler, PolicyError, parse_policy
 
+    try:
+        comp = Compiler(parse_policy(example(text), None, files=files))
+        comp.compile("x", transaction=False)
+        if when == "tests":
+            comp.compile_tests("x")
+    except PolicyError as e:
+        return e
+    return None
+
+
+def message(code: str) -> str | None:
+    """What the compiler says about the page's mistake (None for mistakes only a database finds)."""
     c = CODES[code]
     if not c.wrong or c.when not in ("compile", "tests"):
         return None
-    try:
-        comp = Compiler(parse_policy(example(c.wrong), None, files={} if code == "AZ108" else dict(c.files)))
-        comp.compile("x", transaction=False)
-        if c.when == "tests":
-            comp.compile_tests("x")
-    except PolicyError as e:
-        return str(e)
-    return None
+    e = said(c.wrong, {} if code == "AZ108" else dict(c.files), c.when)
+    return str(e) if e else None
 
 
 def page(code: str) -> str:

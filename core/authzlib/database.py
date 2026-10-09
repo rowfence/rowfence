@@ -272,10 +272,8 @@ def condition_error(err: Exception, sql: str, policy: str, files: Files) -> Erro
     """When a statement of the compiled policy failed on one of the policy's {conditions} (SQL Postgres
     refuses: a column that isn't there, a syntax error), that condition and its line; None otherwise. The
     failing text is the statement at the error's position in sql, or the query inside a function that failed."""
-    fields = getattr(err, "fields", None)
-    if not isinstance(fields, dict):
-        return None
-    got: dict[str, str] = {str(k): str(v) for k, v in fields.items()}
+    fields = getattr(err, "fields", None)  # what the server said, field by field (pgwire.PgError)
+    got: dict[str, str] = {str(k): str(v) for k, v in fields.items()} if isinstance(fields, dict) else {}
     if got.get("q"):
         where, at = got["q"], int(got["p"]) - 1 if got.get("p", "").isdigit() else None
     elif got.get("P", "").isdigit():
@@ -493,12 +491,10 @@ def _push(db: Db, policy: str, files: Files, downgrade: bool = False) -> str:
     lock = text_or_none(last, "lock") if last else None
     if last and last["action"] == "apply" and last["version"] == BUILD and lock:
         last_policy, last_files = text(last, "policy"), files_map(text_or_none(last, "files") or "{}")
-        before: migrate.Compiled | None
-        try:
-            _, before, _ = migratable(last_policy, last_files)
-        except Error:
-            before = None
-        if before is not None and lock_hash(before) == lock and unchanged(db, last_policy, last_files):
+        # the policy in force with what it made (unchanged() compiles it: a record this command can't compile isn't
+        # one), as the migrations so far left it
+        before = migratable(last_policy, last_files)[1] if unchanged(db, last_policy, last_files) else None
+        if before is not None and lock_hash(before) == lock:
             sql, comp, c = migratable(policy, files)
             m = migrate.migration(sql, comp, migrate.parse_lock(migrate.lock_of(before)), "push", lines=True)
             if m.empty and (last_policy, last_files) == (policy, files):
@@ -849,18 +845,12 @@ def why(db: Db, ptype: str, pid: str, type_name: str, oid: str, perm: str, compi
     (grant.Answer). Each change is tried in a savepoint and undone: nothing stays."""
     from . import grant
 
-    if not pid:
-        raise Error("why: as whom? someone signed in (user:42, bot:7): nobody can be given access", "22023")
+    assert pid, "the command and Studio ask for someone signed in first: nobody can be given access"
     c = compiler or policy_compiler(*applied(db))
     try:
         return grant.how_to_grant(c, db, ptype, pid, type_name, oid, perm)
     except KeyError as e:
         raise Error(str(e.args[0]), "22023") from None
-
-
-def given_or_applied(db: Db, policy: str | None, files: Files) -> tuple[str, Files]:
-    """The policy passed in, or the one in force when none is."""
-    return (policy, files) if policy is not None else applied(db)
 
 
 def graph(policy: str, files: Mapping[str, object] | str | None = None) -> str:
@@ -872,8 +862,7 @@ def graph(policy: str, files: Mapping[str, object] | str | None = None) -> str:
 
 
 def client(lang: str, policy: str, files: Mapping[str, object] | str | None = None) -> str:
-    if lang not in ("py", "python", "ts", "typescript", "ts-sdk"):
-        raise Error(f"unknown client language '{lang}'", "22023", hint="use 'py' or 'ts'")
+    """The client in a language the command takes: py or ts, and python, typescript or ts-sdk in rowstile.toml."""
 
     def make(c: Compiler) -> str:
         c.compile("the policy", transaction=False)
@@ -882,12 +871,9 @@ def client(lang: str, policy: str, files: Mapping[str, object] | str | None = No
     return compiled(policy, files, make)
 
 
-def test_files(tests: Mapping[str, object] | str | None) -> Files:
-    """Named tests' files: name -> text (or the same as JSON)."""
-    given: object = json.loads(tests) if isinstance(tests, str) else (tests or {})
-    if not isinstance(given, Mapping) or not all(isinstance(v, str) for v in given.values()):
-        raise Error('tests must be a map of file name -> tests, e.g. {"chats.authz": "test ..."}', "22023")
-    return {str(k): str(v) for k, v in given.items()}
+def test_files(tests: Mapping[str, str] | None) -> Files:
+    """Named tests' files: name -> text."""
+    return dict(tests or {})
 
 
 def test_row(r: dict[str, Value]) -> TestRow:
@@ -902,7 +888,7 @@ def takes_app_role(db: Db, tests_sql: str, role: str) -> None:
         may_take(db, role)
 
 
-def test(db: Db, tests: Mapping[str, object] | str | None = None) -> list[TestRow]:
+def test(db: Db, tests: Mapping[str, str] | None = None) -> list[TestRow]:
     """The current policy's tests, the named tests in `tests` (file name -> text) and the invariants:
     a row per check, as (test, line, ok, detail). Named tests roll back what they did."""
     policy, files = applied(db)
@@ -920,7 +906,7 @@ def test(db: Db, tests: Mapping[str, object] | str | None = None) -> list[TestRo
     return [test_row(r) for r in rows]
 
 
-def coverage(db: Db, tests: Mapping[str, object] | str | None = None) -> tuple[list[TestRow], Report]:
+def coverage(db: Db, tests: Mapping[str, str] | None = None) -> tuple[list[TestRow], Report]:
     """test(), and the coverage of the permissions' branches by its passing checks: (rows, coverage.report)."""
     from . import coverage as cov
     from .testing import COVERAGE
@@ -1005,7 +991,7 @@ def review_run(
     db: Db,
     policy: str,
     files: Mapping[str, object] | str | None,
-    tests: Mapping[str, object] | str | None,
+    tests: Mapping[str, str] | None,
     lock_text: str | None,
     explain: Iterable[tuple[str, str, str, str]] = (),
 ) -> ReviewRun:

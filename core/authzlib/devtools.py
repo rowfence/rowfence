@@ -151,9 +151,9 @@ class DevMixin(Core):
             return self._client_ts(perms, shared, scopes, source_name)
         if lang == "ts-sdk":
             return self._client_ts_names(perms, shared, scopes, source_name)
-        if lang in ("py", "python"):
-            return self._client_py(perms, shared, scopes, source_name)
-        raise ValueError(f"unknown client language '{lang}' (use py or ts; ts-sdk for the names alone)")
+        # (the command takes py or ts, and rowstile.toml's [clients] python, typescript and ts-sdk besides)
+        assert lang in ("py", "python"), f"unknown client language '{lang}'"
+        return self._client_py(perms, shared, scopes, source_name)
 
     def _client_ts(self, perms: Perms, shared: Shared, scopes: list[str], source_name: str) -> str:
         j: Callable[[object], str] = lambda x: json.dumps(x, indent=2)

@@ -27,7 +27,7 @@ from typing import NotRequired, TypeAlias, TypedDict
 from . import Compiler, PolicyError, migrate, parse_policy
 from .conditions import simple
 from .connection import Db
-from .evaluate import Difference, Reference, compare, worlds_to_try
+from .evaluate import FOLLOWS, Difference, Reference, compare, worlds_to_try
 from .parse import KEYWORDS, Expr, Loc, Perm, Policy, Rule, Type, read_lines
 from .statements import split
 
@@ -253,7 +253,8 @@ def entities(policy: str, files: dict[str, str] | None, pol: Policy) -> dict[str
             m = re.match(r"(scope|caveat)\s+([\w:-]+)", s)
             if m:
                 out[f"{m.group(1)} {m.group(2)}"] = (s, loc)
-            elif s.startswith(("app role ", "role ")):  # (`role x`: how a policy said it before `app role`)
+            else:  # the parser takes no other line here (`role x`: how a policy said it before `app role`)
+                assert s.startswith(("app role ", "role ")), s
                 out["app role"] = ("app role " + s.split()[-1], loc)
             continue
         if skip or block is None:
@@ -265,17 +266,15 @@ def entities(policy: str, files: dict[str, str] | None, pol: Policy) -> dict[str
                 out[f"{name}.{m.group(1)}"] = (m.group(2), loc)
                 continue
             m = re.match(r"(\w+)\s*:\s*(.*)$", s)
-            if m:
-                key, said = f"{name}.{m.group(1)}", m.group(2)
-                if m.group(1) == "roles":  # (`roles : user grant view, edit`: before `roles` in the permissions)
-                    said = re.sub(r"\s+grant\s+.*?(?=\s+from\s+\w+$|$)", "", said)
-                prev = out.get(key)
-                out[key] = ((prev[0] + "; " if prev else "") + said, prev[1] if prev else loc)
-                continue
-            out[f"{name}: {s}"] = (s, loc)
+            assert m, s  # (the parser reads every other line of a type as a relation, roles too: name : ...)
+            key, said = f"{name}.{m.group(1)}", m.group(2)
+            if m.group(1) == "roles":  # (`roles : user grant view, edit`: before `roles` in the permissions)
+                said = re.sub(r"\s+grant\s+.*?(?=\s+from\s+\w+$|$)", "", said)
+            prev = out.get(key)
+            out[key] = ((prev[0] + "; " if prev else "") + said, prev[1] if prev else loc)
         elif kind == "rules":
             out[f"rule {name} {heads[loc]}"] = (s.partition(":")[2].strip(), loc)
-        elif kind == "invariants":
+        else:  # invariants
             out[f"invariant {s}"] = (s, loc)
     return out
 
@@ -293,10 +292,9 @@ def uses(pol: Policy) -> dict[tuple[str, str], set[tuple[str, str]]]:
                 out.add((t.name, name))
             case ("arrow", rel, perm):
                 out.add((t.name, rel))
-                for src in t.relations[rel].sources:
-                    for st, sr in src.subjects:
-                        if sr is None and st in pol.types:
-                            out.add((st, perm))
+                for st, sr in t.relations[rel].subjects():
+                    assert sr is None and st in pol.types, FOLLOWS
+                    out.add((st, perm))
             case ("not", item):
                 walk(t, item, out)
             case ("and", items) | ("or", items):
@@ -306,8 +304,6 @@ def uses(pol: Policy) -> dict[tuple[str, str], set[tuple[str, str]]]:
     for t in pol.types.values():
         for p in t.perms.values():
             walk(t, p.expr, graph[(t.name, p.name)])
-            if p.base:
-                graph[(t.name, p.name)].add((t.name, p.base))
         for r in t.relations.values():
             for src in r.sources:
                 for st, sr in src.subjects:
@@ -344,8 +340,8 @@ class Side:
         """previous: read in the language before this one (parse_policy), for a base this one refuses."""
         self.policy, self.files, self.tests, self.previous = policy, files or {}, tests or {}, previous
         self.pol = parse_policy(policy, None, files=self.files, previous=previous)
-        # what `rowstile check` refuses is refused here, with its message: the rest reads a policy that compiles
-        # (a copy: compiling changes the policy it is given)
+        # what `rowstile check` refuses is refused here, with its message: the rest reads a policy that compiles, as
+        # written (a copy is compiled: compiling changes the policy it is given, and adds permissions of its own)
         copy = parse_policy(policy, None, files=self.files, previous=previous)
         Compiler(copy).compile("the policy", transaction=False)
         self.pol.previous = copy.previous  # (with what compiling read the old way too)
@@ -563,18 +559,21 @@ def meaning(b: Side, h: Side, worlds: int, refactor: bool = True) -> Meaning:
     direct = {tuple(c["what"].split(".")) for c in changed if re.match(r"^\w+\.\w+$", c["what"])}
     for t in h.pol.types.values():
         for p in t.perms.values():
-            if p.hidden or (t.name, p.name) in direct:
+            if (t.name, p.name) in direct:
                 continue
             via = sorted(f"{a}.{n}" for a, n in closure(graph, (t.name, p.name)) & direct)
             if via:
                 out["through"].append({"what": f"{t.name}.{p.name}", "via": via, "line": str(p.loc)})
+    governing: dict[str, Type] = {}  # a rule's table, its type's (AZ401: one type governs it)
+    for t in h.pol.types.values():
+        governing.setdefault(t.table, t)
     for r in h.pol.rules:
         if r.command == "mask":
             continue
         key = f"rule {r.table} {rule_head(r)}"
         if any(c["what"] == key for c in changed):
             continue
-        t = next(t for t in h.pol.types.values() if t.table == r.table)
+        t = governing[r.table]
         reads: set[tuple[str, str]] = set()
         _walk_rule(t, r.expr, reads, h.pol)
         hit: set[tuple[str, str]] = set()
@@ -608,10 +607,9 @@ def _walk_rule(t: Type, node: Expr, out: set[tuple[str, str]], pol: Policy) -> N
         case ("ref", name):
             out.add((t.name, name))
         case ("arrow", rel, perm):
-            for src in t.relations[rel].sources:
-                for st, sr in src.subjects:
-                    if sr is None and st in pol.types:
-                        out.add((st, perm))
+            for st, sr in t.relations[rel].subjects():
+                assert sr is None and st in pol.types, FOLLOWS
+                out.add((st, perm))
         case ("not", item):
             _walk_rule(t, item, out, pol)
         case ("and", items) | ("or", items):
@@ -776,16 +774,11 @@ def risk(b: Side, h: Side, worlds: int, seen: Difference | None = None) -> list[
     for t in h.pol.types.values():
         bt = b.pol.types.get(t.name)
         for p in t.perms.values():
-            if p.hidden:
-                continue
             key = f"{t.name}.{p.name}"
             bp = bt.perms.get(p.name) if bt else None
             if bt is None or bp is None:
                 continue
-            before, after = (
-                nots(bp.expr) + (nots(bt.perms[bp.base].expr) if bp.base else []),
-                nots(p.expr) + (nots(t.perms[p.base].expr) if p.base else []),
-            )
+            before, after = nots(bp.expr), nots(p.expr)
             if len(after) < len(before):
                 flag(f"`{key}` has a deny fewer (`not` {len(before)} -> {len(after)})", key, "a deny removed")
             new_paths = arrows(p.expr) - arrows(bp.expr)
@@ -839,7 +832,7 @@ def risk(b: Side, h: Side, worlds: int, seen: Difference | None = None) -> list[
             f"{t.name}.{p.name}"
             for t in h.pol.types.values()
             for p in t.perms.values()
-            if not p.hidden and t.name in b.pol.types and p.name in b.pol.types[t.name].perms
+            if t.name in b.pol.types and p.name in b.pol.types[t.name].perms
         ]
         + [f"rule {r.table} {rule_head(r)}" for r in h.pol.rules if r.command != "mask" and not r.columns]
         if wheres
@@ -976,7 +969,7 @@ def tests(b: Side, h: Side) -> Tests:
     for t in h.pol.types.values():
         bt_ = b.pol.types.get(t.name)
         for p in t.perms.values():
-            if p.hidden or (bt_ and p.name in bt_.perms):
+            if bt_ and p.name in bt_.perms:
                 continue
             if not re.search(rf"\b{re.escape(p.name)}\s+{re.escape(t.name)}\b", named):
                 untested.append({"what": f"{t.name}.{p.name}", "line": str(p.loc)})
@@ -1408,4 +1401,4 @@ def annotations(r: Review, path: str) -> str:
 
 
 def as_json(r: Review) -> str:
-    return json.dumps(r, indent=2, default=lambda x: sorted(x) if isinstance(x, set) else str(x)) + "\n"
+    return json.dumps(r, indent=2) + "\n"
