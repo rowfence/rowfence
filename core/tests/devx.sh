@@ -201,6 +201,9 @@ run apply "$T/i/db/policy.authz"; case "$out" in *": applied") ok "... which app
 CLI apply example/docs.authz >/dev/null 2>&1
 out=$(mkdir -p "$T/j" && cd "$T/j" && python3 "$OLDPWD/cli/rowstile_cli.py" --db "dbname=$DB" init --schema nosuch 2>&1)
 case "$out" in *"no tables to draft a policy from in nosuch"*) ok "a schema with no tables is named";; *) bad "draft empty" "$out";; esac
+out=$(mkdir -p "$T/u" && cd "$T/u" && python3 "$OLDPWD/cli/rowstile_cli.py" --db "dbname=$DB" init --schema app --users app.nosuch 2>&1)
+[ "$out" = "app.nosuch: no such table with a primary key in app" ] && [ -z "$(ls -A "$T/u")" ] &&
+  ok "... and a --users table that isn't there, with nothing written" || bad "init --users of a table that isn't there" "$out $(ls -A "$T/u")"
 # in a Next.js app on Prisma: the tool, the generated names, the SDK packages and the setup line
 mkdir -p "$T/k/prisma" "$T/k/src"
 printf '{\n    "name": "shop",\n    "dependencies": {"next": "16", "@prisma/client": "7", "react": "19"}\n}\n' > "$T/k/package.json"
@@ -350,7 +353,7 @@ case "$(cat "$T/dev.log")" in *"         ok    "*) bad "dev lists the checks tha
 cp "$T/docs.keep" "$T/p/tests/docs.authz"
 printf 'test "caf\351"\n  anyone cannot view file 11\n' > "$T/p/tests/latin.authz"
 devonce
-case "$(cat "$T/dev.log")" in *"  x    "*"tests/latin.authz: not UTF-8 (the byte at "*"): save it as UTF-8"*)
+case "$(cat "$T/dev.log")" in *"  x    tests/latin.authz: not UTF-8 (the byte at "*"): save it as UTF-8"*)
   [ $rc -eq 1 ] && ok "... on a test file that isn't UTF-8: said, exit 1" || bad "dev on a test file not UTF-8: exit" "$rc";;
   *) bad "dev on a test file not UTF-8" "$(cat "$T/dev.log")";; esac
 rm "$T/p/tests/latin.authz"

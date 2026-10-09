@@ -66,7 +66,7 @@ cp "$P/db/policy.authz" "$T/keep.authz"
 sed -i 's/can view  = edit or viewer or parent.view/can view  = edit or viewer or nosuch.view/' "$P/db/policy.authz"
 out=$(CLI review --base main 2>&1); rc=$?
 case "$out" in *"Traceback"*) bad "a mistake in the policy gives a traceback" "$out";;
-  *"has no relation or permission 'nosuch'"*"[AZ203]"*) [ $rc -eq 1 ] && ok "a mistake in the pull request's policy: check's message, exit 1" || bad "mistake exit" "$rc";;
+  "db/policy.authz: line "*"has no relation or permission 'nosuch'"*"[AZ203]"*) [ $rc -eq 1 ] && ok "a mistake in the pull request's policy: check's message, exit 1" || bad "mistake exit" "$rc";;
   *) bad "a mistake in the policy" "$out";; esac
 cp "$T/keep.authz" "$P/db/policy.authz"
 out=$(CLI review --base main db/nosuch.authz 2>&1); rc=$?
@@ -78,7 +78,7 @@ case "$out" in "db/latin.authz: not UTF-8 (the byte at "*"): save it as UTF-8") 
 rm "$P/db/latin.authz"
 printf 'test "caf\351"\n  user 3 can view file 11\n' > "$P/db/tests/latin.authz"
 out=$(CLI review --base main 2>&1); rc=$?
-case "$out" in *"/db/tests/latin.authz: not UTF-8 (the byte at 9): save it as UTF-8") [ $rc -eq 2 ] && ok "a test file that isn't UTF-8: said, exit 2" || bad "review of a test file not UTF-8: exit" "$rc";;
+case "$out" in "db/tests/latin.authz: not UTF-8 (the byte at 9): save it as UTF-8") [ $rc -eq 2 ] && ok "a test file that isn't UTF-8: said, exit 2" || bad "review of a test file not UTF-8: exit" "$rc";;
   *) bad "review of a test file not UTF-8" "$out";; esac
 rm "$P/db/tests/latin.authz"
 out=$(CLI --db "dbname=authz_review_no_such_db" review --base main 2>&1); rc=$?
@@ -91,6 +91,17 @@ case "$out" in *Traceback*) bad "a review database without the app's tables give
     [ $rc -eq 0 ] && ok "a review database without the app's tables: Access says why it isn't computed, exit 0" || bad "review on a bare database: exit" "$rc";;
   *) bad "review on a bare database" "$out";; esac
 dropdb --if-exists "${DB}_bare"
+# the server ends the review's session while it works (here while it waits on a table another session holds)
+( PSQL -c "BEGIN" -c "LOCK TABLE app.folders IN ACCESS EXCLUSIVE MODE" -c "SELECT pg_sleep(6)" -c "COMMIT" >/dev/null 2>&1 ) &
+locker=$!
+for _ in $(seq 40); do [ "$(PSQL -c "SELECT count(*) FROM pg_locks WHERE relation = 'app.folders'::regclass AND mode = 'AccessExclusiveLock' AND granted")" = 1 ] && break; sleep 0.25; done
+( CLI --db "dbname=$DB" review --base main > "$T/review.out" 2>&1; echo $? > "$T/review.rc" ) &
+reviewer=$!
+for _ in $(seq 40); do w=$(PSQL -c "SELECT pid FROM pg_stat_activity WHERE datname = '$DB' AND application_name = 'rowstile' AND wait_event_type = 'Lock' LIMIT 1"); [ -n "$w" ] && break; sleep 0.25; done
+[ -n "$w" ] && PSQL -c "SELECT pg_terminate_backend($w)" >/dev/null
+wait "$reviewer"; wait "$locker"
+case "$(cat "$T/review.out")" in "lost the database: "*) [ "$(cat "$T/review.rc")" = 2 ] && ok "the server ending the review's session: lost the database, exit 2" ||
+  bad "review losing its database: exit" "$(cat "$T/review.rc")";; *) bad "review losing its database" "$(cat "$T/review.out")";; esac
 
 echo "-- a pull request whose policy doesn't run on the review data"
 G checkout -q -- db && rm -f "$P"/db/migrations/*_authz_build_policy.sql && G clean -q -fd db
@@ -177,7 +188,7 @@ case "$out" in "Base     The policy at the base is written in the language befor
 { G checkout -q -b broken && sed -i 's/can edit  = share or editor or/can edit  = share or edtor or/' "$P/db/policy.authz" &&
   G commit -q -am broken && G checkout -q main; } || bad "setting up the branch broken"
 out=$(CLI review --base broken 2>&1); rc=$?
-case "$out" in *"db/policy.authz at broken: the policy at the base has a mistake: line "*": folder has no relation or permission 'edtor'"*"[AZ203]")
+case "$out" in "db/policy.authz at broken: the policy at the base has a mistake: line "*": folder has no relation or permission 'edtor'"*"[AZ203]")
   [ $rc -eq 1 ] && ok "a base whose policy has a mistake (in this language and the one before): said, with the base's line, exit 1" || bad "a base with a mistake: exit" "$rc";;
   *) bad "a base with a mistake" "$out";; esac
 

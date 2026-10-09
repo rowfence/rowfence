@@ -1374,6 +1374,37 @@ class Command(unittest.TestCase):
             self.assertNotIn("Traceback", p.stderr)
             self.assertTrue(p.stderr.startswith("out: "), p.stderr)  # Is a directory (on Windows, Permission denied)
 
+    def test_lsp_takes_no_db(self) -> None:
+        # the language server reads the database rowstile.toml names, the editor's folder's: a --db it would ignore
+        # is refused, as an option a command doesn't take is
+        with tempfile.TemporaryDirectory() as d:
+            p = subprocess.run(
+                [sys.executable, os.path.join(ROOT, "cli", "rowstile_cli.py"), "lsp", "--db", "dbname=x"],
+                cwd=d,
+                stdin=subprocess.DEVNULL,
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+        self.assertEqual(p.returncode, 2, p.stderr)
+        self.assertEqual(
+            p.stderr, "rowstile lsp: --db is not an option it has: it reads the database rowstile.toml names\n"
+        )
+
+    def test_run_as_a_script_it_is_the_module_others_import(self) -> None:
+        # npm and Docker run the command as a script, which makes it __main__: Studio imports rowstile_cli by name
+        # when it connects, and gets this one, with the .env files it read, not a second copy without them
+        cli = os.path.join(ROOT, "cli", "rowstile_cli.py")
+        code = (
+            "import runpy, sys\n"
+            f"sys.argv = [{cli!r}, '--version']\n"
+            f"ran = runpy.run_path({cli!r}, run_name='__main__')\n"
+            "import rowstile_cli\n"
+            "print(rowstile_cli.ENV is ran['ENV'])\n"
+        )
+        p = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=120)
+        self.assertEqual(p.stdout.splitlines()[-1:], ["True"], p.stdout + p.stderr)
+
     def test_array_literal(self) -> None:
         self.assertEqual(database.text_array(["1", 'a"b', "c\\d"]), '{"1","a\\"b","c\\\\d"}')
 

@@ -333,7 +333,10 @@ class Connection:
         rows, _ = self.query_described(sql, args)
         return rows
 
-    def query_described(self, sql: str, args: Sequence[object] = ()) -> tuple[list[tuple[Value, ...]], list[str]]:
+    def query_described(
+        self, sql: str, args: Sequence[object] = (), text: bool = False
+    ) -> tuple[list[tuple[Value, ...]], list[str]]:
+        """(rows, column names); text: each value as Postgres writes it (as psql shows it), not read into Python's."""
         bind = b"\0\0" + struct.pack("!hh", 0, len(args))
         for a in args:
             if a is None:
@@ -391,7 +394,7 @@ class Connection:
                     pos += 4
                     val = None if ln < 0 else payload[pos : pos + ln]
                     pos += max(ln, 0)
-                    row.append(_convert(cols[i][1], val))
+                    row.append((None if val is None else val.decode()) if text else _convert(cols[i][1], val))
                 rows.append(tuple(row))
             elif kind == b"E":
                 error = PgError(self._fields(payload))

@@ -122,6 +122,10 @@ for _ in $(seq 20); do [ "$(sleeping)" = 0 ] && break; sleep 0.5; done
 run explain-rule --as user:3 app.files insert --row '{folder_id: 6}'; [ $rc -eq 2 ] && case "$out" in *"--row: not JSON: {folder_id: 6}"*"The shell took the double quotes"*) true;; *) false;; esac && ok "explain-rule shows a row a Windows shell took the quotes out of, and how to write it there" || bad "explain-rule --row without quotes" "$out"
 run explain-rule --as user:3 app.files insert --row '[1]'; [ $rc -eq 2 ] && case "$out" in *"JSON object"*) true;; *) false;; esac && ok "explain-rule --row wants an object" || bad "--row" "$rc $out"
 run diff "$T/main.authz" --limit; [ $rc -eq 2 ] && [ "$out" = "--limit needs a value" ] && ok "an option without its value is refused" || bad "option without value" "$rc $out"
+run studio --port 70000; [ $rc -eq 2 ] && [ "$out" = "--port needs a port, a whole number from 1 to 65535, not '70000'" ] &&
+  ok "a port above 65535 is refused" || bad "studio --port 70000" "$rc ${out: -200}"
+run dev --once --studio-port 99999 "$T/main.authz"; [ $rc -eq 2 ] && [ "$out" = "--studio-port needs a port, a whole number from 1 to 65535, not '99999'" ] &&
+  ok "... and one for Studio beside dev" || bad "dev --studio-port 99999" "$rc ${out: -200}"
 run client rb "$T/main.authz"; [ $rc -eq 2 ] && [ "$out" = "rowstile client: which language, py or ts?" ] && ok "client in a language it doesn't write is refused" || bad "client rb" "$rc $out"
 run client py; fromdb=$out
 run client py "$T/main.authz"; [ $rc -eq 0 ] && [ -n "$out" ] && [ "$out" = "$fromdb" ] && ok "client py from the file alone is the one the applied policy gives" || bad "client py from a file" "$rc ${out:0:120}"
@@ -169,7 +173,13 @@ run can folder 1 view; [ $rc -eq 2 ] && [ "$out" = "rowstile can: as whom? --as 
 run can --as user:5 folder 1; [ $rc -eq 2 ] && [ "$out" = "rowstile can: see rowstile --help" ] && ok "a question an argument short is refused" || bad "can short" "$rc $out"
 run explain-rule --as user:3 app.files; [ $rc -eq 2 ] && case "$out" in "rowstile explain-rule --as WHO TABLE"*) true;; *) false;; esac && ok "explain-rule without a command shows how to ask" || bad "explain-rule short" "$rc $out"
 run why folder 1 view; [ $rc -eq 2 ] && [ "$out" = "rowstile why --as user:42 TYPE ID PERM" ] && ok "why without --as shows how to ask" || bad "why without --as" "$rc $out"
+run why --as anyone folder 1 view
+[ $rc -eq 2 ] && [ "$out" = "rowstile why: as whom? someone signed in (user:42, bot:7): nobody can be given access" ] &&
+  ok "... and why --as anyone asks as whom too, exit 2" || bad "why --as anyone" "$rc $out"
 run sql --as user:5 "UPDATE app.files SET name = name WHERE false"; [ $rc -eq 0 ] && [ "$out" = "UPDATE 0, as user:5; rolled back" ] && ok "sql says what a statement without rows did, in the server's words" || bad "sql's tag" "$rc $out"
+run sql --as user:5 "SELECT true AS yes, ARRAY['x','y z',NULL] AS words, '{\"k\": 1}'::jsonb AS doc"
+[ $rc -eq 0 ] && [ "$(echo "$out" | sed -n 3p)" = 't    {x,"y z",NULL}  {"k": 1}' ] &&
+  ok "... and writes values as Postgres does, as psql shows them: t, {x,\"y z\",NULL}, JSON" || bad "sql's values" "$out"
 
 echo "-- files that can't be read as they should"
 { cat example/docs.authz; printf -- '-- caf\351\n'; } > "$T/latin.authz"
@@ -312,6 +322,9 @@ echo "-- connecting"
 out=$(python3 cli/rowstile_cli.py --db "dbname=authz_no_such_db" test 2>&1); rc=$?
 case "$out" in "can't connect"*) [ $rc -eq 2 ] && ok "a database that doesn't exist: exit 2" || bad "connect exit" "$rc";; *) bad "connect" "$out";; esac
 out=$(python3 cli/rowstile_cli.py --db "colour=blue" test 2>&1); case "$out" in *"unknown connection setting 'colour'"*) ok "unknown connection settings are named";; *) bad "dsn" "$out";; esac
+out=$(python3 cli/rowstile_cli.py --db "colour=blue" dev --once --no-studio "$T/main.authz" 2>&1); rc=$?
+[ $rc -eq 2 ] && case "$out" in "can't connect: "*"unknown connection setting 'colour'"*) true;; *) false;; esac &&
+  ok "... by dev too, before its loop starts, exit 2" || bad "dev with a setting it doesn't know" "$rc ${out: -300}"
 out=$(PGDATABASE=$DB python3 cli/rowstile_cli.py test 2>&1); case "$out" in *"no policy is applied"*) ok "PGDATABASE is used when --db is left out";; *) bad "env" "${out:0:200}";; esac
 out=$(python3 cli/rowstile_cli.py --db "dbname=authz_no_such_db" graph "$T/main.authz" 2>&1); case "$out" in "%% Generated"*) ok "check, graph and client of a file need no database";; *) bad "no database" "${out:0:200}";; esac
 

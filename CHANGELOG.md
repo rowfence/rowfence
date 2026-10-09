@@ -29,6 +29,10 @@ Each release upgrades from the one before it. How releases are numbered and made
 
 ### Changed
 
+- `rowstile sql` writes values as Postgres writes them, as psql shows them: `t`, `{x,"y z",NULL}` and
+  `{"k": 1}`, where it wrote Python's `True`, `['x', 'y z', None]` and `{'k': 1}` (which isn't JSON).
+- `rowstile lsp --db` is refused: the language server reads the database `rowstile.toml` names, and ignored
+  `--db` without saying so.
 - `authz.unshare` says what it needs: "you cannot unshare editor on folder 3 (needs manage_editors)", where
   it said "you cannot share folder 3", also to someone who may share folder 3. The same words for an object
   the caller can't see and one that doesn't exist, as before; the code (42501) and the hint (AZ705) are the
@@ -67,6 +71,14 @@ Each release upgrades from the one before it. How releases are numbered and made
 
 ### Fixed
 
+- `rowstile review --db` stopped with a traceback when the server ended its session in the middle of the review
+  (a restart, or `pg_terminate_backend`): it says it lost the database, exit 2, as the other commands do. Its
+  messages name the policy as you do (`db/policy.authz`), not by its full path; and `review`, `test` and `dev`
+  name a test file they can't read the same way.
+- `rowstile dev` with a connection string it can't read (`--db colour=blue`) stopped with a traceback: it says
+  it can't connect, exit 2, as the other commands do. `--port` and `--studio-port` took a number above 65535,
+  which stopped Studio with a traceback: it is refused, exit 2. And `rowstile why --as anyone` exited 1, where
+  `why`'s other usage mistakes exit 2: it exits 2.
 - A file the command couldn't write was said as a lost database (`rowstile snapshot --out` naming a folder,
   `rowstile client` writing to a folder, `rowstile init` where `db` is a file), or stopped the command with a
   traceback (`rowstile migrate`, and `rowstile client` from the policy file; in `rowstile dev`, the migration
