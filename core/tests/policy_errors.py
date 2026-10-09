@@ -562,6 +562,12 @@ COMPILE = [
         "there is already a test named 'a'",
         12,
     ),
+    (
+        "a test named without quotes is the same test as one in quotes",
+        'test "sharers see docs"\n  user 1 can share doc 1\ntest sharers see docs\n  user 1 can share doc 1\n',
+        "there is already a test named 'sharers see docs'",
+        12,
+    ),
     ("a scope's command without its table", "scope s = docs.select\n", "commands are qualified by a table", 10),
     ("a scope's permission under a schema", "scope s = alt.doc.share\n", "permissions are qualified by a type", 10),
     ("custom roles declared twice", "  roles : user\n  roles : user\n", "doc declares custom roles twice", 11),
