@@ -4837,22 +4837,36 @@ class CoverageReport(unittest.TestCase):
                 fh.write("step b\tauthz_y\tauthz_int\tfolder__forget\t\t0\tplpgsql definer set\n")
                 fh.write("step c\tauthz_y\tauthz\tverify\t\t0\tsql\n")  # inlined: never counted
                 fh.write("step c\tauthz_z\tauthz\tctx\tkey text\t0\n")  # written before the language was
+                # a guard: called in one database, where every call raised (Postgres has a count for it, at 0)
+                fh.write("step b\tauthz_x\tauthz_int\taudit_is_append_only\t\t0\tplpgsql\tf\n")
+                fh.write("step b\tauthz_y\tauthz_int\taudit_is_append_only\t\t0\tplpgsql\tt\n")
+                # a database measured before it applies again (the call), and when it is dropped (made anew since)
+                fh.write("step d\tauthz_w\tauthz\tstart_review\tp_id text\t1\tplpgsql definer set\tt\n")
+                fh.write("step d\tauthz_w\tauthz\tstart_review\tp_id text\t0\tplpgsql definer set\tf\n")
                 fh.write("a line cut short\n")
             called = self.report.functions_measured([os.path.join(d, ".coverage")])
-        self.assertEqual(len(called), 6)
+        self.assertEqual(len(called), 10)
         kinds = self.report.by_kind(called)
         refuse = kinds["authz_gen.<table>:update:refuse"]
         self.assertEqual((refuse.made, refuse.called, refuse.steps, refuse.counted), (2, 1, {"step b"}, True))
         self.assertFalse(kinds["authz.verify()"].counted)
+        guard, review = kinds["authz_int.audit_is_append_only"], kinds["authz.start_review(p_id text)"]
+        self.assertEqual((guard.made, guard.called, guard.raised), (2, 0, 1))
+        self.assertEqual((review.made, review.called, review.raised, review.steps), (1, 1, 0, {"step d"}))
         report = self.report.functions_report(called)
-        # counted: can and the refusals (called), the forget and ctx (whose language was not written: counted)
-        self.assertIn("2 of 4 kinds of function called", report[1])
-        # never called: the one counted kind no call reached; the inlined one stands apart, not counted
-        never, uncounted = (
+        # counted: can, the refusals and the review (called), the guard (raised), the forget and ctx (whose
+        # language was not written: counted)
+        self.assertIn("3 of 6 kinds of function called, and 1 more whose every call raised", report[1])
+        # every call raised: the guard, apart from what was never called; the inlined one apart, not counted
+        raised, never, uncounted = (
+            report.index("  authz_int.audit_is_append_only  (made in 2 database(s), called in 1)"),
             report.index("  authz_int.<type>__forget  (made in 1 database(s))"),
             report.index("  authz.verify()"),
         )
+        self.assertLess(raised, never)
         self.assertLess(never, uncounted)
+        self.assertLess(report.index("  authz.ctx(key text)  (made in 1 database(s))"), uncounted)
+        self.assertFalse([line for line in report if "start_review" in line])
 
     def test_the_steps_that_compare_answers_are_named_so(self) -> None:
         # the report knows them by their names in run_tests.sh: a step renamed must not leave the comparison

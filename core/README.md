@@ -83,8 +83,11 @@ measured (`.ci/coverage-16/`) and says:
   answers with the reference evaluator (difftest, genpolicy, around): its SQL was made, and never judged (the
   checks that only look for a mistake in the policy, and the messages they make, are set apart);
 - each kind of rowstile's functions (`authz_gen."<table>:update:refuse"`, a tree's refresh, `authz.share`) that
-  no suite ever calls, as far as Postgres can count: not a call that raises, nor one before a database's last
-  apply (applying makes the functions anew), nor a plain SQL function's, which it may inline (listed apart);
+  no suite ever calls, as far as Postgres can count: it counts only the calls that return, but keeps a count from
+  a function's first call, so a guard whose every call raises is listed apart; a call before a database's last
+  apply is lost (applying makes the functions anew), unless the suite measures first, as `tests/governance.sh`
+  does (`bash tests/coverage_functions.sh "$DB"`); a plain SQL function, which Postgres may inline, is listed
+  apart too;
 - with `--diff main`: the lines changed since `main` that nothing runs (exit 1 if there are any).
 
 ### How many checks each suite passes

@@ -28,6 +28,13 @@ expect_code() {  # $1 label, $2 expected "SQLSTATE: the message's words" (or ok)
   if agrees "$label" "$want" "$got"; then echo "ok    $label"; else echo "FAIL  $label: expected $want, got $got"; fails=$((fails + 1)); fi
 }
 
+# applies a policy again: it makes rowstile's functions anew, and Postgres's counts of the calls go with the old
+# ones, so while the run measures what the suites run they are kept first (tests/coverage_functions.sh)
+reapply() {
+  bash tests/coverage_functions.sh "$DB"
+  PGOPTIONS="-c client_min_messages=error" psql -X -q -v ON_ERROR_STOP=1 -d "$DB" -f "$1" >/dev/null
+}
+
 python3 compile_policy.py example/docs.authz > /tmp/authz_governance.sql || exit 1
 PGOPTIONS="-c client_min_messages=error" psql -X -q -v ON_ERROR_STOP=1 -d "$DB" -f example/app_schema.sql >/dev/null &&
 PGOPTIONS="-c client_min_messages=error" psql -X -q -v ON_ERROR_STOP=1 -d "$DB" -f /tmp/authz_governance.sql >/dev/null || exit 1
@@ -72,7 +79,7 @@ admin "emptying a link table is recorded" "truncate|folder" \
 admin "... and announced for every folder" "{*}" \
   "SELECT object_ids::text FROM authz.changes WHERE pos > $POS AND object_type = 'folder' ORDER BY pos LIMIT 1"
 PSQL -c "INSERT INTO authz.shares (object_type, object_id, relation, subject_type, subject_id) VALUES ('folder', '999', 'viewer', 'user', '4')" >/dev/null
-PGOPTIONS="-c client_min_messages=error" psql -X -q -v ON_ERROR_STOP=1 -d "$DB" -f /tmp/authz_governance.sql >/dev/null
+reapply /tmp/authz_governance.sql
 admin "shares dropped when the policy is applied (their row is gone) are recorded, with why" \
   "unshare|applying the policy: the row was deleted" \
   "SELECT action || '|' || reason FROM authz.audit WHERE object_id = '999' ORDER BY id DESC LIMIT 1"
@@ -191,8 +198,7 @@ sed -e 's/^  editor      : user, team#member shared$/  editor      : user, team#
     example/docs.authz > /tmp/authz_governance_by.authz
 grep -q "can manage_editors = owner" /tmp/authz_governance_by.authz && grep -q "shared by manage_editors" /tmp/authz_governance_by.authz ||
   { echo "FAIL  could not make the variant policy"; fails=$((fails + 1)); }
-python3 compile_policy.py /tmp/authz_governance_by.authz > /tmp/authz_governance_by.sql &&
-PGOPTIONS="-c client_min_messages=error" psql -X -q -v ON_ERROR_STOP=1 -d "$DB" -f /tmp/authz_governance_by.sql >/dev/null
+python3 compile_policy.py /tmp/authz_governance_by.authz > /tmp/authz_governance_by.sql && reapply /tmp/authz_governance_by.sql
 as 1 -c "SELECT authz.share('folder', 3, 'editor', 'user', 4)" >/dev/null
 expect_code "erin (share, but not manage_editors) cannot unshare dave's editor share" "42501: you cannot unshare editor on folder 3 (needs manage_editors)" -c "SET authz.user_id = 5" \
   -c "SELECT authz.unshare('folder', 3, 'editor', 'user', 4)"
@@ -212,7 +218,7 @@ admin "alice (manage_editors) turns it off, and the audit trail has it as an uns
    FROM authz.audit ORDER BY id DESC LIMIT 1"
 as 1 -c "SELECT authz.create_link('folder', 3, 'editor')" >/dev/null
 admin "an administrator lists a link and turns it off" "0"   "SELECT authz.revoke_link('folder', 3, (SELECT id FROM authz.list_links('folder', 3))); SELECT count(*) FROM authz.list_links('folder', 3)"
-PGOPTIONS="-c client_min_messages=error" psql -X -q -v ON_ERROR_STOP=1 -d "$DB" -f /tmp/authz_governance.sql >/dev/null
+reapply /tmp/authz_governance.sql
 as 1 -c "SELECT authz.unshare('folder', 3, 'editor', 'user', 4)" >/dev/null
 
 echo "-- invariants"
@@ -275,17 +281,15 @@ admin "lint has no note on a relation named like a type that doesn't sign in" "0
 # without its column rule, whoever may edit a file may make themselves its owner: lint asks for a rule, and
 # suggests the type's own share
 grep -v "update id, owner_id, confidential" example/docs.authz > /tmp/authz_no_column_rule.authz
-python3 compile_policy.py /tmp/authz_no_column_rule.authz > /tmp/authz_no_column_rule.sql &&
-PGOPTIONS="-c client_min_messages=error" psql -X -q -v ON_ERROR_STOP=1 -d "$DB" -f /tmp/authz_no_column_rule.sql >/dev/null
+python3 compile_policy.py /tmp/authz_no_column_rule.authz > /tmp/authz_no_column_rule.sql && reapply /tmp/authz_no_column_rule.sql
 admin "lint finds a column that gives a relation and that an editor may change" "1" \
   "SELECT count(*) FROM authz.lint() WHERE object = 'app.files.owner_id' AND problem LIKE 'grants file.owner%add a rule such as \"update owner_id : share\"'"
 # ...and has nothing to say when nobody may update the row at all
 sed 's/^  update  *: edit$/  update : nobody/' /tmp/authz_no_column_rule.authz | grep -v "update folder_id after" > /tmp/authz_update_nobody.authz
-python3 compile_policy.py /tmp/authz_update_nobody.authz > /tmp/authz_update_nobody.sql &&
-PGOPTIONS="-c client_min_messages=error" psql -X -q -v ON_ERROR_STOP=1 -d "$DB" -f /tmp/authz_update_nobody.sql >/dev/null
+python3 compile_policy.py /tmp/authz_update_nobody.authz > /tmp/authz_update_nobody.sql && reapply /tmp/authz_update_nobody.sql
 admin "...and none where the rule is \"update : nobody\"" "0" \
   "SELECT count(*) FROM authz.lint() WHERE object LIKE 'app.files.%' AND problem LIKE 'grants %'"
-PGOPTIONS="-c client_min_messages=error" psql -X -q -v ON_ERROR_STOP=1 -d "$DB" -f /tmp/authz_governance.sql >/dev/null
+reapply /tmp/authz_governance.sql
 PSQL -c "GRANT TRUNCATE ON app.files TO app_user" \
      -c "CREATE VIEW app.all_files AS SELECT * FROM app.files" -c "GRANT SELECT ON app.all_files TO app_user" \
      -c "GRANT INSERT, TRUNCATE ON app.team_members TO app_user" \
@@ -335,11 +339,10 @@ PSQL -c "ALTER TABLE app.files ENABLE ROW LEVEL SECURITY" >/dev/null
 expect_code "the app role cannot run lint" "42501: permission denied for function lint" -c "SELECT * FROM authz.lint()"
 # without its 'after' rule, moving a folder isn't checked where it goes
 grep -v "update parent_id after" example/docs.authz > /tmp/authz_no_after.authz
-python3 compile_policy.py /tmp/authz_no_after.authz > /tmp/authz_no_after.sql &&
-PGOPTIONS="-c client_min_messages=error" psql -X -q -v ON_ERROR_STOP=1 -d "$DB" -f /tmp/authz_no_after.sql >/dev/null
+python3 compile_policy.py /tmp/authz_no_after.authz > /tmp/authz_no_after.sql && reapply /tmp/authz_no_after.sql
 admin "lint finds a move nothing checks the destination of" "1" \
   "SELECT count(*) FROM authz.lint() WHERE object = 'app.folders.parent_id' AND problem LIKE 'moves a row under another%'"
-PGOPTIONS="-c client_min_messages=error" psql -X -q -v ON_ERROR_STOP=1 -d "$DB" -f /tmp/authz_governance.sql >/dev/null
+reapply /tmp/authz_governance.sql
 admin "...and none with the rule back" "0" \
   "SELECT count(*) FROM authz.lint() WHERE problem LIKE 'moves a row under another%'"
 # a row keyed by two columns, moved by the pair: lint names the pair and the rule to add (it failed on the pair as
