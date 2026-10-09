@@ -45,7 +45,7 @@ function authz.create_api_key(p_name text, p_scopes text, p_expires_at timestamp
 function authz.create_link(p_type text, p_id bigint, p_relation text, p_expires_at timestamptz) | 3737b3f6cdd1 shape=f4261756
 function authz.create_link(p_type text, p_id text, p_relation text, p_expires_at timestamptz) | 94706d6ae734 shape=08f941c7
 function authz.create_role(p_owner_type text, p_owner_id bigint, p_object_type text, p_name text, p_permissions text[]) | 204199562663 shape=67327103
-function authz.create_role(p_owner_type text, p_owner_id text, p_object_type text, p_name text, p_permissions text[]) | 48a7986a0560 shape=b74c801b
+function authz.create_role(p_owner_type text, p_owner_id text, p_object_type text, p_name text, p_permissions text[]) | e3f3312c2cad shape=b74c801b
 function authz.decide_request(p_id bigint, p_approve boolean, p_note text) | fffab9408221 shape=ebe1e76d
 function authz.delete_role(p_role bigint) | 3b857912dc18 shape=7c823e86
 function authz.explain(p_type text, p_id integer, p_perm text, p_user text) | 1409a3a04a15 shape=7d31b532
