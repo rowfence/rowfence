@@ -838,6 +838,19 @@ def main() -> None:
             and not any("role:" in w or "custom role" in w for w in ways),
             said,
         )
+        # rows keyed by uuid: the copies a test brings get keys of their own, and the rest as the rows hold it
+        status, t = c.call(f"/api/test?as=user:{bob}&type=doc&id={plain}&perm=edit&expect=cannot")
+        named = t.get("named", "") if status == 200 else ""
+        made, row = made_and_copied(masks, named, "it", "mt.docs", f"id = '{plain}'")
+        check(
+            "a test on rows keyed by uuid: new keys for the copies, and the copy is the row",
+            status == 200
+            and 'given who = {INSERT INTO "mt"."users" ("id", "active") VALUES (gen_random_uuid(), true) RETURNING "id"}'
+            in named
+            and made == row
+            and '"body": "secret text"' in row,
+            (status, t, made, row),
+        )
     finally:
         ms.stop()
     subprocess.run(["dropdb", "--if-exists", masks], capture_output=True)
