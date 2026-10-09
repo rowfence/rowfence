@@ -459,8 +459,20 @@ class Checker:
                             f"SELECT coalesce(json_agg(json_build_array(i, (SELECT e FROM authz.explain("
                             f"{lit(t.name)}, i, {lit(p)}, NULL) e LIMIT 1))), '[]') FROM unnest({ids}) i",
                         )
-                # authz.share tried as the user, and undone: what sharing lets through, and how it refuses
-                for tname, rname in self.shares_tried if u == sharer else ():
+                # authz.explain_rule's verdict on an update that changes nothing, and on a delete, as the app asks it
+                for table in dict.fromkeys(r.table for r in self.rules):
+                    t = self.ref.type_of_table(table)
+                    ids = "ARRAY[" + ", ".join(lit(i) for i in sample[t.name]) + "]::text[]"
+                    for cmd in ("update", "delete"):
+                        emit(
+                            [u, "explain_rule", table, cmd],
+                            f"SELECT coalesce(json_agg(json_build_array(i, (authz.explain_rule({lit(table)}, "
+                            f"{lit(cmd)}, i, NULL))[1])), '[]') FROM unnest({ids}) i",
+                        )
+            if pid and u == sharer:
+                # the APIs that share, tried by whoever's turn it is (a user, or a service), each attempt undone:
+                # authz.share and unshare, what sharing lets through and how it refuses
+                for tname, rname in self.shares_tried:
                     ids = "ARRAY[" + ", ".join(lit(i) for i in sample[tname]) + "]::text[]"
                     for what in ("share", "unshare"):
                         emit(
@@ -468,17 +480,17 @@ class Checker:
                             f"SELECT coalesce(json_agg(json_build_array(i, difftest_app.try_{what}({lit(tname)}, i, "
                             f"{lit(rname)}, 'user', {lit(self.share_target)}))), '[]') FROM unnest({ids}) i",
                         )
-                for tname, rname in self.links_tried if u == sharer else ():
+                for tname, rname in self.links_tried:
                     ids = "ARRAY[" + ", ".join(lit(i) for i in sample[tname]) + "]::text[]"
                     emit(
                         [u, "create_link", tname, rname],
                         f"SELECT coalesce(json_agg(json_build_array(i, difftest_app.try_create_link({lit(tname)}, i, "
                         f"{lit(rname)}))), '[]') FROM unnest({ids}) i",
                     )
-                # the custom roles API, the same way: a role made for each type that has them by each owner tried,
-                # each role there is given its type's permissions and deleted (and one that isn't there), and the
-                # roles each owner tried has
-                for owner in self.role_owners if u == sharer else ():
+                # the custom roles API: a role made for each type that has them by each owner tried, each role there
+                # is given its type's permissions and deleted (and one that isn't there), and the roles each owner
+                # tried has
+                for owner in self.role_owners:
                     ids = "ARRAY[" + ", ".join(lit(i) for i in sample[owner]) + "]::text[]"
                     for tname, perms in self.role_perms.items():
                         emit(
@@ -491,29 +503,19 @@ class Checker:
                         f"SELECT coalesce(json_agg(json_build_array(i, difftest_app.try_roles_of({lit(owner)}, i))), "
                         f"'[]') FROM unnest({ids}) i",
                     )
-                for rid in [*self.roles_now, MISSING_ROLE] if u == sharer and self.role_owners else ():
+                for rid in [*self.roles_now, MISSING_ROLE] if self.role_owners else ():
                     perms = self.role_perms.get(self.roles_now[rid][2], []) if rid in self.roles_now else []
                     emit(
                         [u, "role", rid],
                         f"SELECT json_build_array(difftest_app.try_set_role_permissions({rid}, {text_array(perms)}), "
                         f"difftest_app.try_delete_role({rid}))",
                     )
-                # the links on each row tried: listed, and each turned off (and one that isn't there), undone
-                for (tname, i), links in self.links_now.items() if u == sharer else ():
+                # the links on each row tried: listed, and each turned off (and one that isn't there)
+                for (tname, i), links in self.links_now.items():
                     tries = [f"difftest_app.try_list_links({lit(tname)}, {lit(i)})"] + [
                         f"difftest_app.try_revoke_link({lit(tname)}, {lit(i)}, {lit(lid)})" for lid in link_ids(links)
                     ]
                     emit([u, "links", tname, i], f"SELECT json_build_array({', '.join(tries)})")
-                # authz.explain_rule's verdict on an update that changes nothing, and on a delete, as the app asks it
-                for table in dict.fromkeys(r.table for r in self.rules):
-                    t = self.ref.type_of_table(table)
-                    ids = "ARRAY[" + ", ".join(lit(i) for i in sample[t.name]) + "]::text[]"
-                    for cmd in ("update", "delete"):
-                        emit(
-                            [u, "explain_rule", table, cmd],
-                            f"SELECT coalesce(json_agg(json_build_array(i, (authz.explain_rule({lit(table)}, "
-                            f"{lit(cmd)}, i, NULL))[1])), '[]') FROM unnest({ids}) i",
-                        )
             for table in dict.fromkeys(r.table for r in self.rules if r.command == "select"):
                 t = self.ref.type_of_table(table)
                 emit([u, "rls", table], f"SELECT coalesce(json_agg({idsql(t)}), '[]') FROM {qt(table)}")
@@ -780,15 +782,17 @@ class Checker:
         return "ok"
 
     def role_problems(self, snap: Snapshot, u: str, state: evaluate.State, signed_in: bool) -> list[str]:
-        """The custom roles API as user u tried it (when it was their turn): making, changing and deleting a role
-        needs a user signed in who holds manage_roles on its owner (by the reference); then what the policy alone
-        says, in the guards' order (whose roles count on the type, what a role there may give). roles_of: the
-        owner's roles, to whoever manages it or may view it."""
+        """The custom roles API as u, a user or a service, tried it (when it was their turn): making, changing and
+        deleting a role needs a user signed in who holds manage_roles on its owner (by the reference); then what the
+        policy alone says, in the guards' order (whose roles count on the type, what a role there may give).
+        roles_of: the owner's roles, to whoever manages it or may view it. These ask authz.uid(): a service is
+        refused, whatever the policy gives it."""
         problems: list[str] = []
+        user_in = signed_in and evaluate.principal_of(u, self.types)[0] == "user"
 
         def holds(owner: str, i: str, perm: str) -> bool:
             t = self.types[owner]
-            return signed_in and perm in t.perms and i in state[(owner, perm)] & self.ref.ids(t)
+            return user_in and perm in t.perms and i in state[(owner, perm)] & self.ref.ids(t)
 
         def cannot_grant(tname: str, perms: list[str]) -> str:
             roles = self.types[tname].roles
@@ -839,10 +843,11 @@ class Checker:
         return problems
 
     def link_problems(self, snap: Snapshot, u: str, state: evaluate.State, signed_in: bool) -> list[str]:
-        """The links API as user u tried it (when it was their turn), by the reference: whoever holds share on the
-        object sees all its links (signed in or not); otherwise the links of the relations they may manage (signed
-        in, holding the permission a relation is shared by), and none at all is a refusal. Turning one off: among
-        those, each link with that id must be one they could unshare; an id none has is no link."""
+        """The links API as u, a user or a service, tried it (when it was their turn), by the reference: whoever
+        holds share on the object sees all its links (signed in or not); otherwise the links of the relations they
+        may manage (signed in, holding the permission a relation is shared by), and none at all is a refusal.
+        Turning one off: among those, each link with that id must be one they could unshare; an id none has is no
+        link."""
         problems: list[str] = []
         for (tname, i), links in self.links_now.items():
             got = snap.get((u, "links", tname, i))
