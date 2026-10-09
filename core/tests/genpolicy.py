@@ -641,9 +641,18 @@ def invariant_problems(checker: Checker) -> list[str]:
     return problems
 
 
-def run(spec: Spec, db: DB, steps: int, workdir: str, seconds: float = 900) -> list[str]:
+def run(
+    spec: Spec,
+    db: DB,
+    steps: int,
+    workdir: str,
+    seconds: float = 900,
+    report: list[str] | None = None,
+    name: str = "",
+) -> list[str]:
     """The problems found with this policy (none: it passed); Refused if the compiler refuses it, Slow if lint
-    warns that its reads are slow to plan or the checks take more than `seconds`."""
+    warns that its reads are slow to plan or the checks take more than `seconds`. With report: the parts of the
+    policy (named name) that never decided an answer go there (tests/decisions.py)."""
     policy_path, schema_path = os.path.join(workdir, "gen.authz"), os.path.join(workdir, "gen_schema.sql")
     with open(policy_path, "w", encoding="utf-8") as fh:
         fh.write(policy_text(spec))
@@ -661,7 +670,7 @@ def run(spec: Spec, db: DB, steps: int, workdir: str, seconds: float = 900) -> l
     db.run(gen.initial())
     db.run(compiled.stdout)
     db.run(gen.grants())
-    checker = Checker(db, policy_path, gen)
+    checker = Checker(db, policy_path, gen, decisions=report is not None)
     broken: set[int] = set()  # invariants the data broke at some step
     for step in range(steps + 1):
         if time.monotonic() - started > seconds:
@@ -681,6 +690,8 @@ def run(spec: Spec, db: DB, steps: int, workdir: str, seconds: float = 900) -> l
         code, _, err = db.run(sql, check=False)
         if code != 0 and not any(e in err for e in gen.expected_errors):
             return [f"step {step + 1}: unexpected error", f"  {sql}", f"  {err.strip()}"]
+    if report is not None and checker.decisions is not None:
+        report += checker.decisions.report(name or f"seed {spec.seed}", only_decisive=True)
     if broken:
         results = prove.prove(parse_policy(policy_text(spec)), worlds=200)
         for n in sorted(broken):
@@ -760,6 +771,9 @@ def main() -> None:
     ap.add_argument("--only", type=int, help="run this one seed, and print its policy")
     ap.add_argument("--no-shrink", action="store_true")
     ap.add_argument("--seconds", type=float, default=900, help="a seed that takes longer is given up (and said)")
+    ap.add_argument(
+        "--decisions", action="store_true", help="and say, for each policy, the parts that never decided an answer"
+    )
     args = ap.parse_args()
     os.chdir(os.path.dirname(HERE))
     db = DB(args.db)
@@ -782,8 +796,9 @@ def main() -> None:
 
                 if args.only is not None:
                     print(f"{name}:\n{policy_text(spec)}")
+                said: list[str] | None = [] if args.decisions else None
                 try:
-                    problems = run(spec, db, steps, workdir, args.seconds)
+                    problems = run(spec, db, steps, workdir, args.seconds, said, name)
                 except Slow as e:
                     slow.append(name)
                     print(f"{name}: not checked ({e})", flush=True)
@@ -796,6 +811,8 @@ def main() -> None:
                     continue
                 if label:
                     twins[label] = twins.get(label, 0) + 1
+                if said:
+                    print("\n".join(said), flush=True)
                 if not problems:
                     passed += 1
                     continue
