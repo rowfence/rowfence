@@ -13,12 +13,15 @@ so a misspelled one doesn't type-check.
 
 An ORM update of a row the user may not change matches no row, and SQLAlchemy raises StaleDataError;
 why_stale() asks the database which it was, for each row of the flush that failed: NotFound (the row is
-hidden) or Refused (and why) for the first one the database says no for. An ORM delete that matches no row is
-only a warning in SQLAlchemy (an error with a version column alone): delete with Core's delete() and expect().
+hidden) or Refused (and why) for the first one the database says no for. The rows are remembered per request
+or acting_as block; outside one, per thread (or task), for the transaction it began last. An ORM delete that
+matches no row is only a warning in SQLAlchemy (an error with a version column alone): delete with Core's
+delete() and expect().
 """
 
 from __future__ import annotations
 
+import contextvars
 import typing
 from collections.abc import Callable, Iterable, Sequence
 from typing import TYPE_CHECKING, Any, Generic, TypeVar
@@ -77,7 +80,19 @@ PermissionName = TypeVar("PermissionName", bound=str)
 
 _engines: dict[Engine, Engine | AsyncEngine] = {}  # sync engine -> the engine install() was given (async or not)
 _mapper_events = False
-_recent: list[_Write] = []  # when no request or acting_as block made a list
+# the writes remembered outside a request or acting_as block: each thread's or task's own (never one list for the
+# process: another thread's writes are another person's), those of the transaction it began last
+_outside: contextvars.ContextVar[list[_Write] | None] = contextvars.ContextVar("rowstile_writes_outside", default=None)
+
+
+def _outside_writes(begin: bool = False) -> list[_Write]:
+    """Where the writes made outside a block go: this thread's or task's list; a new one when a transaction
+    begins (begin), so that why_stale doesn't answer about an earlier transaction's rows."""
+    writes = None if begin else _outside.get()
+    if writes is None:
+        writes = []
+        _outside.set(writes)
+    return writes
 
 
 def install(engine: AnyEngine, user: Callable[[], Who] | None = None) -> AnyEngine:
@@ -92,6 +107,7 @@ def install(engine: AnyEngine, user: Callable[[], Who] | None = None) -> AnyEngi
 
     @event.listens_for(sync, "begin")
     def _sign_in(conn: Connection) -> None:
+        _outside_writes(begin=True)
         who = current()
         if who is None and user is not None:
             who = Principal.of(user())
@@ -122,7 +138,7 @@ def _remember(command: str) -> Callable[[Mapper[Any], Connection, object], None]
         key = mapper.primary_key_from_instance(target)
         writes = _writes.get()
         if writes is None:
-            writes = _recent
+            writes = _outside_writes()
         writes.append((connection.engine, name, command, key))
         del writes[:-20]
 
@@ -139,8 +155,11 @@ def _explain_sql(table: str, command: str, key: object) -> TextClause:
 
 def _flush(exc: BaseException | None) -> list[_Write]:
     """The writes the failed flush was about, the latest first: SQLAlchemy tells every row of a flush before it
-    sends the statements, so the row that was refused is one of the last run of writes to the same table."""
-    recent = _writes.get() or _recent
+    sends the statements, so the row that was refused is one of the last run of writes to the same table. In a
+    block, its own writes only, even when it made none."""
+    recent = _writes.get()
+    if recent is None:
+        recent = _outside.get() or []
     out: list[_Write] = []
     for write in reversed(recent):
         if out and write[:3] != out[0][:3]:

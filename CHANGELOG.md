@@ -423,6 +423,11 @@ Each release upgrades from the one before it. How releases are numbered and made
   change feed twice, once when its stream was cancelled and again when its request was aborted (and once more
   for a change told after that): a feed of your own given as `changes` was unsubscribed as many times. Once
   now.
+- `rowstile.sqlalchemy`: `why_stale()` could answer about a write another thread made outside a request or
+  `acting_as` block, naming its row. The ORM's writes outside a block (an engine `install()`ed with `user=`, as
+  in a Flask app or a worker thread) went to one list for the whole process. Each thread (or task) now has its
+  own, for the transaction it began last: a later transaction isn't answered about an earlier one's writes,
+  and a block that wrote nothing isn't answered about writes made outside it.
 
 ## 0.1.0 (alpha)
 
