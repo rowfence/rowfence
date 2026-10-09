@@ -3,7 +3,7 @@
 -- Prints one line per object that breaks a rule, nothing when all hold.
 WITH o AS (SELECT nspowner AS owner FROM pg_namespace WHERE nspname = 'authz_int'),
 fns AS (SELECT p.oid, p.oid::regprocedure::text AS name, n.nspname AS nsp, p.proowner, p.prosecdef, p.proconfig,
-               p.proleakproof, p.proacl
+               p.proleakproof, p.proacl, p.proparallel
         FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname IN ('authz', 'authz_gen', 'authz_int')),
 rels AS (SELECT c.oid, c.oid::regclass::text AS name, n.nspname AS nsp, c.relowner, c.relacl
          FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
@@ -17,6 +17,10 @@ SELECT problem || ': ' || name FROM (
     WHERE EXISTS (SELECT 1 FROM unnest(proconfig) c WHERE c LIKE 'search_path=%$user%')
   UNION ALL SELECT 'owned by ' || proowner::regrole, name FROM fns WHERE proowner <> (SELECT owner FROM o)
   UNION ALL SELECT 'leakproof', name FROM fns WHERE proleakproof
+  -- a session's signature is bound to its backend, which a parallel worker isn't: reads through the rules run in
+  -- one process (docs/reference/limits.md)
+  UNION ALL SELECT CASE proparallel WHEN 's' THEN 'parallel safe' ELSE 'parallel restricted' END, name FROM fns
+    WHERE proparallel <> 'u'
   -- authz_int's functions keep PUBLIC's EXECUTE (the authz_gen views call them as the app role); no USAGE on the schema
   UNION ALL SELECT 'PUBLIC may execute', name FROM fns
     WHERE nsp <> 'authz_int' AND (proacl IS NULL OR EXISTS (SELECT 1 FROM aclexplode(proacl) a WHERE a.grantee = 0))

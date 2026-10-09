@@ -94,7 +94,7 @@ catalog() {
 }
 got=$(catalog "$DB" /tmp/authz_adversarial.sql app_user)
 [ -z "$got" ] &&
-  echo "ok    docs: definer functions set their search_path; the app role executes the API and nothing else; no grants to PUBLIC or others" ||
+  echo "ok    docs: definer functions set their search_path; the app role executes the API and nothing else; no grants to PUBLIC or others; none parallel safe" ||
   { echo "FAIL  the catalog: $got"; fails=$((fails + 1)); }
 for p in "multi tests/multi_schema.sql tests/multi.authz app_user" "alt tests/alt_schema.sql tests/alt.authz app_user"          "composite tests/composite_schema.sql tests/composite.authz app_user"          "patterns tests/patterns_schema.sql tests/patterns.authz cb_app"          "cross tests/cross_schema.sql tests/cross.authz app_user"; do
   set -- $p; C="${DB}_catalog"
@@ -173,7 +173,8 @@ AS=1 expect "sharing a relation the policy doesn't share" "P0001: the policy doe
 said() { psql -X -q -At -1 -U "$ATTACKER" -d "$DB" -c "$(sign 3)" -c "$1" 2>&1 | sed "s/$2/<id>/g"; }
 for call in "share('file', ID, 'viewer', 'user', '4')" "share('file', ID, 'viewer', 'user', '424242')" \
             "share('file', ID, 'owner', 'user', '4')" "create_link('file', ID, 'viewer', NULL)" \
-            "list_links('file', ID)" "revoke_link('file', ID, 'abc')"; do
+            "list_links('file', ID)" "revoke_link('file', ID, 'abc')" \
+            "request_access('file', ID, 'viewer', 'curious') IS NOT NULL"; do
   hidden=$(said "SELECT authz.${call/ID/12}" "file 12"); missing=$(said "SELECT authz.${call/ID/999999}" "file 999999")
   [ "$hidden" = "$missing" ] && [ -n "$hidden" ] && echo "ok    authz.${call/ID/12} answers as for a missing file" ||
     { echo "FAIL  authz.$call tells hidden from missing: '$hidden' / '$missing'"; fails=$((fails + 1)); }

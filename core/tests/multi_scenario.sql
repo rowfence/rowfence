@@ -286,6 +286,12 @@ SELECT test.ok('erin deletes the role: its assignments go with it',
   test.try(format($$SELECT authz.delete_role(%s)$$, current_setting('test.reviewer'))) = 'ok');
 SELECT test.as(4);
 SELECT test.ok('dave has nothing left', test.docs() = '-');
+RESET ROLE;
+SELECT test.ok('the audit trail has the roles made, the permissions they were given and lost, and the one deleted',
+  (SELECT array_agg(DISTINCT action ORDER BY action) FROM authz.audit
+   WHERE action IN ('insert_role', 'delete_role', 'role_permission_added', 'role_permission_removed'))
+  = ARRAY['delete_role', 'insert_role', 'role_permission_added', 'role_permission_removed']);
+SET ROLE app_user;
 -- folders' roles come from their org (roles ... from org): another org's role counts for nothing there
 SELECT test.as(7);
 SELECT test.ok('gina (Globex admin) defines "auditor" (view) for Globex''s folders',

@@ -32,6 +32,10 @@ echo "-- scopes and API keys"
 READ=$(state -c "SET authz.user_id = 1" -c "SELECT authz.create_api_key('laptop', 'read')")
 FILES=$(state -c "SET authz.user_id = 1" -c "SELECT authz.create_api_key('script', 'files')")
 case "$READ" in ak_*) echo "ok    alice creates a read-only key (shown once)";; *) echo "FAIL  key: $READ"; fails=$((fails + 1));; esac
+# the key itself is nowhere in the table: its SHA-256 hash, and its first ten characters to tell keys apart
+check "only the key's hash is kept, and its first ten characters" "true|true|true" \
+  "RESET ROLE; SELECT (hash = encode(sha256(convert_to('$READ', 'UTF8')), 'hex')) || '|' || (prefix = left('$READ', 10)) || '|'
+     || (position('$READ' in k::text) = 0) FROM authz.api_keys k WHERE name = 'laptop';"
 check "the key signs in as alice" "1" "BEGIN; SELECT authz.login_key('$READ'); SELECT authz.uid(); COMMIT;"
 check "read-only key: may view file 11, not edit it" "true|false" \
   "BEGIN; SELECT authz.login_key('$READ'); SELECT authz.can('file', 11, 'view') || '|' || authz.can('file', 11, 'edit'); COMMIT;"
@@ -40,6 +44,8 @@ check "read-only key: UPDATE changes nothing" "0" \
   "BEGIN; SELECT authz.login_key('$READ'); WITH u AS (UPDATE app.files SET body = 'x' WHERE id = 11 RETURNING 1) SELECT count(*) FROM u; ROLLBACK;"
 expect_code "read-only key: cannot share" "42501: this session is read-only (viewing as someone else, or a read-only token)" -c "BEGIN" -c "SELECT authz.login_key('$READ')" \
   -c "SELECT authz.share('file', 11, 'viewer', 'user', 4)"
+expect_code "read-only key: cannot approve a request" "42501: this session is read-only (viewing as someone else, or a read-only token)" -c "BEGIN" -c "SELECT authz.login_key('$READ')" \
+  -c "SELECT authz.decide_request(1, true)"
 expect_code "a read-only session cannot mint a broader key" "42501: this session is read-only (viewing as someone else, or a read-only token)" -c "BEGIN" -c "SELECT authz.login_key('$READ')" \
   -c "SELECT authz.create_api_key('sneaky', 'files')"
 expect_code "a session limited to a scope cannot make a key with another" "42501: a key cannot have more scopes than the session creating it" \
@@ -64,6 +70,11 @@ KEYID=$(state -c "SET authz.user_id = 1" -c "SELECT id FROM authz.list_api_keys(
 expect_code "bob cannot revoke alice's key" "42501: no API key $KEYID of yours" -c "SET authz.user_id = 2" -c "SELECT authz.revoke_api_key($KEYID)"
 PSQL -c "SET ROLE app_user; SET authz.user_id = 1; SELECT authz.revoke_api_key($KEYID)" >/dev/null
 expect_code "a revoked key no longer signs in" "28000: invalid API key" -c "BEGIN" -c "SELECT authz.login_key('$READ')"
+check "the audit trail has the keys made and the one revoked, with whose they are" \
+  "create_api_key 1 laptop|create_api_key 1 script|revoke_api_key 1 $KEYID" \
+  "RESET ROLE; SELECT string_agg(action || ' ' || object_id || ' ' || coalesce(detail ->> 'name', detail ->> 'key'), '|'
+                                 ORDER BY action, coalesce(detail ->> 'name', detail ->> 'key'))
+   FROM authz.audit WHERE action LIKE '%api_key';"
 expect_code "a made-up key does not either" "28000: invalid API key" -c "BEGIN" -c "SELECT authz.login_key('ak_nope')"
 SHORT=$(state -c "SET authz.user_id = 1" -c "SELECT authz.create_api_key('for an hour', 'read', now() + interval '1 hour')")
 check "a key with an end signs in until then" "1" "BEGIN; SELECT authz.login_key('$SHORT'); SELECT authz.uid(); COMMIT;"
@@ -101,6 +112,8 @@ check "a valid token signs in as bob, with its scope" "2|read" \
 expect_code "wrong signature" "28000: invalid token" -c "BEGIN" -c "SELECT authz.login_jwt('$T_BADSIG')"
 expect_code "expired" "28000: token expired or not yet valid" -c "BEGIN" -c "SELECT authz.login_jwt('$T_EXPIRED')"
 expect_code "another issuer" "28000: token from another issuer" -c "BEGIN" -c "SELECT authz.login_jwt('$T_ISS')"
+expect_code "a token that names no issuer, once one is asked" "28000: token from another issuer" -c "BEGIN" \
+  -c "SELECT authz.login_jwt('$(jwt s3cret-for-tests 2 300 '{"iss": null}')')"
 expect_code "alg none" "28000: invalid token" -c "BEGIN" -c "SELECT authz.login_jwt('$T_NONE')"
 expect_code "no expiry" "28000: token expired or not yet valid" -c "BEGIN" -c "SELECT authz.login_jwt('$T_NOEXP')"
 # nbf is optional; the hours keep these far from a clock that steps a few seconds

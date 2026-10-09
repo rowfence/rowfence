@@ -29,6 +29,10 @@ python3 cli/rowstile_cli.py --db "dbname=$DB" apply example/docs.authz >/dev/nul
 for r in $APP $OTHER; do psql -X -q -d postgres -c "DROP ROLE IF EXISTS $r" >/dev/null 2>&1; done
 psql -X -q -d postgres -c "CREATE ROLE $APP LOGIN IN ROLE app_user" -c "ALTER ROLE $APP SET jit = off" \
      -c "CREATE ROLE $OTHER LOGIN" >/dev/null
+# a login that is neither the app role nor a member of it has nothing of rowstile's, connection_check() included
+ROLE=$OTHER expect "a login outside the app role can't call connection_check() at all" "42501: permission denied for schema authz" \
+  -c "SELECT count(*) FROM authz.connection_check()"
+# (given the schema and the function, as below, it says what is wrong instead)
 PSQL -c "GRANT USAGE ON SCHEMA app, authz TO $OTHER" -c "GRANT EXECUTE ON FUNCTION authz.connection_check() TO $OTHER" >/dev/null
 # erin shares the Company folder with the org, as in tests/adversarial.sh
 PSQL -c "SET ROLE app_user; SET authz.user_id = 5; SELECT authz.share('folder', 1, 'viewer', 'org', 1, 'member')" >/dev/null
