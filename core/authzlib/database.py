@@ -1012,8 +1012,9 @@ def review_run(
     """For rowstile review, on a database at the base branch's state (its migrations and review data): the
     pull request's policy brought in the way it will be deployed (the migrations from the base branch's
     lock, or the whole policy without one), then its tests, all undone afterwards: how long the deploy took
-    (or why it failed), the tests' rows, and for each (user, type, id, perm) in explain, the lines of
-    authz.explain that grant it."""
+    (or why it failed), the tests' rows, and for each (who, type, id, perm) in explain, the lines of
+    authz.explain that grant it (who as --as writes it: user:3, bot:7, '' for someone not signed in). An example
+    explain refuses is left without them: they say how, the review goes on without."""
     import time
 
     out: ReviewRun = {"deployed": None, "error": None, "tests": [], "how": {}}
@@ -1032,18 +1033,18 @@ def review_run(
             except (db.errors, Error) as e:
                 out["error"] = getattr(e, "message", str(e))
                 raise Undo from e
-            for user, type_, id_, perm in explain:
-                kind, other, pid = user.partition(":")  # another principal than a user: type:id
+            for who, type_, id_, perm in explain:
+                kind, _, pid = who.partition(":")
                 lines: list[str] = []
                 try:
                     with savepoint(db, "authz_review_explain"):
-                        if other:  # asked signed in as it (explain's p_user is a user's id), signed out after
+                        if kind not in ("", "user"):  # another principal: asked signed in as it, signed out after
                             db.rows("SELECT authz.act_as($1, $2)", [kind, pid])
                         lines = [
                             text(r, "l")
                             for r in db.rows(
                                 "SELECT l FROM authz.explain($1, $2, $3, $4) l",
-                                [type_, id_, perm, None if other else user or None],
+                                [type_, id_, perm, pid if kind == "user" else None],
                             )
                         ]
                         raise Undo
@@ -1051,7 +1052,7 @@ def review_run(
                     pass
                 except db.errors:
                     continue
-                out["how"][(user, type_, id_, perm)] = granting(lines)[1:4]
+                out["how"][(who, type_, id_, perm)] = granting(lines)[1:4]
             out["tests"] = test(db, tests)
             raise Undo
     except Undo:

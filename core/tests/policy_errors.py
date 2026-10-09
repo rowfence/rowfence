@@ -572,6 +572,12 @@ COMPILE = [
         10,
     ),
     (
+        "inheritance narrowed by a permission through another relation, written before it: the inheritance is named",
+        "  also : doc = also_up\n  can view = owner or (also.share and parent.view)\n",
+        "inheritance through parent can only be narrowed with {conditions} on the row, e.g. (parent.view and {inherit})",
+        11,
+    ),
+    (
         "inheritance inside an or, inside an and",
         "  can view = owner or (reader and (parent.view or {locked}))\n",
         "doc.view depends on itself; a permission can only recurse as 'or rel.perm' (optionally 'and {condition}')",

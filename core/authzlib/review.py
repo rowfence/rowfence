@@ -160,7 +160,8 @@ class Deploy(TypedDict):
 
 
 class Example(TypedDict):
-    user: str
+    user: str  # as the review data writes it: a user's id, type:id for another principal, or NOBODY
+    who: str  # in words: 'user 3', 'bot 7', 'nobody signed in'
     id: str
     how: NotRequired[str]
 
@@ -398,7 +399,7 @@ def review(
         from . import database
 
         wanted = [
-            (e["user"] if e["user"] != NOBODY else "", g["type"], e["id"], g["what"][11:])
+            (as_given(e["user"], h.pol), g["type"], e["id"], g["what"][11:])
             for g in (out["access"] or {}).get("groups", [])
             if g["change"] == "gains" and g["what"].startswith("permission ")
             for e in g["examples"][:2]
@@ -406,7 +407,7 @@ def review(
         ran = database.review_run(db, h.policy, h.files, h.tests, base_lock, wanted)
         for g in (out["access"] or {}).get("groups", []):
             for e in g["examples"]:
-                how = ran["how"].get((e["user"] if e["user"] != NOBODY else "", g["type"], e["id"], g["what"][11:]))
+                how = ran["how"].get((as_given(e["user"], h.pol), g["type"], e["id"], g["what"][11:]))
                 if how:
                     e["how"] = ", ".join(x.removeprefix("yes").strip() for x in how)
         out["deploy"]["on_review_data"] = {"seconds": ran["deployed"], "error": ran["error"]}
@@ -446,7 +447,7 @@ def changes(b: Side, h: Side) -> list[Changed]:
 def declared(pol: Policy, what: str) -> Perm | Rule | None:
     """A permission ('type.perm') or a rule ('rule table command [columns]') of a policy, by its key."""
     if what.startswith("rule "):
-        return next((r for r in pol.rules if f"rule {r.table} {rule_head(r)}" == what), None)
+        return {f"rule {r.table} {rule_head(r)}": r for r in pol.rules}.get(what)
     m = re.match(r"^(\w+)\.(\w+)$", what)
     if m and m.group(1) in pol.types and m.group(2) in pol.types[m.group(1)].perms:
         return pol.types[m.group(1)].perms[m.group(2)]
@@ -702,12 +703,35 @@ def named(user: str) -> str:
     return user.replace(":", " ") if ":" in user else f"user {user}"
 
 
-def who_of(ids: Iterable[str]) -> str:
-    """Who a group of Access is about, in words: '2 users', '1 user and 1 bot', 'someone not signed in' (ids:
-    a user's id, type:id for another principal, '' for someone not signed in)."""
+def principal(user: str, pol: Policy) -> tuple[str, str] | None:
+    """Who an id of the review data is: (type, id), None for someone not signed in. The data writes a user by
+    their id alone, which may hold a ':' too, and another principal as type:id (a type of pol that signs in)."""
+    if user in ("", NOBODY):
+        return None
+    kind, sep, pid = user.partition(":")
+    other = pol.types.get(kind)
+    return (kind, pid) if sep and other is not None and other.principal and kind != "user" else ("user", user)
+
+
+def words(user: str, pol: Policy) -> str:
+    """An id of the review data in words: 'user 3', 'bot 7', 'nobody signed in'."""
+    p = principal(user, pol)
+    return " ".join(p) if p else "nobody signed in"
+
+
+def as_given(user: str, pol: Policy) -> str:
+    """An id of the review data as --as writes it, for database.review_run: 'user:3', 'bot:7', '' for nobody."""
+    p = principal(user, pol)
+    return ":".join(p) if p else ""
+
+
+def who_of(ids: Iterable[str], pol: Policy) -> str:
+    """Who a group of Access is about, in words: '2 users', '1 user and 1 bot', 'someone not signed in' (ids: as
+    the review data writes them, principal())."""
     kinds: dict[str, int] = {}
     for i in ids:
-        kind = i.partition(":")[0] if ":" in i else "user" if i else ""
+        p = principal(i, pol)
+        kind = p[0] if p else ""
         kinds[kind] = kinds.get(kind, 0) + 1
     said = [plural(n, k) for k, n in sorted(kinds.items(), key=lambda kn: (kn[0] != "user", kn[0])) if k]
     said += ["someone not signed in"] if "" in kinds else []
@@ -1074,9 +1098,12 @@ def access(db: Db, h: Side, examples: int = 3) -> Access:
                 "type": type_,
                 "what": what,
                 "users": len(users[key]),
-                "who": who_of(users[key]),
+                "who": who_of(users[key], h.pol),
                 "objects": len(objects[key]),
-                "examples": [{"user": r["user_id"] or NOBODY, "id": r["id"]} for r in shown[key]],
+                "examples": [
+                    {"user": r["user_id"] or NOBODY, "who": words(r["user_id"] or "", h.pol), "id": r["id"]}
+                    for r in shown[key]
+                ],
             }
         )
     return {"groups": out, "users_in_data": None}
@@ -1261,7 +1288,7 @@ def markdown(r: Review, title: str = "rowstile: what this pull request changes")
         ]
         for g in a["groups"]:
             ex = "; ".join(
-                f"{named(e['user'])}, {g['type']} {e['id']}" + (f": {e['how']}" if e.get("how") else "")
+                f"{e['who']}, {g['type']} {e['id']}" + (f": {e['how']}" if e.get("how") else "")
                 for e in g["examples"][:2]
             )
             out.append(
