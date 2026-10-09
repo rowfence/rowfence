@@ -78,12 +78,13 @@ class Served(NamedTuple):
 
 
 def serving(db: str, *flags: str) -> tuple[subprocess.Popen[str], str, Served]:
-    """rowstile studio, started as in a terminal: the process, the line it printed first, and where it is."""
+    """rowstile studio, started as in a terminal: the process, the line it printed first (its error, if it
+    didn't start), and where it is."""
     port = free_port()
     p = subprocess.Popen(
         [sys.executable, CLI, "--db", f"dbname={db}", "studio", "--port", str(port), *flags],
         stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
         text=True,
     )
     assert p.stdout is not None
@@ -96,10 +97,11 @@ def stopped(p: subprocess.Popen[str]) -> int | None:
     """Ctrl-C, as in a terminal: the exit code (None: still running after 20 seconds, so killed)."""
     p.send_signal(signal.SIGINT)
     try:
-        return p.wait(timeout=20)
+        p.communicate(timeout=20)
+        return p.returncode
     except subprocess.TimeoutExpired:
         p.kill()
-        p.wait()
+        p.communicate()
         return None
 
 
@@ -358,7 +360,7 @@ def main() -> None:
             out[-800:],
         )
         status, t = c.call("/api/test?as=user:3&type=folder&id=1&perm=view&expect=cannot")
-        made, row = made_and_copied(db, t["named"], "it", "app.folders", "id = 1")
+        made, row = made_and_copied(db, t.get("named", ""), "it", "app.folders", "id = 1")
         check(
             "a copy of a row with a NULL (folder 1 has no parent): every column the same, the key aside",
             status == 200 and made == row and '"parent_id": null' in row,
@@ -613,7 +615,7 @@ def main() -> None:
     s.start(background=True)
     try:
         status, t = Client(s).call("/api/test?as=user:3&type=folder&id=4&perm=edit&expect=cannot")
-        made, row = made_and_copied(db, t["named"], "it", "app.folders", "id = 4")
+        made, row = made_and_copied(db, t.get("named", ""), "it", "app.folders", "id = 4")
         check(
             "an array, json, a number with a fraction, a boolean the table doesn't fill: the copy is the row",
             status == 200 and made == row and '"tags": ["plans", "q3 review"]' in row,
@@ -621,7 +623,7 @@ def main() -> None:
         )
         with tempfile.TemporaryDirectory() as tmp:
             with open(os.path.join(tmp, "made.authz"), "w", encoding="utf-8") as fh:
-                fh.write(t["named"])
+                fh.write(t.get("named", ""))
             _, out = cli(db, "test", os.path.join(tmp, "made.authz"))
         ran = out.split("user 3 cannot edit folder 4", 1)[-1].split("invariants", 1)[0]
         check("... and the test runs as it is", "ok    " in ran and "FAIL" not in ran, out[-800:])
