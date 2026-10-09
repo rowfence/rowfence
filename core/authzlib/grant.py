@@ -124,6 +124,12 @@ class Way:
     def text(self) -> str:
         return " and ".join(c.text for c in self.changes)
 
+    @property
+    def refused(self) -> str:
+        """Why the database refused to try it: its error's first line."""
+        assert self.error, f"{self.text} was tried"
+        return self.error.splitlines()[0]
+
 
 @dataclass
 class Answer:
@@ -483,7 +489,7 @@ def describe(answer: Answer, who: str, type_name: str, oid: str, perm: str) -> s
     else:
         out.append("no single change to shares or links grants it")
     for w in answer.untried:
-        out.append(f"could not be tried: {w.text} ({(w.error or '').splitlines()[0] if w.error else ''})")
+        out.append(f"could not be tried: {w.text} ({w.refused})")
     for n in answer.notes:
         out.append(f"note: {n}")
     return "\n".join(out)
