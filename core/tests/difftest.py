@@ -416,6 +416,17 @@ class Checker:
                     more[tname] = more.get(tname, 0) + 1
                     self.links_now[(tname, i)] = []
                 self.links_now[(tname, i)].append((rname, lid))
+        # every share on the rows of each type with `share`, as the owner reads them, as authz.list_shares lists them
+        # to those who may share there: (relation, subject type, subject id, subject relation), a link's id hidden
+        self.shares_now: dict[tuple[str, str], list[list[str]]] = {}
+        inspected = [t.name for t in self.types.values() if "share" in t.perms]
+        if inspected:
+            for tname, i, rname, st, sid, sr in self.db.rows(
+                "SELECT object_type, object_id, relation, subject_type, subject_id, subject_relation FROM authz.shares "
+                f"WHERE object_type IN ({', '.join(lit(t) for t in inspected)})"
+            ):
+                self.shares_now.setdefault((tname, i), []).append([rname, st, "(link)" if st == "link" else sid, sr])
+        self.inspected = inspected
         for u in self.users:
             lines = []
             blocks.append(lines)
@@ -535,6 +546,16 @@ class Checker:
                         f"difftest_app.try_revoke_link({lit(tname)}, {lit(i)}, {lit(lid)})" for lid in link_ids(links)
                     ]
                     emit([u, "links", tname, i], f"SELECT json_build_array({', '.join(tries)})")
+                # the shares on the sample rows of each type with `share`, and on two they may share
+                for tname in self.inspected:
+                    t = self.types[tname]
+                    emit(
+                        [u, "list_shares", tname],
+                        f"SELECT coalesce(json_agg(json_build_array(i, difftest_app.try_list_shares({lit(tname)}, i))), "
+                        f"'[]') FROM (SELECT unnest(ARRAY[{', '.join(lit(i) for i in sample[tname])}]::text[]) UNION "
+                        f"(SELECT {idsql(t)} FROM {qt(t.table)} WHERE authz.can({lit(tname)}, {idsql(t)}, 'share') "
+                        f"ORDER BY md5({idsql(t)}) LIMIT 2)) s(i)",
+                    )
             for table in dict.fromkeys(r.table for r in self.rules if r.command == "select"):
                 t = self.ref.type_of_table(table)
                 emit([u, "rls", table], f"SELECT coalesce(json_agg({idsql(t)}), '[]') FROM {qt(table)}")
@@ -744,6 +765,12 @@ class Checker:
             "RETURN 'ok ' || coalesce((SELECT string_agg(r.id::text, ',' ORDER BY r.id) FROM authz.roles_of(ot, oi) r), ''); "
             "EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || SQLERRM; END $f$;"
         )
+        lines.append(  # and the shares on an object: {"ok": [[relation, subject type, id, relation], ...]} or the refusal
+            "CREATE OR REPLACE FUNCTION difftest_app.try_list_shares(t text, i text) RETURNS json "
+            "LANGUAGE plpgsql AS $f$ BEGIN RETURN json_build_object('ok', (SELECT coalesce(json_agg(json_build_array("
+            "s.relation, s.subject_type, s.subject_id, s.subject_relation)), '[]') FROM authz.list_shares(t, i) s)); "
+            "EXCEPTION WHEN OTHERS THEN RETURN json_build_object('refused', SQLSTATE || ': ' || SQLERRM); END $f$;"
+        )
         lines.append(  # and the links on an object: 'ok' and each one's relation:id, or the refusal
             "CREATE OR REPLACE FUNCTION difftest_app.try_list_links(t text, i text) RETURNS text "
             "LANGUAGE plpgsql AS $f$ BEGIN "
@@ -900,6 +927,22 @@ class Checker:
                 problems.append(f"user {u}: authz.list_links and revoke_link on {tname} {i} say {got}, expected {want}")
         return problems
 
+    def list_share_problems(self, snap: Snapshot, u: str, state: evaluate.State) -> list[str]:
+        """authz.list_shares as u tried it (when it was their turn): every share on the object, a link's id hidden,
+        to whoever holds share there by the reference, signed in or not; refused to anyone else."""
+        problems: list[str] = []
+        for tname in self.inspected:
+            t = self.types[tname]
+            for i, got in snap.get((u, "list_shares", tname), []):
+                if i in state[(tname, "share")] & self.ref.ids(t):
+                    want: Answer = {"ok": sorted(self.shares_now.get((tname, i), []))}
+                    got = {"ok": sorted(got["ok"])} if "ok" in got else got  # (the order is the database's)
+                else:
+                    want = {"refused": f"42501: you cannot see the shares of {tname} {i}"}
+                if got != want:
+                    problems.append(f"user {u}: authz.list_shares('{tname}', {i}) says {got}, expected {want}")
+        return problems
+
     def rule_allows(self, state: evaluate.State, table: str, cmd: str, i: str) -> bool:
         """Whether table's rules let cmd through on row i as it is: a delete by its rule; an update that changes
         nothing by its rule on the row before and its after rule (or the update rule again) on the row after."""
@@ -1002,6 +1045,7 @@ class Checker:
                         )
             problems += self.role_problems(snap, u, state, signed_in)
             problems += self.link_problems(snap, u, state, signed_in)
+            problems += self.list_share_problems(snap, u, state)
             # perms_of: the public permissions held on each object, no more (a type without any: none)
             for t in self.types.values():
                 public = [p for p, x in t.perms.items() if not x.hidden]
