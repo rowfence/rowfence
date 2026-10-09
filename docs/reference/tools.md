@@ -51,19 +51,32 @@ tool = "alembic"                       # alembic, prisma, drizzle, sql, goose, d
 dir  = "alembic/versions"              # where the tool keeps them (each tool has a default)
 ```
 
-The database is `--db` (before or after the command), else `rowstile.toml`'s, else `DATABASE_URL`, else the
+The database is `--db` (before or after the command), else `rowstile.toml`'s, else `DATABASE_URL`, else libpq's
 `PG*` variables (`PGHOST`, `PGPORT`, `PGUSER`, `PGPASSWORD`, `PGDATABASE`, `PGOPTIONS`, `PGSSLMODE`,
-`PGSSLROOTCERT`, `PGCHANNELBINDING`; not a password file or a service file). Those variables, and the one `database = "env:NAME"`
+`PGSSLROOTCERT`, `PGCHANNELBINDING`, and the others libpq reads; not a password file or a service file). Those nine variables, and the one `database = "env:NAME"`
 names, may be in `.env.local` or `.env` beside `rowstile.toml` (in the current folder while there is none), where
 Next.js, Prisma and many others keep them: the environment comes first, then `.env.local`, then `.env`, and
 `rowstile dev` says when the database came from a file. Nothing else in those files is read, a file that
 is a link out of the folder isn't read at all, and with `--db` neither is: the command line named the database. Values are as dotenv writes them: quotes, `#` comments,
-`export`, and `${NAME}` filled in. A URL's `?sslmode=`, `?host=`, `?port=` and the like are read; TLS is used when
-the server has it, required with `sslmode=require`, and the server's certificate checked with `verify-ca` and
-`verify-full`. Over TLS the password exchange is bound to the server's certificate when the server offers it
-(`channel_binding=prefer`, the default, as in libpq; `require` refuses a server that doesn't, `disable` never
-does), so a connection string from Neon's dashboard works as it is. A value in a string of keywords is quoted as for
-libpq (`password='it\'s'`). Client certificates and several hosts are refused, not ignored. The files `rowstile.toml` names to be read (the policy, the tests, the lock) are in its folder or
+`export`, and `${NAME}` filled in. A URL's `?sslmode=`, `?host=`, `?port=` and the like are read. Each of
+libpq's settings, in a connection string, a URL or a `PG*` variable, is done as libpq does it, left alone where
+that changes neither what is checked nor where the command connects (`application_name`, `keepalives`, `sslsni`
+and the like), or refused, naming it: a service, a password file where no password is given, a host address apart
+from its name (`hostaddr`), several hosts, client certificates, GSS encryption, OAuth. A value in a string of
+keywords is quoted as for libpq (`password='it\'s'`).
+
+TLS is used when the server has it and required with `sslmode=require`. The server's certificate is checked
+against a root certificate: the one `sslrootcert` names, else `root.crt` in libpq's folder (`~/.postgresql`, or
+`%APPDATA%\postgresql` on Windows), with `require` too when there is one, as libpq does; `verify-ca` and
+`verify-full` don't go on without one. `sslrootcert=system` checks it against the system's roots and checks its
+name, as `verify-full`, and a weaker `sslmode` with it is refused. A certificate `sslcrl`, `sslcrldir` or
+`root.crl` lists as revoked is refused. Over TLS the password exchange is bound to the server's certificate when
+the server offers it (`channel_binding=prefer`, the default, as in libpq; `disable` never does), so a connection
+string from Neon's dashboard works as it is. With `channel_binding=require`, a server that asks for the password
+any other way, or signs the command in without asking, is refused before anything is sent to it. `require_auth`
+says which ways the server may ask, and `target_session_attrs` which session will do, as in libpq.
+
+The files `rowstile.toml` names to be read (the policy, the tests, the lock) are in its folder or
 below; a setting it doesn't know, or one of the wrong type, is an error.
 [Getting started](../getting-started.md) goes through all of it; [the cookbook](../cookbook.md) has tested patterns and
 [troubleshooting](../troubleshooting.md) what people run into.

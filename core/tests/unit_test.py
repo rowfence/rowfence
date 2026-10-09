@@ -2809,8 +2809,15 @@ class Wire(unittest.TestCase):
 
         self.pgwire = pgwire
         self.env = {k: os.environ.pop(k) for k in list(os.environ) if k.startswith("PG")}
+        # libpq's folder (root.crt, root.crl) is in HOME, or APPDATA on Windows: an empty one, the test's own
+        self.home = tempfile.TemporaryDirectory()
+        self.homes = mock.patch.dict(os.environ, {"HOME": self.home.name, "APPDATA": self.home.name})
+        self.homes.start()
+        self.folder = os.path.join(self.home.name, "postgresql" if sys.platform == "win32" else ".postgresql")
 
     def tearDown(self) -> None:
+        self.homes.stop()
+        self.home.cleanup()
         os.environ.update(self.env)
 
     def test_a_url_and_its_options(self) -> None:
@@ -2860,16 +2867,31 @@ class Wire(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, re.escape(said), msg=dsn):
                 self.pgwire.parse_dsn(dsn)
 
-    def server(self, tls: bool, scram: str | None = None, auth: str | None = None) -> tuple[int, dict[str, object]]:
+    def server(
+        self,
+        tls: bool,
+        scram: str | None = None,
+        auth: str | None = None,
+        certificate: str = "wire_test.crt",
+        params: dict[str, str] | None = None,
+        answer: tuple[str, int] | None = None,
+        tls_cap: bool = False,
+        address: str = "127.0.0.1",
+    ) -> tuple[int, dict[str, object]]:
         """A made-up server on a local port: answers the TLS request (yes with the test certificate, or no), reads
         the start-up message, says the client is signed in. seen: whether TLS was used, and the start-up parameters.
-        scram: it asks for the password "secret" with SCRAM first, offering channel binding ("plus"), not offering
-        it ("plain"), or holding another certificate than the one the client sees ("other": a server in the middle);
-        or it answers with a nonce that isn't the client's ("badnonce"), or a proof that is wrong ("badproof").
-        seen then has the mechanism the client chose and whether it bound the exchange to the certificate.
-        auth: it asks for the password in clear ("cleartext") or hashed with MD5 ("md5"), and seen has what the
-        client sent; or it asks in a way the client doesn't know ("gss"), offers SASL without SCRAM-SHA-256
-        ("sasl-other"), or answers the TLS request as no Postgres does ("not postgres")."""
+        scram: it asks for the password "secret" with SCRAM first, offering channel binding as Postgres does, over
+        TLS only ("plus"; "plus anyway": without TLS too), not offering it ("plain"), or holding another certificate
+        than the one the client sees ("other": a server in the middle); or it answers with a nonce that isn't the
+        client's ("badnonce"), or a proof that is wrong ("badproof"). seen then has the mechanism the client chose
+        and whether it bound the exchange to the certificate. auth: it asks for the password in clear ("cleartext")
+        or hashed with MD5 ("md5"), and seen has what the client sent; or it asks in a way the client doesn't know
+        ("gss"), offers SASL without SCRAM-SHA-256 ("sasl-other"), or answers the TLS request as no Postgres does
+        ("not postgres"). seen["sent"]: what the client sent in answer to the first request for the password (or,
+        signed in unasked, until it went), byte for byte. certificate: the one it holds (with the test key), tls_cap:
+        it goes no further than TLSv1.2, seen["version"]: the TLS version agreed. params: what it says as the
+        session starts; answer: what it answers (a text, and its type) to one statement the client then sends,
+        whose text is seen["query"]. address: where it listens (127.0.0.2: a name its certificates don't have)."""
         import base64
         import hashlib
         import hmac
@@ -2880,7 +2902,7 @@ class Wire(unittest.TestCase):
 
         fixtures = os.path.join(ROOT, "tests", "fixtures")
         listener = socket.socket()
-        listener.bind(("127.0.0.1", 0))
+        listener.bind((address, 0))
         listener.listen(1)
         seen: dict[str, object] = {"tls": False, "asked": False}
 
@@ -2893,11 +2915,32 @@ class Wire(unittest.TestCase):
                 data += chunk
             return data
 
+        def received(conn: socket.socket, n: int) -> bytes:
+            """Up to n bytes: what came before the client stopped sending."""
+            data = b""
+            while len(data) < n:
+                try:
+                    chunk = conn.recv(n - len(data))
+                except OSError:
+                    break
+                if not chunk:
+                    break
+                data += chunk
+            return data
+
+        def said(kind: bytes, body: bytes = b"") -> bytes:
+            return kind + struct.pack("!i", 4 + len(body)) + body
+
         def sasl(conn: socket.socket) -> bool:
             salt, rounds = b"0123456789abcdef", 4096
-            mechs = (b"" if scram == "plain" else b"SCRAM-SHA-256-PLUS\0") + b"SCRAM-SHA-256\0\0"
+            plus = scram == "plus anyway" or (tls and scram != "plain")
+            mechs = (b"SCRAM-SHA-256-PLUS\0" if plus else b"") + b"SCRAM-SHA-256\0\0"
             conn.sendall(b"R" + struct.pack("!ii", 8 + len(mechs), 10) + mechs)
-            body = exactly(conn, struct.unpack("!i", exactly(conn, 5)[1:])[0] - 4)
+            head = received(conn, 5)
+            seen["sent"] = head
+            if len(head) < 5:
+                return False
+            body = exactly(conn, struct.unpack("!i", head[1:])[0] - 4)
             mechanism, rest = body.split(b"\0", 1)
             first = rest[4:].decode()
             header, bare = first[: first.index(",,") + 2], first[first.index(",,") + 2 :]
@@ -2908,11 +2951,11 @@ class Wire(unittest.TestCase):
             conn.sendall(b"R" + struct.pack("!ii", 8 + len(server_first), 11) + server_first.encode())
             final = exactly(conn, struct.unpack("!i", exactly(conn, 5)[1:])[0] - 4).decode()
             attrs = dict(kv.split("=", 1) for kv in final.split(","))
-            with open(os.path.join(fixtures, "wire_test.crt"), encoding="ascii") as fh:
-                certificate = ssl.PEM_cert_to_DER_cert(fh.read())
+            with open(os.path.join(fixtures, certificate), encoding="ascii") as fh:
+                held = ssl.PEM_cert_to_DER_cert(fh.read())
             if scram == "other":
-                certificate += b"another"
-            bound = hashlib.sha256(certificate).digest() if header.startswith("p=") else b""
+                held += b"another"
+            bound = hashlib.sha256(held).digest() if header.startswith("p=") else b""
             salted = hashlib.pbkdf2_hmac("sha256", b"secret", salt, rounds)
             stored = hashlib.sha256(hmac.new(salted, b"Client Key", hashlib.sha256).digest()).digest()
             message = f"{bare},{server_first},{final[: final.rindex(',p=')]}".encode()
@@ -2945,11 +2988,13 @@ class Wire(unittest.TestCase):
                     if tls:
                         context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
                         context.minimum_version = ssl.TLSVersion.TLSv1_2
+                        if tls_cap:
+                            context.maximum_version = ssl.TLSVersion.TLSv1_2
                         context.load_cert_chain(
-                            os.path.join(fixtures, "wire_test.crt"), os.path.join(fixtures, "wire_test.key")
+                            os.path.join(fixtures, certificate), os.path.join(fixtures, "wire_test.key")
                         )
-                        conn = context.wrap_socket(conn, server_side=True)
-                        seen["tls"] = True
+                        wrapped = context.wrap_socket(conn, server_side=True)
+                        seen["tls"], seen["version"], conn = True, wrapped.version(), wrapped
                     length, code = struct.unpack("!ii", exactly(conn, 8))
                 seen["start"] = exactly(conn, length - 8).split(b"\0")
                 if scram and not sasl(conn):
@@ -2957,7 +3002,12 @@ class Wire(unittest.TestCase):
                 if auth in ("cleartext", "md5"):
                     asked = struct.pack("!ii", 8, 3) if auth == "cleartext" else struct.pack("!ii", 12, 5) + b"salt"
                     conn.sendall(b"R" + asked)
-                    seen["password"] = exactly(conn, struct.unpack("!i", exactly(conn, 5)[1:])[0] - 4)[:-1].decode()
+                    head = received(conn, 5)
+                    seen["sent"] = head
+                    if len(head) < 5:
+                        return
+                    body = exactly(conn, struct.unpack("!i", head[1:])[0] - 4)
+                    seen["sent"], seen["password"] = head + body, body[:-1].decode()
                 elif auth in ("gss", "sasl-other"):
                     mechs = b"SCRAM-SHA-1\0\0"
                     asked = (
@@ -2965,16 +3015,43 @@ class Wire(unittest.TestCase):
                     )
                     conn.sendall(b"R" + asked)
                     return
-                conn.sendall(b"R" + struct.pack("!ii", 8, 0) + b"Z" + struct.pack("!i", 5) + b"I")
-                conn.recv(16)
+                statuses = b"".join(
+                    said(b"S", k.encode() + b"\0" + v.encode() + b"\0") for k, v in (params or {}).items()
+                )
+                conn.sendall(said(b"R", struct.pack("!i", 0)) + statuses + said(b"Z", b"I"))
+                if answer is not None:
+                    query: list[tuple[bytes, bytes]] = []
+                    while not query or query[-1][0] != b"S":
+                        kind = exactly(conn, 1)
+                        query.append((kind, exactly(conn, struct.unpack("!i", exactly(conn, 4))[0] - 4)))
+                    seen["query"] = next(body for kind, body in query if kind == b"P").split(b"\0")[1].decode()
+                    value, oid = answer
+                    column = said(b"T", struct.pack("!h", 1) + b"x\0" + struct.pack("!ihihih", 0, 0, oid, -1, -1, 0))
+                    row = said(b"D", struct.pack("!hi", 1, len(value)) + value.encode())
+                    conn.sendall(said(b"1") + said(b"2") + column + row + said(b"C", b"SELECT 1\0") + said(b"Z", b"I"))
+                after = received(conn, 1 << 16)
+                seen.setdefault("sent", after)
             except (OSError, ConnectionError):
                 pass
             finally:
                 conn.close()
                 listener.close()
+                finished.set()
 
+        finished = threading.Event()
+        seen["done"] = finished
         threading.Thread(target=serve, daemon=True).start()
         return listener.getsockname()[1], seen
+
+    @staticmethod
+    def sent(seen: dict[str, object]) -> object:
+        """What the client sent the made-up server once asked for the password, when the server is done."""
+        import threading
+
+        done = seen["done"]
+        assert isinstance(done, threading.Event)
+        done.wait(5)
+        return seen.get("sent")
 
     @staticmethod
     def started_with(seen: dict[str, object], name: bytes) -> bytes | None:
@@ -3029,11 +3106,12 @@ class Wire(unittest.TestCase):
         port, seen = self.server(tls=True)
         connect(host="127.0.0.1", port=port, sslmode="verify-full", sslrootcert=crt, timeout=5).close()
         self.assertTrue(seen["tls"])
+        # ... and with no root certificate to check it against, as libpq, it doesn't go on
         port, seen = self.server(tls=True)
-        with self.assertRaisesRegex(self.pgwire.ProtocolError, "TLS with the server failed"):
-            connect(
-                host="127.0.0.1", port=port, sslmode="verify-full", timeout=5
-            )  # not signed by anyone the system trusts
+        root = re.escape(os.path.join(self.folder, "root.crt"))
+        with self.assertRaisesRegex(self.pgwire.ProtocolError, f'^root certificate file "{root}" does not exist: '):
+            connect(host="127.0.0.1", port=port, sslmode="verify-full", timeout=5)
+        self.assertNotIn("start", seen)
 
     def test_scram_is_bound_to_the_tls_channel(self) -> None:
         wrong = self.pgwire.ProtocolError
@@ -3062,18 +3140,44 @@ class Wire(unittest.TestCase):
         port, seen = self.server(tls=True, scram="plain")
         connect(port)
         self.assertEqual((seen["mechanism"], seen["header"]), ("SCRAM-SHA-256", "y,,"))
+        # required: refused before anything is sent, in libpq's words, unless the server takes SCRAM bound to TLS
         port, seen = self.server(tls=True, scram="plain")
-        with self.assertRaisesRegex(wrong, "doesn't offer channel binding"):
+        with self.assertRaisesRegex(
+            wrong,
+            "^channel binding is required, but server did not offer an authentication method that supports channel "
+            "binding$",
+        ):
             connect(port, "require")
+        self.assertEqual(self.sent(seen), b"")
         port, seen = self.server(tls=False, scram="plus")
-        with self.assertRaisesRegex(wrong, "channel_binding=require needs TLS"):
+        with self.assertRaisesRegex(wrong, "^channel binding required, but SSL not in use$"):
             connect(port, "require")
+        self.assertEqual(self.sent(seen), b"")
         port, seen = self.server(tls=False, scram="plus")
         connect(port)  # no TLS: nothing to bind to
         self.assertEqual((seen["mechanism"], seen["header"]), ("SCRAM-SHA-256", "n,,"))
         port, seen = self.server(tls=True)  # signs in without asking anything
-        with self.assertRaisesRegex(wrong, "without channel binding"):
+        with self.assertRaisesRegex(
+            wrong, "^channel binding required, but server authenticated client without channel binding$"
+        ):
             connect(port, "require")
+        self.assertEqual(self.sent(seen), b"")
+        for auth in ("cleartext", "md5"):  # the password, or a hash of it: never sent, asked that way
+            port, seen = self.server(tls=True, auth=auth)
+            with self.assertRaisesRegex(
+                wrong, "^channel binding required but not supported by server's authentication request$", msg=auth
+            ):
+                connect(port, "require", "require")
+            self.assertEqual(self.sent(seen), b"", auth)
+        # a server offers SCRAM-SHA-256-PLUS over TLS only: offered without it, it is for another connection than
+        # this one (libpq refuses it whatever channel_binding says)
+        for binding in ("prefer", "disable"):
+            port, seen = self.server(tls=False, scram="plus anyway")
+            with self.assertRaisesRegex(
+                wrong, "^server offered SCRAM-SHA-256-PLUS authentication over a non-SSL connection$", msg=binding
+            ):
+                connect(port, binding)
+            self.assertEqual(self.sent(seen), b"", binding)
         # a server in the middle holds another certificate than the one the client was shown: the exchange fails
         port, seen = self.server(tls=True, scram="other")
         with self.assertRaisesRegex(self.pgwire.PgError, "28P01"):
@@ -3295,6 +3399,284 @@ class Wire(unittest.TestCase):
         self.assertEqual(convert(1009, b"[0:1]={a,b}"), "[0:1]={a,b}")
         self.assertEqual(self.pgwire._saslprep("pa\u00adss\u2168"), "passIX")  # as psql prepares a password for SCRAM
         self.assertEqual(self.pgwire._saslprep("caf\u00e9"), "caf\u00e9")
+
+    def test_require_auth_as_libpq_reads_it(self) -> None:
+        # the ways the server may ask for the password: any other is refused before anything is sent to it
+        wrong = self.pgwire.ProtocolError
+        for require, tls, scram, auth, said in (
+            ("scram-sha-256", True, None, "cleartext", "server requested a cleartext password"),
+            ("scram-sha-256", True, None, "md5", "server requested a hashed password"),
+            ("password", True, "plus", None, "server requested SASL authentication"),
+            ("scram-sha-256", True, None, None, "server did not complete authentication"),  # signs in unasked
+            ("!password", False, None, "cleartext", "server requested a cleartext password"),
+            ("!scram-sha-256", True, "plus", None, "server requested SCRAM-SHA-256-PLUS authentication"),
+            ("password", False, None, None, "server did not complete authentication"),
+            ("scram-sha-256", True, None, "gss", "server requested GSSAPI authentication"),
+        ):
+            port, seen = self.server(tls=tls, scram=scram, auth=auth)
+            dsn = f"host=127.0.0.1 port={port} password=secret require_auth={require}"
+            with self.assertRaisesRegex(wrong, f'^authentication method requirement "{require}" failed: {said}$'):
+                self.pgwire.connect(**self.pgwire.parse_dsn(dsn))
+            self.assertIn(self.sent(seen), (b"", None), (require, said))  # nothing; or not asked for anything yet
+        for require, tls, scram, auth in (
+            ("scram-sha-256", True, "plus", None),
+            ("md5,scram-sha-256", False, "plain", None),
+            ("password", False, None, "cleartext"),
+            ("!password", False, None, "md5"),
+            ("none", False, None, None),
+            ("scram-sha-256,none", False, None, None),
+            ("!password,!md5", True, "plus", None),
+        ):
+            port, seen = self.server(tls=tls, scram=scram, auth=auth)
+            dsn = f"host=127.0.0.1 port={port} password=secret require_auth={require}"
+            self.pgwire.connect(**self.pgwire.parse_dsn(dsn)).close()
+        for require, said in (
+            ("password,!md5", 'negative require_auth method "!md5" cannot be mixed with non-negative methods'),
+            ("!md5,password", 'require_auth method "password" cannot be mixed with negative methods'),
+            ("passwd", 'invalid require_auth value: "passwd"'),
+            ("password, md5", 'invalid require_auth value: " md5"'),
+            ("md5,md5", 'require_auth method "md5" is specified more than once'),
+            ("!none,!none", 'require_auth method "!none" is specified more than once'),
+        ):
+            with self.assertRaisesRegex(ValueError, f"^{re.escape(said)}$", msg=require):
+                self.pgwire.parse_dsn(f"host=h require_auth='{require}'")
+
+    def test_the_servers_certificate_as_libpq_checks_it(self) -> None:
+        import shutil
+
+        # made with openssl: an authority (wire_ca.crt, its key thrown away), the certificate it signed for localhost
+        # and 127.0.0.1 with wire_test.key (wire_ca_server.crt), and its lists of revoked certificates, one empty and
+        # one naming that certificate (wire_ca_empty.crl, wire_ca_revoked.crl), all good for a hundred years
+        fixtures = os.path.join(ROOT, "tests", "fixtures").replace(os.sep, "/")  # a backslash escapes, in a string
+        authority, other = f"{fixtures}/wire_ca.crt", f"{fixtures}/wire_test.crt"
+        signed = "wire_ca_server.crt"  # the authority's, for localhost and 127.0.0.1
+        wrong = self.pgwire.ProtocolError
+
+        def connect(dsn: str) -> dict[str, object]:
+            """Signs in to a made-up server holding the certificate the authority signed; what the server saw."""
+            port, seen = self.server(tls=True, certificate=signed)
+            self.pgwire.connect(**self.pgwire.parse_dsn(f"host=127.0.0.1 port={port} {dsn}")).close()
+            return seen
+
+        def refused(dsn: str, said: str) -> None:
+            """... refused, nothing sent once TLS was taken: no start-up message."""
+            port, seen = self.server(tls=True, certificate=signed)
+            with self.assertRaisesRegex(wrong, said, msg=dsn):
+                self.pgwire.connect(**self.pgwire.parse_dsn(f"host=127.0.0.1 port={port} {dsn}"))
+            self.assertNotIn("start", seen, dsn)
+
+        # require with a root certificate checks the server's certificate against it, as verify-ca
+        self.assertTrue(connect(f"sslmode=require sslrootcert={authority}")["tls"])
+        refused(
+            f"sslmode=require sslrootcert={other}", r"^TLS with the server failed \(sslmode=require\): .*verify fail"
+        )
+        # ... the one in libpq's folder too, where nothing names one; PGSSLROOTCERT names one
+        os.makedirs(self.folder)
+        shutil.copy(other, os.path.join(self.folder, "root.crt"))
+        refused("sslmode=require", "certificate verify failed")
+        shutil.copy(authority, os.path.join(self.folder, "root.crt"))
+        connect("sslmode=require")
+        with mock.patch.dict(os.environ, {"PGSSLROOTCERT": other}):
+            refused("sslmode=require", "certificate verify failed")
+        os.remove(os.path.join(self.folder, "root.crt"))
+        # a root certificate file that isn't there: require goes on without checking, as libpq does; verify-ca
+        # and verify-full don't go on
+        connect(f"sslmode=require sslrootcert={fixtures}/nowhere.crt")
+        connect("sslmode=require")
+        refused(
+            "sslmode=verify-ca", f'^root certificate file "{re.escape(os.path.join(self.folder, "root.crt"))}" does'
+        )
+        # verify-full checks the name it connected to as well: the certificate's names are localhost and 127.0.0.1
+        connect(f"sslmode=verify-full sslrootcert={authority}")
+        # sslrootcert=system: the system's roots, which this test authority isn't among, and verify-full by default;
+        # a weaker sslmode with it is refused, as libpq refuses it
+        self.assertEqual(self.pgwire.parse_dsn("host=h sslrootcert=system")["sslmode"], "verify-full")
+        refused("sslrootcert=system", "certificate verify failed")
+        # ... the system's roots are what OpenSSL takes for them, as libpq loads them (SSL_CERT_FILE names a file)
+        with mock.patch.dict(os.environ, {"SSL_CERT_FILE": authority}):
+            connect("sslrootcert=system")
+        # ... and the name is checked: the certificates are for localhost and 127.0.0.1, not 127.0.0.2
+        port, seen = self.server(tls=True, certificate=signed, address="127.0.0.2")
+        with mock.patch.dict(os.environ, {"SSL_CERT_FILE": authority}), self.assertRaisesRegex(wrong, "mismatch"):
+            self.pgwire.connect(**self.pgwire.parse_dsn(f"host=127.0.0.2 port={port} sslrootcert=system"))
+        port, seen = self.server(tls=True, certificate=signed, address="127.0.0.2")
+        dsn = f"host=127.0.0.2 port={port} sslmode=verify-full sslrootcert={authority}"
+        with self.assertRaisesRegex(wrong, "IP address mismatch"):
+            self.pgwire.connect(**self.pgwire.parse_dsn(dsn))
+        self.assertNotIn("start", seen)
+        port, seen = self.server(tls=True, certificate=signed, address="127.0.0.2")
+        dsn = f"host=127.0.0.2 port={port} sslmode=verify-ca sslrootcert={authority}"
+        self.pgwire.connect(**self.pgwire.parse_dsn(dsn)).close()  # verify-ca: the authority, not the name
+        for weak in ("require", "verify-ca", "prefer"):
+            with self.assertRaisesRegex(
+                ValueError, f'^weak sslmode "{weak}" may not be used with sslrootcert=system \\(use "verify-full"\\)$'
+            ):
+                self.pgwire.parse_dsn(f"host=h sslrootcert=system sslmode={weak}")
+        # revoked: with a root certificate file, a certificate sslcrl (or sslcrldir, or root.crl in libpq's folder)
+        # lists is refused; one that lists nothing changes nothing
+        empty, revoked = f"{fixtures}/wire_ca_empty.crl", f"{fixtures}/wire_ca_revoked.crl"
+        connect(f"sslmode=verify-ca sslrootcert={authority} sslcrl={empty}")
+        refused(f"sslmode=verify-ca sslrootcert={authority} sslcrl={revoked}", "certificate revoked")
+        with mock.patch.dict(os.environ, {"PGSSLCRL": revoked}):
+            refused(f"sslmode=require sslrootcert={authority}", "certificate revoked")
+        crls = os.path.join(self.home.name, "crls")
+        os.makedirs(crls)
+        shutil.copy(revoked, os.path.join(crls, "231ef00c.r0"))  # its issuer's hash: openssl crl -hash
+        refused(f"sslmode=verify-ca sslrootcert={authority} sslcrldir={crls.replace(os.sep, '/')}", "revoked")
+        shutil.copy(revoked, os.path.join(self.folder, "root.crl"))
+        refused(f"sslmode=require sslrootcert={authority}", "certificate revoked")
+        # TLS's version: TLSv1.3 where both have it, TLSv1.2 at most if the maximum says so; a minimum of TLSv1.3
+        # refuses a server that stops at TLSv1.2
+        os.remove(os.path.join(self.folder, "root.crl"))
+        self.assertEqual(connect("sslmode=require")["version"], "TLSv1.3")
+        self.assertEqual(connect("sslmode=require ssl_max_protocol_version=TLSv1.2")["version"], "TLSv1.2")
+        port, seen = self.server(tls=True, certificate=signed, tls_cap=True)
+        dsn = f"host=127.0.0.1 port={port} sslmode=require ssl_min_protocol_version=tlsv1.3"
+        with self.assertRaisesRegex(wrong, "TLS with the server failed"):
+            self.pgwire.connect(**self.pgwire.parse_dsn(dsn))
+        self.assertNotIn("start", seen)
+
+    def test_libpqs_folder(self) -> None:
+        # where libpq looks for root.crt and root.crl: ~/.postgresql, from HOME, else the user's own folder (as
+        # libpq: in a container whose user has no entry, nowhere), or %APPDATA%\postgresql on Windows
+        folder = self.pgwire._libpq_file
+        with mock.patch.object(sys, "platform", "win32"), mock.patch.dict(os.environ, {"APPDATA": "C:/Roaming"}):
+            self.assertEqual(folder("root.crt"), os.path.join("C:/Roaming", "postgresql", "root.crt"))
+            del os.environ["APPDATA"]
+            self.assertIsNone(folder("root.crt"))
+        if sys.platform == "win32":
+            return
+        import pwd
+
+        with mock.patch.dict(os.environ, {"HOME": ""}):
+            self.assertEqual(
+                folder("root.crl"), os.path.join(pwd.getpwuid(os.geteuid()).pw_dir, ".postgresql", "root.crl")
+            )
+            with mock.patch("pwd.getpwuid", side_effect=KeyError(os.geteuid())):
+                self.assertIsNone(folder("root.crt"))
+                port, seen = self.server(tls=True)
+                with self.assertRaisesRegex(self.pgwire.ProtocolError, "^no home folder to find root.crt in: give it"):
+                    self.pgwire.connect(host="127.0.0.1", port=port, sslmode="verify-ca", timeout=5)
+                self.assertNotIn("start", seen)
+
+    def test_a_certificate_channel_binding_has_no_hash_for(self) -> None:
+        # (Ed25519's signature names none): with SCRAM-SHA-256-PLUS offered, the exchange can't be bound, and is
+        # refused before anything is sent, as libpq refuses it, whatever channel_binding (but disable) says
+        for binding in ("prefer", "require"):
+            port, seen = self.server(tls=True, scram="plus")
+            with (
+                mock.patch.object(self.pgwire, "_end_point", return_value=None),
+                self.assertRaisesRegex(
+                    self.pgwire.ProtocolError, "^the server's certificate is signed in a way channel"
+                ),
+            ):
+                self.pgwire.connect(host="127.0.0.1", port=port, password="secret", channel_binding=binding, timeout=5)
+            self.assertEqual(self.sent(seen), b"", binding)
+
+    def test_target_session_attrs_as_libpq_checks_it(self) -> None:
+        # one host, checked once signed in: from what the server said as the session started, else by asking it
+        rw = {"default_transaction_read_only": "off", "in_hot_standby": "off"}
+        ro = {"default_transaction_read_only": "on", "in_hot_standby": "off"}
+        standby = {"default_transaction_read_only": "off", "in_hot_standby": "on"}
+        show, recovery = "SHOW transaction_read_only", "SELECT pg_catalog.pg_is_in_recovery()"
+        for wanted, params, answer, said, asked in (
+            ("read-write", rw, None, None, None),
+            ("read-write", ro, None, "session is read-only", None),
+            ("read-write", standby, None, "session is read-only", None),
+            ("read-only", rw, None, "session is not read-only", None),
+            ("read-only", standby, None, None, None),
+            ("primary", standby, None, "server is in hot standby mode", None),
+            ("primary", ro, None, None, None),
+            ("standby", rw, None, "server is not in hot standby mode", None),
+            ("prefer-standby", rw, None, None, None),
+            ("any", standby, None, None, None),
+            ("read-write", {}, ("on", 25), "session is read-only", show),
+            ("read-only", {"in_hot_standby": "off"}, ("on", 25), None, show),
+            ("standby", {}, ("t", 16), None, recovery),
+            ("primary", {}, ("t", 16), "server is in hot standby mode", recovery),
+        ):
+            port, seen = self.server(tls=False, params=params, answer=answer)
+            dsn = f"host=127.0.0.1 port={port} sslmode=disable target_session_attrs={wanted}"
+            if said:
+                with self.assertRaisesRegex(self.pgwire.ProtocolError, f"^{said}$", msg=(wanted, params)):
+                    self.pgwire.connect(**self.pgwire.parse_dsn(dsn))
+            else:
+                self.pgwire.connect(**self.pgwire.parse_dsn(dsn)).close()
+            self.assertEqual(seen.get("query"), asked, (wanted, params))
+
+    def test_each_libpq_setting_is_honoured_left_alone_or_refused(self) -> None:
+        p, parse = self.pgwire, self.pgwire.parse_dsn
+        # every one of libpq's settings is in exactly one list (passfile: refused only without a password)
+        groups = [p.HONOURED, set(p.IGNORED), set(p.ONLY), set(p.REFUSED), {"passfile"}]
+        self.assertEqual(sorted(p.LIBPQ), sorted(set().union(*groups)))
+        self.assertEqual(sum(len(g) for g in groups), len(p.LIBPQ))
+        # left alone, from a keyword string too: what they change is neither what is checked nor where it connects
+        got = parse(
+            "host=h application_name=x keepalives=1 sslsni=0 gssencmode=disable sslcertmode=allow "
+            "min_protocol_version=3.0 sslnegotiation=postgres replication=off load_balance_hosts=random"
+        )
+        self.assertEqual(got["host"], "h")
+        # refused, naming the setting or the variable that gave it
+        for dsn, env, said in (
+            ("host=h hostaddr=10.0.0.1", {}, "a host address apart from its name (hostaddr=10.0.0.1)"),
+            ("postgresql://h/d?hostaddr=10.0.0.1", {}, "a host address apart from its name (hostaddr=10.0.0.1)"),
+            ("host=h", {"PGHOSTADDR": "10.0.0.1"}, "a host address apart from its name (PGHOSTADDR=10.0.0.1)"),
+            ("host=h", {"PGSERVICE": "prod"}, "connection services (PGSERVICE=prod)"),
+            ("service=prod", {}, "connection services (service=prod)"),
+            ("host=h", {"PGSSLCERT": "c.crt"}, "client certificates (PGSSLCERT=c.crt)"),
+            ("host=h", {"PGREQUIREPEER": "postgres"}, "requirepeer (PGREQUIREPEER=postgres)"),
+            ("postgresql://h/d?gssencmode=require", {}, "GSS encryption (gssencmode=require)"),
+            ("host=h", {"PGGSSENCMODE": "require"}, "GSS encryption (PGGSSENCMODE=require)"),
+            ("host=h", {"PGSSLCERTMODE": "require"}, "a client certificate (PGSSLCERTMODE=require)"),
+            ("postgresql://h/d?sslnegotiation=direct", {}, "TLS without asking the server first (sslnegotiation"),
+            ("postgresql://h/d?oauth_client_id=x", {}, "OAuth (oauth_client_id=x)"),
+            ("host=h scram_client_key=a2V5", {}, "SCRAM keys in place of the password (scram_client_key=a2V5)"),
+            ("host=h replication=database", {}, "a replication connection (replication=database)"),
+            ("host=h", {"PGMINPROTOCOLVERSION": "3.2"}, "a protocol version above 3.0 (PGMINPROTOCOLVERSION=3.2)"),
+            ("host=h", {"PGPASSFILE": "/p"}, "a password file (PGPASSFILE=/p)"),
+            ("host=h passfile=/p", {}, "a password file (passfile=/p)"),
+            (
+                "host=h ssl_min_protocol_version=TLSv1 ssl_max_protocol_version=TLSv1.1",
+                {},
+                "TLS older than TLSv1.2 (ssl_max_protocol_version=TLSv1.1)",
+            ),
+        ):
+            with mock.patch.dict(os.environ, env), self.assertRaisesRegex(ValueError, re.escape(said), msg=dsn):
+                parse(dsn)
+        for dsn, said in (
+            ("host=h ssl_min_protocol_version=TLSv9", 'invalid "ssl_min_protocol_version" value: "TLSv9"'),
+            (
+                "host=h ssl_min_protocol_version=TLSv1.3 ssl_max_protocol_version=TLSv1.2",
+                "invalid SSL protocol version",
+            ),
+            ("host=h ssl_max_protocol_version=TLSv1.1", "invalid SSL protocol version range"),  # the minimum is 1.2
+            ("host=h target_session_attrs=primaryish", 'invalid target_session_attrs value: "primaryish"'),
+        ):
+            with self.assertRaisesRegex(ValueError, re.escape(said), msg=dsn):
+                parse(dsn)
+        # a password file is no matter where the password is given: libpq reads it only without one
+        with mock.patch.dict(os.environ, {"PGPASSFILE": "/p"}):
+            self.assertEqual(parse("host=h password=x")["password"], "x")
+        # honoured from the variables too
+        with mock.patch.dict(
+            os.environ, {"PGCONNECT_TIMEOUT": "7", "PGREQUIRESSL": "1", "PGTARGETSESSIONATTRS": "standby"}
+        ):
+            got = parse("host=h")
+            self.assertEqual((got["timeout"], got["sslmode"], got["target_session_attrs"]), (7.0, "require", "standby"))
+            self.assertEqual(parse("host=h sslmode=disable")["sslmode"], "disable")  # what the string says comes first
+        self.assertEqual(parse("host=h requiressl=1")["sslmode"], "require")  # libpq's old name for it
+        # what libpq sends with its start-up from PGDATESTYLE, PGTZ and PGGEQO (not "default"), so does this client
+        with mock.patch.dict(os.environ, {"PGDATESTYLE": "ISO, DMY", "PGTZ": "UTC", "PGGEQO": "default"}):
+            port, seen = self.server(tls=False)
+            self.pgwire.connect(**parse(f"host=127.0.0.1 port={port} sslmode=disable")).close()
+        self.assertEqual(
+            (
+                self.started_with(seen, b"datestyle"),
+                self.started_with(seen, b"timezone"),
+                self.started_with(seen, b"geqo"),
+            ),
+            (b"ISO, DMY", b"UTC", None),
+        )
 
 
 class TestFiles(unittest.TestCase):

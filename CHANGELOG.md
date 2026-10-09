@@ -295,6 +295,21 @@ Each release upgrades from the one before it. How releases are numbered and made
   error, where it got no answer and its client waited. Params that aren't an object, and a tool's argument
   that is null, true, an object or a list where text goes, are refused: they were taken as no params, or
   passed to the command as `None`.
+- The command connects as libpq does with the same settings, and refuses, naming it, a setting it doesn't do,
+  where it left some out. With `channel_binding=require`, a server that asks for the password in clear or hashed
+  with MD5, offers SCRAM without channel binding, or signs the command in without asking is refused before
+  anything is sent to it. With `sslmode=require`, the server's certificate is checked against a root certificate
+  when there is one (`sslrootcert`, `PGSSLROOTCERT`, or `root.crt` in libpq's folder: `~/.postgresql`, or
+  `%APPDATA%\postgresql` on Windows), as `verify-ca` checks it. `sslrootcert=system` checks it against the
+  system's roots and checks its name, as `verify-full`, and a weaker `sslmode` with it is refused. A certificate
+  `sslcrl`, `sslcrldir` or `root.crl` lists as revoked is refused. `require_auth`, `target_session_attrs`,
+  `ssl_min_protocol_version` and `ssl_max_protocol_version` are honoured, and so are `PGCONNECT_TIMEOUT`,
+  `PGREQUIRESSL`, `PGDATESTYLE`, `PGTZ` and `PGGEQO`. What it doesn't do is refused, from a connection string or
+  a variable: a service (`PGSERVICE`), a host address apart from its name (`hostaddr`), client certificates
+  (`PGSSLCERT`), GSS encryption (`gssencmode=require`), a password file where no password is given
+  (`PGPASSFILE`), and the like. **Upgrading**: `sslmode=verify-ca` or `verify-full` with no root certificate,
+  which the command checked against the system's roots, now needs one, as in libpq: `sslrootcert=system` with
+  `verify-full` for a server whose certificate a public authority signed.
 
 ## 0.1.0 (alpha)
 

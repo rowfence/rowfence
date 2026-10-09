@@ -114,7 +114,9 @@ your policy that calls such a function writes `extensions.` too.
   `?uselibpqcompat=true&sslmode=require` (encrypted, the certificate not checked, as libpq means it), or give
   node-postgres Supabase's authority (`sslrootcert`: the certificate the project's database settings offer to
   download) and keep `verify-full`. Prisma's client goes through node-postgres too (`@prisma/adapter-pg`);
-  Prisma Migrate and the command take `sslmode=require` as libpq does.
+  Prisma Migrate and the command take `sslmode=require` as libpq does. The command, as libpq, then checks the
+  certificate against a root certificate when there is one: the authority `sslrootcert` names, or `root.crt` in
+  libpq's folder (`~/.postgresql`).
 - **The transaction pooler and prepared statements**: asyncpg and psycopg need the settings in
   [Behind a pooler](operations.md#behind-a-pooler). Through port 6543, 200 signed-in transactions from 20 at a
   time all saw their own rows with them; without them 154 of 200 failed ("prepared statement ... does not
