@@ -109,6 +109,13 @@ Each release upgrades from the one before it. How releases are numbered and made
   with text in it that holds a space or an apostrophe. The test's lines now quote such an id, as a test reads
   it. Its copy of a row wrote an array column as JSON, which Postgres refuses ("malformed array literal"), and
   a number with a fraction as a float, losing digits: each is now written as the column holds it.
+- Studio says what the other commands say. With the policy taken out while it runs (`rowstile remove`), the
+  tab of shares and requests said "function authz.act_as(unknown, unknown) does not exist", and why and the
+  access diff said "no policy is applied [AZ609]" without how to apply one: each now says "no policy is applied
+  [AZ609] (rowstile apply db/policy.authz)". Through an app role its connection may not take (an owner on
+  managed Postgres that made the role but wasn't given it), the tables said "GRANT app_user TO the role Studio
+  connects as": they now say what `rowstile test` and `sql --as` say, with the role to grant to, who may run
+  the grant, and the code (AZ618).
 - Ctrl-C while `rowstile sql` (or `can`, `explain`, `perms`, `list`, `who`, `explain-rule`) waited on a statement,
   or while `rowstile review --db` worked on its database, stopped only once the statement had run its course. It
   stops at once now and ends the statement on the server, as the other commands did.
