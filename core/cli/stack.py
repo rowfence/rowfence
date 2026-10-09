@@ -77,9 +77,9 @@ def _python_names(root: str) -> set[str]:
     }
     return (
         {m.group(1).lower().replace("_", "-") for m in re.finditer(r'(?m)^\s*"?([A-Za-z][A-Za-z0-9_.-]*)', text)}
-        | {
+        | {  # each one of a list on one line: "fastapi>=0.110", "sqlalchemy (>=2.0)" (Poetry's), "x @ git+https://..."
             m.group(1).lower().replace("_", "-")
-            for m in re.finditer(r'"([A-Za-z][A-Za-z0-9_.-]*)\s*(?:\[[^\]]*\])?\s*(?:[<>=!~;][^"]*)?"', text)
+            for m in re.finditer(r'"([A-Za-z][A-Za-z0-9_.-]*)\s*(?:\[[^\]]*\])?\s*(?:[(<>=!~;@][^"]*)?"', text)
         }
         | extras
     )

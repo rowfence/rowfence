@@ -9,7 +9,7 @@ cli 110
 concurrency 12
 confidence 39
 cookbook 79
-devx 71
+devx 74
 docs 11
 governance 134
 identity 50
@@ -29,4 +29,4 @@ scenario 93
 signed sessions 36
 studio 59
 tools 36
-unit 246
+unit 250

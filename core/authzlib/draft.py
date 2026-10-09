@@ -455,6 +455,20 @@ def draft(
                     base[n] = changed = True
             if edit_base[n] and not view_base[n]:
                 view_base[n] = changed = True
+
+    def in_loop(n: str) -> bool:
+        """Whether n's foreign keys lead back to it through other tables (a tree of its own type is no loop)."""
+        seen: set[str] = set()
+        todo = [p for p in parent_of[n].values() if p != n]
+        while todo:
+            p = todo.pop()
+            if p == n:
+                return True
+            if p not in seen:
+                seen.add(p)
+                todo += parent_of[p].values()
+        return False
+
     for n in sorted(type_names, key=lambda x: (type_names[x] != "user", type_names[x])):
         t, tname = by_name[n], type_names[n]
         out.append(f"type {tname} = {n}{key_spec(t)}")
@@ -481,7 +495,13 @@ def draft(
                 if parents
                 else ["edit"] + linked
             )
-            no_owner = "   -- decide: the loop of foreign keys it is in has no owner anywhere; "
+            # nobody edits what it is in: a loop of foreign keys with no owner anywhere in it, or a table nobody
+            # changes through the app above it (a list of categories)
+            no_owner = (
+                "   -- decide: the loop of foreign keys it is in has no owner anywhere; "
+                if in_loop(n)
+                else "   -- decide: nobody edits what it is in; "
+            )
             if not edit:
                 out.append(
                     f"  can edit = nobody{no_owner}who edits these?"

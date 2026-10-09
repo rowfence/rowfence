@@ -202,6 +202,12 @@ Each release upgrades from the one before it. How releases are numbered and made
 - `rowstile bench` left out a path that failed, without a word: with the app role not allowed to read
   `app.files`, the reads and updates of `app.files` were simply not in the table. They are there now, with
   what the database said: `read app.files  -  -  <- failed: permission denied for table files`.
+- `rowstile init` didn't find FastAPI or SQLAlchemy in a `pyproject.toml` whose dependencies are all on one
+  line, each with its version in parentheses as Poetry writes it (`"fastapi (>=0.115.0,<0.116.0)"`), or given
+  by a URL (`"fastapi @ git+https://..."`): it wrote no setup line and asked for `rowstile` without its extras.
+- `rowstile init`'s draft said "the loop of foreign keys it is in has no owner anywhere" of a table whose
+  only foreign keys point at a table nobody changes through the app (products in categories), where there
+  is no loop. It says "nobody edits what it is in" there.
 
 ## 0.1.0 (alpha)
 
