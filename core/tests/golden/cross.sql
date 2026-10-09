@@ -387,35 +387,35 @@ BEGIN
                     AND attname = 'chief_id' AND attnum > 0 AND NOT attisdropped) THEN
     missing := missing || E'\n  line 39: column chief_id not found in cx.regions [AZ601]';
   END IF;
-  IF to_regclass('"cx"."sites"') IS NULL THEN missing := missing || E'\n  line 45: table cx.sites not found [AZ601]';
+  IF to_regclass('"cx"."sites"') IS NULL THEN missing := missing || E'\n  line 48: table cx.sites not found [AZ601]';
   ELSIF NOT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = to_regclass('"cx"."sites"')
                     AND attname = 'id' AND attnum > 0 AND NOT attisdropped) THEN
-    missing := missing || E'\n  line 45: column id not found in cx.sites [AZ601]';
+    missing := missing || E'\n  line 48: column id not found in cx.sites [AZ601]';
   END IF;
-  IF to_regclass('"cx"."site_regions"') IS NULL THEN missing := missing || E'\n  line 46: table cx.site_regions not found [AZ601]';
+  IF to_regclass('"cx"."site_regions"') IS NULL THEN missing := missing || E'\n  line 49: table cx.site_regions not found [AZ601]';
   ELSIF NOT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = to_regclass('"cx"."site_regions"')
                     AND attname = 'site_id' AND attnum > 0 AND NOT attisdropped) THEN
-    missing := missing || E'\n  line 46: column site_id not found in cx.site_regions [AZ601]';
+    missing := missing || E'\n  line 49: column site_id not found in cx.site_regions [AZ601]';
   END IF;
-  IF to_regclass('"cx"."site_regions"') IS NULL THEN missing := missing || E'\n  line 46: table cx.site_regions not found [AZ601]';
+  IF to_regclass('"cx"."site_regions"') IS NULL THEN missing := missing || E'\n  line 49: table cx.site_regions not found [AZ601]';
   ELSIF NOT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = to_regclass('"cx"."site_regions"')
                     AND attname = 'region_id' AND attnum > 0 AND NOT attisdropped) THEN
-    missing := missing || E'\n  line 46: column region_id not found in cx.site_regions [AZ601]';
+    missing := missing || E'\n  line 49: column region_id not found in cx.site_regions [AZ601]';
   END IF;
-  IF to_regclass('"cx"."sites"') IS NULL THEN missing := missing || E'\n  line 47: table cx.sites not found [AZ601]';
+  IF to_regclass('"cx"."sites"') IS NULL THEN missing := missing || E'\n  line 50: table cx.sites not found [AZ601]';
   ELSIF NOT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = to_regclass('"cx"."sites"')
                     AND attname = 'region_id' AND attnum > 0 AND NOT attisdropped) THEN
-    missing := missing || E'\n  line 47: column region_id not found in cx.sites [AZ601]';
+    missing := missing || E'\n  line 50: column region_id not found in cx.sites [AZ601]';
   END IF;
-  IF to_regclass('"cx"."notes"') IS NULL THEN missing := missing || E'\n  line 51: table cx.notes not found [AZ601]';
+  IF to_regclass('"cx"."notes"') IS NULL THEN missing := missing || E'\n  line 54: table cx.notes not found [AZ601]';
   ELSIF NOT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = to_regclass('"cx"."notes"')
                     AND attname = 'id' AND attnum > 0 AND NOT attisdropped) THEN
-    missing := missing || E'\n  line 51: column id not found in cx.notes [AZ601]';
+    missing := missing || E'\n  line 54: column id not found in cx.notes [AZ601]';
   END IF;
-  IF to_regclass('"cx"."notes"') IS NULL THEN missing := missing || E'\n  line 52: table cx.notes not found [AZ601]';
+  IF to_regclass('"cx"."notes"') IS NULL THEN missing := missing || E'\n  line 55: table cx.notes not found [AZ601]';
   ELSIF NOT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = to_regclass('"cx"."notes"')
                     AND attname = 'author_id' AND attnum > 0 AND NOT attisdropped) THEN
-    missing := missing || E'\n  line 52: column author_id not found in cx.notes [AZ601]';
+    missing := missing || E'\n  line 55: column author_id not found in cx.notes [AZ601]';
   END IF;
   SELECT atttypid, replace(format_type(atttypid, NULL), 'character varying', 'varchar') INTO v_oid, v_type
   FROM pg_attribute WHERE attrelid = to_regclass('"cx"."users"') AND attname = 'id' AND attnum > 0 AND NOT attisdropped;
@@ -440,12 +440,12 @@ BEGIN
   SELECT atttypid, replace(format_type(atttypid, NULL), 'character varying', 'varchar') INTO v_oid, v_type
   FROM pg_attribute WHERE attrelid = to_regclass('"cx"."sites"') AND attname = 'id' AND attnum > 0 AND NOT attisdropped;
   IF FOUND AND v_oid <> to_regtype('bigint') THEN
-    missing := missing || E'\n  line 45: cx.sites.id is ' || v_type || E', not bigint: write its type after the key, (id ' || v_type || ') [AZ602]';
+    missing := missing || E'\n  line 48: cx.sites.id is ' || v_type || E', not bigint: write its type after the key, (id ' || v_type || ') [AZ602]';
   END IF;
   SELECT atttypid, replace(format_type(atttypid, NULL), 'character varying', 'varchar') INTO v_oid, v_type
   FROM pg_attribute WHERE attrelid = to_regclass('"cx"."notes"') AND attname = 'id' AND attnum > 0 AND NOT attisdropped;
   IF FOUND AND v_oid <> to_regtype('bigint') THEN
-    missing := missing || E'\n  line 51: cx.notes.id is ' || v_type || E', not bigint: write its type after the key, (id ' || v_type || ') [AZ602]';
+    missing := missing || E'\n  line 54: cx.notes.id is ' || v_type || E', not bigint: write its type after the key, (id ' || v_type || ') [AZ602]';
   END IF;
   IF missing <> '' THEN RAISE EXCEPTION 'the policy does not match this database:%', missing; END IF;
 END $chk$;
@@ -605,6 +605,8 @@ INSERT INTO authz_int.perms VALUES
   ('region', 'run'),
   ('region', 'rename'),
   ('region', 'fund'),
+  ('region', 'share'),
+  ('region', 'visit'),
   ('site', 'run'),
   ('site', 'guard'),
   ('note', 'write'),
@@ -625,7 +627,9 @@ CREATE TABLE authz_int.shared_relations (object_type text, relation text, subjec
 INSERT INTO authz_int.shared_relations VALUES
   ('folder', 'viewer', 'user', 'view', ARRAY['view']::text[], 'share folder.viewer user'),
   ('project', 'host', 'folder', 'edit', ARRAY['edit', 'view']::text[], 'share project.host folder'),
-  ('region', 'chief', 'user', 'run', ARRAY['run', 'rename', 'fund']::text[], 'share region.chief user');
+  ('region', 'chief', 'user', 'run', ARRAY['run', 'rename', 'fund', 'share', 'visit']::text[], 'share region.chief user'),
+  ('region', 'guest', 'user', 'rename', ARRAY['visit']::text[], 'share region.guest user'),
+  ('region', 'guest', 'link', 'rename', ARRAY['visit']::text[], 'share region.guest link');
 
 DO $w$
 DECLARE n bigint;
@@ -2009,7 +2013,7 @@ BEGIN
   BEGIN
     CREATE INDEX ON authz_probe ((coalesce((active), false)));
   EXCEPTION WHEN others THEN
-    RAISE EXCEPTION 'line 46: a condition that limits inheritance must give the same answer for every user at any time (%) [AZ603]', SQLERRM;
+    RAISE EXCEPTION 'line 49: a condition that limits inheritance must give the same answer for every user at any time (%) [AZ603]', SQLERRM;
   END;
   DROP TABLE authz_probe;
   FOR d IN SELECT DISTINCT p.oid::regprocedure AS fn
@@ -3484,7 +3488,7 @@ CREATE VIEW authz_int."region__chief" AS
   (SELECT g.object_id::bigint AS id FROM authz.shares g WHERE g.object_type = 'region' AND g.relation = 'chief' AND g.subject_type = 'user' AND g.subject_relation = '' AND g.subject_id = (SELECT authz.uid()::text) AND (g.expires_at IS NULL OR g.expires_at > now()) AND (g.starts_at IS NULL OR g.starts_at <= now()) AND g.caveat IS NULL);
 CREATE VIEW authz_gen."region__chief" WITH (security_barrier) AS SELECT id FROM authz_int."region__chief";
 
--- region.fund (line 43): chief
+-- region.fund (line 44): chief
 CREATE VIEW authz_int."region__fund" AS
   SELECT id FROM authz_int."region__chief";
 CREATE VIEW authz_gen."region__fund" WITH (security_barrier) AS SELECT id FROM authz_int."region__fund";
@@ -3551,7 +3555,7 @@ BEGIN
   WHERE EXISTS (SELECT 1 FROM "cx"."sites" w WHERE w."id" = x.id AND coalesce((not exists (select 1 from cx.closed c where c.site_id = w.id)), false));
 END $f$;
 
--- region.run (line 41): chief or over.run
+-- region.run (line 42): chief or over.run
 CREATE VIEW authz_int."region__run" AS
   SELECT c.did::bigint AS id FROM authz_int."region_site__over__tree" c
   WHERE c.dtype = 'region' AND (c.atype, c.aid) IN (
@@ -3560,12 +3564,31 @@ CREATE VIEW authz_int."region__run" AS
   SELECT 'site'::text, x::text FROM authz_int."site__run__start"() x);
 CREATE VIEW authz_gen."region__run" WITH (security_barrier) AS SELECT id FROM authz_int."region__run";
 
--- region.rename (line 42): chief
+-- region.rename (line 43): chief
 CREATE VIEW authz_int."region__rename" AS
   SELECT id FROM authz_int."region__chief";
 CREATE VIEW authz_gen."region__rename" WITH (security_barrier) AS SELECT id FROM authz_int."region__rename";
 
--- site.run (line 48): over.run
+-- region.share (line 45): run
+CREATE VIEW authz_int."region__share" AS
+  SELECT id FROM authz_int."region__run";
+CREATE VIEW authz_gen."region__share" WITH (security_barrier) AS SELECT id FROM authz_int."region__share";
+
+-- region.guest (line 41)
+CREATE VIEW authz_int."region__guest" AS
+  (SELECT g.object_id::bigint AS id FROM authz.shares g WHERE g.object_type = 'region' AND g.relation = 'guest' AND g.subject_type = 'user' AND g.subject_relation = '' AND g.subject_id = (SELECT authz.uid()::text) AND (g.expires_at IS NULL OR g.expires_at > now()) AND (g.starts_at IS NULL OR g.starts_at <= now()) AND g.caveat IS NULL)
+  UNION ALL
+  (SELECT g.object_id::bigint AS id FROM authz.shares g WHERE g.object_type = 'region' AND g.relation = 'guest' AND g.subject_type = 'link' AND g.subject_id = ANY ((SELECT authz.link_hashes())::text[]) AND (g.expires_at IS NULL OR g.expires_at > now()) AND (g.starts_at IS NULL OR g.starts_at <= now()) AND g.caveat IS NULL);
+CREATE VIEW authz_gen."region__guest" WITH (security_barrier) AS SELECT id FROM authz_int."region__guest";
+
+-- region.visit (line 46): guest or run
+CREATE VIEW authz_int."region__visit" AS
+  (SELECT id FROM authz_int."region__guest")
+  UNION ALL
+  (SELECT id FROM authz_int."region__run");
+CREATE VIEW authz_gen."region__visit" WITH (security_barrier) AS SELECT id FROM authz_int."region__visit";
+
+-- site.run (line 51): over.run
 CREATE VIEW authz_int."site__run" AS
   SELECT x.id FROM (
   SELECT c.did::bigint AS id FROM authz_int."region_site__over__tree" c
@@ -3576,14 +3599,14 @@ CREATE VIEW authz_int."site__run" AS
   WHERE EXISTS (SELECT 1 FROM "cx"."sites" w WHERE w."id" = x.id AND coalesce((not exists (select 1 from cx.closed c where c.site_id = w.id)), false));
 CREATE VIEW authz_gen."site__run" WITH (security_barrier) AS SELECT id FROM authz_int."site__run";
 
--- site.warden (line 47)
+-- site.warden (line 50)
 CREATE VIEW authz_int."site__warden" AS
   SELECT x.id FROM (
   SELECT r."id" AS id FROM "cx"."sites" r WHERE r."region_id" IN (SELECT id FROM authz_int."region__chief")) x
   WHERE EXISTS (SELECT 1 FROM "cx"."sites" w WHERE w."id" = x.id AND coalesce((not exists (select 1 from cx.closed c where c.site_id = w.id)), false));
 CREATE VIEW authz_gen."site__warden" WITH (security_barrier) AS SELECT id FROM authz_int."site__warden";
 
--- site.guard (line 49): warden or run
+-- site.guard (line 52): warden or run
 CREATE VIEW authz_int."site__guard" AS
   SELECT x.id FROM (
   (SELECT id FROM authz_int."site__warden")
@@ -3592,17 +3615,17 @@ CREATE VIEW authz_int."site__guard" AS
   WHERE EXISTS (SELECT 1 FROM "cx"."sites" w WHERE w."id" = x.id AND coalesce((not exists (select 1 from cx.closed c where c.site_id = w.id)), false));
 CREATE VIEW authz_gen."site__guard" WITH (security_barrier) AS SELECT id FROM authz_int."site__guard";
 
--- note.author (line 52)
+-- note.author (line 55)
 CREATE VIEW authz_int."note__author" AS
   SELECT r."id" AS id FROM "cx"."notes" r WHERE r."author_id" = (SELECT authz.uid());
 CREATE VIEW authz_gen."note__author" WITH (security_barrier) AS SELECT id FROM authz_int."note__author";
 
--- note.write (line 53): author
+-- note.write (line 56): author
 CREATE VIEW authz_int."note__write" AS
   SELECT id FROM authz_int."note__author";
 CREATE VIEW authz_gen."note__write" WITH (security_barrier) AS SELECT id FROM authz_int."note__write";
 
--- note.open (line 54): {author_id is null} and {id > 0}
+-- note.open (line 57): {author_id is null} and {id > 0}
 CREATE VIEW authz_int."note__open" AS
   SELECT r."id" AS id FROM "cx"."notes" r
   WHERE coalesce((author_id is null), false)
@@ -3774,7 +3797,7 @@ BEGIN
   RETURN ARRAY['no   there is no update rule for cx.notes: nobody may update its rows'];
 END $f$;
 
--- cx.notes insert (line 57): write
+-- cx.notes insert (line 60): write
 CREATE POLICY "authz_insert" ON "cx"."notes" FOR INSERT TO app_user
   WITH CHECK (((SELECT authz_int.scope_cmd('cx.notes', 'insert')) AND coalesce("notes"."author_id" = (SELECT authz.uid()), false))
     OR authz_gen."cx.notes:insert:refuse"(ROW("notes".*)::"cx"."notes"));
@@ -3895,7 +3918,7 @@ BEGIN
   RETURN ARRAY(SELECT * FROM authz_gen."cx.folders:update:why"(r_old)) || CASE WHEN p_row IS NULL THEN '{}'::text[] ELSE ARRAY['after the change:'] || ARRAY(SELECT '  ' || l FROM authz_gen."cx.folders:update:why"(r_new) l) END;
 END $f$;
 
--- cx.folders select (line 60): view
+-- cx.folders select (line 63): view
 CREATE POLICY "authz_select" ON "cx"."folders" FOR SELECT TO app_user
   USING (((SELECT authz_int.scope_cmd('cx.folders', 'select')) AND ((coalesce("folders"."owner_id" = (SELECT authz.uid()), false)
     OR EXISTS (SELECT 1 FROM authz_gen."folder__viewer" v WHERE v.id = "folders"."id")
@@ -3908,7 +3931,7 @@ CREATE POLICY "authz_select" ON "cx"."folders" FOR SELECT TO app_user
 
 COMMENT ON POLICY "authz_select" ON "cx"."folders" IS 'rowstile';
 
--- cx.folders update (line 61): edit
+-- cx.folders update (line 64): edit
 CREATE POLICY "authz_update" ON "cx"."folders" FOR UPDATE TO app_user
   USING (((SELECT authz_int.scope_cmd('cx.folders', 'update')) AND ((coalesce("folders"."owner_id" = (SELECT authz.uid()), false)
     OR (authz_gen."folder__check_46a73ef441"(ROW("folders".*)::"cx"."folders")
@@ -3924,7 +3947,7 @@ CREATE POLICY "authz_update" ON "cx"."folders" FOR UPDATE TO app_user
 
 COMMENT ON POLICY "authz_update" ON "cx"."folders" IS 'rowstile';
 
--- cx.folders delete (line 62): file
+-- cx.folders delete (line 65): file
 CREATE POLICY "authz_delete" ON "cx"."folders" FOR DELETE TO app_user
   USING (((SELECT authz_int.scope_cmd('cx.folders', 'delete')) AND ((coalesce("folders"."owner_id" = (SELECT authz.uid()), false)
     OR (coalesce((owner_id is null /* this.owner_id: nobody's */ and parent_type <> $$this.id$$ and parent_type <> e'it\'s' and id <>-1), false)
@@ -4010,7 +4033,7 @@ BEGIN
   RETURN ARRAY(SELECT * FROM authz_gen."cx.regions:update:why"(r_old)) || CASE WHEN p_row IS NULL THEN '{}'::text[] ELSE ARRAY['after the change:'] || ARRAY(SELECT '  ' || l FROM authz_gen."cx.regions:update:why"(r_new) l) END;
 END $f$;
 
--- cx.regions select (line 65): run
+-- cx.regions select (line 68): run
 CREATE POLICY "authz_select" ON "cx"."regions" FOR SELECT TO app_user
   USING (((SELECT authz_int.scope_cmd('cx.regions', 'select')) AND ((coalesce("regions"."chief_id" = (SELECT authz.uid()), false)
     OR EXISTS (SELECT 1 FROM authz_gen."region__chief__ext" v WHERE v.id = "regions"."id"))
@@ -4018,7 +4041,7 @@ CREATE POLICY "authz_select" ON "cx"."regions" FOR SELECT TO app_user
 
 COMMENT ON POLICY "authz_select" ON "cx"."regions" IS 'rowstile';
 
--- cx.regions update (line 66): rename
+-- cx.regions update (line 69): rename
 CREATE POLICY "authz_update" ON "cx"."regions" FOR UPDATE TO app_user
   USING (((SELECT authz_int.scope_cmd('cx.regions', 'update')) AND (coalesce("regions"."chief_id" = (SELECT authz.uid()), false)
     OR EXISTS (SELECT 1 FROM authz_gen."region__chief__ext" v WHERE v.id = "regions"."id"))))
@@ -4106,14 +4129,14 @@ BEGIN
   RETURN ARRAY(SELECT * FROM authz_gen."cx.sites:update:why"(r_old)) || CASE WHEN p_row IS NULL THEN '{}'::text[] ELSE ARRAY['after the change:'] || ARRAY(SELECT '  ' || l FROM authz_gen."cx.sites:update:why"(r_new) l) END;
 END $f$;
 
--- cx.sites select (line 69): run
+-- cx.sites select (line 72): run
 CREATE POLICY "authz_select" ON "cx"."sites" FOR SELECT TO app_user
   USING (((SELECT authz_int.scope_cmd('cx.sites', 'select')) AND (EXISTS (SELECT 1 FROM authz_gen."site__over__run" v WHERE v.id = "sites"."id")
     AND authz_gen."site__check_77cc73ddd9"(ROW("sites".*)::"cx"."sites"))));
 
 COMMENT ON POLICY "authz_select" ON "cx"."sites" IS 'rowstile';
 
--- cx.sites update (line 70): guard
+-- cx.sites update (line 73): guard
 CREATE POLICY "authz_update" ON "cx"."sites" FOR UPDATE TO app_user
   USING (((SELECT authz_int.scope_cmd('cx.sites', 'update')) AND ((EXISTS (SELECT 1 FROM authz_gen."region__chief" v WHERE v.id = "sites"."region_id")
     OR EXISTS (SELECT 1 FROM authz_gen."site__over__run" v WHERE v.id = "sites"."id"))
@@ -4272,7 +4295,7 @@ BEGIN
   RETURN ARRAY(SELECT * FROM authz_gen."cx.projects:update:why"(r_old)) || CASE WHEN p_row IS NULL THEN '{}'::text[] ELSE ARRAY['after the change:'] || ARRAY(SELECT '  ' || l FROM authz_gen."cx.projects:update:why"(r_new) l) || ARRAY(SELECT '  ' || l FROM authz_gen."cx.projects:update_after:why"(r_new) l) END;
 END $f$;
 
--- cx.projects select (line 73): view
+-- cx.projects select (line 76): view
 CREATE POLICY "authz_select" ON "cx"."projects" FOR SELECT TO app_user
   USING (((SELECT authz_int.scope_cmd('cx.projects', 'select')) AND (coalesce("projects"."lead_id" = (SELECT authz.uid()), false)
     OR EXISTS (SELECT 1 FROM authz_gen."project__inside__view" v WHERE v.id = "projects"."id")
@@ -4280,8 +4303,8 @@ CREATE POLICY "authz_select" ON "cx"."projects" FOR SELECT TO app_user
 
 COMMENT ON POLICY "authz_select" ON "cx"."projects" IS 'rowstile';
 
--- cx.projects update (line 74): edit
--- cx.projects update after (line 75): edit
+-- cx.projects update (line 77): edit
+-- cx.projects update after (line 78): edit
 CREATE POLICY "authz_update" ON "cx"."projects" FOR UPDATE TO app_user
   USING (((SELECT authz_int.scope_cmd('cx.projects', 'update')) AND (coalesce("projects"."lead_id" = (SELECT authz.uid()), false)
     OR EXISTS (SELECT 1 FROM authz_gen."project__inside__edit" v WHERE v.id = "projects"."id")
@@ -4293,7 +4316,7 @@ CREATE POLICY "authz_update" ON "cx"."projects" FOR UPDATE TO app_user
 
 COMMENT ON POLICY "authz_update" ON "cx"."projects" IS 'rowstile';
 
--- cx.projects delete (line 76): fund
+-- cx.projects delete (line 79): fund
 CREATE POLICY "authz_delete" ON "cx"."projects" FOR DELETE TO app_user
   USING (((SELECT authz_int.scope_cmd('cx.projects', 'delete')) AND (coalesce("projects"."lead_id" = (SELECT authz.uid()), false)
     OR EXISTS (SELECT 1 FROM authz_gen."project__backer__fund" v WHERE v.id = "projects"."id"))));
@@ -4312,7 +4335,7 @@ BEGIN
   END LOOP;
 END $fk$;
 
--- cx.sites_seen: the rows of cx.sites the user may select (line 69: run)
+-- cx.sites_seen: the rows of cx.sites the user may select (line 72: run)
 -- @object view "cx"."sites_seen"
 DO $mv$
 DECLARE cols text; uses text;
@@ -4435,6 +4458,13 @@ BEGIN
     OR EXISTS (SELECT 1 FROM authz_gen."region__chief__ext" v WHERE v.id = o."id"))));
         WHEN 'fund' THEN RETURN EXISTS (SELECT 1 FROM "cx"."regions" o WHERE o."id" = v_bigint AND ((coalesce(o."chief_id" = (SELECT authz.uid()), false)
     OR EXISTS (SELECT 1 FROM authz_gen."region__chief__ext" v WHERE v.id = o."id"))));
+        WHEN 'share' THEN RETURN EXISTS (SELECT 1 FROM "cx"."regions" o WHERE o."id" = v_bigint AND (((coalesce(o."chief_id" = (SELECT authz.uid()), false)
+    OR EXISTS (SELECT 1 FROM authz_gen."region__chief__ext" v WHERE v.id = o."id"))
+    OR EXISTS (SELECT 1 FROM authz_gen."region__over__run" v WHERE v.id = o."id"))));
+        WHEN 'visit' THEN RETURN EXISTS (SELECT 1 FROM "cx"."regions" o WHERE o."id" = v_bigint AND ((EXISTS (SELECT 1 FROM authz_gen."region__guest" v WHERE v.id = o."id")
+    OR (coalesce(o."chief_id" = (SELECT authz.uid()), false)
+    OR EXISTS (SELECT 1 FROM authz_gen."region__chief__ext" v WHERE v.id = o."id"))
+    OR EXISTS (SELECT 1 FROM authz_gen."region__over__run" v WHERE v.id = o."id"))));
         ELSE RAISE EXCEPTION 'no permission %.% in the policy', p_type, p_perm USING HINT = 'rowstile help AZ707';
       END CASE;
     WHEN 'site' THEN
@@ -4707,6 +4737,47 @@ BEGIN
     OR EXISTS (SELECT 1 FROM authz_gen."region__chief__ext" v WHERE v.id = o."id"))
         ORDER BY o."id" LIMIT p_limit;
       END IF;
+    WHEN 'region.share' THEN
+      IF p_limit IS NULL AND p_after IS NULL THEN
+        RETURN QUERY SELECT o."id"::text FROM "cx"."regions" o
+        WHERE ((coalesce(o."chief_id" = (SELECT authz.uid()), false)
+    OR EXISTS (SELECT 1 FROM authz_gen."region__chief__ext" v WHERE v.id = o."id"))
+    OR EXISTS (SELECT 1 FROM authz_gen."region__over__run" v WHERE v.id = o."id"));
+      ELSIF p_after IS NULL THEN
+        RETURN QUERY SELECT o."id"::text FROM "cx"."regions" o
+        WHERE ((coalesce(o."chief_id" = (SELECT authz.uid()), false)
+    OR EXISTS (SELECT 1 FROM authz_gen."region__chief__ext" v WHERE v.id = o."id"))
+    OR EXISTS (SELECT 1 FROM authz_gen."region__over__run" v WHERE v.id = o."id"))
+        ORDER BY o."id" LIMIT p_limit;
+      ELSE
+        RETURN QUERY SELECT o."id"::text FROM "cx"."regions" o
+        WHERE o."id" > p_after::bigint AND ((coalesce(o."chief_id" = (SELECT authz.uid()), false)
+    OR EXISTS (SELECT 1 FROM authz_gen."region__chief__ext" v WHERE v.id = o."id"))
+    OR EXISTS (SELECT 1 FROM authz_gen."region__over__run" v WHERE v.id = o."id"))
+        ORDER BY o."id" LIMIT p_limit;
+      END IF;
+    WHEN 'region.visit' THEN
+      IF p_limit IS NULL AND p_after IS NULL THEN
+        RETURN QUERY SELECT o."id"::text FROM "cx"."regions" o
+        WHERE (EXISTS (SELECT 1 FROM authz_gen."region__guest" v WHERE v.id = o."id")
+    OR (coalesce(o."chief_id" = (SELECT authz.uid()), false)
+    OR EXISTS (SELECT 1 FROM authz_gen."region__chief__ext" v WHERE v.id = o."id"))
+    OR EXISTS (SELECT 1 FROM authz_gen."region__over__run" v WHERE v.id = o."id"));
+      ELSIF p_after IS NULL THEN
+        RETURN QUERY SELECT o."id"::text FROM "cx"."regions" o
+        WHERE (EXISTS (SELECT 1 FROM authz_gen."region__guest" v WHERE v.id = o."id")
+    OR (coalesce(o."chief_id" = (SELECT authz.uid()), false)
+    OR EXISTS (SELECT 1 FROM authz_gen."region__chief__ext" v WHERE v.id = o."id"))
+    OR EXISTS (SELECT 1 FROM authz_gen."region__over__run" v WHERE v.id = o."id"))
+        ORDER BY o."id" LIMIT p_limit;
+      ELSE
+        RETURN QUERY SELECT o."id"::text FROM "cx"."regions" o
+        WHERE o."id" > p_after::bigint AND (EXISTS (SELECT 1 FROM authz_gen."region__guest" v WHERE v.id = o."id")
+    OR (coalesce(o."chief_id" = (SELECT authz.uid()), false)
+    OR EXISTS (SELECT 1 FROM authz_gen."region__chief__ext" v WHERE v.id = o."id"))
+    OR EXISTS (SELECT 1 FROM authz_gen."region__over__run" v WHERE v.id = o."id"))
+        ORDER BY o."id" LIMIT p_limit;
+      END IF;
     WHEN 'site.run' THEN
       IF p_limit IS NULL AND p_after IS NULL THEN
         RETURN QUERY SELECT o."id"::text FROM "cx"."sites" o
@@ -4785,7 +4856,7 @@ BEGIN
     WHEN 'user' THEN names := ARRAY[]::text[];
     WHEN 'folder' THEN names := ARRAY['edit', 'view', 'file', 'fund']::text[];
     WHEN 'project' THEN names := ARRAY['edit', 'view', 'file', 'fund']::text[];
-    WHEN 'region' THEN names := ARRAY['run', 'rename', 'fund']::text[];
+    WHEN 'region' THEN names := ARRAY['run', 'rename', 'fund', 'share', 'visit']::text[];
     WHEN 'site' THEN names := ARRAY['run', 'guard']::text[];
     WHEN 'note' THEN names := ARRAY['write', 'open']::text[];
     ELSE RAISE EXCEPTION 'no type % in the policy', p_type USING HINT = 'rowstile help AZ707';
@@ -5174,6 +5245,11 @@ LANGUAGE sql STABLE STRICT SECURITY DEFINER SET search_path FROM CURRENT ROWS 50
   (SELECT g.subject_id::bigint FROM authz.shares g WHERE g.object_type = 'region' AND g.object_id = (p_id)::text AND g.relation = 'chief' AND g.subject_type = 'user' AND g.subject_relation = '' AND g.subject_id <> '*')
 $f$;
 
+CREATE FUNCTION authz_int."region__guest__who"(p_id bigint) RETURNS SETOF bigint
+LANGUAGE sql STABLE STRICT SECURITY DEFINER SET search_path FROM CURRENT ROWS 50 AS $f$
+  SELECT g.subject_id::bigint FROM authz.shares g WHERE g.object_type = 'region' AND g.object_id = (p_id)::text AND g.relation = 'guest' AND g.subject_type = 'user' AND g.subject_relation = '' AND g.subject_id <> '*'
+$f$;
+
 CREATE FUNCTION authz_int."site__warden__who"(p_id bigint) RETURNS SETOF bigint
 LANGUAGE sql STABLE STRICT SECURITY DEFINER SET search_path FROM CURRENT ROWS 50 AS $f$
   SELECT x FROM "cx"."sites" r, LATERAL authz_int."region__chief__who"(r."region_id") x WHERE r."id" = p_id
@@ -5297,6 +5373,18 @@ $f$;
 CREATE FUNCTION authz_int."region__fund__who"(p_id bigint) RETURNS SETOF bigint
 LANGUAGE sql STABLE STRICT SECURITY DEFINER SET search_path FROM CURRENT ROWS 50 AS $f$
   SELECT x FROM authz_int."region__chief__who"(p_id) x
+$f$;
+
+CREATE FUNCTION authz_int."region__share__who"(p_id bigint) RETURNS SETOF bigint
+LANGUAGE sql STABLE STRICT SECURITY DEFINER SET search_path FROM CURRENT ROWS 50 AS $f$
+  SELECT x FROM authz_int."region__run__who"(p_id) x
+$f$;
+
+CREATE FUNCTION authz_int."region__visit__who"(p_id bigint) RETURNS SETOF bigint
+LANGUAGE sql STABLE STRICT SECURITY DEFINER SET search_path FROM CURRENT ROWS 50 AS $f$
+  (SELECT x FROM authz_int."region__guest__who"(p_id) x)
+  UNION ALL
+  (SELECT x FROM authz_int."region__run__who"(p_id) x)
 $f$;
 
 CREATE FUNCTION authz_int."site__run__who_base"(p_id bigint) RETURNS SETOF bigint
@@ -5771,6 +5859,21 @@ BEGIN
   RETURN NEXT pad || 'no   you do not hold region.chief';
 END $f$;
 
+CREATE FUNCTION authz_int."region__guest__why"(p_id bigint, p_depth int, p_seen text[])
+RETURNS SETOF text LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path FROM CURRENT AS $f$
+DECLARE pad text := repeat('  ', p_depth); v_t record;
+BEGIN
+  IF p_id IN (SELECT g.object_id::bigint AS id FROM authz.shares g WHERE g.object_type = 'region' AND g.relation = 'guest' AND g.subject_type = 'user' AND g.subject_relation = '' AND g.subject_id = (SELECT authz.uid()::text) AND (g.expires_at IS NULL OR g.expires_at > now()) AND (g.starts_at IS NULL OR g.starts_at <= now()) AND g.caveat IS NULL) THEN
+    RETURN NEXT pad || 'yes  ' || 'guest: shared with you' || coalesce((SELECT concat(' (by ', coalesce(g.created_by, 'an admin'), coalesce(', until ' || g.expires_at, ''), coalesce(', from ' || g.starts_at, ''), coalesce(', caveat ' || g.caveat, ''), ')') FROM authz.shares g WHERE g.object_type = 'region' AND g.object_id = p_id::text AND g.relation = 'guest' AND g.subject_type = 'user' AND (g.expires_at IS NULL OR g.expires_at > now()) AND (g.starts_at IS NULL OR g.starts_at <= now()) AND g.caveat IS NULL ORDER BY g.created_at LIMIT 1), '');
+    RETURN;
+  END IF;
+  IF p_id IN (SELECT g.object_id::bigint AS id FROM authz.shares g WHERE g.object_type = 'region' AND g.relation = 'guest' AND g.subject_type = 'link' AND g.subject_id = ANY ((SELECT authz.link_hashes())::text[]) AND (g.expires_at IS NULL OR g.expires_at > now()) AND (g.starts_at IS NULL OR g.starts_at <= now()) AND g.caveat IS NULL) THEN
+    RETURN NEXT pad || 'yes  ' || 'guest: shared by a link you presented' || coalesce((SELECT concat(' (by ', coalesce(g.created_by, 'an admin'), coalesce(', until ' || g.expires_at, ''), coalesce(', from ' || g.starts_at, ''), coalesce(', caveat ' || g.caveat, ''), ')') FROM authz.shares g WHERE g.object_type = 'region' AND g.object_id = p_id::text AND g.relation = 'guest' AND g.subject_type = 'link' AND (g.expires_at IS NULL OR g.expires_at > now()) AND (g.starts_at IS NULL OR g.starts_at <= now()) AND g.caveat IS NULL ORDER BY g.created_at LIMIT 1), '');
+    RETURN;
+  END IF;
+  RETURN NEXT pad || 'no   you do not hold region.guest';
+END $f$;
+
 CREATE FUNCTION authz_int."region__run__why"(p_id bigint, p_depth int, p_seen text[])
 RETURNS SETOF text LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path FROM CURRENT AS $f$
 DECLARE pad text := repeat('  ', p_depth); v_ok boolean; v_done boolean := false; v_t record;
@@ -5838,6 +5941,37 @@ BEGIN
     v_ok := (p_id) IN (SELECT id FROM authz_int."region__chief");
     RETURN NEXT pad || CASE WHEN v_ok THEN 'yes  ' ELSE 'no   ' END || 'chief';
     IF v_ok AND NOT v_done THEN v_done := true; RETURN QUERY SELECT * FROM authz_int."region__chief__why"(p_id, p_depth + 1, p_seen); END IF;
+  END;
+END $f$;
+
+CREATE FUNCTION authz_int."region__share__why"(p_id bigint, p_depth int, p_seen text[])
+RETURNS SETOF text LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path FROM CURRENT AS $f$
+DECLARE pad text := repeat('  ', p_depth); v_ok boolean; v_done boolean := false; v_t record;
+        v_holds boolean := p_id IN (SELECT id FROM authz_int."region__share");
+BEGIN
+  IF p_depth > 60 THEN RETURN NEXT pad || '...'; RETURN; END IF;
+  RETURN NEXT pad || 'region.share = run';
+  BEGIN
+    v_ok := (p_id) IN (SELECT id FROM authz_int."region__run");
+    RETURN NEXT pad || CASE WHEN v_ok THEN 'yes  ' ELSE 'no   ' END || 'run';
+    IF v_ok AND NOT v_done THEN v_done := true; RETURN QUERY SELECT * FROM authz_int."region__run__why"(p_id, p_depth + 1, p_seen); END IF;
+  END;
+END $f$;
+
+CREATE FUNCTION authz_int."region__visit__why"(p_id bigint, p_depth int, p_seen text[])
+RETURNS SETOF text LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path FROM CURRENT AS $f$
+DECLARE pad text := repeat('  ', p_depth); v_ok boolean; v_done boolean := false; v_t record;
+        v_holds boolean := p_id IN (SELECT id FROM authz_int."region__visit");
+BEGIN
+  IF p_depth > 60 THEN RETURN NEXT pad || '...'; RETURN; END IF;
+  RETURN NEXT pad || 'region.visit = guest or run';
+  BEGIN
+    v_ok := (p_id) IN (SELECT id FROM authz_int."region__guest");
+    RETURN NEXT pad || CASE WHEN v_ok THEN 'yes  ' ELSE 'no   ' END || 'guest';
+    IF v_ok AND NOT v_done THEN v_done := true; RETURN QUERY SELECT * FROM authz_int."region__guest__why"(p_id, p_depth + 1, p_seen); END IF;
+    v_ok := (p_id) IN (SELECT id FROM authz_int."region__run");
+    RETURN NEXT pad || CASE WHEN v_ok THEN 'yes  ' ELSE 'no   ' END || 'run';
+    IF v_ok AND NOT v_done THEN v_done := true; RETURN QUERY SELECT * FROM authz_int."region__run__why"(p_id, p_depth + 1, p_seen); END IF;
   END;
 END $f$;
 
@@ -6119,6 +6253,18 @@ BEGIN
             PERFORM authz_int.sign();
             IF authz.can(p_type, p_id, p_perm) THEN RETURN NEXT v_c; END IF;
           END LOOP;
+        WHEN 'share' THEN
+          FOR v_c IN SELECT DISTINCT x::text FROM authz_int."region__share__who"(v_bigint) x WHERE EXISTS (SELECT 1 FROM "cx"."users" u WHERE u."id" = x) LOOP
+            PERFORM set_config('authz.user_id', v_c, true);
+            PERFORM authz_int.sign();
+            IF authz.can(p_type, p_id, p_perm) THEN RETURN NEXT v_c; END IF;
+          END LOOP;
+        WHEN 'visit' THEN
+          FOR v_c IN SELECT DISTINCT x::text FROM authz_int."region__visit__who"(v_bigint) x WHERE EXISTS (SELECT 1 FROM "cx"."users" u WHERE u."id" = x) LOOP
+            PERFORM set_config('authz.user_id', v_c, true);
+            PERFORM authz_int.sign();
+            IF authz.can(p_type, p_id, p_perm) THEN RETURN NEXT v_c; END IF;
+          END LOOP;
         ELSE RAISE EXCEPTION 'no permission %.% in the policy', p_type, p_perm USING HINT = 'rowstile help AZ707';
       END CASE;
     WHEN 'site' THEN
@@ -6232,6 +6378,8 @@ BEGIN
         WHEN 'run' THEN RETURN QUERY SELECT * FROM authz_int."region__run__why"(v_bigint, 1, '{}');
         WHEN 'rename' THEN RETURN QUERY SELECT * FROM authz_int."region__rename__why"(v_bigint, 1, '{}');
         WHEN 'fund' THEN RETURN QUERY SELECT * FROM authz_int."region__fund__why"(v_bigint, 1, '{}');
+        WHEN 'share' THEN RETURN QUERY SELECT * FROM authz_int."region__share__why"(v_bigint, 1, '{}');
+        WHEN 'visit' THEN RETURN QUERY SELECT * FROM authz_int."region__visit__why"(v_bigint, 1, '{}');
         ELSE RAISE EXCEPTION 'no permission %.% in the policy', p_type, p_perm USING HINT = 'rowstile help AZ707';
       END CASE;
     WHEN 'site' THEN
@@ -7065,7 +7213,7 @@ WHERE w.who IS NOT NULL AND n.nspname !~ '^pg_(toast_)?temp_' LOOP
     END IF;
   END LOOP;
   -- columns that grant a relation, changed by anyone who may update the row
-  FOR r IN SELECT * FROM (VALUES ('"cx"."folders"', 'parent_id', 'folder.parent', 'relation folder.parent parent_id', 'nobody'), ('"cx"."folders"', 'parent_type', 'folder.parent', 'relation folder.parent parent_type', 'nobody'), ('"cx"."folders"', 'owner_id', 'folder.owner', 'relation folder.owner owner_id', 'nobody'), ('"cx"."projects"', 'lead_id', 'project.lead', 'relation project.lead lead_id', 'nobody'), ('"cx"."regions"', 'chief_id', 'region.chief', 'relation region.chief chief_id', 'nobody'), ('"cx"."sites"', 'region_id', 'site.warden', 'relation site.warden region_id', 'nobody')) v(tbl, col, what, loc, ask)
+  FOR r IN SELECT * FROM (VALUES ('"cx"."folders"', 'parent_id', 'folder.parent', 'relation folder.parent parent_id', 'nobody'), ('"cx"."folders"', 'parent_type', 'folder.parent', 'relation folder.parent parent_type', 'nobody'), ('"cx"."folders"', 'owner_id', 'folder.owner', 'relation folder.owner owner_id', 'nobody'), ('"cx"."projects"', 'lead_id', 'project.lead', 'relation project.lead lead_id', 'nobody'), ('"cx"."regions"', 'chief_id', 'region.chief', 'relation region.chief chief_id', 'share'), ('"cx"."sites"', 'region_id', 'site.warden', 'relation site.warden region_id', 'nobody')) v(tbl, col, what, loc, ask)
            WHERE tbl IS NOT NULL LOOP
     IF EXISTS (SELECT 1 FROM pg_attribute a WHERE a.attrelid = to_regclass(r.tbl) AND a.attname = r.col
                AND a.attnum > 0 AND NOT a.attisdropped)
@@ -7229,18 +7377,20 @@ INSERT INTO authz_gen.policy_lines VALUES
   ('relation folder.parent parent_type', 'line 16'),
   ('relation project.lead lead_id', 'line 29'),
   ('relation region.chief chief_id', 'line 39'),
-  ('relation site.warden region_id', 'line 47'),
-  ('rule cx.folders delete', 'line 62'),
-  ('rule cx.folders update', 'line 61'),
-  ('rule cx.notes insert', 'line 57'),
-  ('rule cx.projects delete', 'line 76'),
-  ('rule cx.projects update', 'line 74'),
-  ('rule cx.projects update after', 'line 75'),
-  ('rule cx.regions update', 'line 66'),
-  ('rule cx.sites update', 'line 70'),
+  ('relation site.warden region_id', 'line 50'),
+  ('rule cx.folders delete', 'line 65'),
+  ('rule cx.folders update', 'line 64'),
+  ('rule cx.notes insert', 'line 60'),
+  ('rule cx.projects delete', 'line 79'),
+  ('rule cx.projects update', 'line 77'),
+  ('rule cx.projects update after', 'line 78'),
+  ('rule cx.regions update', 'line 69'),
+  ('rule cx.sites update', 'line 73'),
   ('share folder.viewer user', 'line 18'),
   ('share project.host folder', 'line 28'),
-  ('share region.chief user', 'line 40');
+  ('share region.chief user', 'line 40'),
+  ('share region.guest link', 'line 41'),
+  ('share region.guest user', 'line 41');
 
 DO $k$
 DECLARE v_old text;

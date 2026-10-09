@@ -144,6 +144,13 @@ def text_array(items: Sequence[str]) -> str:
 
 # a custom role's id no role has: changing or deleting it is refused as one the user may not manage is
 MISSING_ROLE = "999999"
+# a link's id (the start of its token's hash) no link has
+MISSING_LINK = "ffffffffffffffff"
+
+
+def link_ids(links: list[tuple[str, str]]) -> list[str]:
+    """The ids of an object's links (relation, id), and one no link has: what is tried to turn off, in order."""
+    return [*sorted({lid for _, lid in links}), MISSING_LINK]
 
 
 # ----------------------------------------------------------------------
@@ -371,6 +378,14 @@ class Checker:
             )
             if owner_type in self.role_owners
         }
+        # the relations a link may be given on each type, with the permission that manages them (unsharing one, or
+        # turning it off: none if the type hasn't it), as the compiled catalog says
+        self.link_by: dict[tuple[str, str], str | None] = {
+            (tname, rname): by if by in self.types[tname].perms else None
+            for tname, rname, by in self.db.rows(
+                "SELECT object_type, relation, shared_by FROM authz_int.shared_relations WHERE subject = 'link'"
+            )
+        }
         # the rows explain is asked about by each user themselves, whether they may see them or not: picked here
         sample = {
             t.name: [
@@ -378,6 +393,23 @@ class Checker:
             ]
             for t in self.types.values()
         }
+        # the links on those rows of the types links may be given on, and on up to three more rows of each that have
+        # some: (relation, the link's id), as the owner reads them, expired or not, as authz.list_links lists them
+        self.links_now: dict[tuple[str, str], list[tuple[str, str]]] = {
+            (tname, i): [] for tname in dict.fromkeys(t for t, _ in self.link_by) for i in sample[tname]
+        }
+        if self.links_now:
+            more: dict[str, int] = {}
+            for tname, i, rname, lid in self.db.rows(
+                "SELECT object_type, object_id, relation, left(subject_id, 16) FROM authz.shares "
+                "WHERE subject_type = 'link' ORDER BY md5(object_id), 1, 2, 3, 4"
+            ):
+                if (tname, i) not in self.links_now:
+                    if more.get(tname, 0) == 3 or not any(t == tname for t, _ in self.link_by):
+                        continue
+                    more[tname] = more.get(tname, 0) + 1
+                    self.links_now[(tname, i)] = []
+                self.links_now[(tname, i)].append((rname, lid))
         for u in self.users:
             lines = []
             blocks.append(lines)
@@ -459,6 +491,12 @@ class Checker:
                         f"SELECT json_build_array(difftest_app.try_set_role_permissions({rid}, {text_array(perms)}), "
                         f"difftest_app.try_delete_role({rid}))",
                     )
+                # the links on each row tried: listed, and each turned off (and one that isn't there), undone
+                for (tname, i), links in self.links_now.items() if u == sharer else ():
+                    tries = [f"difftest_app.try_list_links({lit(tname)}, {lit(i)})"] + [
+                        f"difftest_app.try_revoke_link({lit(tname)}, {lit(i)}, {lit(lid)})" for lid in link_ids(links)
+                    ]
+                    emit([u, "links", tname, i], f"SELECT json_build_array({', '.join(tries)})")
                 # authz.explain_rule's verdict on an update that changes nothing, and on a delete, as the app asks it
                 for table in dict.fromkeys(r.table for r in self.rules):
                     t = self.ref.type_of_table(table)
@@ -650,6 +688,7 @@ class Checker:
             ),
             ("set_role_permissions", "r bigint, ps text[]", "authz.set_role_permissions(r, ps)"),
             ("delete_role", "r bigint", "authz.delete_role(r)"),
+            ("revoke_link", "t text, i text, l text", "authz.revoke_link(t, i, l)"),
         ):
             lines.append(
                 f"CREATE OR REPLACE FUNCTION difftest_app.try_{name}({args}) RETURNS text "
@@ -662,6 +701,12 @@ class Checker:
             "CREATE OR REPLACE FUNCTION difftest_app.try_roles_of(ot text, oi text) RETURNS text "
             "LANGUAGE plpgsql AS $f$ BEGIN "
             "RETURN 'ok ' || coalesce((SELECT string_agg(r.id::text, ',' ORDER BY r.id) FROM authz.roles_of(ot, oi) r), ''); "
+            "EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || SQLERRM; END $f$;"
+        )
+        lines.append(  # and the links on an object: 'ok' and each one's relation:id, or the refusal
+            "CREATE OR REPLACE FUNCTION difftest_app.try_list_links(t text, i text) RETURNS text "
+            "LANGUAGE plpgsql AS $f$ BEGIN "
+            "RETURN 'ok ' || coalesce((SELECT string_agg(l.relation || ':' || l.id, ',') FROM authz.list_links(t, i) l), ''); "
             "EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || SQLERRM; END $f$;"
         )
         return lines
@@ -773,6 +818,41 @@ class Checker:
                 )
         return problems
 
+    def link_problems(self, snap: Snapshot, u: str, state: evaluate.State, signed_in: bool) -> list[str]:
+        """The links API as user u tried it (when it was their turn), by the reference: whoever holds share on the
+        object sees all its links (signed in or not); otherwise the links of the relations they may manage (signed
+        in, holding the permission a relation is shared by), and none at all is a refusal. Turning one off: among
+        those, each link with that id must be one they could unshare; an id none has is no link."""
+        problems: list[str] = []
+        for (tname, i), links in self.links_now.items():
+            got = snap.get((u, "links", tname, i))
+            if got is None:
+                continue
+            t = self.types[tname]
+            held = {p for p in t.perms if i in state[(tname, p)] & self.ref.ids(t)}
+            manageable = {r for (o, r), by in self.link_by.items() if o == tname and signed_in and by in held}
+            visible: set[str] | None = {r for r, _ in links} if "share" in held else (manageable or None)
+            if visible is None:
+                want = [f"42501: you cannot see the links of {tname} {i}"]
+                want += [f"42501: you cannot turn off the links of {tname} {i}"] * len(link_ids(links))
+            else:
+                listed = ",".join(sorted(f"{r}:{lid}" for r, lid in links if r in visible))
+                want = [f"ok {listed}"]
+                for lid in link_ids(links):
+                    rows = [r for r, x in links if x == lid and r in visible]
+                    if not rows:
+                        want.append(f"P0001: no link {lid} on {tname} {i}")
+                    elif not all(r in manageable for r in rows):
+                        want.append(f"42501: you cannot turn off link {lid} of {tname} {i} (you could not unshare it)")
+                    else:
+                        want.append("ok")
+            # the list's order is the database's (its collation): compared as a set
+            if got[0].startswith("ok "):
+                got = [f"ok {','.join(sorted(x for x in got[0][3:].split(',') if x))}", *got[1:]]
+            if got != want:
+                problems.append(f"user {u}: authz.list_links and revoke_link on {tname} {i} say {got}, expected {want}")
+        return problems
+
     def rule_allows(self, state: evaluate.State, table: str, cmd: str, i: str) -> bool:
         """Whether table's rules let cmd through on row i as it is: a delete by its rule; an update that changes
         nothing by its rule on the row before and its after rule (or the update rule again) on the row after."""
@@ -868,6 +948,7 @@ class Checker:
                             f"user {u}: authz.create_link('{tname}', {i}, '{rname}') says {got!r}, expected {want!r}"
                         )
             problems += self.role_problems(snap, u, state, signed_in)
+            problems += self.link_problems(snap, u, state, signed_in)
             # perms_of: the public permissions held on each object, no more (a type without any: none)
             for t in self.types.values():
                 public = [p for p, x in t.perms.items() if not x.hidden]
@@ -1894,7 +1975,8 @@ class CrossGen(Gen):
     each naming another type). Shapes no other policy has: what is filed comes down through a relation whose
     types are partly inside the recursion and partly outside it, narrowed by a condition with a comment, dollar
     quotes and an E'' string in it; a type whose where reads another table (cx.closed); a region's chief named by
-    a column and by shares; a site's wardens, the chiefs of the region a column names; an update rule with an
+    a column and by shares; a region's guests, users or links, whose links whoever may share the region sees and
+    only its chiefs turn off; a site's wardens, the chiefs of the region a column names; an update rule with an
     after rule on the whole row; notes, a table with rules and no select rule, whose `open` is conditions alone; a
     project's backers, folders or regions a table names with their type (one it doesn't know gives nothing)."""
 
@@ -1961,7 +2043,13 @@ class CrossGen(Gen):
         )
 
     def grants(self) -> str:
-        return "\n".join(self.grant() for _ in range(10))
+        # a link on each region to begin with: seen by whoever runs it, turned off only by its chiefs
+        links = [
+            f"INSERT INTO authz.shares VALUES ('region', {i}, 'guest', 'link', "
+            f"encode(sha256(convert_to({lit(self.r.choice(['cx-a', 'cx-b']))}, 'UTF8')), 'hex'), '', NULL);"
+            for i in range(1, 5)
+        ]
+        return "\n".join(links + [self.grant() for _ in range(10)])
 
     def grant(self, ids: Ids | None = None) -> str:
         r = self.r
@@ -1971,6 +2059,16 @@ class CrossGen(Gen):
             return (
                 f"INSERT INTO authz.shares VALUES ('region', {r.choice(regions)}, 'chief', 'user', "
                 f"{r.choice(self.users)}, '', {r.choice(['NULL', EXPIRED])}) ON CONFLICT DO NOTHING;"
+            )
+        if r.random() < 0.2:  # a region's guest: a user, or a link (nobody here presents its token)
+            regions = ints(ids, "region") or list(range(1, 5))
+            token = lit(r.choice(["cx-a", "cx-b"]))
+            kind, sid = r.choice(
+                [("user", r.choice(self.users)), ("link", f"encode(sha256(convert_to({token}, 'UTF8')), 'hex')")]
+            )
+            return (
+                f"INSERT INTO authz.shares VALUES ('region', {r.choice(regions)}, 'guest', '{kind}', {sid}, '', NULL) "
+                "ON CONFLICT DO NOTHING;"
             )
         if r.random() < 0.5:  # a project shared with a folder: a link, which never expires
             return (

@@ -38,9 +38,12 @@ type region = cx.regions                                                    -- r
   over  : region = cx.region_links(region_id -> parent_id)                   -- but a link's where stops them
   chief : user   = chief_id
   chief : user   shared by run
-  can run = chief or over.run
+  guest : user, link  shared by rename                                     -- whoever may share a region sees its
+  can run = chief or over.run                                              -- links; only its chiefs turn them off
   can rename = chief
   can fund = chief
+  can share = run
+  can visit = guest or run
 
 type site = cx.sites where {not exists (select 1 from cx.closed c where c.site_id = this.id)}
   over   : region = cx.site_regions(site_id -> region_id) where {active}
