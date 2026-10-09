@@ -381,6 +381,10 @@ Each release upgrades from the one before it. How releases are numbered and made
   (or `master`): it exits 2 only where there is neither, not whenever `--base` is left out. Each promise of the
   reference, the threat model and the page on how rowstile is checked now names the check that holds it, and
   every code block of the reference runs (`core/tests/reference.sh`).
+- Two tables whose rules named the same view (`rules app.folders view app.visible` and `rules app.files view
+  app.visible`) passed `rowstile check`, and `rowstile apply`, `push` and `migrate` stopped with a Python traceback
+  (`ValueError: view "app"."visible" is made twice`). It is refused when the policy is compiled, naming both lines
+  (AZ109).
 
 ## 0.1.0 (alpha)
 

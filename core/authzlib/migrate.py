@@ -187,8 +187,8 @@ def read(compiler: Compiler, policy: str, files: dict[str, str]) -> Compiled:
             items += objs
     seen: dict[str, Obj] = {}
     for o in (o for it in items for o in ([it] if isinstance(it, Obj) else it.objs if isinstance(it, Tree) else [])):
-        if o.ident in seen:
-            raise ValueError(f"{o.ident} is made twice")
+        # (the compiler makes each object once: a view two tables' rules would name alike is refused, AZ109)
+        assert o.ident not in seen, f"{o.ident} is made twice"
         seen[o.ident] = o
     return Compiled(items, meaning_lines(policy, files), policy, files)
 

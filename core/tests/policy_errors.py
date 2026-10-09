@@ -547,6 +547,12 @@ COMPILE = [
         "alt.docs already has the view alt.v1",
         12,
     ),
+    (
+        "two tables given the same view (applying would make it twice)",
+        "rules alt.docs view alt.v\n  select : share\nrules alt.groups view alt.v\n  select : member\n",
+        "alt.v is already the view of alt.docs (line 10): give alt.groups a view of its own",
+        12,
+    ),
     ("a caveat defined twice", "caveat c = {true}\ncaveat c = {true}\n", "caveat c is defined twice", 11),
     ("a test's given without a statement", 'test "t"\n  given x = { }\n', "given {...} needs a statement", 11),
     ("a test's as without a statement", 'test "t"\n  as user 1 allowed { }\n', "as ... {...} needs a statement", 11),
