@@ -21,6 +21,8 @@ import inspect
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from typing import TYPE_CHECKING, Any, TypeAlias, cast
 
+from sqlalchemy.exc import DBAPIError
+from sqlalchemy.orm.exc import StaleDataError
 from starlette.exceptions import HTTPException
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
@@ -65,14 +67,8 @@ class Rowstile:
         app.add_middleware(_SignIn, user=user)
         app.add_exception_handler(Refused, _problem)
         app.add_exception_handler(NotFound, _problem)
-        try:
-            from sqlalchemy.exc import DBAPIError
-            from sqlalchemy.orm.exc import StaleDataError
-
-            app.add_exception_handler(DBAPIError, _db_error)
-            app.add_exception_handler(StaleDataError, _stale)
-        except ImportError:  # FastAPI without SQLAlchemy: psycopg or asyncpg
-            pass
+        app.add_exception_handler(DBAPIError, _db_error)
+        app.add_exception_handler(StaleDataError, _stale)
         if check_connection and engine is not None:
             # around the app's lifespan, whichever it has: Starlette runs "startup" handlers only when the app
             # was given no lifespan
@@ -128,9 +124,8 @@ def _json(problem: Problem) -> JSONResponse:
 
 
 async def _problem(request: Request, exc: Exception) -> Response:
-    if isinstance(exc, (Refused, NotFound)):
-        return _json(exc.problem())
-    raise exc
+    assert isinstance(exc, (Refused, NotFound))  # the handler of these two only
+    return _json(exc.problem())
 
 
 async def _db_error(request: Request, exc: Exception) -> Response:

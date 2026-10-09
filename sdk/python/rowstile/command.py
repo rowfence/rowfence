@@ -25,7 +25,3 @@ def main(argv: Sequence[str] | None = None) -> None:
     sys.path.insert(0, command_dir())
     rowstile_cli = importlib.import_module("rowstile_cli")  # it puts authzlib, beside it, on the path too
     rowstile_cli.main(list(sys.argv[1:] if argv is None else argv))
-
-
-if __name__ == "__main__":
-    main()

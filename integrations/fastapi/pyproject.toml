@@ -13,6 +13,7 @@ dependencies = [
   "httpx>=0.27",
   "pytest>=8",
   "mypy>=1.10",
+  "coverage>=7.16",
 ]
 
 [tool.uv]
@@ -24,6 +25,25 @@ rowstile = {path = "../../sdk/python", editable = true}
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+
+# What the checks run of the SDK (sdk/python/rowstile), lines and branches. test.sh has every Python process it
+# starts measure itself, the tests' own subprocesses too (coverage's .pth file reads COVERAGE_PROCESS_START), then
+# combines them, prints the report and fails below 100%
+[tool.coverage.run]
+branch = true
+parallel = true
+source_pkgs = ["rowstile"]
+# not the command's Postgres client, which rowstile.testing loads as rowstile._pgwire (core's suites measure it)
+omit = ["*/core/cli/*"]
+# SQLAlchemy's async engine runs the driver's calls in greenlets
+concurrency = ["greenlet", "thread"]
+
+[tool.coverage.report]
+show_missing = true
+fail_under = 100
+# what only the type checker reads
+exclude_also = ["if TYPE_CHECKING:"]
+partial_branches = ["if not TYPE_CHECKING:"]
 
 # strongly typed, as the repository's Python (ty.toml): uv sync, then uvx ty@0.0.56 check --project integrations/fastapi
 [tool.ty.environment]

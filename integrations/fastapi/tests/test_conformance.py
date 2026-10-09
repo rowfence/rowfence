@@ -200,7 +200,8 @@ async def test_12_a_test_database_per_worker_has_the_policy(
     import rowstile.psycopg as pgp
 
     tests = os.environ["ROWSTILE_TESTS_URL"]
-    assert re.search(r"/conf_tests_w\d+$", worker_database.url), worker_database.url
+    copied = tests.rsplit("/", 1)[1]  # the migrated test database (test.sh's conf_tests): each copy is named after it
+    assert re.search(rf"/{copied}_w\d+$", worker_database.url), worker_database.url
     assert worker_database.url.startswith("postgresql+psycopg://")  # the URL's own form, another database
     assert worker_database.app_url and worker_database.app_url.startswith("postgresql+asyncpg://conf_app:")
 
@@ -227,7 +228,7 @@ async def test_12_a_test_database_per_worker_has_the_policy(
     # one for each of pytest-xdist's workers; a run without workers has one
     assert worker_id() == "0"
     monkeypatch.setenv("PYTEST_XDIST_WORKER", "gw3")
-    assert worker_id() == "3" and database_per_worker(tests).url.endswith("/conf_tests_w3")
+    assert worker_id() == "3" and database_per_worker(tests).url.endswith(f"/{copied}_w3")
     with pytest.raises(ValueError, match="a database to copy"):
         database_per_worker("postgresql://conf_owner:owner@localhost")
 
@@ -412,12 +413,11 @@ async def test_a_block_inside_an_open_transaction_signs_out_again() -> None:
             with pgp.transaction(conn, 2):
                 assert [r[0] for r in conn.execute(projects)] == PROJECTS["2"]
             assert [r[0] for r in conn.execute(projects)] == PROJECTS["1"]  # back to the block around it
-    if sys.platform != "win32":  # psycopg's async connections need a selector loop
-        async with await psycopg.AsyncConnection.connect(libpq(APP)) as aconn:
-            await aconn.execute("SELECT 1")
-            async with pgp.atransaction(aconn, 2):
-                pass
-            assert [r[0] for r in await (await aconn.execute(projects)).fetchall()] == PROJECTS[None]
+    async with await psycopg.AsyncConnection.connect(libpq(APP)) as aconn:  # (a selector loop: conftest.py)
+        await aconn.execute("SELECT 1")
+        async with pgp.atransaction(aconn, 2):
+            pass
+        assert [r[0] for r in await (await aconn.execute(projects)).fetchall()] == PROJECTS[None]
     pconn = await asyncpg.connect(libpq(APP))
     try:
         async with pconn.transaction():
