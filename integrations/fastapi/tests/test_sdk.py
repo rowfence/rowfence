@@ -2,6 +2,8 @@
 promises, asked of the database where there is one to ask. test.sh measures what these and the conformance
 checks run of the SDK (sdk/python/rowstile), and fails unless they run every line and branch of it."""
 
+import asyncio
+import contextvars
 import importlib
 import io
 import os
@@ -434,6 +436,34 @@ async def test_an_update_the_rules_allow_that_matched_nothing_is_404(app: FastAP
     async with client(app) as c:
         r = await c.patch("/versioned/4", headers={"x-user": "3"})  # cy may edit note 4: not the rules' doing
     assert r.status_code == 404 and r.json()["detail"] == "the row not found", r.text
+
+
+async def test_a_request_without_a_user_is_answered_about_its_own_write() -> None:
+    # Rowstile without user=: the app signs in another way, here install()'s user(). A sync endpoint runs in a
+    # worker thread; its refused flush is answered from the request's own writes: 403, with the rule's reason
+    engine = authz_sa.install(create_engine(SYNC), user=lambda: 2)  # bo may see note 3, not edit it
+    a = FastAPI()
+    Rowstile(a, engine, check_connection=False)
+
+    @a.patch("/notes/{note_id}")
+    def edit(note_id: int) -> None:
+        with Session(engine) as s, s.begin():
+            note = s.get(Note, note_id)
+            assert note is not None
+            note.body = "x"
+
+    async def patch() -> httpx.Response:
+        async with client(a) as c:
+            return await c.patch("/notes/3")
+
+    try:
+        # in a task of its own, as a server runs each request: nothing the checks before it left is there
+        r = await asyncio.create_task(patch(), context=contextvars.Context())
+    finally:
+        engine.dispose()
+    assert r.status_code == 403, r.text
+    assert r.json()["detail"] == "permission denied: user 2 may not update row 3 of app.notes", r.text
+    assert r.json()["why"][0].startswith("no   update : edit"), r.text
 
 
 # --- the drivers without SQLAlchemy -------------------------------------------------------------------------------

@@ -435,7 +435,8 @@ Each release upgrades from the one before it. How releases are numbered and made
   `acting_as` block, naming its row. The ORM's writes outside a block (an engine `install()`ed with `user=`, as
   in a Flask app or a worker thread) went to one list for the whole process. Each thread (or task) now has its
   own, for the transaction it began last: a later transaction isn't answered about an earlier one's writes,
-  and a block that wrote nothing isn't answered about writes made outside it.
+  and a block that wrote nothing isn't answered about writes made outside it. In `rowstile.fastapi` each
+  request has its own, also when `Rowstile` isn't given `user=` (a sync endpoint's refused flush is 403).
 
 ## 0.1.0 (alpha)
 
