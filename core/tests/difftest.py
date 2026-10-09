@@ -45,7 +45,7 @@ import compile_policy  # noqa: E402
 from authzlib import evaluate  # noqa: E402
 from authzlib.parse import Caveat, Cols, Policy, Rule, Type  # noqa: E402
 from authzlib.sqlutil import q, qt  # noqa: E402  (names as the policy writes them, quoted: capitals, reserved words)
-from decisions import Decisions  # noqa: E402
+from decisions import Decisions, allows, scope_items  # noqa: E402
 
 # the database's answers, read back as JSON: their shape is what the checks compare
 Answer = Any
@@ -381,12 +381,9 @@ class Checker:
 
     def scope_allows(self, scope: str, kind: str, qual: str, word: str) -> bool:
         """Whether a transaction limited to this scope may run a command on a table (kind 'cmd') or use a
-        permission of a type ('perm'). `read` is built in unless the policy defines it."""
-        sc = self.pol.scopes.get(scope)
-        items = sc.items if sc else [("cmd", None, "select"), ("perm", None, "*")]
-        return any(
-            k == kind and (w == word or (kind == "perm" and w == "*")) and (q is None or q == qual) for k, q, w in items
-        )
+        permission of a type ('perm'). `read` is built in unless the policy defines it. (What an item lets
+        through is the rule decisions.py reports by, so these checks judge it too.)"""
+        return any(allows(item, kind, qual, word) for item in scope_items(self.pol, scope))
 
     def snapshot(self) -> Snapshot:
         """The evaluator's inputs and the database's answers, per user. Each user's questions are a block that
