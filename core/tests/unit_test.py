@@ -1927,6 +1927,48 @@ class Draft(unittest.TestCase):
         Compiler(parse_policy(text, None, files={})).compile("the policy")  # what the guide promises: it compiles
         return text
 
+    def test_plurals_names_and_what_is_left_out(self) -> None:
+        # what init meets in a real schema: plurals in -xes, -sses, -ches; a name SQL reserves; two tables of one
+        # name in two schemas; and a table it can't name, one without a key, one keyed by a type it can't use, each
+        # left out with why. What it writes compiles
+        text = draft.draft(
+            [
+                self.table("app.users", {"id": "bigint"}, ["id"]),
+                self.table("app.boxes", {"id": "bigint"}, ["id"]),
+                self.table("app.classes", {"id": "bigint"}, ["id"]),
+                self.table("app.matches", {"id": "bigint"}, ["id"]),
+                self.table("app.order", {"id": "bigint"}, ["id"]),
+                self.table("other.boxes", {"id": "bigint"}, ["id"]),
+                self.table("app.user-data", {"id": "bigint"}, ["id"]),
+                self.table("app.logs", {"line": "text"}, []),
+                self.table("app.blobs", {"k": "jsonb"}, ["k"]),
+            ],
+            schemas=("app", "other"),
+        )
+        Compiler(parse_policy(text, None, files={})).compile("the policy")
+        for line in ("box = app.boxes", "box2 = other.boxes", "class = app.classes", "match = app.matches"):
+            self.assertIn(f"\ntype {line}\n", text)
+        self.assertIn("\ntype order = app.order\n", text)
+        self.assertIn("-- app.user-data: a name the policy language can't write", text)
+        self.assertIn("-- app.logs: no primary key (rowstile needs one to name its rows)", text)
+        self.assertIn("-- app.blobs: its key's type isn't one rowstile can use", text)
+
+    def test_finding_the_user_table(self) -> None:
+        # by its name, or else by what refers to it (an author_id, an owner_id, ...); a users table keyed by two
+        # columns is named with what it lacks; nothing to go by, or a --users table that isn't there: asked
+        accounts = self.table("app.accounts", {"id": "bigint"}, ["id"])
+        posts = self.table(
+            "app.posts", {"id": "bigint", "author_id": "bigint"}, ["id"], ((["author_id"], "app.accounts", ["id"]),)
+        )
+        self.assertIn("\ntype user = app.accounts\n", draft.draft([accounts, posts], schemas=("app",)))
+        wide = self.table("app.users", {"org": "bigint", "id": "bigint"}, ["org", "id"])
+        with self.assertRaisesRegex(draft.DraftError, r"^app\.users: the user table needs a key of one column"):
+            draft.draft([wide], schemas=("app",))
+        with self.assertRaisesRegex(draft.DraftError, r"^which table holds your users\?"):
+            draft.draft([self.table("app.things", {"id": "bigint"}, ["id"])], schemas=("app",))
+        with self.assertRaisesRegex(draft.DraftError, r"^app\.nosuch: no such table with a primary key in app$"):
+            draft.draft([accounts, posts], users="app.nosuch", schemas=("app",))
+
     def test_the_first_row_of_a_tree_can_be_made(self) -> None:
         # folders inside folders: "inside one you edit" alone lets nobody make the first folder through the app, so
         # the drafted rule also lets a row with nothing above it be made, in the maker's own name. The column is

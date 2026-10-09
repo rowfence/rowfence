@@ -64,6 +64,9 @@ Each release upgrades from the one before it. How releases are numbered and made
 
 ### Fixed
 
+- `rowstile init` on a schema whose users table is keyed by two columns (a tenant's and its own) asked which
+  table holds the users, and naming it with `--users` then failed on its key. It says at once that the user
+  table needs a key of one column.
 - `rowstile review` of the pull request that adds the policy said its app role and its user type changed, from
   `app role app_user` and `type user = app.users`, which nobody wrote: with no policy at the base, it compared
   with a made-up one. Each declaration is now added, the app role and the user type too, and Meaning and Risk

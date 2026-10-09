@@ -297,6 +297,13 @@ def draft(
                     ):
                         refs[fk["ref"]] = refs.get(fk["ref"], 0) + 1
             if not refs:
+                # a users table keyed by two columns (a tenant's and its own): say what it lacks, not "which table"
+                wide = sorted(n for n in keyed if n.split(".")[1].lower() in USER_TABLES)
+                if wide:
+                    raise DraftError(
+                        f"{wide[0]}: the user table needs a key of one column (or name another: rowstile init "
+                        "--users schema.table)"
+                    )
                 raise DraftError("which table holds your users? name it: rowstile init --users schema.table")
             users = max(refs, key=lambda n: refs[n])
     if len(keyed[users]["pk"]) != 1:
