@@ -16,7 +16,7 @@ identity 50
 keep unchanged trees 7
 language server 84
 masks 25
-mcp 37
+mcp 49
 migrate vs apply 43
 migrations 52
 moves 22

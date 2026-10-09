@@ -140,10 +140,18 @@ TOOLS: dict[str, Tool] = {
 }
 
 
+def string(name: str, value: Json) -> str:
+    """A tool's text argument: a string, or a number as written (an id). null, true, an object or a list is
+    refused, not handed to the command as Python writes it ("None")."""
+    if isinstance(value, bool) or not isinstance(value, (str, int, float)):
+        raise ValueError(f"{name}: a string, not {json.dumps(value)[:40]}")
+    return str(value)
+
+
 def plain(name: str, value: Json) -> str:
     """A tool's argument as the command takes it: never one of the command's own options. An agent that sends
     "--development" as the policy would mark the database itself, which is a person's to do."""
-    text = str(value)
+    text = string(name, value)
     if text.startswith("-"):
         raise ValueError(f"{name}: {text!r} starts with '-': a name or a value, not an option")
     return text
@@ -151,7 +159,7 @@ def plain(name: str, value: Json) -> str:
 
 def ident(value: Json) -> str:
     """An object's id: any text (a negative number too), but not one of the command's options."""
-    text = str(value)
+    text = string("id", value)
     if text.startswith("--"):
         raise ValueError(f"id: {text!r} starts with '--': an id, not an option")
     return text
@@ -246,7 +254,12 @@ class Server:
         raw = msg.get("params")
         method, params, mid = msg.get("method"), raw if isinstance(raw, dict) else {}, msg.get("id")
         if mid is None:
-            return None  # notifications/initialized, notifications/cancelled, ...
+            # a notification (notifications/initialized, notifications/cancelled, ...): no answer; a request whose id
+            # is null (which MCP doesn't allow) is told so, or its client would wait for an answer
+            null = "id" in msg and "method" in msg
+            return error(None, -32600, "a request's id is a string or a number, not null") if null else None
+        if raw is not None and not isinstance(raw, dict):
+            return error(mid, -32602, f"{method}: params is an object (names and values), not {json.dumps(raw)[:40]}")
         if method == "initialize":
             from authzlib import __version__
 
@@ -275,6 +288,16 @@ class Server:
                 return error(mid, -32602, f"{params.get('name')}: {e}")
         return error(mid, -32601, f"not supported: {method}")
 
+    def answer(self, got: Json) -> Message | None:
+        """The answer to one message as read: an error for one that isn't an object, None for a notification."""
+        if not isinstance(got, dict):
+            return error(None, -32600, "not a request")
+        msg: Message = {str(k): v for k, v in got.items()}
+        try:
+            return self.handle(msg)
+        except Exception as e:  # answer and carry on: a dead server stops the agent's whole session
+            return error(msg.get("id"), -32603, f"{type(e).__name__}: {e}") if msg.get("id") is not None else None
+
 
 def ok(mid: Json, result: Json) -> Message:
     return {"jsonrpc": "2.0", "id": mid, "result": result}
@@ -291,17 +314,19 @@ def serve(dsn: str | None = None) -> None:
     for raw in sys.stdin.buffer:
         if not raw.strip():
             continue
-        answer: Message | None
+        answer: Json
         try:
             got = json.loads(raw)
         except (ValueError, RecursionError):  # nested too deep to read is not JSON this server takes either
             answer = error(None, -32700, "not JSON")
         else:
-            msg: Message = {str(k): v for k, v in got.items()} if isinstance(got, dict) else {}
-            try:
-                answer = server.handle(msg) if isinstance(got, dict) else error(None, -32600, "not a request")
-            except Exception as e:  # answer and carry on: a dead server stops the agent's whole session
-                answer = error(msg.get("id"), -32603, f"{type(e).__name__}: {e}") if msg.get("id") is not None else None
+            if isinstance(got, list) and got:
+                # a batch (protocol 2025-03-26 has them): each message answered, the answers in one array, and
+                # nothing for notifications alone
+                answers: list[Json] = [a for a in map(server.answer, got) if a is not None]
+                answer = answers or None
+            else:
+                answer = server.answer(got)
         if answer is not None:
             out.write(json.dumps(answer).encode() + b"\n")
             out.flush()

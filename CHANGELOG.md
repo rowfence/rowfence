@@ -226,6 +226,11 @@ Each release upgrades from the one before it. How releases are numbered and made
 - `rowstile sql` showed an array of arrays of text or booleans wrong: `ARRAY[['a','b'],['c','d']]` as
   `['{a', 'b']`, and booleans all false. It shows them as Postgres writes them, braces in braces, as it did
   numbers.
+- `rowstile mcp` takes a batch, an array of requests, as protocol version 2025-03-26 asks a server to: each
+  request in it is answered, in an array. It answered "not a request". A request whose id is null gets an
+  error, where it got no answer and its client waited. Params that aren't an object, and a tool's argument
+  that is null, true, an object or a list where text goes, are refused: they were taken as no params, or
+  passed to the command as `None`.
 
 ## 0.1.0 (alpha)
 
