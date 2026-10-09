@@ -560,6 +560,44 @@ COMPILE = [
         12,
     ),
     (
+        "a permission that depends on itself only through a not",
+        "  can view = {locked} and not parent.view\n",
+        "doc.view depends on itself; a permission can only recurse as 'or rel.perm' (optionally 'and {condition}')",
+        10,
+    ),
+    (
+        "inheritance narrowed by a relation, after a condition",
+        "  can view = owner or ({locked} and parent.view and reader)\n",
+        "inheritance through parent can only be narrowed with {conditions}",
+        10,
+    ),
+    (
+        "inheritance inside an or, inside an and",
+        "  can view = owner or (reader and (parent.view or {locked}))\n",
+        "doc.view depends on itself; a permission can only recurse as 'or rel.perm' (optionally 'and {condition}')",
+        10,
+    ),
+    (
+        "a group named by the permission it gives",
+        "  viewer : user, doc#view  shared\n  can view = owner or viewer\n",
+        "doc.view depends on itself; a permission can only recurse as 'or rel.perm' (optionally 'and {condition}')",
+        11,
+    ),
+    (
+        "two groups nested in each other",
+        "type team = alt.projects\n  lead : user, team#helper shared by see\n  helper : user, team#lead shared by see\n"
+        "  can see = lead or helper\n",
+        "team.lead depends on itself; a permission can only recurse as 'or rel.perm' through a relation to objects, "
+        "and a group only as 'member : group#member'",
+        11,
+    ),
+    (
+        "a rule following a permission with a dot, among other items",
+        "rules alt.docs\n  select : owner or share.view\n",
+        "'share' is a permission; only relations can be followed with a dot",
+        11,
+    ),
+    (
         "a rule using a link as if it held users",
         "rules alt.docs\n  select : owner or parent\n",
         "doc.parent links to doc objects, not users; follow it with a dot",
@@ -570,6 +608,31 @@ COMPILE = [
         "  parent : doc = alt.doc_links(child -> parent)\nrules alt.docs\n  select : owner and not parent\n",
         "doc.parent links to doc objects, not users; follow it with a dot",
         12,
+    ),
+    (
+        "a masked view named as the table",
+        "rules alt.docs view alt.docs\n  select : share\n",
+        "alt.docs is a table of the policy; name a new view",
+        10,
+    ),
+    (
+        "a masked view named as another type's table",
+        "rules alt.docs view alt.groups\n  select : share\n",
+        "alt.groups is a table of the policy; name a new view",
+        10,
+    ),
+    (
+        "a scope's command on a table no type maps",
+        "scope s = alt.things.select\n",
+        "scope s: no type maps to alt.things",
+        10,
+    ),
+    ("a scope's permission of a type that isn't there", "scope s = robot.view\n", "scope s: unknown type 'robot'", 10),
+    (
+        "a scope's permission no type has",
+        "scope s = frobnicate\n",
+        "scope s: no type has a permission 'frobnicate'",
+        10,
     ),
 ]
 
@@ -616,9 +679,46 @@ APPLY = [
         "  can view = owner or (parent.view and {created + interval '1 day' > '2020-01-01'})\n",
         "line 10: a condition that limits inheritance must give the same answer for every user at any time",
     ),
+    (
+        "inheritance across two types through a link table whose where depends on the time zone",
+        "  project : project = alt.proj_links(doc_no -> proj_id) where {since + interval '1 day' > '2020-01-01'}\n"
+        "  can view = owner or parent.view or project.view\n"
+        "type project = alt.projects\n  lead : user = lead_id\n  docs : doc = alt.doc_projects(proj_id -> doc_no)\n"
+        "  can view = lead or docs.view\n",
+        "line 10: a condition that limits inheritance must give the same answer for every user at any time",
+    ),
 ]
 
-# policies that must apply cleanly although their names are awkward
+# Answers worked out by hand, asked of the database as each user ('' is nobody): expect() says which ids
+# authz.list gives and which of the ids authz.can allows, sees() which rows the app role reads through the rules.
+ANSWERS = """
+CREATE FUNCTION pg_temp.expect(p_user text, p_type text, p_perm text, p_ids text[], p_want text[]) RETURNS void
+LANGUAGE plpgsql AS $f$
+DECLARE v_want text[] := ARRAY(SELECT x FROM unnest(p_want) x ORDER BY x); v_list text[]; v_can text[];
+BEGIN
+  PERFORM set_config('authz.user_id', p_user, false);
+  v_list := ARRAY(SELECT x FROM authz.list(p_type, p_perm) x ORDER BY x);
+  v_can := ARRAY(SELECT x FROM unnest(p_ids) x WHERE authz.can(p_type, x, p_perm) ORDER BY x);
+  IF v_list <> v_want OR v_can <> v_want THEN
+    RAISE EXCEPTION '%.% as user %: authz.list gives %, authz.can allows %, by hand %',
+      p_type, p_perm, p_user, v_list, v_can, v_want;
+  END IF;
+END $f$;
+CREATE FUNCTION pg_temp.sees(p_user text, p_query text, p_want text[]) RETURNS void
+LANGUAGE plpgsql AS $f$
+DECLARE v_got text[];
+BEGIN
+  PERFORM set_config('authz.user_id', p_user, true);
+  SET LOCAL ROLE app_user;
+  EXECUTE 'SELECT ARRAY(' || p_query || ')' INTO v_got;
+  RESET ROLE;
+  IF v_got <> ARRAY(SELECT x FROM unnest(p_want) x ORDER BY x) THEN
+    RAISE EXCEPTION 'as user %, the app role reads % (%), by hand %', p_user, v_got, p_query, p_want;
+  END IF;
+END $f$;
+"""
+
+# policies that must apply cleanly although their names are awkward (a whole policy if it starts with its app role)
 APPLY_OK = [
     (
         "names longer than Postgres allows (63 bytes) are shortened consistently",
@@ -650,6 +750,117 @@ APPLY_OK = [
         "INSERT INTO alt.users VALUES (1); INSERT INTO alt.groups VALUES (1, 1); INSERT INTO alt.group_members VALUES (1, 1);"
         "UPDATE alt.group_members SET active = false; DELETE FROM alt.group_members; TRUNCATE alt.group_members;",
     ),
+    # forms of the language that must give, in the database, the answers worked out by hand from the reference
+    # (docs/reference/language.md), asked with ANSWERS
+    (
+        "a group named by a permission (team#manage): shared to it, those who hold the permission hold the relation",
+        "  watcher : user, team#manage  shared\n  can view = owner or reader or watcher\n"
+        "type team = alt.groups (gid)\n  boss : user = owner_id\n  can manage = boss\n",
+        {},
+        ANSWERS + "INSERT INTO alt.users VALUES (1), (2), (3), (4); INSERT INTO alt.groups VALUES (1, 1), (2, 3);"
+        "INSERT INTO alt.group_members (group_id, user_id) VALUES (1, 2), (2, 4);"
+        "INSERT INTO alt.docs (doc_no) VALUES (10), (11), (12);"
+        "INSERT INTO authz.shares (object_type, object_id, relation, subject_type, subject_id, subject_relation) VALUES"
+        " ('doc', '10', 'watcher', 'team', '1', 'manage'), ('doc', '11', 'reader', 'grp', '1', 'member'),"
+        " ('doc', '12', 'watcher', 'team', '2', 'manage');"
+        "SELECT pg_temp.expect('1', 'doc', 'view', '{10,11,12}', '{10}');"
+        "SELECT pg_temp.expect('2', 'doc', 'view', '{10,11,12}', '{11}');"
+        "SELECT pg_temp.expect('3', 'doc', 'view', '{10,11,12}', '{12}');"
+        "SELECT pg_temp.expect('4', 'doc', 'view', '{10,11,12}', '{}');"
+        "SELECT pg_temp.expect('', 'doc', 'view', '{10,11,12}', '{}');"
+        "SELECT pg_temp.expect('1', 'team', 'manage', '{1,2}', '{1}');",
+    ),
+    (
+        "a relation declared again for another type (a doc's parent is a doc, or its project), inheriting through it",
+        "  parent : doc = alt.doc_links(child -> parent)\n  parent : project = project_id\n"
+        "  can view = (owner and not {locked}) or parent.view\nrules alt.docs\n  select : view\n"
+        "type project = alt.projects\n  owner : user = lead_id\n  can view = owner\n",
+        {},
+        # (doc 3's parent is doc 1 through the column, and the project has the id of a doc)
+        ANSWERS + "INSERT INTO alt.users VALUES (1), (2), (3); INSERT INTO alt.projects VALUES (1, 3);"
+        "INSERT INTO alt.docs (doc_no, owner_id, locked, project_id) VALUES (1, 1, false, NULL), (2, 1, true, NULL),"
+        " (4, NULL, false, NULL), (5, NULL, false, 1), (6, NULL, false, NULL), (7, 2, false, 1);"
+        "INSERT INTO alt.docs (doc_no, up) VALUES (3, 1); INSERT INTO alt.doc_links VALUES (4, 2), (6, 5);"
+        "SELECT pg_temp.expect('1', 'doc', 'view', '{1,2,3,4,5,6,7}', '{1,3}');"
+        "SELECT pg_temp.expect('2', 'doc', 'view', '{1,2,3,4,5,6,7}', '{7}');"
+        "SELECT pg_temp.expect('3', 'doc', 'view', '{1,2,3,4,5,6,7}', '{5,6,7}');"
+        "SELECT pg_temp.expect('', 'doc', 'view', '{1,2,3,4,5,6,7}', '{}');"
+        "SELECT pg_temp.expect('1', 'doc', 'share', '{1,2,3,4,5,6,7}', '{1,2,3,4}');"
+        "SELECT pg_temp.expect('3', 'doc', 'share', '{1,2,3,4,5,6,7}', '{5,7}');"
+        "SELECT pg_temp.sees('3', 'SELECT doc_no::text FROM alt.docs ORDER BY 1', '{5,6,7}');"
+        "DELETE FROM alt.doc_links WHERE child = 6; INSERT INTO alt.doc_links VALUES (6, 1);"
+        "SELECT pg_temp.expect('1', 'doc', 'view', '{1,2,3,4,5,6,7}', '{1,3,6}');"
+        "SELECT pg_temp.expect('3', 'doc', 'view', '{1,2,3,4,5,6,7}', '{5,7}');"
+        "SELECT pg_temp.sees('1', 'SELECT doc_no::text FROM alt.docs ORDER BY 1', '{1,3,6}');",
+    ),
+    (
+        "inheritance across two types whose only condition is a link table's where: a link it leaves out passes nothing",
+        "  project : project = alt.proj_links(doc_no -> proj_id) where {active}\n"
+        "  can view = owner or parent.view or project.view\n"
+        "type project = alt.projects\n  lead : user = lead_id\n  docs : doc = alt.doc_projects(proj_id -> doc_no)\n"
+        "  can view = lead or docs.view\n",
+        {},
+        ANSWERS + "INSERT INTO alt.users VALUES (1), (2), (3); INSERT INTO alt.projects VALUES (1, 3), (2, NULL);"
+        "INSERT INTO alt.docs (doc_no, owner_id) VALUES (1, 1), (2, NULL), (3, NULL), (4, NULL);"
+        "INSERT INTO alt.doc_projects VALUES (1, 2);"
+        "INSERT INTO alt.proj_links (doc_no, proj_id, active) VALUES (2, 1, true), (3, 1, false), (4, 2, true);"
+        "SELECT pg_temp.expect('1', 'doc', 'view', '{1,2,3,4}', '{1,4}');"
+        "SELECT pg_temp.expect('1', 'project', 'view', '{1,2}', '{2}');"
+        "SELECT pg_temp.expect('3', 'doc', 'view', '{1,2,3,4}', '{2}');"
+        "SELECT pg_temp.expect('3', 'project', 'view', '{1,2}', '{1}');"
+        "SELECT pg_temp.expect('2', 'doc', 'view', '{1,2,3,4}', '{}');"
+        "UPDATE alt.proj_links SET active = true WHERE doc_no = 3;"
+        "SELECT pg_temp.expect('3', 'doc', 'view', '{1,2,3,4}', '{2,3}');",
+    ),
+    (
+        "every type keyed by text",
+        "app role app_user\ntype user = alt.tusers (id text)\ntype doc = alt.tdocs (id text)\n"
+        "  owner  : user = owner_id\n  parent : doc = parent_id\n  viewer : user  shared\n"
+        "  can share = owner or parent.share\n  can view = share or viewer or parent.view\n"
+        "rules alt.tdocs\n  select : view\n",
+        {},
+        ANSWERS + "INSERT INTO alt.tusers VALUES ('ann'), ('bo');"
+        "INSERT INTO alt.tdocs VALUES ('a', 'ann', NULL), ('c', 'bo', NULL), ('d', NULL, NULL), ('b', NULL, 'a'),"
+        " ('e', NULL, 'd');"
+        "SET authz.user_id = 'bo'; SELECT authz.share('doc', 'c', 'viewer', 'user', 'ann'); RESET authz.user_id;"
+        "INSERT INTO authz.shares (object_type, object_id, relation, subject_type, subject_id)"
+        " VALUES ('doc', 'd', 'viewer', 'user', 'bo');"
+        "SELECT pg_temp.expect('ann', 'doc', 'view', '{a,b,c,d,e}', '{a,b,c}');"
+        "SELECT pg_temp.expect('bo', 'doc', 'view', '{a,b,c,d,e}', '{c,d,e}');"
+        "SELECT pg_temp.expect('', 'doc', 'view', '{a,b,c,d,e}', '{}');"
+        "SELECT pg_temp.expect('ann', 'doc', 'share', '{a,b,c,d,e}', '{a,b}');"
+        "SELECT pg_temp.sees('ann', 'SELECT id FROM alt.tdocs ORDER BY 1', '{a,b,c}');",
+    ),
+    (
+        "no permission at all, and a rule on a relation to users and to objects: its users",
+        "app role app_user\ntype user = alt.users\ntype doc = alt.docs (doc_no)\n  watcher : user = owner_id\n"
+        "  watcher : doc = alt.doc_links(child -> parent)\nrules alt.docs\n  select : watcher\n",
+        {},
+        ANSWERS + "INSERT INTO alt.users VALUES (1), (2);"
+        "INSERT INTO alt.docs (doc_no, owner_id) VALUES (1, 1), (2, NULL), (3, 2);"
+        "INSERT INTO alt.doc_links VALUES (2, 1), (3, 1);"
+        "SELECT pg_temp.sees('1', 'SELECT doc_no::text FROM alt.docs ORDER BY 1', '{1}');"
+        "SELECT pg_temp.sees('2', 'SELECT doc_no::text FROM alt.docs ORDER BY 1', '{3}');"
+        "SELECT pg_temp.sees('', 'SELECT doc_no::text FROM alt.docs ORDER BY 1', '{}');",
+    ),
+    (
+        "a link table naming objects of two types keyed by two columns: the audit names each by its key",
+        "  pinned : space, room = alt.pins(doc_no -> (kind, [org, ref]))\n  can view = owner or pinned.see\n"
+        "type space = alt.spaces (org, id)\n  keeper : user = keeper_id\n  can see = keeper\n"
+        "type room = alt.rooms (org, id)\n  keeper : user = keeper_id\n  can see = keeper\n",
+        {},
+        ANSWERS + "INSERT INTO alt.users VALUES (1), (2);"
+        "INSERT INTO alt.spaces VALUES (1, 2, 1); INSERT INTO alt.rooms VALUES (1, 2, 2);"
+        "INSERT INTO alt.docs (doc_no) VALUES (10), (11);"
+        "INSERT INTO alt.pins VALUES (10, 'space', 1, 2), (11, 'room', 1, 2);"
+        "SELECT pg_temp.expect('1', 'doc', 'view', '{10,11}', '{10}');"
+        "SELECT pg_temp.expect('2', 'doc', 'view', '{10,11}', '{11}');"
+        "DO $$ BEGIN IF ARRAY(SELECT concat_ws(' ', action, object_id, relation, subject_type, subject_id)"
+        " FROM authz.audit WHERE relation = 'pinned' ORDER BY 1)"
+        ' <> \'{"relate 10 pinned space (1,2)","relate 11 pinned room (1,2)"}\' THEN'
+        " RAISE EXCEPTION 'the audit of alt.pins: %', ARRAY(SELECT concat_ws(' ', action, object_id, relation,"
+        " subject_type, subject_id) FROM authz.audit WHERE relation = 'pinned'); END IF; END $$;",
+    ),
 ]
 
 APPLY_SETUP = """
@@ -659,6 +870,14 @@ CREATE TABLE alt."group" (gid bigint PRIMARY KEY, owner_id bigint);
 GRANT SELECT ON alt."group" TO app_user;
 CREATE VIEW alt.member_view AS SELECT group_id, user_id FROM alt.group_members;
 CREATE FUNCTION alt.is_active(boolean) RETURNS boolean LANGUAGE sql IMMUTABLE AS 'SELECT $1';
+CREATE TABLE alt.proj_links (doc_no bigint REFERENCES alt.docs, proj_id bigint REFERENCES alt.projects,
+  active boolean NOT NULL DEFAULT true, since timestamptz NOT NULL DEFAULT now(), PRIMARY KEY (doc_no, proj_id));
+CREATE TABLE alt.tusers (id text PRIMARY KEY);
+CREATE TABLE alt.tdocs (id text PRIMARY KEY, owner_id text REFERENCES alt.tusers, parent_id text REFERENCES alt.tdocs);
+CREATE TABLE alt.spaces (org bigint, id bigint, keeper_id bigint, PRIMARY KEY (org, id));
+CREATE TABLE alt.rooms (org bigint, id bigint, keeper_id bigint, PRIMARY KEY (org, id));
+CREATE TABLE alt.pins (doc_no bigint REFERENCES alt.docs, kind text, org bigint, ref bigint);
+GRANT SELECT ON alt.proj_links, alt.tusers, alt.tdocs, alt.spaces, alt.rooms, alt.pins TO app_user;
 """
 
 
@@ -905,7 +1124,7 @@ def main() -> None:
             ["psql", "-X", "-q", "-v", "ON_ERROR_STOP=1", "-d", db, "-c", APPLY_SETUP], check=True, capture_output=True
         )
         try:
-            sql = compile_policy(BASE + extra)
+            sql = compile_policy(extra if extra.startswith("app role ") else BASE + extra)
             p = subprocess.run(
                 ["psql", "-X", "-q", "-v", "ON_ERROR_STOP=1", "-d", db],
                 input=sql + "\nSELECT authz.verify();\n" + "".join(after),
@@ -953,7 +1172,7 @@ def main() -> None:
     )
 
     subprocess.run(["dropdb", db], capture_output=True)
-    total = len(COMPILE) + 1 + len(TESTS) + 2 + len(INCLUDES) + 1 + len(APPLY) + len(APPLY_OK) + 1
+    total = len(COMPILE) + len(WHOLE) + 1 + len(TESTS) + 2 + len(INCLUDES) + 1 + len(APPLY) + len(APPLY_OK) + 1
     print(f"policy errors: {total - fails} of {total} cases behave as expected")
     sys.exit(1 if fails else 0)
 

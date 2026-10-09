@@ -132,6 +132,11 @@ class ThisRow(unittest.TestCase):
             '"files"."Name" = $$this.x$$ /* this.y */ and E\'a\\\'s this.z\' = "files".w',
         )
         self.assertEqual(on_row("t.this.x = xthis.y", "r"), "t.this.x = xthis.y")
+        # a doubled quote doesn't end the text it is in (before an escaped one, in an E'' string; in a quoted name),
+        # and a quote never closed runs to the end
+        self.assertEqual(on_row("x = E'it''s \\' this.y' and this.z", "r"), "x = E'it''s \\' this.y' and r.z")
+        self.assertEqual(on_row('"a""this".x = this.z', "r"), '"a""this".x = r.z')
+        self.assertEqual(on_row("this.z = 'it''s this.y", "r"), "r.z = 'it''s this.y")
         self.assertTrue(names_this("this.a = 1") and not names_this("'this.a' = x"))
         self.assertTrue(this_alone("exists (select 1 from app.t this where this.x)") and not this_alone("this.x"))
 
@@ -299,6 +304,19 @@ class PointChecks(unittest.TestCase):
         self.assertLess(files.index('"file__viewer"'), files.index('"folder__edit"'))
         folders = self.policy(sql, '"app"."folders"', "select")
         self.assertLess(folders.index("coalesce((inherit), false)"), folders.index('"folder__view" v'))
+
+    def test_a_starting_point_with_a_not_is_the_rows_own(self) -> None:
+        """`owner and not {locked}` is decided by the doc's own columns: it is checked first, as owner alone is."""
+        text = errors_prelude() + (
+            "type doc = app.docs\n  owner : user = owner_id\n  parent : doc = parent_id\n"
+            "  can view = (owner and not {locked}) or parent.view\nrules app.docs\n  select : view\n"
+        )
+        direct = search(
+            r'CREATE VIEW authz_int\."doc__view__direct" AS.*?;', Compiler(parse_policy(text)).compile("x"), re.S
+        )
+        self.assertIn(
+            'IN (SELECT id FROM authz_int."doc__owner")\n    AND NOT coalesce((locked), false);', direct.group(0)
+        )
 
 
 class ColumnRules(unittest.TestCase):
@@ -534,6 +552,16 @@ class LanguageForms(unittest.TestCase):
             rows("  select : edit\n  update : edit\n  update boss_id after : edit\n"), ["select", "update"]
         )
         self.assertEqual(rows("  select : edit\n  update : nobody\n  insert : nobody\n"), ["select"])
+
+    def test_a_subject_given_twice_is_listed_once(self) -> None:
+        # a second source of a shared relation that names a subject again (`user` here): the clients list it once
+        text = errors_prelude() + (
+            "type doc = app.docs\n  owner : user = owner_id\n  viewer : user  shared\n  viewer : user, user:*  shared\n"
+            "  can share = owner\n  can view = owner or viewer\n"
+        )
+        ts = Compiler(parse_policy(text)).client("ts", "x")
+        shared = json.loads(search(r"export const sharedRelations = (\{.*?\}) as const;", ts, re.S).group(1))
+        self.assertEqual(shared, {"doc": {"viewer": ["user", "user:*"]}})
 
     def test_your_own_row_is_not_a_move(self) -> None:
         # a relation from the row's own key to its type (`self : user = id`) is "this row": lint doesn't ask for an
@@ -1795,6 +1823,29 @@ test
         self.assertIn("no app role line: the rules applied to PUBLIC", old)
         self.assertTrue(any("[AZ307] (the language before this one didn't check it)" in x for x in old), old)
 
+    def test_the_language_before_read_signed_in_and_had_its_own_mistakes(self) -> None:
+        # signed_in meant then what it means now: nothing to say about it
+        pol = parse_policy(self.OLD.replace("everyone", "signed_in"), None, files={}, previous=True)
+        self.assertEqual(
+            pol.types["folder"].perms["open"].expr, authzlib.parse.Cond("cond", authzlib.parse.KEYWORDS["signed_in"])
+        )
+        self.assertFalse(any("signed_in" in note for note in pol.previous or []), pol.previous)
+        # what it refused, a base is refused for (the review says the base has a mistake)
+        for old, new, code in (
+            ("  roles  : user grant view, edit from org\n", "  roles  : user grant view, edit from org\n" * 2, "AZ109"),
+            ("grant view, edit from", "grant view, nothing from", "AZ203"),
+            (
+                "can view = (edit or viewer) and {not archived}",
+                "can view = edit and viewer and {not archived}",
+                "AZ210",
+            ),
+        ):
+            text = self.OLD.replace(old, new)
+            self.assertNotEqual(text, self.OLD)
+            with self.assertRaises(PolicyError, msg=code) as e:
+                parse_policy(text, None, files={}, previous=True)
+            self.assertEqual(e.exception.code, code, str(e.exception))
+
     def test_a_flag_in_an_included_file_is_annotated_there(self) -> None:
         main = self.SMALL.replace(
             "type org = app.orgs\n  member : user = app.org_members(org_id -> user_id)\n"
@@ -2945,6 +2996,41 @@ class Confidence(unittest.TestCase):
         )
         self.assertFalse(self.same(head + "  select : view or {public}\n", head + "  select : view\n"))
 
+    def test_a_type_one_side_has_alone_may_read_columns(self) -> None:
+        # the worlds draw the columns both sides' simple conditions read: the side without the type has no rows of it
+        doc = "type doc = app.docs\n  owner : user = owner_id\n  can view = owner\n"
+        tag = "type tag = app.tags\n  owner : user = owner_id\n  can see = owner and {not hidden}\n"
+        self.assertTrue(self.same(doc, doc + tag))
+        self.assertTrue(self.same(doc + tag, doc))
+
+    def test_a_corner_leaves_drawn_what_has_too_many_values_to_try(self) -> None:
+        # four columns of nine values each (the seven named, one none of them names, NULL): more combinations than a
+        # corner tries, so their values stay as the world drew them
+        from authzlib import evaluate
+
+        cond = " and ".join(f"{c} in (1, 2, 3, 4, 5, 6, 7)" for c in "abcd")
+        pol = parse_policy(
+            self.HEAD + f"type doc = app.docs\n  owner : user = owner_id\n  can view = owner and {{{cond}}}\n",
+            "p.authz",
+        )
+        self.assertGreater(9**4, evaluate.World.CORNER_CHOICES)
+        drawn = evaluate.World("s", 4, pols=[pol]).columns(pol)
+        self.assertEqual(evaluate.World("s", 4, {cond: True}, pols=[pol]).columns(pol), drawn)
+
+    def test_the_evaluator_refuses_data_it_cannot_read(self) -> None:
+        from authzlib import evaluate
+
+        with self.assertRaisesRegex(ValueError, "not the evaluator's data"):
+            evaluate.Data.of({("idz", "doc"): ["1"]})
+        # a condition it doesn't read as a fact about the row, with no rows said to hold it
+        pol = parse_policy(
+            self.HEAD + "type doc = app.docs\n  can view = {exists (select 1 from app.flags)}\n", "p.authz"
+        )
+        ids = {"user": ["1"], "doc": ["1"]}
+        data = evaluate.Data(ids=ids, valid=ids, columns={"user": {"1": {}}, "doc": {"1": {}}})
+        with self.assertRaisesRegex(KeyError, r"no rows given for \{exists \(select 1 from app.flags\)\} on doc"):
+            evaluate.Reference(pol).evaluate(data, "1")
+
     def test_coverage_reads_explain(self) -> None:
         from authzlib import coverage
 
@@ -3311,6 +3397,67 @@ class HandAnswers(unittest.TestCase):
             "folder 3 viewer[1] user bo\n",
             {"ann": {"folder.view": "1, 2"}, "bo": {"folder.view": "3"}},
         )
+
+    def test_a_group_named_by_a_permission(self) -> None:
+        # shared with team#manage, a permission: whoever holds it on the team holds the relation, as with a relation
+        self.check(
+            "type user = app.users\ntype team = app.teams\n  member : user = app.team_members(team_id -> user_id)\n"
+            "  boss : user = boss_id\n  can manage = boss\n"
+            "type doc = app.docs\n  owner : user = owner_id\n  reader : user, team#member, team#manage shared\n"
+            "  can share = owner\n  can view = owner or reader\n",
+            "user: 1, 2, 3, 4\nteam: 1, 2\nteam 1 boss user 1\nteam 2 boss user 3\nteam 1 member user 2\n"
+            "team 2 member user 4\ndoc: 10, 11, 12\ndoc 10 reader team#manage 1\ndoc 11 reader team#member 1\n"
+            "doc 12 reader team#manage 2\n",
+            {
+                "1": {"doc.view": "10", "team.manage": "1"},
+                "2": {"doc.view": "11", "team.manage": ""},
+                "3": {"doc.view": "12", "team.manage": "2"},
+                "4": {"doc.view": ""},
+                "": {"doc.view": ""},
+            },
+        )
+
+    def test_a_relation_declared_again_for_another_type(self) -> None:
+        # a doc's parent is a doc (a column, or a link table) or its project: inheritance goes through each; and
+        # `owner and not {locked}` gives nothing on a locked doc
+        self.check(
+            "type user = app.users\ntype project = app.projects\n  owner : user = lead_id\n  can view = owner\n"
+            "type doc = app.docs\n  owner : user = owner_id\n  parent : doc = up\n"
+            "  parent : doc = app.doc_links(child -> parent)\n  parent : project = project_id\n"
+            "  can view = (owner and not {locked}) or parent.view\nrules app.docs\n  select : view\n",
+            "user: 1, 2, 3\nproject: 1\ndoc: 1, 2, 3, 4, 5, 6, 7\nproject 1 owner user 3\ndoc 1 owner user 1\n"
+            "doc 2 owner user 1\ndoc 7 owner user 2\ndoc 1: locked = false\ndoc 2: locked = true\n"
+            "doc 7: locked = false\ndoc 3 parent doc 1\ndoc 4 parent[1] doc 2\ndoc 6 parent[1] doc 5\n"
+            "doc 5 parent project 1\ndoc 7 parent project 1\n",
+            {
+                "1": {"doc.view": "1, 3", "rule app.docs select": "1, 3"},
+                "2": {"doc.view": "7"},
+                "3": {"doc.view": "5, 6, 7", "rule app.docs select": "5, 6, 7"},
+                "": {"doc.view": ""},
+            },
+        )
+
+    def test_a_relation_to_users_and_to_objects_gives_its_users(self) -> None:
+        # alone in a rule it is the users it links to; the docs it links to give no one
+        self.check(
+            "type user = app.users\ntype doc = app.docs\n  watcher : user = owner_id\n"
+            "  watcher : doc = app.doc_links(child -> parent)\nrules app.docs\n  select : watcher\n",
+            "user: 1, 2\ndoc: 1, 2, 3\ndoc 1 watcher user 1\ndoc 3 watcher user 2\ndoc 2 watcher doc 1\n"
+            "doc 3 watcher doc 1\n",
+            {
+                "1": {"rule app.docs select": "1"},
+                "2": {"rule app.docs select": "3"},
+                "": {"rule app.docs select": ""},
+            },
+        )
+
+    def test_what_is_not_a_fact_about_the_row(self) -> None:
+        # a list that holds a column, or nothing (which Postgres refuses): read as a condition of its own, never as
+        # a list of constants
+        from authzlib.conditions import simple
+
+        for sql in ("kind in (other_kind)", "kind in ()", "id in (select doc_id from holds)"):
+            self.assertIsNone(simple(sql), sql)
 
 
 class Encodings(unittest.TestCase):
@@ -4960,6 +5107,14 @@ class Version(unittest.TestCase):
             self.assertRegex(authzlib.BUILD, r"^\d+\.\d+\.\d+-dev\+[0-9a-f]{12}$")
         else:
             self.assertEqual(authzlib.BUILD, authzlib.__version__)
+        # a release's is its version alone; the hash reads the compiler's .py files only (a machine that writes
+        # bytecode has __pycache__ beside them)
+        for release in ("0.2.0", "0.2.0-rc.1"):
+            with mock.patch.object(authzlib, "__version__", release):
+                self.assertEqual(authzlib._build(), release)
+        names = os.listdir(os.path.dirname(os.path.abspath(authzlib.__file__)))
+        with mock.patch("os.listdir", return_value=[*names, "__pycache__", "notes.txt"]):
+            self.assertEqual(authzlib._build(), authzlib.BUILD)
 
     def test_one_version(self) -> None:
         # the packages and the review for CI carry the compiler's version (packaging/version.py sets them all)
