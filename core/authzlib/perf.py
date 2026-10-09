@@ -34,6 +34,8 @@ SLOW_MS = 100  # a read slower than this on the data there is worth a warning
 
 # a lookup the policy makes: (table, columns, why, the policy line)
 Lookup: TypeAlias = "tuple[str, tuple[str, ...], str, str]"
+# one that no index serves, and whether its table is partitioned (Postgres makes no index on one concurrently)
+Missing: TypeAlias = "tuple[str, tuple[str, ...], str, str, bool]"
 
 
 class TablePlan(TypedDict):
@@ -49,9 +51,10 @@ Plans = TypedDict("Plans", {"as": str, "tables": list[TablePlan]})
 
 class Path(TypedDict):
     path: str
-    n: int
-    p50: float | None
+    n: int  # the times it ran (one that failed is not timed)
+    p50: float | None  # None: it never ran
     p95: float | None
+    failed: str | None  # what the database said when it failed (the app role may not read the table, ...)
 
 
 class Bench(TypedDict):
@@ -128,20 +131,32 @@ def table_indexes(db: Db, table: str) -> list[tuple[str, ...]]:
     return out
 
 
-def missing_indexes(db: Db, c: Compiler) -> list[Lookup]:
-    """[(table, columns, why, line)] for the needed lookups no index serves (its columns lead no index)."""
-    out: list[Lookup] = []
+def relkind(db: Db, table: str) -> str:
+    """What the table is: r a table, p a partitioned one, v a view, m a materialized one ('' if there is none)."""
+    rows = db.rows("SELECT c.relkind::text AS k FROM pg_catalog.pg_class c WHERE c.oid = to_regclass($1)", [qt(table)])
+    return text(rows[0], "k") if rows else ""
+
+
+def missing_indexes(db: Db, c: Compiler) -> list[Missing]:
+    """[(table, columns, why, line, partitioned)] for the needed lookups no index serves (its columns lead no
+    index). A view can't have an index: the tables under it answer its lookups (authz.lint() skips it too)."""
+    out: list[Missing] = []
+    kinds: dict[str, str] = {}
     cache: dict[str, list[tuple[str, ...]]] = {}
     for table, columns, why, line in needed_indexes(c):
-        if table not in cache:
+        if table not in kinds:
+            kinds[table] = relkind(db, table)
             cache[table] = table_indexes(db, table)
-        if not any(ix[: len(columns)] == columns or set(ix[: len(columns)]) == set(columns) for ix in cache[table]):
-            out.append((table, columns, why, line))
+        if kinds[table] != "v" and not any(
+            ix[: len(columns)] == columns or set(ix[: len(columns)]) == set(columns) for ix in cache[table]
+        ):
+            out.append((table, columns, why, line, kinds[table] == "p"))
     return out
 
 
-def advice(table: str, columns: Sequence[str], tool: str | None) -> str:
-    """The line to add, for the app's migration tool."""
+def advice(table: str, columns: Sequence[str], tool: str | None, partitioned: bool = False) -> str:
+    """The line to add, for the app's migration tool. Postgres makes no index on a partitioned table concurrently:
+    it makes one on each partition, which holds off writes to it meanwhile."""
     name = f"{table.split('.')[-1]}_{'_'.join(columns)}_idx"
     fields = ", ".join(columns)
     if tool == "prisma":
@@ -153,14 +168,17 @@ def advice(table: str, columns: Sequence[str], tool: str | None) -> str:
             f"Index({lit(name)}, {', '.join(lit(x) for x in columns)}) in {table}'s model "
             f"(or index=True on the column), then alembic revision --autogenerate"
         )
-    return f"CREATE INDEX CONCURRENTLY {q(name)} ON {qt(table)} ({', '.join(q(x) for x in columns)});"
+    return (
+        f"CREATE INDEX {'' if partitioned else 'CONCURRENTLY '}{q(name)} ON {qt(table)} "
+        f"({', '.join(q(x) for x in columns)});"
+    )
 
 
-def describe_missing(missing: list[Lookup], tool: str | None) -> str:
+def describe_missing(missing: list[Missing], tool: str | None) -> str:
     lines = []
-    for table, columns, why, line in missing:
+    for table, columns, why, line, partitioned in missing:
         lines.append(f"{table} has no index on ({', '.join(columns)}): {why} ({line})")
-        lines.append(f"  add: {advice(table, columns, tool)}")
+        lines.append(f"  add: {advice(table, columns, tool, partitioned)}")
     return "\n".join(lines)
 
 
@@ -289,6 +307,7 @@ def bench(db: Db, c: Compiler, people: int = 10, rounds: int = 20, seed: int = 0
             users += [(t.name, i) for i in rng.sample(ids, min(len(ids), people))]
     users = users[:people] or [(None, None)]
     timings: dict[str, list[float]] = {}
+    failed: dict[str, str] = {}  # what the database said the first time a path failed
 
     def timed(label: str, sql: str, args: Sequence[Value] = (), as_app: bool = False) -> None:
         took = 0.0
@@ -302,7 +321,9 @@ def bench(db: Db, c: Compiler, people: int = 10, rounds: int = 20, seed: int = 0
                 raise Undo
         except Undo:
             pass
-        except db.errors:
+        except db.errors as e:
+            failed.setdefault(label, str(getattr(e, "message", e)))
+            timings.setdefault(label, [])  # said, not left out
             return
         timings.setdefault(label, []).append(took)
 
@@ -340,7 +361,10 @@ def bench(db: Db, c: Compiler, people: int = 10, rounds: int = 20, seed: int = 0
         "round_trip": round_trip,
         "people": len(users),
         "rounds": rounds,
-        "paths": [{"path": k, "n": len(v), "p50": pct(v, 50), "p95": pct(v, 95)} for k, v in sorted(timings.items())],
+        "paths": [
+            {"path": k, "n": len(v), "p50": pct(v, 50), "p95": pct(v, 95), "failed": failed.get(k)}
+            for k, v in sorted(timings.items())
+        ],
     }
 
 
@@ -367,5 +391,6 @@ def describe_bench(b: Bench) -> str:
         f"  {'path'.ljust(width)}   p50      p95",
     ]
     for x in b["paths"]:
-        lines.append(f"  {x['path'].ljust(width)}  {x['p50']:>6}  {x['p95']:>7}")
+        times = f"  {x['p50']:>6}  {x['p95']:>7}" if x["n"] else f"  {'-':>6}  {'-':>7}"
+        lines.append(f"  {x['path'].ljust(width)}{times}" + (f"  <- failed: {x['failed']}" if x["failed"] else ""))
     return "\n".join(lines)

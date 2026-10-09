@@ -11,6 +11,7 @@ import sys
 import tempfile
 from collections.abc import Callable
 from typing import TypeVar
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -51,6 +52,26 @@ type folder = app.folders
   can hidden = {blocked} or parent.hidden
   can view   = (owner or viewer or parent.view) and not hidden
   can see    = signed_in
+"""
+# a table that holds only its key and its owner
+TAGS_SCHEMA = """CREATE SCHEMA app;
+CREATE TABLE app.users (id bigint PRIMARY KEY);
+CREATE TABLE app.tags (id bigint PRIMARY KEY, owner_id bigint NOT NULL REFERENCES app.users);
+CREATE INDEX ON app.tags (owner_id);
+GRANT USAGE ON SCHEMA app TO app_user;
+GRANT SELECT, UPDATE ON ALL TABLES IN SCHEMA app TO app_user;
+INSERT INTO app.users VALUES (1), (2);
+INSERT INTO app.tags VALUES (1, 1), (2, 2);
+"""
+TAGS_POLICY = """app role app_user
+type user = app.users
+type tag = app.tags
+  owner : user = owner_id
+  can edit = owner
+rules app.tags
+  select : edit
+  update : edit
+  update owner_id : nobody
 """
 DENY_TESTS = """test "the owner"
   given u = {INSERT INTO app.users VALUES (1) RETURNING id}
@@ -201,6 +222,24 @@ def main() -> None:
             rc == 0 and "coverage: 2 of 6 branches" in out and "folder.view: parent.view" not in out,
             out,
         )
+        # a policy without rules, on tables without rows: plans has no app role to read as; bench lists, as
+        # nobody signed in, and checks nothing on a type that has no row
+        rc, out = cli(db + "_deny", "plans")
+        check(
+            "rowstile plans with no rules applied: no app role to read as, exit 1",
+            rc == 1 and out == "no policy with rules is applied, so there is no app role to read as\n",
+            out,
+        )
+        rc, out = cli(db + "_deny", "bench", "--people", "1", "--rounds", "1")
+        check(
+            "rowstile bench with no rows: lists only, as nobody signed in",
+            rc == 0
+            and out.startswith("1 rounds as 1 people")
+            and "  authz.list folder view " in out
+            and "authz.can" not in out
+            and "read " not in out,
+            out,
+        )
         subprocess.run(["dropdb", "--if-exists", db + "_deny"], capture_output=True)
 
     print("-- snapshot")
@@ -255,7 +294,7 @@ def main() -> None:
         work(lambda d: perf.missing_indexes(d, database.policy_compiler(*database.applied(d)))) == [],
     )
 
-    def without(d: Db) -> list[perf.Lookup]:
+    def without(d: Db) -> list[perf.Missing]:
         d.script("DROP INDEX app.team_members_user_id_idx")
         return perf.missing_indexes(d, database.policy_compiler(*database.applied(d)))
 
@@ -271,7 +310,7 @@ def main() -> None:
         and perf.advice("app.team_members", ("user_id",), "sql").startswith("CREATE INDEX CONCURRENTLY"),
     )
 
-    def behind_an_expression(d: Db) -> list[perf.Lookup]:
+    def behind_an_expression(d: Db) -> list[perf.Missing]:
         d.script(
             "DROP INDEX app.team_members_user_id_idx; "
             "CREATE INDEX team_members_expr ON app.team_members ((team_id + 0), user_id)"
@@ -296,6 +335,82 @@ def main() -> None:
         work(capitals) == [("teamId", "userId"), ("userId",)],
     )
 
+    def through_a_view(d: Db) -> list[perf.Missing]:
+        # team members read through a view, and the folders' owner index gone: a view can't have an index (the
+        # tables under it answer its lookups), so only the table is named
+        d.script(
+            "CREATE VIEW app.team_members_v AS SELECT team_id, user_id FROM app.team_members; "
+            "DROP INDEX app.folders_owner_id_idx"
+        )
+        text, files = database.applied(d)
+        policy = text.replace("app.team_members(team_id -> user_id)", "app.team_members_v(team_id -> user_id)")
+        return perf.missing_indexes(d, database.policy_compiler(policy, files))
+
+    found = work(through_a_view)
+    check(
+        "a relation read from a view: no index asked of the view, the table's still named",
+        [(m[0], m[1]) for m in found] == [("app.folders", ("owner_id",))],
+        found,
+    )
+
+    def partitioned(d: Db) -> tuple[str, str, list[perf.Missing]]:
+        # a governed table may be partitioned: Postgres makes no index on it concurrently, so the line to add says
+        # CREATE INDEX alone there; made, it serves the lookup
+        d.script(
+            "CREATE TABLE app.events (id bigint, owner_id bigint, at date NOT NULL) PARTITION BY RANGE (at); "
+            "CREATE TABLE app.events_2026 PARTITION OF app.events FOR VALUES FROM ('2026-01-01') TO ('2027-01-01')"
+        )
+        text, files = database.applied(d)
+        c = database.policy_compiler(
+            text + "\ntype event = app.events\n  owner : user = owner_id\n  can view = owner\n", files
+        )
+        said = perf.describe_missing(perf.missing_indexes(d, c), "sql")
+        refused = ""
+        try:
+            with database.savepoint(d, "authz_index"):
+                d.script(said.partition("\n  add: ")[2])
+        except d.errors as e:
+            refused = str(getattr(e, "message", e))
+        return said, refused, perf.missing_indexes(d, c)
+
+    said, refused, after = work(partitioned)
+    check(
+        "a partitioned table: the index to add without CONCURRENTLY, which Postgres refuses there; made, it serves",
+        re.fullmatch(
+            r"app\.events has no index on \(owner_id\): finding the events by their event\.owner \(lists, select "
+            r'rules\) \(line \d+\)\n  add: CREATE INDEX "events_owner_id_idx" ON "app"\."events" \("owner_id"\);',
+            said,
+        )
+        is not None
+        and (refused, after) == ("", []),
+        (said, refused, after),
+    )
+    # the line to add in the words of the tool rowstile.toml names, and --check exits 1 while a lookup has no index
+    subprocess.run(["psql", "-X", "-q", "-d", db, "-c", "DROP INDEX app.team_members_user_id_idx"], check=True)
+    with tempfile.TemporaryDirectory() as tmp:
+        for tool, line in (
+            ("drizzle", "index('team_members_user_id_idx').on(t.user_id) in the table for app.team_members"),
+            (
+                "alembic",
+                "Index('team_members_user_id_idx', 'user_id') in app.team_members's model (or index=True on the "
+                "column), then alembic revision --autogenerate",
+            ),
+        ):
+            with open(os.path.join(tmp, "rowstile.toml"), "w", encoding="utf-8") as fh:
+                fh.write(f'[migrations]\ntool = "{tool}"\n')
+            rc, out = cli(db, "indexes", "--check", cwd=tmp)
+            check(
+                f"rowstile indexes --check: the lookup with no index, the line to add for {tool}, exit 1",
+                rc == 1
+                and out.startswith("app.team_members has no index on (user_id): finding the teams by their team.member")
+                and f"\n  add: {line}\n" in out,
+                out,
+            )
+    subprocess.run(
+        ["psql", "-X", "-q", "-d", db, "-c", "CREATE INDEX team_members_user_id_idx ON app.team_members (user_id)"],
+        check=True,
+    )
+
     print("-- plans and bench")
     p = work(lambda d: perf.plans(d, database.policy_compiler(*database.applied(d)), ("user", "1")))
     tables = {t["table"]: t for t in p["tables"]}
@@ -308,6 +423,34 @@ def main() -> None:
     rc, out = cli(db, "plans", "--as", "user:1")
     check("rowstile plans", rc == 0 and "as user:1:" in out and "app.folders:" in out, out)
     check("no warning on the example's few rows", all(t["warnings"] == [] for t in tables.values()), p)
+    rc, out = cli(db, "plans")
+    check("without --as, as the first user in the data", rc == 0 and out.startswith("as user:1:\n"), out)
+
+    def nobody(d: Db) -> perf.Plans:
+        d.script("TRUNCATE app.users CASCADE")
+        return perf.plans(d, database.policy_compiler(*database.applied(d)))
+
+    alone = work(nobody)
+    check("... and as anyone when there is no user", alone["as"] == "anyone" and len(alone["tables"]) == 2, alone)
+
+    def unreadable(d: Db) -> perf.Plans:
+        d.script("REVOKE SELECT ON app.files FROM app_user")
+        return perf.plans(d, database.policy_compiler(*database.applied(d)), ("user", "1"))
+
+    failed = {t["table"]: (t["ms"], t["rows"], t["warnings"]) for t in work(unreadable)["tables"]}
+    check(
+        "a table the app role may not read: the read failed, and why; the others are read",
+        failed.get("app.files") == (None, None, ["failed: permission denied for table files"])
+        and failed.get("app.folders", (None, None, []))[0] is not None,
+        failed,
+    )
+    with mock.patch.object(perf, "SLOW_MS", -1):  # every read is slower than that
+        slower = work(lambda d: perf.plans(d, database.policy_compiler(*database.applied(d)), ("user", "1")))
+    check(
+        "a read slower than the limit: its time is the first warning",
+        all(t["warnings"] and re.fullmatch(r"took \d+(\.\d+)? ms", t["warnings"][0]) for t in slower["tables"]),
+        slower,
+    )
 
     def grown(d: Db) -> perf.Plans:
         # a link table grown past what a scan should read, and the index its lookup needs gone
@@ -342,6 +485,37 @@ def main() -> None:
     rc, out = cli(db, "bench", "--rounds", "2", "--people", "2")
     check("rowstile bench", rc == 0 and "p50" in out and "read app.files" in out, out)
     check("... and nothing it did stays", count() == before, (before, count()))
+    # a table whose columns are all its key and what its relations read: nothing to write back unchanged, so no
+    # update is timed
+    subprocess.run(["dropdb", "--if-exists", db + "_tags"], capture_output=True)
+    subprocess.run(["createdb", db + "_tags"], check=True)
+    subprocess.run(["psql", "-X", "-q", "-v", "ON_ERROR_STOP=1", "-d", db + "_tags", "-c", TAGS_SCHEMA], check=True)
+    with tempfile.TemporaryDirectory() as tmp:
+        with open(os.path.join(tmp, "p.authz"), "w", encoding="utf-8") as fh:
+            fh.write(TAGS_POLICY)
+        rc, out = cli(db + "_tags", "apply", os.path.join(tmp, "p.authz"))
+        rc, out = cli(db + "_tags", "bench", "--people", "1", "--rounds", "1") if rc == 0 else (rc, out)
+        check(
+            "bench: no update timed on a table with no column to write back unchanged",
+            rc == 0 and "  read app.tags " in out and "  authz.can tag edit " in out and "update" not in out,
+            out,
+        )
+    subprocess.run(["dropdb", "--if-exists", db + "_tags"], capture_output=True)
+
+    def bench_unreadable(d: Db) -> perf.Bench:
+        d.script("REVOKE SELECT ON app.files FROM app_user")
+        return perf.bench(d, database.policy_compiler(*database.applied(d)), people=1, rounds=1)
+
+    b = work(bench_unreadable)
+    ran = {x["path"]: (x["n"], x["p50"], x["failed"]) for x in b["paths"]}
+    said = perf.describe_bench(b)
+    check(
+        "bench: a path that fails is there with why, not left out",
+        ran.get("read app.files") == ran.get("update app.files") == (0, None, "permission denied for table files")
+        and ran.get("read app.folders", (0, None, "missing"))[::2] == (1, None)
+        and re.search(r"\n  read app\.files +- +-  <- failed: permission denied for table files\n", said) is not None,
+        said,
+    )
 
     conn.close()
     subprocess.run(["dropdb", "--if-exists", db], capture_output=True)

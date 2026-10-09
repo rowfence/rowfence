@@ -192,6 +192,16 @@ Each release upgrades from the one before it. How releases are numbered and made
   project.view) and not hidden`, where projects inherit from folders too) is refused saying so: "folder.view has
   a deny, so it can only inherit within folder" (AZ306). It said "folder.view depends on itself" (AZ302), and
   nothing of the deny.
+- `rowstile indexes` asked for indexes on a view that a relation reads (`app.members(team_id -> user_id)`,
+  `app.members` a view), with a `CREATE INDEX` that Postgres refuses, so `indexes --check` could never pass. A
+  view can't have an index: the tables under it answer its lookups, as `authz.lint()` already said. `rowstile
+  dev` warned of them at start too.
+- `rowstile indexes` gave a partitioned table's missing index as `CREATE INDEX CONCURRENTLY`, which Postgres
+  refuses on a partitioned table ("cannot create index on partitioned table concurrently"). It says `CREATE
+  INDEX` there, which makes the index on each partition.
+- `rowstile bench` left out a path that failed, without a word: with the app role not allowed to read
+  `app.files`, the reads and updates of `app.files` were simply not in the table. They are there now, with
+  what the database said: `read app.files  -  -  <- failed: permission denied for table files`.
 
 ## 0.1.0 (alpha)
 

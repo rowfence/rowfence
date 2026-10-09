@@ -272,6 +272,13 @@ CLI push --development example/docs.authz >/dev/null 2>&1 || bad "push --develop
 ( cd "$T/p" && python3 "$OLDPWD/cli/rowstile_cli.py" dev --once ) > "$T/dev.log" 2>&1; rc=$?
 case "$(cat "$T/dev.log")" in *"ok   compiles"*"applied in"*"check(s) pass"*"wrote out/authz_client.py"*) [ $rc -eq 0 ] &&
   ok "dev --once: compiles, applies, tests, writes the client" || bad "dev exit" "$rc";; *) bad "dev --once" "$(cat "$T/dev.log")";; esac
+# a lookup the policy makes that no index serves: named once the pass is through, with the line to add
+PSQL -c "DROP INDEX app.team_members_user_id_idx"
+( cd "$T/p" && python3 "$OLDPWD/cli/rowstile_cli.py" dev --once ) > "$T/dev.log" 2>&1; rc=$?
+case "$(cat "$T/dev.log")" in *"check(s) pass"*"  !    app.team_members has no index on (user_id): finding the teams by their team.member"*'         add: CREATE INDEX CONCURRENTLY "team_members_user_id_idx" ON "app"."team_members" ("user_id");')
+  [ $rc -eq 0 ] && ok "... and names a lookup no index serves, with the index to add" || bad "dev index exit" "$rc";;
+  *) bad "dev and a missing index" "$(cat "$T/dev.log")";; esac
+PSQL -c "CREATE INDEX team_members_user_id_idx ON app.team_members (user_id)"
 sed -i 's/can edit  = share or editor or/can edit  = share or edtor or/' "$T/p/policy.authz"
 ( cd "$T/p" && python3 "$OLDPWD/cli/rowstile_cli.py" dev --once ) > "$T/dev.log" 2>&1; rc=$?
 case "$(cat "$T/dev.log")" in *"policy.authz: line "*"edtor"*"nothing applied"*) [ $rc -eq 1 ] && ok "... a mistake stops it before applying, exit 1" || bad "dev mistake exit" "$rc";;
