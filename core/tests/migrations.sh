@@ -125,6 +125,15 @@ case "$out" in *"policy.authz: applied (the whole policy)")
   [ "$(PSQL -c "SELECT count(*) FROM pg_policy WHERE polrelid = 'app.files'::regclass AND polname = 'authz_select'")" = 1 ] &&
   ok "push where a rule's policy was dropped by hand: the whole policy, which makes it again" || bad "push after a dropped policy: it is still gone";;
   *) bad "push after a dropped policy" "$out";; esac
+# the policy on record changed by hand into text that doesn't compile (a stray line): it isn't the policy in force, so
+# push applies the whole policy, and records it as it is
+PSQL -c "UPDATE authz.policy_versions SET policy = policy || E'\nnonsense' WHERE id = (SELECT max(id) FROM authz.policy_versions)" >/dev/null
+out=$(CLI push 2>&1); rc=$?
+case "$out" in *"policy.authz: applied (the whole policy)")
+  [ $rc -eq 0 ] && [ "$(PSQL -c "SELECT policy FROM authz.policy_versions ORDER BY id DESC LIMIT 1")" = "$(cat "$P/db/policy.authz")" ] &&
+  ok "push where the policy on record was changed by hand into one that doesn't compile: the whole policy, recorded as it is" ||
+  bad "push after the record was changed by hand: exit $rc, or the record";;
+  *) bad "push after the record was changed by hand" "$out";; esac
 # a user type's where that doesn't run: the migration that makes authz.uid() again reads it (Postgres would read it on
 # the app's first query), and refuses it with its line, as applying the whole policy does (the user type without its
 # permission, impersonate, whose view would read the where too)
@@ -137,7 +146,24 @@ case "$out" in *"policy line $(grep -n '^type user = ' "$P/db/policy.authz" | cu
   [ $rc -eq 1 ] && [ "$(PSQL -c "SELECT count(*) FROM pg_proc WHERE oid = 'authz.uid()'::regprocedure AND prosrc LIKE '%nme%'")" = 0 ] &&
   ok "push of a user type's where that doesn't run: refused with its line, authz.uid() as it was" || bad "push of a bad where: exit or state" "$rc";;
   *) bad "push of a user type's where that doesn't run" "$out";; esac
+# one that runs when pushed, on a column only authz.uid() reads (no view holds it, so the app may drop it), which the
+# app then drops: the push of another change goes on (its migration doesn't make authz.uid() again, and the column is
+# the app's to put back), and applying the whole policy refuses it with its line
+PSQL -c "ALTER TABLE app.users ADD COLUMN active boolean NOT NULL DEFAULT true" >/dev/null
+sed -i -e 's/^type user = app.users where {this.nme is not null}$/type user = app.users where {active}/' "$P/db/policy.authz"
+out=$(CLI push 2>&1) || bad "push of a user type's where on a column of its own" "$out"
+PSQL -c "ALTER TABLE app.users DROP COLUMN active" >/dev/null
+sed -i 's/^  can print = edit$/  can print = view/' "$P/db/policy.authz"
+out=$(CLI push 2>&1); rc=$?
+case "$out" in *"policy.authz: pushed") [ $rc -eq 0 ] &&
+  ok "a where on a column the app dropped since: the push of another change goes on" || bad "push after a dropped column: exit" "$rc";;
+  *) bad "push after the app dropped a column a where reads" "$out";; esac
+out=$(CLI apply --force 2>&1); rc=$?
+case "$out" in *"policy line $(grep -n '^type user = ' "$P/db/policy.authz" | cut -d: -f1): the condition {active} doesn't run: column \"active\" does not exist [AZ613]"*)
+  [ $rc -eq 1 ] && ok "... and applying the whole policy refuses it with its line" || bad "apply after a dropped column: exit" "$rc";;
+  *) bad "apply after the app dropped a column a where reads" "$out";; esac
 cp "$T/keep.authz" "$P/db/policy.authz"
+out=$(CLI push 2>&1); case "$out" in *"policy.authz: pushed") ;; *) bad "push back to the policy without a where" "$out";; esac
 # removing the policy doesn't make a database a development one: what it took is still on record
 fresh "${DB}_4"
 PGOPTIONS="-c client_min_messages=error" psql -X -q -1 -v ON_ERROR_STOP=1 -d "${DB}_4" -f "$first" >/dev/null 2>&1
