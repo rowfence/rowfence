@@ -437,6 +437,14 @@ Each release upgrades from the one before it. How releases are numbered and made
   own, for the transaction it began last: a later transaction isn't answered about an earlier one's writes,
   and a block that wrote nothing isn't answered about writes made outside it. In `rowstile.fastapi` each
   request has its own, also when `Rowstile` isn't given `user=` (a sync endpoint's refused flush is 403).
+- `rowstile why` (and Studio, where it may write) didn't offer to share again where a share had expired, starts
+  later or has a caveat: it tried it as the share already there, which granted nothing. It tries it as
+  `authz.share` makes it again. It offered a share the relation's `shared if` refuses, which `authz.share`
+  refuses too: it offers only the ones it allows.
+- `rowstile why` and Studio offered no column and no link row on a type keyed by several columns (`type project
+  = app.projects (org_id, id)`): "no single change to shares or links grants it", where setting the project's
+  `lead_id`, or adding a row to its members' table, would. They offer both.
+- `rowstile why` called a condition after `not` (`and not {archived}`) a deny. It names the condition.
 
 ## 0.1.0 (alpha)
 

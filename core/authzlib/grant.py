@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING
 
 from .conditions import Bool, Cmp, Col, Const, In, IsNull, Node, Scalar, simple
 from .connection import Db, Value, flag, number, text
-from .parse import Expr, Loc, Ref, Relation, Source, Type
+from .parse import And, Cols, Expr, Loc, Ref, Relation, Source, Type, cols
 from .sqlutil import lit, q, qt
 
 if TYPE_CHECKING:
@@ -70,6 +70,15 @@ def constant(v: Scalar) -> str:
     return lit(v) if isinstance(v, str) else str(v)
 
 
+def holding(t: Type, columns: Cols, oid: str) -> list[tuple[str, str]]:
+    """The columns that hold the id of t's object oid, each with its value as SQL: the id, or for a key of several
+    columns (oid is then the key's row text) each of its fields."""
+    if isinstance(columns, str):
+        return [(columns, lit(oid))]
+    key = f"({lit(oid)}::{t.keytype})"
+    return [(c, f"{key}.{q(k)}") for c, (k, _) in zip(columns, t.key, strict=True)]
+
+
 @dataclass
 class Held:
     objects: int  # how many objects of the type the person holds the permission on
@@ -115,18 +124,17 @@ class Grants:
     def __init__(self, c: Compiler, db: Db, ptype: str, pid: str) -> None:
         self.c, self.db, self.ptype, self.pid = c, db, ptype, pid
         self.notes: list[str] = []
-        self.errors: list[str] = []
 
     # --- reading what is there now -------------------------------------------------------------------
     def probe(self, sql: str, args: Sequence[Value] = ()) -> list[dict[str, Value]]:
-        """Rows of a read that may fail (a relation authz.list doesn't know), in a savepoint of its own."""
+        """Rows of a read that may fail, in a savepoint of its own: none when it does (an id its key's type can't
+        hold, as `folder Engineering` for a bigint key: the changes tried on it then say why)."""
         from .database import savepoint
 
         try:
             with savepoint(self.db, "authz_grant_probe"):
                 return self.db.rows(sql, list(args))
-        except self.db.errors as e:
-            self.errors.append(getattr(e, "message", str(e)))
+        except self.db.errors:
             return []
 
     def linked(self, t: Type, r: Relation, src: Source, st: str, sr: str | None, oid: str) -> list[str]:
@@ -159,29 +167,41 @@ class Grants:
     def direct(
         self, t: Type, r: Relation, src: Source, st: str, sid: str, sr: str = ""
     ) -> Callable[[str], Change | None]:
-        """The change that links oid to subject sid through this source (None if there is no simple one)."""
+        """The change that links oid to subject sid through this source (None when it is a link table whose `where`
+        doesn't say which values make it true)."""
 
         def make(oid: str) -> Change | None:
             if src.kind == "shared":
                 who = f"{st}#{sr} {sid}" if sr else f"{st} {sid}"
-                # the row authz.share would make (it needs someone signed in who may share; this is the owner)
+                obj, subj = f"authz_int.canon({lit(t.name)}, {lit(oid)})", f"authz_int.canon({lit(st)}, {lit(sid)})"
+                key = f"{t.name}.{r.name}.{st}#{sr}" if sr else f"{t.name}.{r.name}.{st}"
+                # the share authz.share would make (it needs someone signed in who may share; this is the owner): only
+                # one the relation's `shared if` allows, and one there already (that expired, say) made again without
+                # an end, a start or a caveat, as authz.share makes it again
                 return Change(
                     "share",
                     f"share {r.name} on {t.name} {oid} with {who}",
                     "INSERT INTO authz.shares (object_type, object_id, relation, subject_type, subject_id, "
-                    f"subject_relation) VALUES ({lit(t.name)}, authz_int.canon({lit(t.name)}, {lit(oid)}), "
-                    f"{lit(r.name)}, {lit(st)}, authz_int.canon({lit(st)}, {lit(sid)}), {lit(sr)}) ON CONFLICT DO NOTHING",
+                    f"subject_relation) SELECT {lit(t.name)}, {obj}, {lit(r.name)}, {lit(st)}, {subj}, {lit(sr)} "
+                    f"WHERE authz_int.share_if({lit(key)}, {obj}, {lit(st)}, {subj}, {lit(sr)}) "
+                    "ON CONFLICT ON CONSTRAINT shares_pkey "
+                    "DO UPDATE SET expires_at = NULL, starts_at = NULL, caveat = NULL, caveat_args = NULL",
                     src.loc,
                     1,
                 )
-            if src.kind == "table" and src.table and isinstance(src.obj_col, str) and isinstance(src.subj_col, str):
-                cols, vals = [src.obj_col, src.subj_col], [lit(oid), lit(sid)]
-                if src.type_col:
-                    cols.append(src.type_col)
-                    vals.append(lit(st))
+            # a row of a link table, or a column of the object's own row (relation() never asks for a custom
+            # role's): the subject's columns, each with its value, and in a polymorphic source the one naming its type
+            assert src.kind in ("table", "column"), f"{t.name}.{r.name}: no change for a {src.kind} source"
+            on = src.subj_col if src.kind == "table" else src.column
+            assert on, f"{t.name}.{r.name}: a source names its subject's columns"
+            subject = holding(self.c.types[st], on, sid) + ([(src.type_col, lit(st))] if src.type_col else [])
+            if src.kind == "table":
+                assert src.table and src.obj_col, f"{t.name}.{r.name}: a link table names the object's columns"
+                pairs = holding(t, src.obj_col, oid) + subject
+                names, vals = [c for c, _ in pairs], [v for _, v in pairs]
                 # a source with a `where`: the row must also hold what the condition asks, if it says which values
                 held = settles(src.where) if src.where else {}
-                if held is None or set(held) & set(cols):
+                if held is None or set(held) & set(names):
                     self.notes.append(
                         f"{t.name}.{r.name} wasn't tried: it reads {src.table} where {{{src.where}}}, and it isn't "
                         "known which values make that true"
@@ -190,7 +210,7 @@ class Grants:
                 more = ", ".join(f"{c} = {constant(v)}" for c, v in held.items())
                 if held:
                     # the link's row may be there already, left out by the condition: then its columns change
-                    same = " AND ".join(f"{q(c)} = {v}" for c, v in zip(cols, vals, strict=True))
+                    same = " AND ".join(f"{q(c)} = {v}" for c, v in zip(names, vals, strict=True))
                     if self.probe(f"SELECT 1 AS x FROM {qt(src.table)} WHERE {same} LIMIT 1"):
                         sets = ", ".join(f"{q(c)} = {constant(v)}" for c, v in held.items())
                         return Change(
@@ -200,25 +220,23 @@ class Grants:
                             src.loc,
                             2,
                         )
-                    cols += list(held)
+                    names += list(held)
                     vals += [constant(v) for v in held.values()]
                 return Change(
                     "link",
                     f"add {st} {sid} to {src.table} for {t.name} {oid}" + (f", with {more}" if held else ""),
-                    f"INSERT INTO {qt(src.table)} ({', '.join(q(x) for x in cols)}) VALUES ({', '.join(vals)})",
+                    f"INSERT INTO {qt(src.table)} ({', '.join(q(x) for x in names)}) VALUES ({', '.join(vals)})",
                     src.loc,
                     2,
                 )
-            if src.kind == "column" and isinstance(src.column, str) and not t.composite:
-                sets = [f"{q(src.column)} = {lit(sid)}"] + ([f"{q(src.type_col)} = {lit(st)}"] if src.type_col else [])
-                return Change(
-                    "column",
-                    f"set {src.column} of {t.name} {oid} to {sid}",
-                    f"UPDATE {qt(t.table)} r SET {', '.join(sets)} WHERE {self.c.key_is(t, 'r', lit(oid))}",
-                    src.loc,
-                    3,
-                )
-            return None
+            return Change(
+                "column",
+                f"set {', '.join(cols(on))} of {t.name} {oid} to {sid}",
+                f"UPDATE {qt(t.table)} r SET {', '.join(f'{q(c)} = {v}' for c, v in subject)} "
+                f"WHERE {self.c.key_is(t, 'r', lit(oid))}",
+                src.loc,
+                3,
+            )
 
         return make
 
@@ -241,12 +259,16 @@ class Grants:
                     return out
                 for src in r.sources:
                     for target, sr in src.subjects:
-                        if sr is None and target in self.c.types:
-                            for x in self.linked(t, r, src, target, None, oid):
-                                out += self.ways(self.c.types[target], x, Ref("ref", perm), depth + 1, seen)
+                        # a relation followed with a dot links to objects, not to groups or anyone (AZ301)
+                        assert sr is None and target in self.c.types, f"{t.name}.{rel} is followed to {target}"
+                        for x in self.linked(t, r, src, target, None, oid):
+                            out += self.ways(self.c.types[target], x, Ref("ref", perm), depth + 1, seen)
                 return out
             case ("cond", sql):
                 self.notes.append(f"{t.name} {oid} must meet {{{sql}}}: no share or link changes that")
+                return []
+            case ("not", ("cond", sql)):
+                self.notes.append(f"{t.name} {oid} must not meet {{{sql}}}: no share or link changes that")
                 return []
             case ("not", _):
                 self.notes.append(
@@ -255,14 +277,14 @@ class Grants:
                 return []
             case ("or", items):
                 return [w for x in items for w in self.ways(t, oid, x, depth, seen)]
-            case ("and", items):
-                # a change for each part that may not hold yet (or none, if it holds already)
-                combos: list[list[Change]] = [[]]
-                for x in items:
-                    options = [*sorted(self.ways(t, oid, x, depth, seen), key=len)[:3], []]
-                    combos = [a + b for a in combos for b in options][:TRIES]
-                return [c for c in combos if c]
-        return []
+        # an `and` (the compiler's own arrow_on is never in a permission's expression): a change for each part that
+        # may not hold yet (or none, if it holds already)
+        assert isinstance(node, And), node
+        combos: list[list[Change]] = [[]]
+        for x in node.items:
+            options = [*sorted(self.ways(t, oid, x, depth, seen), key=len)[:3], []]
+            combos = [a + b for a in combos for b in options][:TRIES]
+        return [c for c in combos if c]
 
     def relation(
         self, t: Type, oid: str, r: Relation, depth: int, seen: frozenset[tuple[str, str, str]]
@@ -276,7 +298,7 @@ class Grants:
                     ch = self.direct(t, r, src, st, self.pid)(oid)
                     if ch:
                         out.append([ch])
-                elif sr and sr != "*" and st in self.c.types:
+                elif sr and sr != "*":  # (every user, user:*, is no group to join: a share with it is never offered)
                     # a group the person is in already: link the object to it
                     for g in self.groups_of(st, sr):
                         ch = self.direct(t, r, src, st, g, sr)(oid)

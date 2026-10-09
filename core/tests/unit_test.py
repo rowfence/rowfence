@@ -6420,6 +6420,7 @@ class Why(unittest.TestCase):
             ("'admin' = role", {"role": "admin"}),
             ("active and not blocked and level = 2", {"active": True, "blocked": False, "level": 2}),
             ("kind in ('a', 'b') and ended is null", {"kind": "a", "ended": None}),
+            ("kind in (null, 'a')", None),  # a column set to NULL is in no list
             ("role <> 'guest'", None),
             ("role = 'admin' or role = 'owner'", None),
             ("ended is not null", None),
@@ -6456,6 +6457,36 @@ class Why(unittest.TestCase):
                 "which values make that true"
             ],
         )
+
+    def test_a_loop_of_links_is_followed_once(self) -> None:
+        """Folders shown inside each other (links may loop): the search comes back to the folder it started from
+        and stops there, so each way is found and each link looked up once (not again until the depth runs out)."""
+        from authzlib import grant
+        from authzlib.parse import Ref, Relation, Source, Type
+
+        c = Compiler(
+            parse_policy(
+                errors_prelude() + "type folder = app.folders\n"
+                "  link  : folder = app.folder_links(folder_id -> parent_id)\n"
+                "  owner : user   = owner_id\n"
+                "  can view = owner or link.view\n",
+                "p.authz",
+            )
+        )
+        looked: list[str] = []
+
+        class Loop(grant.Grants):
+            def linked(self, t: Type, r: Relation, src: Source, st: str, sr: str | None, oid: str) -> list[str]:
+                looked.append(oid)
+                return ["2" if oid == "1" else "1"]  # folder 1 is shown in folder 2, and 2 in 1
+
+        g = Loop(c, cast("grant.Db", None), "user", "4")
+        ways = g.ways(c.types["folder"], "1", Ref("ref", "view"), 0, frozenset())
+        self.assertEqual(
+            [[ch.text for ch in w] for w in ways],
+            [["set owner_id of folder 1 to 4"], ["set owner_id of folder 2 to 4"]],
+        )
+        self.assertEqual(looked, ["1", "2"])
 
 
 WINDOWS_ONLY = (

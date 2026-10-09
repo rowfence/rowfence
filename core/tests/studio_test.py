@@ -1119,9 +1119,222 @@ def main() -> None:
     check("... and nothing of it stays", psql(cross, "SELECT chief_id FROM cx.regions WHERE id = 2") == "2")
     subprocess.run(["dropdb", "--if-exists", cross], capture_output=True)
 
+    corners(db + "_why")
+
     subprocess.run(["dropdb", "--if-exists", db], capture_output=True)
     print("studio: all passed" if not fails else f"studio: {fails} failed")
     sys.exit(1 if fails else 0)
+
+
+# rowstile why on what the docs example doesn't have: groups in groups through a permission, a table naming its
+# rows' type, a share that expired, `shared if`, a link table with a column no change fills, a chain of five, a
+# service that signs in, a deny, a condition, and a key of two columns
+WHY_SCHEMA = """
+CREATE SCHEMA cn;
+CREATE TABLE cn.users (id bigint PRIMARY KEY, active boolean NOT NULL DEFAULT true);
+CREATE TABLE cn.bots (id bigint PRIMARY KEY, owner_id bigint REFERENCES cn.users);
+CREATE TABLE cn.groups (id bigint PRIMARY KEY, parent_id bigint REFERENCES cn.groups);
+CREATE TABLE cn.group_members (group_id bigint REFERENCES cn.groups, member_type text NOT NULL, member_id bigint,
+  PRIMARY KEY (group_id, member_type, member_id));
+CREATE TABLE cn.docs (id bigint PRIMARY KEY, parent_id bigint REFERENCES cn.docs, owner_id bigint REFERENCES cn.users,
+  archived boolean NOT NULL DEFAULT false);
+CREATE TABLE cn.doc_editors (doc_id bigint REFERENCES cn.docs, user_id bigint REFERENCES cn.users,
+  added_by bigint NOT NULL REFERENCES cn.users, PRIMARY KEY (doc_id, user_id));
+CREATE TABLE cn.doc_groups (doc_id bigint REFERENCES cn.docs, group_id bigint REFERENCES cn.groups,
+  until timestamptz NOT NULL, PRIMARY KEY (doc_id, group_id));
+CREATE TABLE cn.pages (id bigint PRIMARY KEY, parent_id bigint REFERENCES cn.pages, hidden boolean NOT NULL);
+CREATE TABLE cn.page_readers (page_id bigint REFERENCES cn.pages, user_id bigint REFERENCES cn.users,
+  PRIMARY KEY (page_id, user_id));
+CREATE TABLE cn.projects (org_id bigint, id bigint, lead_id bigint REFERENCES cn.users, PRIMARY KEY (org_id, id));
+CREATE TABLE cn.project_members (org_id bigint, project_id bigint, user_id bigint REFERENCES cn.users,
+  PRIMARY KEY (org_id, project_id, user_id), FOREIGN KEY (org_id, project_id) REFERENCES cn.projects);
+GRANT USAGE ON SCHEMA cn TO app_user;
+GRANT SELECT ON ALL TABLES IN SCHEMA cn TO app_user;
+-- ann (1) owns docs 1 to 5, each inside the one before, and doc 6, archived; bo (2) is in group 2, which is in
+-- group 1; dee (4) is no longer active; bot 1 may view doc 4
+INSERT INTO cn.users VALUES (1, true), (2, true), (3, true), (4, false);
+INSERT INTO cn.bots VALUES (1, 1);
+INSERT INTO cn.groups VALUES (1, NULL), (2, 1);
+INSERT INTO cn.group_members VALUES (2, 'user', 2);
+INSERT INTO cn.docs VALUES (1, NULL, 1, false), (2, 1, 1, false), (3, 2, 1, false), (4, 3, 1, false),
+  (5, 4, 1, false), (6, NULL, 1, true);
+INSERT INTO cn.pages VALUES (1, NULL, true), (2, 1, false);
+INSERT INTO cn.projects VALUES (1, 5, 1);
+"""
+WHY_POLICY = """app role app_user
+
+type user = cn.users
+type bot = cn.bots principal
+  owner : user = owner_id
+  can manage_keys = owner
+
+type grp = cn.groups
+  member : user, bot  = cn.group_members(group_id -> (member_type, member_id))
+  member : grp#member = cn.groups(parent_id -> id)
+  can belong = member
+
+type doc = cn.docs
+  parent : doc  = parent_id
+  owner  : user = owner_id
+  editor : user = cn.doc_editors(doc_id -> user_id)
+  viewer : user, user:*, bot, grp#belong shared if {subject_type <> 'user' or subject_id in (select id::text from cn.users where active)}
+  reader : grp#member = cn.doc_groups(doc_id -> group_id) where {until > now()}
+  can share   = owner
+  can edit    = owner or editor
+  can view    = edit or viewer or reader or parent.view
+  can archive = owner and not {archived}
+
+type page = cn.pages
+  parent : page = parent_id
+  reader : user = cn.page_readers(page_id -> user_id)
+  reader : user, user:* shared by read
+  can hidden = {hidden} or parent.hidden
+  can read   = (reader or parent.read) and not hidden
+
+type project = cn.projects (org_id, id)
+  lead   : user = lead_id
+  member : user = cn.project_members([org_id, project_id] -> user_id)
+  editor : user, grp#member shared if {subject_type = 'user'}
+  can share = lead
+  can edit  = lead or member or editor
+"""
+
+
+def corners(db: str) -> None:
+    print("-- rowstile why on the shapes the docs example doesn't have")
+    subprocess.run(["dropdb", "--if-exists", db], capture_output=True)
+    subprocess.run(["createdb", db], check=True)
+    psql(db, WHY_SCHEMA)
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "why.authz")
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(WHY_POLICY)
+        rc, out = cli(db, "apply", path)
+    if rc:
+        raise SystemExit(out)
+    # cy (3) could view doc 3 until yesterday; bot 1 may view doc 4; page 2 was shared with every user before page 1,
+    # above it, was hidden
+    psql(
+        db,
+        "SELECT authz.act_as('user', '1'); "
+        "SELECT authz.share('doc', '3', 'viewer', 'user', '3', '', now() - interval '1 day'); "
+        "SELECT authz.share('doc', '4', 'viewer', 'bot', '1'); "
+        "INSERT INTO authz.shares (object_type, object_id, relation, subject_type, subject_id) "
+        "VALUES ('page', '2', 'reader', 'user', '*')",
+    )
+    data = "SELECT (SELECT string_agg(s::text, ' ' ORDER BY s::text) FROM authz.shares s), " + ", ".join(
+        f"(SELECT string_agg(x::text, ' ' ORDER BY x::text) FROM {t} x)"
+        for t in ("cn.group_members", "cn.docs", "cn.doc_editors", "cn.projects", "cn.project_members")
+    )
+    before = psql(db, data)
+
+    def why(*question: str) -> tuple[int, str, list[str], list[str]]:
+        """The exit code, what it printed, the ways that grant it, and the lines after them."""
+        rc, said = cli(db, "why", *question)
+        lines = said.splitlines()
+        ways = lines[lines.index("would be granted by:") + 1 :] if "would be granted by:" in lines else []
+        return rc, said, [x.strip() for x in ways if x.startswith("  ")], [x for x in ways if not x.startswith("  ")]
+
+    rc, said, ways, _ = why("--as", "user:2", "doc", "5", "view")
+    check(
+        "a group whose membership is a permission: a share with each group the person belongs to, the one above "
+        "through the one below too",
+        rc == 0
+        and "share viewer on doc 5 with grp#belong 2  [line 17]" in ways
+        and "share viewer on doc 5 with grp#belong 1  [line 17]" in ways,
+        said,
+    )
+    rc, said, ways, _ = why("--as", "user:3", "grp", "2", "belong")
+    check(
+        "a table that names its rows' type: the row it adds names the person's",
+        rc == 0
+        and ways[:1]
+        == ["add user 3 to cn.group_members for grp 2 (also gives belong on 1 more grp for user:3)  [line 9]"],
+        said,
+    )
+    rc, said, ways, _ = why("--as", "user:3", "doc", "3", "view")
+    check(
+        "a share that expired: made again, as authz.share makes it, first",
+        rc == 0
+        and ways[:1] == ["share viewer on doc 3 with user 3 (also gives view on 2 more docs for user:3)  [line 17]"],
+        said,
+    )
+    rc, said, ways, _ = why("--as", "user:4", "doc", "5", "view")
+    check(
+        "a share the relation's `shared if` refuses (dee isn't active) is no way, as authz.share would refuse it",
+        rc == 0
+        and ways
+        and not any("with user 4" in w for w in ways)
+        and any(w.startswith("set owner_id of doc 5 to 4") for w in ways),
+        said,
+    )
+    rc, said, _, after = why("--as", "user:3", "doc", "5", "view")
+    check(
+        "a row the table refuses (a column no change fills): said, with the database's reason; for the doc and the "
+        "three above it, and no higher",
+        rc == 0
+        and [x for x in after if x.startswith("could not be tried")]
+        == [
+            f"could not be tried: add user 3 to cn.doc_editors for doc {n} (null value in column "
+            '"added_by" of relation "doc_editors" violates not-null constraint)'
+            for n in (5, 4, 3, 2)
+        ],
+        said,
+    )
+    rc, said, ways, _ = why("--as", "bot:1", "doc", "2", "view")
+    check(
+        "as a service that signs in: why not, as the database explains it to the service, and a share with it",
+        rc == 0
+        and said.splitlines()[1] == "  no   bot 1 does not hold view on doc 2"
+        and ways[:1] == ["share viewer on doc 2 with bot 1 (also gives view on 1 more doc for bot:1)  [line 17]"],
+        said,
+    )
+    rc, said, ways, _ = why("--as", "user:2", "project", "(1,5)", "edit")
+    check(
+        "a key of two columns: a row of the link table, and the column, each from the key's fields",
+        rc == 0
+        and "add user 2 to cn.project_members for project (1,5)  [line 33]" in ways
+        and any(w.startswith("set lead_id of project (1,5) to 2 (also gives share on it)") for w in ways),
+        said,
+    )
+    check(
+        "... a share with the person, and none with the group they are in: `shared if` takes people only",
+        "share editor on project (1,5) with user 2  [line 34]" in ways and not any("grp#member" in w for w in ways),
+        said,
+    )
+    rc, said, ways, after = why("--as", "user:3", "page", "2", "read")
+    check(
+        "a deny above it, on a page shared with every user: no change grants it, and the note says what may stop it",
+        rc == 0
+        and said.endswith(
+            "no single change to shares or links grants it\n"
+            "note: a deny on page 2 (not ...) may be what stops it: no share or link removes it\n"
+        ),
+        said,
+    )
+    rc, said, ways, after = why("--as", "user:1", "doc", "6", "archive")
+    check(
+        "a condition: no change grants it, and the note names it",
+        rc == 0
+        and said.endswith(
+            "no single change to shares or links grants it\n"
+            "note: doc 6 must not meet {archived}: no share or link changes that\n"
+        ),
+        said,
+    )
+    rc, said, ways, _ = why("--as", "user:3", "doc", "five", "view")
+    check(
+        "an id its key can't hold: no, and why each change couldn't be tried",
+        rc == 0
+        and said.startswith("no: user:3 does not hold view on doc five\n")
+        and 'could not be tried: share viewer on doc five with user 3 (invalid input syntax for type bigint: "five")'
+        in said,
+        said,
+    )
+    rc, said = cli(db, "why", "--as", "user:3", "nothing", "3", "view")
+    check("a type the policy doesn't have: named, exit 1", (rc, said) == (1, "no type nothing in the policy\n"), said)
+    check("... and nothing it tried stays", psql(db, data) == before, (before, psql(db, data)))
+    subprocess.run(["dropdb", "--if-exists", db], capture_output=True)
 
 
 if __name__ == "__main__":
