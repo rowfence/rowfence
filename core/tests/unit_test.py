@@ -1316,7 +1316,7 @@ class Command(unittest.TestCase):
 
     def test_migrate_says_what_stops_the_tool_and_how_much_changed(self) -> None:
         # Alembic with two heads (two branches each added a revision): said, and nothing written; a migration of
-        # many changes lists the first twenty of them, and how many more
+        # many changes lists the first twenty of them, and how many more (--check too, which listed twenty alone)
         text = read(POLICIES["docs"])
         with tempfile.TemporaryDirectory() as d:
             policy = os.path.join(d, "policy.authz")
@@ -1349,10 +1349,30 @@ class Command(unittest.TestCase):
                         text, "  can share = owner or folder.share\n", "  can share = owner or folder.share\n" + extra
                     )
                 )
-            p = run("migrate", "policy.authz", "--tool", "sql")
-            self.assertEqual(p.returncode, 0, p.stderr)
-            self.assertEqual(p.stdout.count("  + type file: can extra"), 20, p.stdout)
-            self.assertIn("\n  ... and 5 more\n", p.stdout)
+            for check, code in ((["--check"], 1), ([], 0)):
+                p = run("migrate", "policy.authz", "--tool", "sql", *check)
+                self.assertEqual(p.returncode, code, p.stderr)
+                self.assertEqual(p.stdout.count("  + type file: can extra"), 20, p.stdout)
+                self.assertIn("\n  ... and 5 more\n", p.stdout)
+
+    def test_a_file_it_cant_write_is_named(self) -> None:
+        # the client's path is a folder: the file and why, exit 2, where the command stopped with a traceback
+        with tempfile.TemporaryDirectory() as d:
+            with open(os.path.join(d, "rowstile.toml"), "w", encoding="utf-8") as fh:
+                fh.write('policy = "policy.authz"\n[clients]\npy = "out"\n')
+            with open(os.path.join(d, "policy.authz"), "w", encoding="utf-8") as fh:
+                fh.write(read(POLICIES["docs"]))
+            os.mkdir(os.path.join(d, "out"))
+            p = subprocess.run(
+                [sys.executable, os.path.join(ROOT, "cli", "rowstile_cli.py"), "client"],
+                cwd=d,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+            )
+            self.assertEqual(p.returncode, 2, p.stderr)
+            self.assertNotIn("Traceback", p.stderr)
+            self.assertTrue(p.stderr.startswith("out: "), p.stderr)  # Is a directory (on Windows, Permission denied)
 
     def test_array_literal(self) -> None:
         self.assertEqual(database.text_array(["1", 'a"b', "c\\d"]), '{"1","a\\"b","c\\\\d"}')

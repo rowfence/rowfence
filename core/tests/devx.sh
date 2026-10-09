@@ -368,6 +368,28 @@ out=$(python3 cli/rowstile_cli.py --db "dbname=${DB}_plain" dev --once --no-stud
 case "$out" in *'  ok   no tests yet (rowstile.toml: tests = ["db/tests/*.authz"])'*) [ $rc -eq 0 ] && ok "... on a policy with neither tests nor invariants: no tests yet, exit 0" || bad "dev without tests: exit" "$rc";;
   *) bad "dev without tests" "$out";; esac
 dropdb --if-exists "${DB}_plain"
+# who gains and loses what, said before each push: permissions on objects, and rows by table
+cp "$T/p/policy.authz" "$T/policy.keep"
+sed -i 's/^           or (folder.view and not {confidential})$//' "$T/p/policy.authz"
+devonce
+[ $rc -eq 0 ] && grep -q "^  ~    access:$" "$T/dev.log" &&
+  grep -qE "^       [1-9][0-9]* user\(s\) lose rows readable in app\.files \([1-9][0-9]* rows?\)$" "$T/dev.log" &&
+  grep -qE "^       [1-9][0-9]* user\(s\) lose permission view on [1-9][0-9]* files?$" "$T/dev.log" &&
+  ok "... says before each push who gains and loses what: rows by table, permissions by type" || bad "dev's access" "$rc $(cat "$T/dev.log")"
+cp "$T/policy.keep" "$T/p/policy.authz"; devonce
+# a client it can't write (its path a folder): which file and why, not a lost database
+rm "$T/p/out/authz_client.py"; mkdir "$T/p/out/authz_client.py"
+devonce
+case "$(cat "$T/dev.log")" in *"lost the database"*) bad "dev says it lost the database for a client it can't write" "$(cat "$T/dev.log")";;
+  *"  x    out/authz_client.py: Is a directory"*) [ $rc -eq 1 ] && ok "... of a client file it can't write: which file and why, exit 1" || bad "dev on a client it can't write: exit" "$rc";;
+  *) bad "dev on a client it can't write" "$(cat "$T/dev.log")";; esac
+rmdir "$T/p/out/authz_client.py"
+python3 -c "open('$T/deep.authz', 'w').write('app role app_user\ntype user = app.users\ntype d = app.d\n  o : user = owner_id\n  can view = ' + '(' * 3000 + 'o' + ')' * 3000 + '\n')"
+run dev --once --no-studio "$T/deep.authz"
+case "$out" in *Traceback*) bad "dev on an expression nested too deep gives a traceback" "${out: -300}";;
+  *"  x    "*"deep.authz: an expression in the policy is nested too deep to read"*"nothing applied"*)
+    [ $rc -eq 1 ] && ok "... of an expression nested too deep to read: said, nothing applied, exit 1" || bad "dev on deep nesting: exit" "$rc";;
+  *) bad "dev on deep nesting" "$out";; esac
 # the loop itself, left running: each save of the policy or of a test file runs it again, a mistake stops it
 # before applying, the migration is written once the saves stop, and Ctrl-C ends it, exit 0 (with job control
 # on: a background job otherwise ignores Ctrl-C)
@@ -405,6 +427,13 @@ if seen "watching 2 file(s)" && seen "check(s) pass"; then
   n=$(passes); mv "$T/p/policy.authz" "$T/policy.away"
   seen "  x    policy.authz: No such file or directory" && mv "$T/policy.away" "$T/p/policy.authz" && seen "check(s) pass" $((n + 1)) &&
     ok "... says when the policy file is gone, and runs again once it is back" || bad "dev without its policy file" "$(cat "$T/watch.log")"
+  # a migration it can't write (its folder is a file): which file and why, and the loop goes on
+  mistake; rm -r "$T/p/migrations"; : > "$T/p/migrations"
+  n=$(passes); sed -i -e 's/edtor/editor/' -e 's/^  can share = owner or folder.share$/&\n  can annotate = view/' "$T/p/policy.authz"
+  seen "check(s) pass" $((n + 1)) && seen "^migrations: File exists" &&
+    printf -- '-- saved after it\n' >> "$T/p/tests/docs.authz" && seen "check(s) pass" $((n + 2)) &&
+    ok "... says which file stops the migration it writes, and goes on" || bad "dev's migration it can't write" "$(cat "$T/watch.log")"
+  rm "$T/p/migrations"; mkdir "$T/p/migrations"
   # a migration it may not write (a lock file a newer rowstile wrote) is said, and the loop goes on
   mistake; sed -i '1s/^# rowstile [^:]*:/# rowstile 99.0.0:/' "$T/p/policy.lock"
   n=$(passes); sed -i -e 's/edtor/editor/' -e '/^  can comment = view$/d' "$T/p/policy.authz"
@@ -418,6 +447,17 @@ if seen "watching 2 file(s)" && seen "check(s) pass"; then
   n=$(passes); printf -- '-- saved once more\n' >> "$T/p/tests/docs.authz"
   seen "  x    lost the database: " && printf -- '-- and again\n' >> "$T/p/tests/docs.authz" && seen "check(s) pass" $((n + 1)) &&
     ok "... says it lost the database when the server ends its session, and connects again on the next save" || bad "dev losing the database" "$(cat "$T/watch.log")"
+  # ... and when it ends it in the middle of a push (here while it waits on another apply, which holds the lock
+  # apply and push take)
+  ( PSQL -c "SELECT pg_advisory_lock(1919905638, 0)" -c "SELECT pg_sleep(4)" >/dev/null 2>&1 ) &
+  locker=$!
+  for _ in $(seq 40); do [ "$(PSQL -c "SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND classid = 1919905638 AND objid = 0 AND granted")" = 1 ] && break; sleep 0.25; done
+  n=$(passes); sed -i 's/^  can share = owner or folder.share$/&\n  can comment = view/' "$T/p/policy.authz"
+  for _ in $(seq 40); do pid=$(PSQL -c "SELECT pid FROM pg_stat_activity WHERE datname = '$DB' AND application_name = 'rowstile' AND wait_event_type = 'Lock' LIMIT 1"); [ -n "$pid" ] && break; sleep 0.25; done
+  [ -n "$pid" ] && PSQL -c "SELECT pg_terminate_backend($pid)" >/dev/null
+  wait "$locker"
+  seen "  x    lost the database: terminating connection" && printf -- '-- saved after it\n' >> "$T/p/tests/docs.authz" && seen "check(s) pass" $((n + 1)) &&
+    ok "... and in the middle of a push: lost the database, and connects again on the next save" || bad "dev losing the database in a push" "$(cat "$T/watch.log")"
 else
   bad "dev didn't start watching" "$(cat "$T/watch.log")"
 fi

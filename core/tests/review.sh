@@ -84,6 +84,13 @@ rm "$P/db/tests/latin.authz"
 out=$(CLI --db "dbname=authz_review_no_such_db" review --base main 2>&1); rc=$?
 case "$out" in "can't connect: "*'database "authz_review_no_such_db" does not exist') [ $rc -eq 2 ] && ok "a review database that isn't there: can't connect, exit 2" || bad "review --db unreachable: exit" "$rc";;
   *) bad "review --db unreachable" "$out";; esac
+dropdb --if-exists "${DB}_bare" 2>/dev/null; createdb "${DB}_bare"
+out=$(CLI --db "dbname=${DB}_bare" review --base main 2>&1); rc=$?
+case "$out" in *Traceback*) bad "a review database without the app's tables gives a traceback" "${out: -300}";;
+  *"Access   not computed: the policy does not match this database:"*"table app.users not found [AZ601]"*)
+    [ $rc -eq 0 ] && ok "a review database without the app's tables: Access says why it isn't computed, exit 0" || bad "review on a bare database: exit" "$rc";;
+  *) bad "review on a bare database" "$out";; esac
+dropdb --if-exists "${DB}_bare"
 
 echo "-- a pull request whose policy doesn't run on the review data"
 G checkout -q -- db && rm -f "$P"/db/migrations/*_authz_build_policy.sql && G clean -q -fd db
@@ -236,6 +243,34 @@ printf '  can edit = owner\n' >> "$I/db/parts/types.authz"
 out=$( (cd "$I" && python3 "$OLDPWD/cli/rowstile_cli.py" review --base main db/policy.authz) 2>&1); rc=$?
 case "$out" in "Meaning  1 permission added"*) [ $rc -eq 0 ] && ok "a policy that includes files: the base's are read from git too" || bad "includes at the base: exit" "$rc";;
   *) bad "includes at the base" "$out";; esac
+
+echo "-- a review database whose owner may not switch to the app role"
+# since PostgreSQL 16 a role that makes another gets ADMIN on it, not SET (the suites' owner has
+# createrole_self_grant, which would hide it); the tests run as the app role
+N=authz_review_plain
+R=authz_review_plain_app
+dropdb --if-exists "$N" 2>/dev/null; psql -X -q -d postgres -c "DROP ROLE IF EXISTS $R" >/dev/null 2>&1
+createdb "$N" || exit 1
+PGOPTIONS="-c createrole_self_grant= -c client_min_messages=error" psql -X -q -v ON_ERROR_STOP=1 -d "$N" \
+  -c "CREATE ROLE $R" -c "CREATE SCHEMA app" -c "CREATE TABLE app.users (id bigint PRIMARY KEY)" \
+  -c "CREATE TABLE app.notes (id bigint PRIMARY KEY, owner_id bigint NOT NULL REFERENCES app.users, body text)" \
+  -c "GRANT USAGE ON SCHEMA app TO $R" -c "GRANT SELECT ON app.users TO $R" -c "GRANT SELECT, UPDATE ON app.notes TO $R" >/dev/null || exit 1
+Q="$T/plain"; mkdir -p "$Q/db/tests"
+printf 'app role %s\ntype user = app.users\ntype note = app.notes\n  owner : user = owner_id\n  can edit = owner\nrules app.notes\n  select : edit\n  update : edit\n' "$R" > "$Q/db/policy.authz"
+printf 'test "the owner reads its note"\n  as user 1 sees 1 {SELECT FROM app.notes}\n' > "$Q/db/tests/t.authz"
+printf 'policy = "db/policy.authz"\ntests = ["db/tests/*.authz"]\n[migrations]\ntool = "sql"\ndir = "db/migrations"\n' > "$Q/rowstile.toml"
+QCLI() { ( cd "$Q" && python3 "$OLDPWD/cli/rowstile_cli.py" "$@" ); }
+{ git -C "$Q" init -q -b main && git -C "$Q" config user.email t@example.com && git -C "$Q" config user.name t &&
+  QCLI migrate >/dev/null && git -C "$Q" add -A && git -C "$Q" commit -q -m base; } || bad "setting up the plain owner's repository"
+for f in "$Q"/db/migrations/*.sql; do
+  PGOPTIONS="-c client_min_messages=error" psql -X -q -1 -v ON_ERROR_STOP=1 -d "$N" -f "$f" >/dev/null || bad "the plain owner's base migration"
+done
+sed -i 's/^  can edit = owner$/&\n  can view = edit/' "$Q/db/policy.authz"
+out=$(QCLI --db "dbname=$N" review --base main 2>&1); rc=$?
+case "$out" in *"may not switch to the app role $R (SET ROLE), and this looks at the data as the app does [AZ618]"*"HINT: "*"GRANT \"$R\" TO \"$PGUSER\""*)
+  [ $rc -eq 1 ] && ok "the review says what to grant, exit 1" || bad "review as a plain owner: exit" "$rc";;
+  *) bad "review as a plain owner" "$out";; esac
+dropdb --if-exists "$N"; psql -X -q -d postgres -c "DROP ROLE IF EXISTS $R" >/dev/null 2>&1
 
 rm -rf "$T"
 dropdb --if-exists "$DB" 2>/dev/null

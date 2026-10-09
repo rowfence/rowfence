@@ -278,6 +278,11 @@ echo "-- snapshot: where it writes"
 toml 'policy = "db/policy.authz"\n' snapshot
 [ $rc -eq 0 ] && case "$out" in "wrote db/access.snapshot ("*" lines)") true;; *) false;; esac && [ -s "$P/db/access.snapshot" ] &&
   ok "snapshot writes access.snapshot beside the policy" || bad "snapshot beside the policy" "$rc $out"
+toml 'policy = "db/policy.authz"\n[review]\nsnapshot = "review/access.txt"\n' snapshot
+[ $rc -eq 0 ] && case "$out" in "wrote review/access.txt ("*" lines)") true;; *) false;; esac && [ -s "$P/review/access.txt" ] &&
+  ok "... or where [review] snapshot says, making its folder" || bad "snapshot where rowstile.toml says" "$rc $out"
+out=$(TOML snapshot --out db 2>&1); rc=$?
+[ $rc -eq 2 ] && [ "$out" = "db: Is a directory" ] && ok "a file it can't write (here a folder) is named, with why, exit 2: not a lost database" || bad "snapshot into a folder" "$rc $out"
 
 echo "-- a server that goes away, two applies at once"
 ( sleep 2; psql -X -q -At -d postgres -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '$DB' AND query LIKE '%pg_sleep(7)%' AND pid <> pg_backend_pid()" >/dev/null ) &
