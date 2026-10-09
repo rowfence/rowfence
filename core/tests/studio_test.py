@@ -683,6 +683,11 @@ def main() -> None:
             "postgres://a@localhost:port/x",
             "the URL's port isn't a number: a #, ? or / in the password must be written %23, %3F, %2F",
         ),
+        (
+            "a setting it doesn't know",
+            "colour=blue",
+            "unknown connection setting 'colour' (use host, port, user, password, dbname, sslmode)",
+        ),
     ):
         rc, out = command(target, "studio", "--port", str(free_port()))
         check(
