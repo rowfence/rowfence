@@ -6729,6 +6729,62 @@ class CheckCounts(unittest.TestCase):
         self.assertNotIn(0, written.values())
 
 
+class PreviousRelease(unittest.TestCase):
+    """tests/previous_release.py, which tests/upgrade.sh starts from: the release before a version is the newest
+    PyPI has that is older, in the order RELEASING.md gives (a version's alphas, its candidates, then it), with a
+    build of main after each alpha and candidate of the version it is on its way to."""
+
+    def setUp(self) -> None:
+        sys.path.insert(0, os.path.join(ROOT, "tests"))
+        import previous_release
+
+        self.p = previous_release
+
+    def test_the_release_before(self) -> None:
+        before = self.p.before
+        alphas = ["0.1.0a2", "0.1.0a6", "0.1.0a5"]
+        self.assertEqual(before("0.1.0-dev", alphas), "0.1.0a6")
+        # a release's own version is not before it, nor one after it
+        self.assertEqual(before("0.1.0-alpha.6", [*alphas, "0.1.0a7"]), "0.1.0a5")
+        self.assertEqual(before("0.1.0-rc.1", [*alphas, "0.1.0rc1"]), "0.1.0a6")
+        # numbers, not text: rc10 comes after rc2, 0.10.0 after 0.9.0
+        self.assertEqual(before("0.1.0", [*alphas, "0.1.0rc2", "0.1.0rc10"]), "0.1.0rc10")
+        self.assertEqual(before("0.10.0-dev", ["0.9.0", "0.2.0", "0.10.0a1"]), "0.10.0a1")
+        # main after a release: the release; a patch on an older line: the release it patches
+        self.assertEqual(before("0.3.0-dev", ["0.1.0", "0.2.0", "0.2.1", "0.3.0a1"]), "0.3.0a1")
+        self.assertEqual(before("0.2.0-dev", ["0.1.0", "0.2.0", "0.1.1"]), "0.1.1")
+        self.assertEqual(before("0.1.2", ["0.1.0", "0.1.1", "0.2.0"]), "0.1.1")
+        self.assertIsNone(before("0.1.0-alpha.2", ["0.1.0a2", "0.1.0a3"]))
+        # what the command never makes is left out: a beta, a post-release, a dev build published
+        self.assertEqual(before("0.2.0", ["0.1.0", "0.1.1b1", "0.1.1.post1", "0.1.1.dev0"]), "0.1.0")
+        with self.assertRaises(ValueError):
+            before("0.1.0-beta.1", alphas)
+
+    def test_spelled_as_the_command_writes_it(self) -> None:
+        self.assertEqual(
+            [self.p.spelled(v) for v in ("0.1.0a6", "0.1.0rc1", "0.2.0")], ["0.1.0-alpha.6", "0.1.0-rc.1", "0.2.0"]
+        )
+
+    def test_the_wheels_an_index_lists(self) -> None:
+        def f(name: str, **more: object) -> dict[str, object]:
+            return {"filename": name, "url": f"https://files.example/{name}", "hashes": {"sha256": "ab" * 32}, **more}
+
+        index = {
+            "files": [
+                f("rowstile-0.1.0a5-py3-none-any.whl"),
+                f("rowstile-0.1.0a5.tar.gz"),
+                f("rowstile-0.1.0a6-py3-none-any.whl", yanked="broken"),
+                f("rowstile-0.1.0a7-py3-none-any.whl", hashes={}),
+            ]
+        }
+        self.assertEqual(
+            self.p.wheels(index),
+            {"0.1.0a5": ("https://files.example/rowstile-0.1.0a5-py3-none-any.whl", "ab" * 32)},
+        )
+        with self.assertRaises(self.p.Wrong):
+            self.p.wheels({"meta": {}})
+
+
 class Delivery(unittest.TestCase):
     """What the workflows run, what the packages are built from, and what this folder's README says is tested."""
 

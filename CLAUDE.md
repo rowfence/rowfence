@@ -208,7 +208,10 @@ For one suite, start a container and run it inside:
 ## Conventions
 
 - Generated SQL must be re-appliable: `DROP SCHEMA authz_gen, authz_int CASCADE` then recreate; persistent
-  state lives in schema `authz` (`CREATE TABLE IF NOT EXISTS`, migrations in `base.py`).
+  state lives in schema `authz` (`CREATE TABLE IF NOT EXISTS`, migrations in `base.py`): a new column goes last
+  in its `CREATE TABLE`, and an `ADD COLUMN IF NOT EXISTS` beside it gives it to a database made before.
+  `tests/upgrade.sh` upgrades databases the release before made (from PyPI: push, apply, reapply, the next
+  migration) and compares each with a new database, those tables' columns in order among what it compares.
 - Applying: the command runs the compiled SQL in one transaction, as the tables' owner; nothing may
   need a superuser or an extension (later grants on masked columns are reported by `authz.lint()`, not refused). Anything `apply()` creates must also be dropped by `REMOVE_SQL` (`database.py`). `tests/apply.sh`
   applies as a non-superuser owner.

@@ -1,5 +1,6 @@
 # Postgres for developing and testing rowstile: the stock image, plus python3, git (rowstile review reads the
-# base branch with it) and the rowstile command. rowstile needs nothing in the database but plain SQL and
+# base branch with it), the root certificates HTTPS is checked against (tests/upgrade.sh installs the release before
+# this one from PyPI) and the rowstile command. rowstile needs nothing in the database but plain SQL and
 # PL/pgSQL: the command compiles the policy and applies it as the tables' owner, with no superuser.
 #   docker build -t rowstile:16 --build-arg PG_MAJOR=16 -f core/Dockerfile .
 #   docker run -d --name pga -e POSTGRES_HOST_AUTH_METHOD=trust rowstile:16
@@ -10,7 +11,7 @@ ARG PG_MAJOR=16
 FROM postgres:${PG_MAJOR}
 ARG COVERAGE=
 RUN apt-get update \
- && apt-get install -y --no-install-recommends python3 git ${COVERAGE:+python3-coverage} \
+ && apt-get install -y --no-install-recommends python3 git ca-certificates ${COVERAGE:+python3-coverage} \
  && rm -rf /var/lib/apt/lists/*
 RUN if [ -n "$COVERAGE" ]; then \
       echo "import coverage; coverage.process_startup()" > /usr/lib/python3/dist-packages/rowstile-coverage.pth; fi

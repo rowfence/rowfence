@@ -104,6 +104,12 @@ not a proof for worlds of any size, and it reads the policy, not your data.
 - **Migrations**: for each kind of policy change, [`tests/migrate_test.py`](../core/tests/migrate_test.py)
   checks that the migration leaves exactly what applying the new policy whole leaves: functions and their
   privileges, views, triggers, policies, the inheritance rows.
+- **Upgrades**: [`tests/upgrade.sh`](../core/tests/upgrade.sh) installs the release before this one from PyPI
+  and makes the docs app's database with it, each way an app may have one: pushed to, applied, set up by
+  migrations. The app shares, makes an API key and asks for access. This version then upgrades each database as
+  the app would, and each holds what applying this version on a new database leaves, down to the columns of the
+  tables rowstile keeps across applies; the policy's tests and the scenario pass, and what the app made before
+  still works. <!-- checked: tests/upgrade.sh "it holds what applying this version on a new database leaves"; tests/upgrade.sh "the API key made before still signs dave in" -->
 - **The parser**: [`tests/fuzz_parser.py`](../core/tests/fuzz_parser.py) feeds it thousands of broken
   policies; each is accepted, or refused with a line number, never a crash. <!-- checked: tests/fuzz_parser.py "refused without a line number" -->
 - **The docs**: the getting-started guide runs as written, every line the cookbook shows is in a policy that
