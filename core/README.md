@@ -58,7 +58,7 @@ the stock Postgres image. CI runs it in parts, each on a machine of its own, sid
 | `tests/sessions.sh` | signed sessions: the app role can't choose its user by setting `authz.user_id`, widen its scopes, or reuse a sign-in in another transaction or connection |
 | `tests/devx.sh` | what developers use day to day: named tests with their own data, refusals that say why, `authz.who_among`, drafting a policy, `rowstile dev`, `test`, `init`, `--as` |
 | `tests/confidence_test.py` | `rowstile prove`, `test --coverage`, `snapshot`, `indexes`, `plans` and `bench`, on the docs example |
-| `tests/lsp_test.py` | the language server over its protocol, as an editor uses it (no database) |
+| `tests/lsp_test.py` | the language server over its protocol, as an editor uses it; where there is a database (`createdb` works), also the tables and columns it completes from one |
 | `tests/mcp_test.py` | the MCP server over its protocol, as a coding agent's client uses it: each tool in a project folder |
 | `tests/studio_test.py` | `rowstile why` and Studio's API: read-only unless `--write`, only for the page that has the token, on localhost |
 | `tests/cookbook.sh` | the cookbook's recipes (`docs/cookbook/<name>.md` and its folder): each one's tables and rows load, its policy applies without a warning, its tests pass, its invariants are proved, and every line its page shows is in them |

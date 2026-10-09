@@ -67,6 +67,22 @@ Each release upgrades from the one before it. How releases are numbered and made
 
 ### Fixed
 
+- The language server stopped, and the editor said it had crashed, when a test file was opened while
+  `rowstile.toml`'s `policy` named a file outside its folder (which the command refuses). The test file shows
+  why on its first line now. A `policy` that names a file that isn't there is shown the same way, where it was a
+  warning that the checker failed.
+- The language server's completion inside `{ }` offered each column by its bare name: a column with capitals, as
+  Prisma names them (`parentId`), or one named with a word SQL keeps (`user`, `order`) made a condition that
+  applying refused, or, for `user`, one about the session's role. It offers them as SQL names them now, quoted
+  where they must be (`"parentId"`). In a link table's `where { }` it offered the type's columns, where the row
+  is the link table's, and in `shared if { }` too, where the row is the share being made (`object_id`,
+  `subject_type`, `subject_id`, `subject_relation`). And it offered tables a policy can't name (a space in the
+  name).
+- The language server offered the words a line begins with (`type`, `rules`, `include`, ...) inside comments and
+  after a line's first word, and an editor asks at each space typed: each word of a comment brought the list up.
+  Nothing is offered there now, and after `type x =` and `rules` only the tables.
+- When the database in `rowstile.toml` can't be read (it is down, it refuses the connection, the setting is
+  wrong), the language server says why in its log, once. It went on without the tables' names and said nothing.
 - Ctrl-C while `rowstile sql` (or `can`, `explain`, `perms`, `list`, `who`, `explain-rule`) waited on a statement,
   or while `rowstile review --db` worked on its database, stopped only once the statement had run its course. It
   stops at once now and ends the statement on the server, as the other commands did.
