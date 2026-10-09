@@ -196,7 +196,8 @@ For one suite, start a container and run it inside:
 
 - The suites run the mounted repository's code; the image only holds a copy of the command for `docker exec`.
 - `ci.sh` starts Postgres with `fsync`, `synchronous_commit` and `full_page_writes` off: the databases last as
-  long as the container. `difftest.py` asks a snapshot's questions in up to four sessions side by side
+  long as the container. Its `wal_level` is `logical`: `governance.sh` copies the audit trail to another database
+  by a subscription (skipped, saying why, on a server without it). `difftest.py` asks a snapshot's questions in up to four sessions side by side
   (`DIFFTEST_SESSIONS=1`: one), each user's in one session, two users or more to a session.
 - Everything is LF (`.gitattributes`); the repo is mounted into Linux. `core.fileMode` is off on Windows, so mark
   new scripts executable with `git update-index --chmod=+x`.
