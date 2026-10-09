@@ -4099,6 +4099,17 @@ class Confidence(unittest.TestCase):
             is None
         )
 
+    def test_a_widening_through_a_column_of_two_or_a_groups_column_is_found(self) -> None:
+        # a column that names no single object by itself (a parent by two columns, a team whose members it names):
+        # the worlds draw its links too, so the review finds a widening through it
+        box = "type box = app.boxes (org_id, id)\n  owner : user = owner_id\n  parent : box = [org_id, parent_id]\n"
+        self.assertFalse(self.same(box + "  can view = owner\n", box + "  can view = owner or parent.view\n"))
+        team = (
+            "type team = app.teams\n  member : user = app.team_members(team_id -> user_id)\n"
+            "type doc = app.docs\n  owner : user = owner_id\n  crew : team#member = team_id\n"
+        )
+        self.assertFalse(self.same(team + "  can view = owner\n", team + "  can view = owner or crew\n"))
+
     def test_anyone_nobody_and_signed_in_are_the_same_on_every_row(self) -> None:
         folder = "type folder = app.folders\n  owner : user = owner_id\n  viewer : user = viewer_id\n"
         self.assertEqual(self.proofs(folder + "  can view = anyone\ninvariants\n  never folder: not view\n"), [True])
