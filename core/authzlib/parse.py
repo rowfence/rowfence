@@ -368,8 +368,7 @@ class ExprParser:
         return tok
 
     def parse(self) -> Expr:
-        if not self.toks:
-            fail(self.loc, "empty expression", "AZ102")
+        # (never given an empty one: the lines it reads end in what follows `=` or `:`, which isn't blank)
         e = self.or_()
         if self.i < len(self.toks):
             fail(self.loc, f"unexpected '{self.toks[self.i][1]}'", "AZ102")

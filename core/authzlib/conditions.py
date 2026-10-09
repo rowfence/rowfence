@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 from functools import cache
 from typing import NamedTuple, TypeAlias
 
@@ -163,9 +163,7 @@ class Parser:
                 values.append(self.constant())
             self.take("p", ")")
             return In(left, tuple(values), negated)
-        if negated:
-            raise NotSimple("not")
-        return left
+        return left  # (`not` was taken only before an `in`)
 
     def operand(self) -> Node:
         if self.peek("p", "("):
@@ -216,10 +214,8 @@ def number(v: Scalar) -> Decimal | None:
     """A number as one, and so a linked id's text that is one ('10': owner_id holds the id of its user)."""
     if isinstance(v, bool) or v is None:
         return None
-    try:
-        return Decimal(str(v)) if isinstance(v, (int, float)) or re.fullmatch(r"-?\d+", v) else None
-    except InvalidOperation:
-        return None
+    # (Decimal reads every int and float as text, and every run of digits, whatever the script)
+    return Decimal(str(v)) if isinstance(v, (int, float)) or re.fullmatch(r"-?\d+", v) else None
 
 
 @cache

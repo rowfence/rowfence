@@ -17,13 +17,12 @@ USER_DEPENDENT = re.compile(
 
 
 def expr_text(node: Expr) -> str:
+    """An item of what the policy wrote (never the compiler's own arrow_on: it is only ever a starting point)."""
     match node:
         case ("ref", name):
             return name if not name.startswith("roles:") else "a custom role"
         case ("arrow", rel, perm):
             return f"{rel}.{perm}"
-        case ("arrow_on", rel, perm, types):
-            return f"{rel}.{perm} (on {', '.join(types)})"
         case ("cond", sql):
             return WORD_OF.get(sql, "{" + sql + "}")
         case ("not", item):
@@ -476,7 +475,7 @@ END $f$;"""
         # a type without permissions is still a type: asked for one, it has no such permission (as authz.list says)
         no_perm = "      RAISE EXCEPTION 'no permission %.% in the policy', p_type, p_perm USING HINT = 'rowstile help AZ707';"
 
-        def who_branch(t: Type) -> str | None:
+        def who_branch(t: Type) -> str:
             if not t.perms:
                 return no_perm
             cases = "\n".join(
@@ -490,7 +489,7 @@ END $f$;"""
             )
             return f"      CASE p_perm\n{cases}\n        ELSE RAISE EXCEPTION 'no permission %.% in the policy', p_type, p_perm USING HINT = 'rowstile help AZ707';\n      END CASE;"
 
-        def why_branch(t: Type) -> str | None:
+        def why_branch(t: Type) -> str:
             if not t.perms:
                 return no_perm
             cases = "\n".join(
