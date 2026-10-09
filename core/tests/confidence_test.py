@@ -414,6 +414,27 @@ def main() -> None:
         and (refused, after) == ("", []),
         (said, refused, after),
     )
+
+    def keyed_by_its_user(d: Db) -> tuple[list[perf.Missing], list[perf.Missing]]:
+        # a table keyed by its user's id, and a relation that reads that key: lists find the profiles by it, a lookup
+        # like any other (authz.lint() names it too), which its primary key serves, and without one nothing does
+        d.script("CREATE TABLE app.profiles (user_id bigint NOT NULL, bio text)")
+        text, files = database.applied(d)
+        c = database.policy_compiler(
+            text + "\ntype profile = app.profiles (user_id)\n  owner : user = user_id\n  can edit = owner\n", files
+        )
+        no_key = perf.missing_indexes(d, c)
+        d.script("ALTER TABLE app.profiles ADD PRIMARY KEY (user_id)")
+        return no_key, perf.missing_indexes(d, c)
+
+    no_key, with_key = work(keyed_by_its_user)
+    check(
+        "a relation that reads the row's own key: its lookup named while no index serves it, not once a primary key does",
+        [(m[0], m[1]) for m in no_key] == [("app.profiles", ("user_id",))]
+        and no_key[0][2] == "finding the profiles by their profile.owner (lists, select rules)"
+        and with_key == [],
+        (no_key, with_key),
+    )
     # the line to add in the words of the tool rowstile.toml names, and --check exits 1 while a lookup has no index
     subprocess.run(["psql", "-X", "-q", "-d", db, "-c", "DROP INDEX app.team_members_user_id_idx"], check=True)
     with tempfile.TemporaryDirectory() as tmp:
