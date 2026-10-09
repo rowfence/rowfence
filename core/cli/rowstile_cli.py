@@ -159,7 +159,17 @@ def read_policy(path: str) -> tuple[str, dict[str, str]]:
 ENV_FILES = (".env.local", ".env")  # read after the environment, in this order: the first that has a name wins
 # What the files may set: where the database is, and nothing else. The review in CI reads a pull request's
 # files, and a GIT_SSH_COMMAND or a PATH taken from its .env would run the pull request's code there.
-PG_NAMES = ("PGHOST", "PGPORT", "PGUSER", "PGPASSWORD", "PGDATABASE", "PGSSLMODE", "PGSSLROOTCERT", "PGCHANNELBINDING")
+PG_NAMES = (
+    "PGHOST",
+    "PGPORT",
+    "PGUSER",
+    "PGPASSWORD",
+    "PGDATABASE",
+    "PGOPTIONS",
+    "PGSSLMODE",
+    "PGSSLROOTCERT",
+    "PGCHANNELBINDING",
+)
 ENV_NAMES = frozenset({"DATABASE_URL", *PG_NAMES})
 
 

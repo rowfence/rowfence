@@ -587,8 +587,8 @@ REFUSED = {
 
 def parse_dsn(text: str | None) -> ConnectArgs:
     """connect() arguments from "host=... port=... user=... password=... dbname=... sslmode=..." or a
-    postgresql:// URL (its ?options too), with PGHOST, PGPORT, PGUSER, PGPASSWORD, PGDATABASE, PGSSLMODE,
-    PGSSLROOTCERT and PGCHANNELBINDING for whatever is left out. Raises ValueError for a setting it can't honour: an unknown one in a
+    postgresql:// URL (its ?options too), with PGHOST, PGPORT, PGUSER, PGPASSWORD, PGDATABASE, PGOPTIONS,
+    PGSSLMODE, PGSSLROOTCERT and PGCHANNELBINDING for whatever is left out. Raises ValueError for a setting it can't honour: an unknown one in a
     keyword string, or one of REFUSED. A URL's other options (an ORM's own: ?schema=, ?pgbouncer=) are left to
     whoever they are for."""
     out: dict[str, str] = {}
@@ -654,7 +654,7 @@ def parse_dsn(text: str | None) -> ConnectArgs:
         "user": user,
         "password": password,
         "database": out.get("database") or os.environ.get("PGDATABASE", user),
-        "options": out.get("options"),
+        "options": out.get("options") or os.environ.get("PGOPTIONS"),
         "timeout": float(out.get("timeout", "10")) or 10,
         "sslmode": sslmode,
         "sslrootcert": out.get("sslrootcert") or os.environ.get("PGSSLROOTCERT"),
