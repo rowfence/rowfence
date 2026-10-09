@@ -334,6 +334,7 @@ class Checker:
 
         self.db.run("\n".join(self.as_app_functions()))
         self.shares_tried = self.shareable()
+        self.links_tried = self.shareable("link")
         # who tries to share in this snapshot: one user, in turn (each attempt is a subtransaction of its own)
         sharer = self.users[self.checks % len(self.users)]
         # what lets someone share anything on an object of a type: share, or a permission a relation is shared by
@@ -398,10 +399,18 @@ class Checker:
                 # authz.share tried as the user, and undone: what sharing lets through, and how it refuses
                 for tname, rname in self.shares_tried if u == sharer else ():
                     ids = "ARRAY[" + ", ".join(lit(i) for i in sample[tname]) + "]::text[]"
+                    for what in ("share", "unshare"):
+                        emit(
+                            [u, what, tname, rname],
+                            f"SELECT coalesce(json_agg(json_build_array(i, difftest_app.try_{what}({lit(tname)}, i, "
+                            f"{lit(rname)}, 'user', {lit(self.share_target)}))), '[]') FROM unnest({ids}) i",
+                        )
+                for tname, rname in self.links_tried if u == sharer else ():
+                    ids = "ARRAY[" + ", ".join(lit(i) for i in sample[tname]) + "]::text[]"
                     emit(
-                        [u, "share", tname, rname],
-                        f"SELECT coalesce(json_agg(json_build_array(i, difftest_app.try_share({lit(tname)}, i, "
-                        f"{lit(rname)}, 'user', {lit(self.share_target)}))), '[]') FROM unnest({ids}) i",
+                        [u, "create_link", tname, rname],
+                        f"SELECT coalesce(json_agg(json_build_array(i, difftest_app.try_create_link({lit(tname)}, i, "
+                        f"{lit(rname)}))), '[]') FROM unnest({ids}) i",
                     )
                 # authz.explain_rule's verdict on an update that changes nothing, and on a delete, as the app asks it
                 for table in dict.fromkeys(r.table for r in self.rules):
@@ -571,22 +580,37 @@ class Checker:
             "EXCEPTION WHEN OTHERS THEN RETURN CASE WHEN SQLSTATE = 'P0099' THEN 'ok' ELSE SQLSTATE || ': ' || SQLERRM END; "
             "END; END $f$;"
         )
+        lines.append(  # and authz.unshare the same way
+            "CREATE OR REPLACE FUNCTION difftest_app.try_unshare(t text, i text, r text, st text, sid text) RETURNS text "
+            "LANGUAGE plpgsql AS $f$ BEGIN BEGIN PERFORM authz.unshare(t, i, r, st, sid); "
+            "RAISE EXCEPTION USING ERRCODE = 'P0099', MESSAGE = 'unshared'; "
+            "EXCEPTION WHEN OTHERS THEN RETURN CASE WHEN SQLSTATE = 'P0099' THEN 'ok' ELSE SQLSTATE || ': ' || SQLERRM END; "
+            "END; END $f$;"
+        )
+        lines.append(  # and authz.create_link
+            "CREATE OR REPLACE FUNCTION difftest_app.try_create_link(t text, i text, r text) RETURNS text "
+            "LANGUAGE plpgsql AS $f$ BEGIN BEGIN PERFORM authz.create_link(t, i, r); "
+            "RAISE EXCEPTION USING ERRCODE = 'P0099', MESSAGE = 'linked'; "
+            "EXCEPTION WHEN OTHERS THEN RETURN CASE WHEN SQLSTATE = 'P0099' THEN 'ok' ELSE SQLSTATE || ': ' || SQLERRM END; "
+            "END; END $f$;"
+        )
         return lines
 
-    def shareable(self) -> dict[tuple[str, str], tuple[str, list[str]]]:
-        """The relations a user may be shared without a `shared if`: (type, relation) -> (the permission sharing it
-        needs, the permissions it feeds into, which the sharer must hold too), as the compiled catalog says."""
+    def shareable(self, subject: str = "user") -> dict[tuple[str, str], tuple[str, list[str]]]:
+        """The relations a subject (a user, or a link) may be shared without a `shared if`: (type, relation) -> (the
+        permission sharing it needs, the permissions it feeds into, which the sharer must hold too), as the compiled
+        catalog says."""
         plain = {
             (t.name, r.name)
             for t in self.types.values()
             for r in t.relations.values()
             for src in r.sources
-            if src.kind == "shared" and ("user", None) in src.subjects and not src.shared_if
+            if src.kind == "shared" and (subject, None) in src.subjects and not src.shared_if
         }
         out: dict[tuple[str, str], tuple[str, list[str]]] = {}
         for row in self.db.rows(
             "SELECT object_type || '|' || relation || '|' || shared_by || '|' || array_to_string(required, ',') "
-            "FROM authz_int.shared_relations WHERE subject = 'user'"
+            f"FROM authz_int.shared_relations WHERE subject = {lit(subject)}"
         ):
             tname, rname, by, required = row[0].split("|")
             if (tname, rname) in plain:
@@ -599,6 +623,26 @@ class Checker:
         if not rule:
             raise LookupError(f"{table}: no {command} rule")
         return self.ref.eval_expr(state, t, rule.expr) & self.ref.ids(t) & self.ref.valid(t)
+
+    def share_verdict(
+        self, state: evaluate.State, signed_in: bool, t: Type, i: str, by: str, required: list[str], to_user: bool
+    ) -> str:
+        """How authz.share answers, from what the reference says the sharer holds on row i of t: in the order its
+        guards go (nobody signed in, or nothing to share there: the answer a missing object gets; no such user; the
+        permission the relation is shared by; a permission it feeds into), or 'ok'."""
+
+        def holds(p: str) -> bool:
+            return p in t.perms and i in state[(t.name, p)] & self.ref.ids(t)
+
+        if not signed_in or not any(holds(p) for p in self.share_perms.get(t.name, {"share"})):
+            return "42501: you cannot share"
+        if to_user and self.share_target not in self.ref.ids(self.types["user"]):
+            return "23503: there is no"
+        if not holds(by):
+            return f"42501: you cannot share {t.name} {i} (needs {by})"
+        if not all(holds(p) for p in required):
+            return "42501: you cannot grant"
+        return "ok"
 
     def rule_allows(self, state: evaluate.State, table: str, cmd: str, i: str) -> bool:
         """Whether table's rules let cmd through on row i as it is: a delete by its rule; an update that changes
@@ -664,24 +708,35 @@ class Checker:
             for (tname, rname), (by, required) in self.shares_tried.items():
                 t = self.types[tname]
                 for i, got in snap.get((u, "share", tname, rname), []):
-
-                    def holds(p: str, t: Type = t, i: str = i, state: evaluate.State = state) -> bool:
-                        return p in t.perms and i in state[(t.name, p)] & self.ref.ids(t)
-
-                    if not signed_in or not any(holds(p) for p in self.share_perms.get(tname, {"share"})):
-                        want = "42501: you cannot share"
-                    elif self.share_target not in self.ref.ids(self.types["user"]):
-                        want = "23503: there is no"
-                    elif not holds(by):
-                        want = f"42501: you cannot share {tname} {i} (needs {by})"
-                    elif not all(holds(p) for p in required):
-                        want = "42501: you cannot grant"
-                    else:
-                        want = "ok"
+                    want = self.share_verdict(state, signed_in, t, i, by, required, to_user=True)
                     if not str(got).startswith(want) or (want == "42501: you cannot share" and "(needs" in str(got)):
                         problems.append(
                             f"user {u}: authz.share('{tname}', {i}, '{rname}', user {self.share_target}) says "
                             f"{got!r}, expected {want!r}"
+                        )
+                # unsharing needs the permission the relation is shared by, if the type has it, and someone signed
+                # in; what it says comes from the policy alone (the same words for a hidden object and a missing one)
+                for i, got in snap.get((u, "unshare", tname, rname), []):
+                    cannot = f"42501: you cannot unshare {rname} on {tname} {i}"
+                    if by not in t.perms:
+                        want = cannot
+                    elif not signed_in or i not in state[(tname, by)] & self.ref.ids(t):
+                        want = f"{cannot} (needs {by})"
+                    else:
+                        want = "ok"
+                    if str(got) != want:
+                        problems.append(
+                            f"user {u}: authz.unshare('{tname}', {i}, '{rname}', user {self.share_target}) says "
+                            f"{got!r}, expected {want!r}"
+                        )
+            # create_link: the same rule, for a link (no one to look up)
+            for (tname, rname), (by, required) in self.links_tried.items():
+                t = self.types[tname]
+                for i, got in snap.get((u, "create_link", tname, rname), []):
+                    want = self.share_verdict(state, signed_in, t, i, by, required, to_user=False)
+                    if not str(got).startswith(want) or (want == "42501: you cannot share" and "(needs" in str(got)):
+                        problems.append(
+                            f"user {u}: authz.create_link('{tname}', {i}, '{rname}') says {got!r}, expected {want!r}"
                         )
             # perms_of: the public permissions held on each object, no more (a type without any: none)
             for t in self.types.values():
