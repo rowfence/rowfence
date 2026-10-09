@@ -18,6 +18,8 @@ rowstile-review:
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
   variables:
+    # the whole history: the review reads the target branch's policy, the files it includes, its tests and its
+    # lock file with git, and stops (exit 2) where git can't read one of them there
     GIT_DEPTH: "0"
     ROWSTILE_VERSION: "0.1.0-dev"
     ROWSTILE_PACKAGE: "rowstile==$ROWSTILE_VERSION"

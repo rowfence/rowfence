@@ -10,6 +10,10 @@
 #     with:
 #       database-url: ${{ env.REVIEW_DATABASE_URL }}   # optional: the base branch's migrations and review data
 #
+# The review reads the base's policy, the files it includes, its tests and its lock file with git: check out the
+# whole history (fetch-depth: 0), with no filter. Where git can't read one of them there, the review stops,
+# exit 2, and says which, rather than review the policy as new.
+#
 # Access and the tests' results need a database at the base branch's state (its migrations, then the review
 # data); prepare one in the steps before (a Postgres service, your migration tool) and pass its URL. Without
 # one, the review says what changes in meaning, risk, tests and deploy, and leaves Access out.

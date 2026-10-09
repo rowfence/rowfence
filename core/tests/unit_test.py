@@ -900,9 +900,13 @@ class Command(unittest.TestCase):
             with mock.patch.object(stack.os, "listdir", side_effect=PermissionError(13, "Permission denied", d)):
                 self.assertEqual(stack.detect(d).found, ["FastAPI"])
 
-    def test_review_reads_what_git_can_of_the_base(self) -> None:
+    def test_review_stops_where_git_cant_read_the_base(self) -> None:
         # a repository missing objects of the base (an interrupted fetch, a partial clone that can't reach its
-        # remote): the base's test files git can't read are left out, and the review goes on without them
+        # remote): read as missing, a test file's checks would be listed as added and a policy reviewed as new. The
+        # review stops instead, exit 2, and says what git can't read and how to fetch it (tests/review.sh: the
+        # command, for the policy, a file it includes, the lock file and the tests). A file that isn't at the base
+        # is none, as before.
+        import contextlib
         import shutil
         import stat
 
@@ -924,24 +928,45 @@ class Command(unittest.TestCase):
                     text=True,
                 ).stdout.strip()
 
-            def lose(spec: str) -> None:
-                """The object spec names taken out of the repository (git writes its objects read-only)."""
-                sha = git("rev-parse", spec)
+            def lose(sha: str) -> None:
+                """An object taken out of the repository (git writes its objects read-only)."""
                 path = os.path.join(d, ".git", "objects", sha[:2], sha[2:])
                 os.chmod(path, stat.S_IWRITE | stat.S_IREAD)
                 os.remove(path)
 
+            def stops(read: Callable[[], object]) -> str:
+                """What the review says as it stops, exit 2."""
+                err = io.StringIO()
+                with contextlib.redirect_stderr(err), self.assertRaises(SystemExit) as stop:
+                    read()
+                self.assertEqual(stop.exception.code, 2)
+                return err.getvalue()
+
             for args in (["init", "-q"], ["add", "-A"], ["commit", "-q", "-m", "base"]):
                 git(*args)
+            blob, folder = git("rev-parse", "HEAD:tests/b.authz", "HEAD:tests").split()
             cfg = rowstile_cli.Config(os.path.join(d, "rowstile.toml"), {"tests": ["tests/*.authz"]})
+            fetch = (
+                ": this repository is missing objects of that commit (a partial clone that can't fetch them? fetch the "
+                "base's history: fetch-depth: 0 with actions/checkout, and no filter)\n"
+            )
+            b, c = os.path.join("tests", "b.authz"), os.path.join("tests", "c.authz")  # as the command names them
             os.chdir(d)
             try:
                 both = {"tests/a.authz": "test one\n", "tests/b.authz": "test two\n"}
                 self.assertEqual(rowstile_cli.base_tests(cfg, "HEAD"), both)
-                lose("HEAD:tests/b.authz")
-                self.assertEqual(rowstile_cli.base_tests(cfg, "HEAD"), {"tests/a.authz": "test one\n"})
-                lose("HEAD:tests")
-                self.assertEqual(rowstile_cli.base_tests(cfg, "HEAD"), {})
+                self.assertIsNone(rowstile_cli.at_base("HEAD", c))  # a file added since: not at the base
+                lose(blob)
+                said = stops(lambda: rowstile_cli.base_tests(cfg, "HEAD"))
+                self.assertEqual(said, f"rowstile review: git can't read tests/b.authz at HEAD{fetch}")
+                said = stops(lambda: rowstile_cli.at_base("HEAD", b))
+                self.assertEqual(said, f"rowstile review: git can't read {b} at HEAD{fetch}")
+                lose(folder)
+                said = stops(lambda: rowstile_cli.base_tests(cfg, "HEAD"))
+                self.assertEqual(said, f"rowstile review: git can't list the files at HEAD{fetch}")
+                # the same file in a folder git can't list: whether it is there can't be known
+                said = stops(lambda: rowstile_cli.at_base("HEAD", c))
+                self.assertEqual(said, f"rowstile review: git can't read {c} at HEAD{fetch}")
             finally:
                 os.chdir(before)
 

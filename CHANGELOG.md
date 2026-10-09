@@ -29,6 +29,12 @@ Each release upgrades from the one before it. How releases are numbered and made
 
 ### Changed
 
+- `rowstile review` stops when git can't read a file it needs at the base: the policy, a file it includes, the
+  lock file or a test file (a partial clone that can't fetch it, a repository missing objects). It says "git
+  can't read db/policy.authz at main", why, and how to fetch the base's history, and exits 2. It went on as if
+  the file weren't there: the policy reviewed as new, a file it includes called a mistake of the base's, Deploy
+  worked out as if the base had no lock file, the base's tests left out. A file the base doesn't have (a new
+  policy, a test file added since) is reviewed as before.
 - `rowstile sql` writes values as Postgres writes them, as psql shows them: `t`, `{x,"y z",NULL}` and
   `{"k": 1}`, where it wrote Python's `True`, `['x', 'y z', None]` and `{'k': 1}` (which isn't JSON).
 - `rowstile lsp --db` is refused: the language server reads the database `rowstile.toml` names, and ignored
@@ -75,6 +81,9 @@ Each release upgrades from the one before it. How releases are numbered and made
   (a restart, or `pg_terminate_backend`): it says it lost the database, exit 2, as the other commands do. Its
   messages name the policy as you do (`db/policy.authz`), not by its full path; and `review`, `test` and `dev`
   name a test file they can't read the same way.
+- `rowstile review` said "the policy at the base has a mistake" of a new policy whose file name has a `[`, `*` or
+  `?` in it: git read the name as a pattern, found nothing, and gave no error. It is reviewed as new, as any
+  policy the base doesn't have.
 - `rowstile dev` with a connection string it can't read (`--db colour=blue`) stopped with a traceback: it says
   it can't connect, exit 2, as the other commands do. `--port` and `--studio-port` took a number above 65535,
   which stopped Studio with a traceback: it is refused, exit 2. And `rowstile why --as anyone` exited 1, where
