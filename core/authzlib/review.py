@@ -1033,9 +1033,9 @@ def deploy(b: Side, h: Side, base_lock: str | None, head_lock: str | None) -> De
         # the first migration would call every change a whole policy that locks every table and rebuilds every tree.
         return {"migrations": [], "lock_current": None, "no_lock": True}
     try:
-        ms = migrate_list(h, base_lock)
-    except PolicyError as e:
-        return {"migrations": [], "lock_current": None, "error": str(e)}
+        ms = migrate_list(h, base_lock)  # (the head's policy compiles: Side compiled it)
+    except migrate.LockError as e:  # a merge's conflict markers in the base branch's lock file, say
+        return {"migrations": [], "lock_current": None, "error": f"{e}, at the base [AZ619]"}
     for i, m in enumerate(ms):
         if m.empty:
             continue

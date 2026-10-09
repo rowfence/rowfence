@@ -62,6 +62,18 @@ echo "-- a base git doesn't know, a policy with a mistake"
 out=$(CLI review --base no-such-branch 2>&1); rc=$?
 case "$out" in *"git doesn't know the commit to compare with, no-such-branch"*) [ $rc -eq 2 ] && ok "a base git doesn't know: said, exit 2 (not the whole policy as new)" || bad "unknown base exit" "$rc";;
   *) bad "unknown base" "$out";; esac
+# a base whose lock file a merge left its conflict markers in (main's, in a commit of its own): Deploy says why it
+# isn't computed, and the rest of the review goes on
+blob=$(G show main:p/db/policy.lock | sed '3i<<<<<<< HEAD' | G hash-object -w --stdin)
+GIT_INDEX_FILE="$T/merged.index" G read-tree main &&
+  GIT_INDEX_FILE="$T/merged.index" G update-index --cacheinfo "100644,$blob,p/db/policy.lock" &&
+  G branch merged "$(G commit-tree "$(GIT_INDEX_FILE="$T/merged.index" G write-tree)" -p main -m merged)" || bad "a base with a merged lock: setting it up"
+out=$(CLI review --base merged 2>&1); rc=$?
+case "$out" in *"Meaning  "*"Deploy   not computed: line 3 of the lock file isn't one rowstile migrate writes (<<<<<<< HEAD), at the base [AZ619]"*)
+  [ $rc -eq 0 ] && ok "a base whose lock file holds a merge's conflict markers: Deploy says why it isn't computed, the review goes on" ||
+  bad "a base with a merged lock: exit" "$rc";;
+  *) bad "a base with a merged lock" "$out";; esac
+G branch -D merged >/dev/null
 cp "$P/db/policy.authz" "$T/keep.authz"
 sed -i 's/can view  = edit or viewer or parent.view/can view  = edit or viewer or nosuch.view/' "$P/db/policy.authz"
 out=$(CLI review --base main 2>&1); rc=$?

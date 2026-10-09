@@ -354,12 +354,24 @@ def migratable(policy: str, files: Mapping[str, object] | str | None) -> tuple[s
     return sql, migrate.read(c, policy, files_map(files)), c
 
 
+def lock_file(lock_text: str | None) -> migrate.Lock:
+    """The lock file's text read: one with a line rowstile migrate doesn't write is an Error that says what to do."""
+    try:
+        return migrate.parse_lock(lock_text)
+    except migrate.LockError as e:
+        raise Error(
+            f"{e}: a merge left both branches' lines in it? Keep the lock file and the migrations of the branch merged "
+            "into, then run rowstile migrate again [AZ619]",
+            "22023",
+        ) from None
+
+
 def migration(
     policy: str, files: Mapping[str, object] | str | None, lock_text: str | None, name: str = "policy"
 ) -> migrate.Migration:
     """The migration from the lock file's text (None or '': the first) to this policy (migrate.Migration)."""
     sql, comp, _ = migratable(policy, files)
-    return migrate.migration(sql, comp, migrate.parse_lock(lock_text), name)
+    return migrate.migration(sql, comp, lock_file(lock_text), name)
 
 
 def migrations(
@@ -372,7 +384,7 @@ def migrations(
 ) -> list[migrate.Migration]:
     """The migrations from the lock file's text to this policy: one, or two when inheritance trees are
     built beside the ones in use first (migrate.migrations). Refused when a newer version wrote the lock."""
-    lock = migrate.parse_lock(lock_text)
+    lock = lock_file(lock_text)
     if not downgrade:
         refuse_older(lock.version, "the lock file")
     sql, comp, _ = migratable(policy, files)

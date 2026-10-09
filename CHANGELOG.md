@@ -394,6 +394,10 @@ Each release upgrades from the one before it. How releases are numbered and made
 - A caveat that doesn't run (a column that isn't there), when it reads what its share was made with
   (`arg('ip')`), was said as another condition's mistake: applying named the policy's other caveat, or no line
   at all. It names the caveat's line.
+- A lock file with a merge's conflict markers in it (two branches that each wrote a migration) stopped
+  `rowstile migrate` with a Python traceback (`IndexError`), and `rowstile review` too when the base branch's
+  lock had them. `migrate` says which line it can't read and what to do (AZ619), exit 1, and writes nothing; the
+  review says why its Deploy part isn't computed, and goes on.
 
 ## 0.1.0 (alpha)
 
