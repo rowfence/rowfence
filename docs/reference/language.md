@@ -140,7 +140,8 @@ test "a folder's owner edits what is inside"    -- brings its own data, rolled b
   roles.
 - **Rules** say what each command needs, per table, with column-level variants and
   masks. The plain `update` rule must hold on the row before and after the change (as
-  Postgres checks both). A column rule checks the row before the change (`update owner_id : share`, or
+  Postgres checks both), unless `update after : ...` says what must hold after it. A column rule checks the
+  row before the change (`update owner_id : share`, or
   `update owner_id before : share`) or after it (`update folder_id after : folder.edit`: where
   a row moves to); `authz.lint()` warns about a move nothing checks the destination of.
   **Invariants** state what must never be true, for everyone who can sign in (each user, each

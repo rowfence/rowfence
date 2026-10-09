@@ -101,6 +101,15 @@ out=$(as 6 "INSERT INTO app.files (folder_id, owner_id, name) VALUES (6, 6, 'x')
 case "$out" in *"no   you have no access to folder 6"*) ok "... and says nothing about a folder the user can't see";; *) bad "no leak" "$out";; esac
 out=$(as 5 "UPDATE app.folders SET inherit = false WHERE id = 1 RETURNING id")
 [ "$out" = 1 ] && ok "an allowed update is not refused" || bad "allowed update" "$out"
+# as user $1, in a transaction rolled back after it: rows put in as the owner ($2), then statements ($3, $4)
+then_as() { psql -X -q -At -d "$DB" -v VERBOSITY=verbose -c "BEGIN" -c "$2" -c "SET LOCAL ROLE app_user" \
+  -c "SET LOCAL authz.user_id = '$1'" -c "$3" ${4:+-c "$4"} -c "ROLLBACK" 2>&1; }
+# alice may share a folder below Engineering through Engineering alone: once she turns its inheritance off, she
+# may no longer edit it, so the update rule doesn't hold after the change
+out=$(then_as 1 "INSERT INTO app.folders (id, org_id, parent_id, owner_id, name) VALUES (90, 1, 3, 3, 'Below')" \
+  "UPDATE app.folders SET inherit = false WHERE id = 90")
+case "$out" in *"42501: permission denied: user 1 may not update this row of app.folders to these values"*"DETAIL:  no   update : edit  (line "*"  no   edit"*"HINT:  the update rule must hold on the row after the change too (Postgres checks both) (rowstile help AZ709)"*)
+  ok "an update the rule refuses on the row after it says so, and that the rule holds on both sides";; *) bad "refused after the change" "$out";; esac
 
 echo "-- authz.explain_rule"
 out=$(as 1 "SELECT array_to_string(authz.explain_rule('app.files', 'update', '11'), '|')")
@@ -136,6 +145,31 @@ out=$(as 2 "SELECT array_to_string(authz.explain_rule('app.files', 'update', '12
 case "$out" in "no   update : edit"*"after the change:"*) ok "an update the user may not make: no, before and after the change";; *) bad "explain update" "$out";; esac
 out=$(as 1 "SELECT authz.explain_rule('app.nothing', 'insert')")
 case "$out" in *"no rules for table app.nothing"*) ok "a table without rules is named";; *) bad "no rules" "$out";; esac
+
+echo "-- an update after rule: what the row after the change answers to"
+# (applying makes rowstile's functions anew, and Postgres's counts of their calls go with the old ones: while the
+# run measures what the suites run, they are kept first, here and before the next apply; tests/coverage_functions.sh)
+bash tests/coverage_functions.sh "$DB"
+# a file's sharers update it, and after the change they must still edit it (not share it)
+sed 's/^  update                            : edit$/  update                            : share\n  update after                      : edit/' \
+  example/docs.authz > "$T/after.authz"
+[ "$(grep -c '^  update after  *: edit$' "$T/after.authz")" = 1 ] || bad "could not make the policy with an update after rule"
+run apply "$T/after.authz"; case "$out" in *": applied") ;; *) bad "the policy with an update after rule applies" "$out";; esac
+# carol gives away her file in Secrets, where she edits nothing
+out=$(then_as 3 "INSERT INTO app.files (id, folder_id, owner_id, name) VALUES (90, 5, 3, 'mine')" \
+  "UPDATE app.files SET owner_id = 4 WHERE id = 90")
+case "$out" in *"42501: permission denied: user 3 may not update this row of app.files to these values"*"DETAIL:  no   update after : edit  (line "*"  no   edit"*"HINT:  rowstile help AZ709"*)
+  ok "an update the after rule refuses says it is that rule, on the row after the change";; *) bad "refused by the after rule" "$out";; esac
+# bob gives away his file in Design docs, which he edits: the update rule (share) wouldn't hold after it
+out=$(then_as 2 "INSERT INTO app.files (id, folder_id, owner_id, name) VALUES (91, 4, 2, 'his')" \
+  "SELECT array_to_string(authz.explain_rule('app.files', 'update', '91', '{\"owner_id\": 7}'), '|')" \
+  "UPDATE app.files SET owner_id = 7 WHERE id = 91 RETURNING owner_id")
+[ "${out##*$'\n'}" = 7 ] && ok "... and one it allows goes through, though the update rule wouldn't hold after it" ||
+  bad "allowed by the after rule" "$out"
+case "$out" in "yes  update : share  (line "*"|after the change:|  yes  update after : edit  (line "*) ok "... which explain_rule says: after the change, the after rule";;
+  *) bad "explain_rule with an update after rule" "$out";; esac
+bash tests/coverage_functions.sh "$DB"
+CLI apply example/docs.authz >/dev/null 2>&1
 
 echo "-- authz.who_among"
 out=$(as '' "SELECT string_agg(x, ',' ORDER BY x) FROM authz.who_among('file', 11, 'view', ARRAY['1','2','3','4','5','6','7']) x")

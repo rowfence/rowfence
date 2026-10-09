@@ -218,15 +218,12 @@ END $f$;"""
         )
         delete = why("delete", "r_old") if "delete" in by_cmd else none("delete")
         if "update" in by_cmd:
-            after = (
-                f" || ARRAY(SELECT '  ' || l FROM {self.rule_fn(table, 'update check', 'why')}(r_new) l)"
-                if "update check" in by_cmd
-                else ""
-            )
+            # the row after the change answers to the `update after` rule where there is one, instead of the
+            # update rule (the WITH CHECK is that rule's)
+            after = "update check" if "update check" in by_cmd else "update"
             update = (
                 f"{why('update', 'r_old')} || CASE WHEN p_row IS NULL THEN '{{}}'::text[] ELSE "
-                f"ARRAY['after the change:'] || ARRAY(SELECT '  ' || l FROM {self.rule_fn(table, 'update', 'why')}(r_new) l)"
-                f"{after} END"
+                f"ARRAY['after the change:'] || ARRAY(SELECT '  ' || l FROM {self.rule_fn(table, after, 'why')}(r_new) l) END"
             )
         else:
             update = none("update")

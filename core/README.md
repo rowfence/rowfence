@@ -86,8 +86,8 @@ measured (`.ci/coverage-16/`) and says:
   no suite ever calls, as far as Postgres can count: it counts only the calls that return, but keeps a count from
   a function's first call, so a guard whose every call raises is listed apart; a call before a database's last
   apply is lost (applying makes the functions anew), unless the suite measures first, as `tests/governance.sh`
-  does (`bash tests/coverage_functions.sh "$DB"`); a plain SQL function, which Postgres may inline, is listed
-  apart too;
+  and `tests/devx.sh` do (`bash tests/coverage_functions.sh "$DB"`); a plain SQL function, which Postgres may
+  inline, is listed apart too;
 - with `--diff main`: the lines changed since `main` that nothing runs (exit 1 if there are any).
 
 ### How many checks each suite passes

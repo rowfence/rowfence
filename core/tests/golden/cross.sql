@@ -4292,7 +4292,7 @@ BEGIN
     RETURN ARRAY(SELECT * FROM authz_gen."cx.projects:delete:why"(r_old));
   END IF;
   r_new := jsonb_populate_record(r_old, coalesce(p_row, '{}'));
-  RETURN ARRAY(SELECT * FROM authz_gen."cx.projects:update:why"(r_old)) || CASE WHEN p_row IS NULL THEN '{}'::text[] ELSE ARRAY['after the change:'] || ARRAY(SELECT '  ' || l FROM authz_gen."cx.projects:update:why"(r_new) l) || ARRAY(SELECT '  ' || l FROM authz_gen."cx.projects:update_after:why"(r_new) l) END;
+  RETURN ARRAY(SELECT * FROM authz_gen."cx.projects:update:why"(r_old)) || CASE WHEN p_row IS NULL THEN '{}'::text[] ELSE ARRAY['after the change:'] || ARRAY(SELECT '  ' || l FROM authz_gen."cx.projects:update_after:why"(r_new) l) END;
 END $f$;
 
 -- cx.projects select (line 76): view
