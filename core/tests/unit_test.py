@@ -5144,18 +5144,26 @@ class Decisions(unittest.TestCase):
 
     def test_a_where_never_false_and_a_source_never_true(self) -> None:
         t = self.watch(
-            "type user = app.users where {active}\ntype doc = app.docs where {not archived}\n  owner : user = owner_id\n"
+            "type user = app.users where {active}\n  boss : user = boss_id\n  can manage = boss\n  can greet = anyone\n"
+            "type doc = app.docs where {not archived}\n  owner : user = owner_id\n"
             "  editor : user = app.doc_editors(doc_id -> user_id)\n  can view = owner or editor\n",
-            ["user: ann, bo\ndoc: 1, 2, 3\ndoc 2 fails its where\ndoc 1 owner user ann\ndoc 3 owner user bo\n"],
+            [
+                "user: ann, bo\nuser bo boss user ann\ndoc: 1, 2, 3\ndoc 2 fails its where\ndoc 1 owner user ann\n"
+                "doc 3 owner user bo\n"
+            ],
         )
-        # every user passes: never false, and false it takes everything away
+        # every user passes: never false, and false it takes everything away (signed in, they are nobody)
         self.assertEqual(t.parts[("where", "user")].nevers(), ["never false"])
-        self.assertEqual(t.parts[("where", "user")].down, "doc.view on 1 for ann")
+        self.assertEqual(t.parts[("where", "user")].down, "user.manage on bo for ann")
+        # ann's part of bo, read just after that: as she is, not as nobody
+        self.assertEqual(t.parts[("source", "user", "boss", 0, "user", "")].nevers(), [])
         # doc 2 fails it, and nobody holds anything there: letting it through changes nothing
         self.assertEqual(t.parts[("where", "doc")].nevers(), ["decisive only forced false"])
         # no editor anywhere: never true, yet one everywhere would show
         editor = t.parts[("source", "doc", "editor", 0, "user", "")]
         self.assertEqual((editor.nevers(), editor.up), (["never true"], "doc.view on 3 for ann"))
+        # anyone is never false, as it says: no news
+        self.assertEqual(t.parts[("expr", "perm", "user", "greet")].nevers(), [])
 
     def test_a_share_that_does_not_count_had_it_counted(self) -> None:
         expired = ("share", "expired", "doc", "viewer", 0, "user", "")
@@ -5212,7 +5220,8 @@ class Decisions(unittest.TestCase):
             "  viewer : team#member shared\n  can share = owner\n  can view = viewer\n",
             [
                 "user: ann\nteam: 1, 2, 3\nteam 3 member user ann\nteam 2 member team#member 3\n"
-                "team 1 member team#member 2\nfolder: 1, 2\nfolder 1 viewer team#member 2\nfolder 2 viewer team#member 1\n"
+                "team 1 member team#member 2\nfolder: 1, 2, 3\nfolder 1 viewer team#member 2\n"
+                "folder 2 viewer team#member 1\n"
             ],
             ["ann"],
         )
@@ -5221,18 +5230,33 @@ class Decisions(unittest.TestCase):
             [t.parts[("depth", 0, d)].down for d in (1, 2, 3)],
             ["folder.view on 1 for ann", "folder.view on 2 for ann", ""],
         )
+        # shared with a team of hers on folder 3 too, she would view it: the source decides both ways
+        viewer = t.parts[("source", "folder", "viewer", 0, "team", "member")]
+        self.assertEqual((viewer.nevers(), viewer.up), ([], "folder.view on 3 for ann"))
 
     def test_what_a_scope_let_through_and_left_out(self) -> None:
-        t = self.watch(
+        policy = (
             "type user = app.users\ntype doc = app.docs\n  owner : user = owner_id\n  can view = owner\n"
-            "  can edit = owner\nscope files = doc.view\nrules app.docs\n  select : view\n",
-            ["user: ann\ndoc: 1\ndoc 1 owner user ann\n"],
-            ["ann"],
-            scope=("ann", "files"),
+            "  can edit = owner\nscope files = doc.view\nscope both = doc.view, view\nrules app.docs\n  select : view\n"
         )
+        world = ["user: ann\ndoc: 1\ndoc 1 owner user ann\n"]
+        t = self.watch(policy, world, ["ann"], scope=("ann", "files"))
         self.assertEqual(t.parts[("scope", "files", 0)].down, "doc.view for ann")
         self.assertEqual(t.parts[("scope refuses", "files")].up, "doc.edit for ann")
         self.assertEqual(t.parts[("scope", "read", 1)].nevers(), ["never true", "never decisive"])
+        # two items let doc.view through: without either one, the other still does
+        both = self.watch(policy, world, ["ann"], scope=("ann", "both"))
+        self.assertEqual([both.parts[("scope", "both", j)].nevers() for j in (0, 1)], [["never decisive"]] * 2)
+
+    def test_a_mask_decides_only_on_rows_one_may_select(self) -> None:
+        # {shown} holds on doc 2 alone, which ann may not select: its column shows nowhere she sees, either way
+        t = self.watch(
+            "type user = app.users\ntype doc = app.docs\n  owner : user = owner_id\n  can view = owner\n"
+            "rules app.docs view app.docs_seen\n  select : view\n  mask body : {shown}\n",
+            ["user: ann\ndoc: 1, 2\ndoc 1 owner user ann\n{shown} on doc 2\n"],
+            ["ann"],
+        )
+        self.assertEqual(t.parts[("expr", "rule", 1)].nevers(), ["decisive only forced true"])
 
     def test_whose_roles_count(self) -> None:
         t = self.watch(
@@ -5246,6 +5270,37 @@ class Decisions(unittest.TestCase):
         # org 2's role counts on its folder 2, not on org 1's folder 1: checked or not, view changes
         part = t.parts[("roles from", "folder")]
         self.assertEqual((part.up, part.down), ("folder.view on 1 for ann", "folder.view on 2 for ann"))
+
+    def test_difftest_reads_the_shares_that_do_not_count_by_why(self) -> None:
+        import difftest
+
+        def queries(name: str) -> dict[tuple[str | int, ...], str]:
+            return dict(difftest.Reference(parse_policy(read(POLICIES[name]), POLICIES[name])).decisions_queries())
+
+        live, started = difftest.NOT_EXPIRED, difftest.STARTED
+        multi = queries("multi")
+        # each one live but for its why
+        self.assertIn(
+            f" AND NOT {live} AND {started} AND (g.caveat IS NULL OR CASE",
+            multi[("share", "expired", "folder", "viewer", 0, "user", "")],
+        )
+        self.assertIn(
+            f" AND {live} AND NOT {started} AND (g.caveat IS NULL OR CASE",
+            multi[("share", "not started", "folder", "viewer", 0, "user", "")],
+        )
+        self.assertIn(
+            f" AND {live} AND {started} AND g.caveat IS NOT NULL AND NOT (g.caveat IS NULL OR CASE",
+            multi[("share", "caveat false", "folder", "viewer", 0, "user", "*")],
+        )
+        self.assertIn(
+            f" AND {live} AND {started} AND g.caveat IS NOT NULL AND (g.caveat IS NULL OR CASE",
+            multi[("share", "caveat true", "project", "viewer", 0, "link", "")],
+        )
+        # custom roles' shares too, by the permission a role gives
+        self.assertIn("rp.permission = 'edit'", multi[("role share", "expired", "folder", "edit", "team", "member")])
+        # no caveat in the policy: none of those; a share to an object is a link of a tree, which never expires
+        self.assertEqual({str(k[1]) for k in queries("docs")}, {"expired", "not started"})
+        self.assertEqual([k for k in queries("alt") if k[2:4] == ("doc", "shortcut")], [])
 
     def test_unforced_it_answers_as_the_evaluator(self) -> None:
         # what it watches with is the evaluator overridden only where told: otherwise the very same answers
