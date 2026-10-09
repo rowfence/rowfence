@@ -882,13 +882,12 @@ def test_row(r: dict[str, Value]) -> TestRow:
     return text(r, "test"), text_or_none(r, "line"), flag(r, "ok"), text_or_none(r, "detail")
 
 
-def takes_app_role(db: Db, tests_sql: str) -> None:
-    """Checks that write or read as someone run as the app role: asked before they run, since a refused SET ROLE
-    would read as the policy refusing the check."""
+def takes_app_role(db: Db, tests_sql: str, role: str) -> None:
+    """Checks that write or read as someone run as the app role (the policy's, which a policy without rules makes
+    no row-level security policy for): asked before they run, since a refused SET ROLE would read as the policy
+    refusing the check."""
     if "SET LOCAL ROLE" in tests_sql:
-        from .perf import app_role
-
-        may_take(db, app_role(db))
+        may_take(db, role)
 
 
 def test(db: Db, tests: Mapping[str, object] | str | None = None) -> list[TestRow]:
@@ -897,12 +896,12 @@ def test(db: Db, tests: Mapping[str, object] | str | None = None) -> list[TestRo
     policy, files = applied(db)
     named = test_files(tests)
 
-    def make(c: Compiler) -> str:
+    def make(c: Compiler) -> tuple[str, str]:
         c.add_test_files(named)
-        return c.tests_function_sql()
+        return c.tests_function_sql(), c.role
 
-    sql = compiled(policy, files, make)
-    takes_app_role(db, sql)
+    sql, role = compiled(policy, files, make)
+    takes_app_role(db, sql, role)
     db.script(sql)
     rows = db.rows(f"SELECT * FROM {TESTS_FN}()")
     db.script(f"DROP FUNCTION {TESTS_FN}()")
@@ -917,12 +916,12 @@ def coverage(db: Db, tests: Mapping[str, object] | str | None = None) -> tuple[l
     policy, files = applied(db)
     named = test_files(tests)
 
-    def make(c: Compiler) -> str:
+    def make(c: Compiler) -> tuple[str, str]:
         c.add_test_files(named)
-        return c.tests_function_sql(coverage=True)
+        return c.tests_function_sql(coverage=True), c.role
 
-    sql = compiled(policy, files, make)
-    takes_app_role(db, sql)
+    sql, role = compiled(policy, files, make)
+    takes_app_role(db, sql, role)
     db.script(sql)
     rows = db.rows(f"SELECT * FROM {TESTS_FN}()")
     db.script(f"DROP FUNCTION {TESTS_FN}()")

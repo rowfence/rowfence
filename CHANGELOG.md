@@ -83,6 +83,10 @@ Each release upgrades from the one before it. How releases are numbered and made
   Nothing is offered there now, and after `type x =` and `rules` only the tables.
 - When the database in `rowstile.toml` can't be read (it is down, it refuses the connection, the setting is
   wrong), the language server says why in its log, once. It went on without the tables' names and said nothing.
+- `rowstile test` passed a `refused` check it never ran when the policy has no rules and the tables' owner may
+  not switch to the app role (as an owner that made the role on PostgreSQL 16 or later): the refused switch
+  read as the statement refused. It says what to grant first now (AZ618), as it did for a policy with rules;
+  so does `test --coverage`.
 - Ctrl-C while `rowstile sql` (or `can`, `explain`, `perms`, `list`, `who`, `explain-rule`) waited on a statement,
   or while `rowstile review --db` worked on its database, stopped only once the statement had run its course. It
   stops at once now and ends the statement on the server, as the other commands did.

@@ -137,6 +137,34 @@ out=$(TCLI test 2>&1); rc=$?
 case "$out" in *"FAIL"*"user 3 cannot view file 11"*) [ $rc -eq 1 ] && ok "... and a failing test fails it" || bad "test exit" "$rc";; *) bad "failing test" "$out";; esac
 [ "$(psql -X -At -d "$TDB" -c "SELECT count(*) FROM pg_proc WHERE proname = 'authz_policy_tests'")" = 0 ] && ok "testing leaves nothing behind" || bad "test function left"
 dropdb "$TDB"
+# a policy without rules makes no row-level security policy to find the app role by: the tests switch to the
+# policy's own, and an owner that only administers it (it made the role, as on managed Postgres) is told what to
+# grant first. A switch refused while the tests run would pass a check that a statement is refused, unrun
+N=${DB}_plain; R=${DB}_plain_app
+dropdb --if-exists "$N" 2>/dev/null; psql -X -q -d postgres -c "DROP ROLE IF EXISTS $R" >/dev/null 2>&1
+createdb "$N" || exit 1
+PGOPTIONS="-c createrole_self_grant= -c client_min_messages=error" psql -X -q -v ON_ERROR_STOP=1 -d "$N" \
+  -c "CREATE ROLE $R" -c "CREATE SCHEMA app" -c "CREATE TABLE app.users (id bigint PRIMARY KEY)" \
+  -c "CREATE TABLE app.notes (id bigint PRIMARY KEY, owner_id bigint NOT NULL REFERENCES app.users)" \
+  -c "GRANT USAGE ON SCHEMA app TO $R" -c "GRANT SELECT ON ALL TABLES IN SCHEMA app TO $R" \
+  -c "INSERT INTO app.users VALUES (1), (2)" -c "INSERT INTO app.notes VALUES (1, 1)" >/dev/null || exit 1
+printf 'app role %s\ntype user = app.users\ntype note = app.notes\n  owner : user = owner_id\n  viewer : user shared\n  can share = owner\n  can view = owner or viewer\n' "$R" > "$T/norules.authz"
+# a check that is false: user 1 owns note 1, and may share it
+printf 'test "the owner may share"\n  as user 1 refused {SELECT authz.share(%s, %s, %s, %s, %s)}\n' "'note'" "'1'" "'viewer'" "'user'" "'2'" > "$T/norules.test.authz"
+NCLI() { python3 cli/rowstile_cli.py --db "dbname=$N" "$@"; }
+NCLI apply "$T/norules.authz" >/dev/null 2>&1 || bad "apply a policy without rules"
+for flag in "" --coverage; do
+  out=$(NCLI test $flag "$T/norules.test.authz" 2>&1); rc=$?
+  case "$out" in *"may not switch to the app role $R (SET ROLE)"*"[AZ618]"*"GRANT \"$R\" TO"*) [ $rc -eq 1 ] &&
+    ok "test${flag:+ $flag} on a policy without rules, as an owner that may not switch to the app role: what to grant, no check passed" ||
+    bad "test${flag:+ $flag} without rules: exit" "$rc";; *) bad "test${flag:+ $flag} without rules, as a plain owner" "$out";; esac
+done
+psql -X -q -d "$N" -c "GRANT $R TO $PGUSER" >/dev/null
+out=$(NCLI test "$T/norules.test.authz" 2>&1); rc=$?
+case "$out" in *"FAIL"*"as user 1 refused"*"allowed (1 row(s))"*"1 policy test(s) failed"*) [ $rc -eq 1 ] &&
+  ok "... and once it may, the check runs as the app role, and fails: the owner's share is allowed" || bad "test after the grant: exit" "$rc";;
+  *) bad "test without rules, after the grant" "$out";; esac
+dropdb "$N"; psql -X -q -d postgres -c "DROP ROLE IF EXISTS $R" >/dev/null 2>&1
 
 echo "-- includes"
 mkdir -p "$T/sub"
