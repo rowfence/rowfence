@@ -181,6 +181,20 @@ grep -q 'tool = "prisma"' "$T/k/rowstile.toml" && grep -q 'dir  = "prisma/migrat
 # ...and that the app's client takes a URL of its own, not Prisma's, which is the owner's
 case "$out" in *"process.env.ROWSTILE_APP_URL"*"never the one this command uses"*) ok "... and that the app connects with its own URL, as the app role";;
   *) bad "init: the app's connection" "$out";; esac
+# init again there: rowstile.toml is kept, and package.json, which has the packages now, is left as it is
+before=$(cksum < "$T/k/package.json")
+out=$(cd "$T/k" && python3 "$OLDPWD/cli/rowstile_cli.py" --db "dbname=$DB" init --schema app 2>&1)
+case "$out" in *"added "*) bad "init again adds packages the app has" "$out";;
+  *"using rowstile.toml (it is there already)"*) [ "$(cksum < "$T/k/package.json")" = "$before" ] &&
+    ok "... init again keeps rowstile.toml, and package.json as it is" || bad "init again changed package.json" "$(cat "$T/k/package.json")";;
+  *) bad "init again in the Next.js app" "$out";; esac
+# ...and with rowstile.toml gone: written again, and .gitattributes, which marks the generated files already, as it is
+before=$(cksum < "$T/k/.gitattributes"); rm "$T/k/rowstile.toml"
+out=$(cd "$T/k" && python3 "$OLDPWD/cli/rowstile_cli.py" --db "dbname=$DB" init --schema app 2>&1)
+case "$out" in *".gitattributes"*) bad "init marks the generated files again" "$out";;
+  *"wrote rowstile.toml"*) [ "$(cksum < "$T/k/.gitattributes")" = "$before" ] &&
+    ok "... with rowstile.toml gone, writes it, and leaves .gitattributes as it is" || bad "init changed .gitattributes" "$(cat "$T/k/.gitattributes")";;
+  *) bad "init without rowstile.toml" "$out";; esac
 # in a FastAPI app that got FastAPI through rowstile's extras, with a role of its own name: the stack is found, the
 # role named is the policy's, and rowstile isn't asked for again
 mkdir -p "$T/f"
@@ -191,6 +205,12 @@ case "$out" in *"to your Python dependencies"*|*"(app_user)"*) bad "init in a Fa
   *"found   FastAPI, SQLAlchemy, Alembic"*"Rowstile(app, engine"*"connects as (tracker_app)"*) ok "init finds FastAPI through rowstile's extras, and names the policy's role";;
   *) bad "init in a FastAPI app" "$out";; esac
 grep -q "(tracker_app)" "$T/f/db/tests/first.authz" && ok "... in the first test file too" || bad "init: the role in the test file" "$(cat "$T/f/db/tests/first.authz")"
+# a FastAPI app that doesn't depend on rowstile yet: what to add to its dependencies, with the extras it uses
+mkdir -p "$T/fa"
+printf 'fastapi>=0.110\nsqlalchemy\n' > "$T/fa/requirements.txt"
+out=$(cd "$T/fa" && python3 "$OLDPWD/cli/rowstile_cli.py" --db "dbname=$DB" init --schema app 2>&1)
+case "$out" in *"found   FastAPI, SQLAlchemy, Postgres"*"add     rowstile[fastapi,sqlalchemy]"*" to your Python dependencies (pip install 'rowstile[fastapi,sqlalchemy]"*"', or uv add 'rowstile[fastapi,sqlalchemy]"*)
+  ok "init in a FastAPI app without rowstile says what to add to its dependencies";; *) bad "init: what to add to a Python app" "$out";; esac
 # a schema as Prisma names it (capitals), a column named like an SQL word, a link table named like a permission,
 # one through a unique column, a name with a space, and the migration tool's own table: the draft compiles and applies
 dropdb --if-exists "${DB}_names" 2>/dev/null; createdb "${DB}_names"

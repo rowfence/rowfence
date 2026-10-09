@@ -1027,6 +1027,97 @@ class Command(unittest.TestCase):
         self.assertIn('\t\t"@rowstile/next": "^1.2.3"', text)
         self.assertIn('"devDependencies"', text)
         self.assertEqual(stack.add_npm(d, ["@rowstile/next"], "1.2.3"), [])
+        self.assertEqual(stack.add_npm(at({}), ["@rowstile/pg"], "1.2.3"), [])  # no package.json: nothing to add to
+
+    def test_stack_as_apps_write_their_files(self) -> None:
+        """What init finds in the files apps have: requirements with comments, extras and markers, Poetry's
+        dependencies on one line, a package.json that isn't JSON or holds only tools, each Node driver."""
+        import stack
+
+        def detect(files: dict[str, str]) -> stack.Stack:
+            d = tempfile.mkdtemp()
+            for name, body in files.items():
+                os.makedirs(os.path.dirname(os.path.join(d, name)) or d, exist_ok=True)
+                with open(os.path.join(d, name), "w", encoding="utf-8") as fh:
+                    fh.write(body)
+            return stack.detect(d)
+
+        fastapi = ["FastAPI", "SQLAlchemy"]
+        for files in (
+            {
+                "requirements.txt": "# the app\n-r base.txt\n--index-url https://pypi.org/simple\n"
+                'fastapi[standard]>=0.110 ; python_version >= "3.11"\nSQLAlchemy==2.0.30  # pinned\n'
+                "psycopg[binary,pool]~=3.2\n\nasyncpg\n-e .\n"
+            },
+            # Poetry writes a version in parentheses; a list on one line has no line of its own for each
+            {"pyproject.toml": '[project]\ndependencies = ["fastapi (>=0.115.0,<0.116.0)", "sqlalchemy (>=2.0)"]\n'},
+            {
+                "pyproject.toml": '[project]\ndependencies = ["fastapi @ git+https://example.com/fastapi", "sqlalchemy"]\n'
+            },
+        ):
+            s = detect(files)
+            self.assertEqual((s.found, s.setup[:1]), (fastapi, ["from rowstile.fastapi import Rowstile"]), files)
+        self.assertEqual(s.pip, "rowstile[fastapi,sqlalchemy]")
+        # SQLAlchemy without FastAPI, and Alembic where alembic.ini says
+        s = detect({"requirements.txt": "sqlalchemy\npsycopg\n", "alembic.ini": "script_location = db/migrations\n"})
+        self.assertEqual(
+            (s.found, s.tool, s.migrations_dir, s.pip, s.setup[:2]),
+            (
+                ["SQLAlchemy", "Alembic"],
+                "alembic",
+                "db/migrations/versions",
+                "rowstile[sqlalchemy,psycopg]",
+                [
+                    "import rowstile.sqlalchemy",
+                    "rowstile.sqlalchemy.install(engine)   # with rowstile.acting_as(user_id): ...",
+                ],
+            ),
+        )
+        self.assertEqual(
+            s.setup[2:],
+            [
+                "# alembic env.py: context.configure(..., include_name=include_name, include_object=include_object)",
+                "from rowstile.alembic import include_name, include_object",
+            ],
+        )
+        # a driver alone: what to install, no line of setup to change, no tool
+        s = detect({"requirements.txt": "psycopg\n"})
+        self.assertEqual((s.found, s.pip, s.setup, s.tool), ([], "rowstile[psycopg]", [], ""))
+        # a package.json that isn't JSON is read as none, and one that holds only the tools of a Python app's
+        # front end leaves the Python stack to be found
+        s = detect({"package.json": "{ not json", "requirements.txt": "fastapi\n"})
+        self.assertEqual((s.found, s.npm, s.pip), (["FastAPI"], [], "rowstile[fastapi]"))
+        s = detect(
+            {
+                "package.json": '{"devDependencies": {"prettier": "3"}}',
+                "requirements.txt": "fastapi\nsqlalchemy\n",
+                "alembic.ini": "script_location = alembic\n",
+            }
+        )
+        self.assertEqual(
+            (s.found, s.npm, s.clients, s.tool), (fastapi + ["Alembic"], [], {"py": "authz_types.py"}, "alembic")
+        )
+        # each Node driver gets its package, and the client the SDK registers the names with
+        s = detect({"package.json": '{"dependencies": {"postgres": "3"}}'})
+        self.assertEqual(
+            (s.npm, s.setup[:1], s.clients),
+            (["@rowstile/postgres"], ['import { authz } from "@rowstile/postgres";'], {"ts": "authz.gen.ts"}),
+        )
+        s = detect({"package.json": '{"dependencies": {"pg": "8", "react": "19"}, "devDependencies": {"vitest": "3"}}'})
+        self.assertEqual(
+            (s.npm, s.setup[:1]),
+            (["@rowstile/pg", "@rowstile/react", "@rowstile/vitest"], ['import { authz } from "@rowstile/pg";']),
+        )
+        # Drizzle without its config file: its default folder; and a migrations folder with no SQL in it is no tool
+        s = detect({"package.json": '{"dependencies": {"drizzle-orm": "0.40"}}'})
+        self.assertEqual((s.found, s.tool, s.migrations_dir, s.setup_file), (["Drizzle"], "drizzle", "drizzle", ""))
+        self.assertEqual(detect({"migrations/README": "x"}).tool, "")
+        # the source files init looks through for the line to change stop at a limit (a big tree isn't read whole)
+        d = tempfile.mkdtemp()
+        for name in ("a.ts", "b.ts", "c.ts"):
+            with open(os.path.join(d, name), "w", encoding="utf-8") as fh:
+                fh.write("export {};\n")
+        self.assertEqual(stack._files(d, (".ts",), limit=2), ["a.ts", "b.ts"])
 
     def test_no_database_named_is_said(self) -> None:
         # with no --db, no `database` in rowstile.toml and no variable, the defaults are tried (a local socket): when
@@ -2249,6 +2340,89 @@ class Draft(unittest.TestCase):
         )
         self.assertIn("  can edit = creator or site.edit   -- decide: owners", text)
         self.assertIn("  can view = creator or site.view\n", text)
+
+    def test_the_user_table_named_or_found_by_what_refers_to_it(self) -> None:
+        # --users names it; with none of the usual names, it is the table most foreign keys of people point at
+        # (owner_id, author_id, ...); a --users table keyed by two columns is said, as one found by its name is
+        to = lambda col, table: ([col], table, ["id"])
+        customers = self.table("app.customers", {"id": "bigint"}, ["id"])
+        staff = self.table("app.staff", {"id": "bigint"}, ["id"])
+        notes = self.table(
+            "app.notes",
+            {"id": "bigint", "author_id": "bigint", "owner_id": "bigint", "editor_id": "bigint"},
+            ["id"],
+            (to("author_id", "app.customers"), to("owner_id", "app.customers"), to("editor_id", "app.staff")),
+        )
+        self.assertIn("\ntype user = app.customers\n", self.compiled([customers, staff, notes]))
+        self.assertIn(
+            "\ntype user = app.staff\n", draft.draft([customers, staff, notes], "app.staff", schemas=("app",))
+        )
+        wide = self.table("app.accounts", {"org": "bigint", "id": "bigint"}, ["org", "id"])
+        with self.assertRaisesRegex(draft.DraftError, r"^app\.accounts: the user table needs a key of one column$"):
+            draft.draft([wide, customers], "app.accounts", schemas=("app",))
+        refs = self.table("app.docs", {"id": "bigint", "owner_id": "bigint"}, ["id"], (to("owner_id", "app.accounts"),))
+        with self.assertRaisesRegex(draft.DraftError, r"^app\.accounts: the user table needs a key of one column$"):
+            draft.draft([wide, refs], schemas=("app",))
+
+    def test_names_a_type_cannot_have_and_a_key_it_cannot_write(self) -> None:
+        # a table named like a word of the language is a type of another name (and a users table that isn't the
+        # user table is too, with --users naming another); one whose key's column the language can't write is
+        # left out, with why
+        text = draft.draft(
+            [
+                self.table("app.accounts", {"id": "bigint"}, ["id"]),
+                self.table("app.tests", {"id": "bigint"}, ["id"]),
+                self.table("app.users", {"id": "bigint"}, ["id"]),
+                self.table("app.s", {"id": "bigint"}, ["id"]),
+                self.table("app.things", {"thing id": "bigint"}, ["thing id"]),
+            ],
+            "app.accounts",
+            schemas=("app",),
+        )
+        Compiler(parse_policy(text, None, files={})).compile("the policy")
+        for line in ("user = app.accounts", "test_row = app.tests", "user_row = app.users", "t_ = app.s"):
+            self.assertIn(f"\ntype {line}\n", text)
+        self.assertIn("-- app.things: its key has a column name the policy language can't write (thing id)", text)
+
+    def test_what_nobody_edits_above_a_type_is_said_as_it_is(self) -> None:
+        # products in categories nobody changes through the app: nobody edits what a product is in, and there is
+        # no loop of foreign keys to look for (categories in categories are a tree, not a loop); a link table
+        # named for neither of its sides keeps its own name
+        to = lambda col, table: ([col], table, ["id"])
+        text = self.compiled(
+            [
+                self.table("app.users", {"id": "bigint"}, ["id"]),
+                self.table(
+                    "app.categories",
+                    {"id": "bigint", "parent_id": "bigint"},
+                    ["id"],
+                    (to("parent_id", "app.categories"),),
+                ),
+                self.table(
+                    "app.products",
+                    {"id": "bigint", "category_id": "bigint"},
+                    ["id"],
+                    (to("category_id", "app.categories"),),
+                ),
+                self.table(
+                    "app.memberships",
+                    {"category_id": "bigint", "user_id": "bigint"},
+                    ["category_id", "user_id"],
+                    (to("category_id", "app.categories"), to("user_id", "app.users")),
+                ),
+            ]
+        )
+        self.assertIn(
+            "type product = app.products\n  category : category = category_id\n"
+            "  can edit = nobody   -- decide: nobody edits what it is in; who edits these?\n"
+            "  can view = category.view\n",
+            text,
+        )
+        self.assertIn(
+            "  parent : category = parent_id\n  membership : user = app.memberships(category_id -> user_id)\n"
+            "  can edit = nobody   -- decide: nobody edits what it is in; who edits these?\n",
+            text,
+        )
 
     def test_a_user_table_whose_key_it_cannot_use_is_said(self) -> None:
         with self.assertRaisesRegex(draft.DraftError, "its key is character\\(8\\).*--users"):
