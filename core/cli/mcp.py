@@ -107,7 +107,7 @@ TOOLS: dict[str, Tool] = {
             "as": WHO,
             "type": {"type": "string", "description": "the policy's type, e.g. folder"},
             "id": {"type": "string"},
-            "perm": {"type": "string", "description": "a permission or relation"},
+            "perm": {"type": "string", "description": "a permission of the type, e.g. view"},
         },
         ["as", "type", "id", "perm"],
         {"readOnlyHint": True},

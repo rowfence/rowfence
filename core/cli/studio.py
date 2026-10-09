@@ -30,9 +30,9 @@ from typing import TYPE_CHECKING, TypeVar
 from urllib.parse import parse_qs, urlparse
 
 import pgwire
-from authzlib import Compiler, database, grant
+from authzlib import Compiler, database
 from authzlib.connection import Value as Json
-from authzlib.parse import Ref, Type
+from authzlib.parse import Type
 from authzlib.sqlutil import POLICY_MARKS, lit, qt
 from authzlib.sqlutil import q as quoted
 
@@ -312,19 +312,23 @@ class Studio:
             raise Problem("why for nobody: pick someone to view as (user:42)")
 
         def run(db: Db) -> Message:
-            c = self.compiler(db)
-            if self.writable:
-                answer = database.why(
-                    db, kind, ident, q.get("type", ""), q.get("id", ""), q.get("perm", ""), compiler=c
-                )
-                tried = True
-            else:
-                answer, tried = untried(c, db, (kind, ident), q), False
+            # read-only, the changes that might grant it are listed, none tried: the command's answer otherwise
+            answer = database.why(
+                db,
+                kind,
+                ident,
+                q.get("type", ""),
+                q.get("id", ""),
+                q.get("perm", ""),
+                compiler=self.compiler(db),
+                tried=self.writable,
+            )
             return {
                 "holds": answer.holds,
                 "explain": list[Json](answer.explain),
                 "needs": answer.needs,
-                "tried": tried,
+                "tried": self.writable,
+                "stops": list[Json](answer.stops),
                 "notes": list[Json](answer.notes),
                 "ways": [
                     {
@@ -665,38 +669,6 @@ def as_object(value: Json) -> Message:
     """A JSON object from the database: jsonb comes as a dict, json as its text."""
     got = json.loads(value) if isinstance(value, str) else value
     return got if isinstance(got, dict) else {}
-
-
-def untried(c: Compiler, db: Db, who: tuple[str, str], q: Query) -> grant.Answer:
-    """how_to_grant on a read-only Studio: the answer and the candidate changes, none tried."""
-    g = grant.Grants(c, db, who[0], who[1])
-    type_name, oid, perm = q.get("type", ""), q.get("id", ""), q.get("perm", "")
-    if type_name not in c.types:
-        raise Problem(f"no type {type_name} in the policy", 404)
-    t = c.types[type_name]
-    if perm not in t.perms and perm not in t.relations:
-        raise Problem(f"{type_name} has no permission {perm}", 404)
-    g.sign_in(False)
-    explain = (
-        [str(x["l"]) for x in db.rows("SELECT l FROM authz.explain($1, $2, $3, $4) l", [type_name, oid, perm, who[1]])]
-        if who[0] == "user"
-        else []
-    )
-    g.sign_in()
-    holds = db.rows("SELECT authz.can($1, $2, $3) AS ok", [type_name, oid, perm])[0]["ok"] is True
-    p = t.perms.get(perm)
-    answer = grant.Answer(holds, explain, f"{perm} = {p.src}  ({p.loc})" if p else f"{perm}: a relation")
-    if not holds:
-        seen: set[tuple[str, ...]] = set()
-        for changes in g.ways(t, oid, Ref("ref", perm), 0, frozenset()):
-            key = tuple(ch.sql for ch in changes)
-            if key not in seen:
-                seen.add(key)
-                answer.ways.append(grant.Way(changes))
-        answer.ways.sort(key=lambda w: (len(w.changes), sum(ch.cost for ch in w.changes)))
-        answer.ways = answer.ways[: grant.SHOWN]
-        answer.notes = list(dict.fromkeys(g.notes))
-    return answer
 
 
 def serve(

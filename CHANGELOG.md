@@ -459,6 +459,19 @@ Each release upgrades from the one before it. How releases are numbered and made
   single change that could be tried grants it" and "could not be tried: add user 3 to app.doc_editors for doc 5
   (null value in column "added_by" ...)", Studio's page said "No single change to shares or links grants it". It
   says them, with the database's reason, as the command does.
+- `rowstile why` on an object that isn't there (`doc 999`), or an id its key can't hold (`doc five`), tried the
+  changes on it anyway: "no single change that could be tried grants it", and a "could not be tried" line for
+  each one the database refused (invalid input syntax for type bigint). As someone who isn't there (`--as
+  user:999`), the same. It says "there is no doc 999", as `authz.share` says of someone who isn't there, and
+  tries nothing. A row the type's `where` leaves out (an archived folder) holds nothing: where it said no change
+  grants it, with notes on other conditions, it says "folder 7 fails the type's where {not archived}".
+- `rowstile why` and Studio named a type or a permission the policy doesn't have in words of their own ("folder
+  has no permission fly"), and took a relation, which `authz.can` and `authz.explain` refuse. They refuse what
+  those refuse, in their words and with their code: "no permission folder.fly in the policy", `rowstile help
+  AZ707`.
+- Studio, where it may not write, gave a service no explanation of why not, where the command gives the
+  database's, and listed changes for an object that isn't there. It answers as the command does, the changes
+  listed and none tried.
 
 ## 0.1.0 (alpha)
 

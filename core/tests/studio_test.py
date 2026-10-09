@@ -259,7 +259,11 @@ def main() -> None:
     rc, out = cli(db, "why", "--as", "user:1", "folder", "3", "edit")
     check("yes, and why", rc == 0 and out.startswith("yes: user:1 holds edit on folder 3") and "owner" in out, out)
     rc, out = cli(db, "why", "--as", "user:2", "folder", "3", "fly")
-    check("a permission the type doesn't have is named", rc != 0 and "folder has no permission fly" in out, out)
+    check(
+        "a permission the type doesn't have: refused in authz.can's words, with its code, exit 1",
+        (rc, out) == (1, "no permission folder.fly in the policy\nHINT: rowstile help AZ707\n"),
+        out,
+    )
     before = shares()
     rc, out = cli(db, "why", "--as", "user:7", "file", "10", "view")
     check("nothing it tried stays", shares() == before and "share viewer on file 10 with user 7" in out, out)
@@ -437,8 +441,24 @@ def main() -> None:
         for label, path, want, words in (
             ("someone to view as, written wrongly", "/api/rows?table=app.folders&as=user:", 400, "as whom? 'user:'"),
             ("why for nobody", "/api/why?as=anyone&type=folder&id=3&perm=edit", 400, "why for nobody"),
-            ("why on a type the policy doesn't have", "/api/why?as=user:3&type=nothing&id=3&perm=edit", 404, "no type"),
-            ("why on a permission the type doesn't have", "/api/why?as=user:3&type=folder&id=3&perm=nope", 404, "nope"),
+            (
+                "why on a type the policy doesn't have",
+                "/api/why?as=user:3&type=nothing&id=3&perm=edit",
+                400,
+                "no type nothing in the policy (rowstile help AZ707)",
+            ),
+            (
+                "why on a permission the type doesn't have",
+                "/api/why?as=user:3&type=folder&id=3&perm=nope",
+                400,
+                "no permission folder.nope in the policy (rowstile help AZ707)",
+            ),
+            (
+                "why on a relation, which authz.can and authz.explain don't take",
+                "/api/why?as=user:3&type=folder&id=3&perm=viewer",
+                400,
+                "no permission folder.viewer in the policy (rowstile help AZ707)",
+            ),
             ("a test expecting neither", "/api/test?as=user:3&type=folder&id=3&perm=edit&expect=maybe", 400, "expect:"),
             (
                 "a test on a type the policy doesn't have",
@@ -623,8 +643,8 @@ def main() -> None:
         )
         status, e = c.call("/api/why?as=user:3&type=folder&id=3&perm=fly")
         check(
-            "why, trying changes, on a permission the type doesn't have: says so",
-            status == 400 and e["detail"] == "folder has no permission fly",
+            "why, trying changes, on a permission the type doesn't have: says so, as the command does",
+            status == 400 and e["detail"] == "no permission folder.fly in the policy (rowstile help AZ707)",
             (status, e),
         )
         status, _ = c.call("/api/share", {**body, "as": "user:1"})
@@ -1146,7 +1166,7 @@ def main() -> None:
 
 # rowstile why on what the docs example doesn't have: groups in groups through a permission, a table naming its
 # rows' type, a share that expired, `shared if`, a link table with a column no change fills, a chain of five, a
-# service that signs in, a deny, a condition, and a key of two columns
+# service that signs in, a deny, a condition, a key of two columns, and a type's where
 WHY_SCHEMA = """
 CREATE SCHEMA cn;
 CREATE TABLE cn.clubs (id bigint PRIMARY KEY);
@@ -1169,14 +1189,15 @@ CREATE TABLE cn.project_members (org_id bigint, project_id bigint, user_id bigin
   PRIMARY KEY (org_id, project_id, user_id), FOREIGN KEY (org_id, project_id) REFERENCES cn.projects);
 CREATE TABLE cn.project_groups (org_id bigint, project_id bigint, group_id bigint REFERENCES cn.groups,
   PRIMARY KEY (org_id, project_id, group_id), FOREIGN KEY (org_id, project_id) REFERENCES cn.projects);
-CREATE TABLE cn.shelves (id bigint PRIMARY KEY, closed boolean NOT NULL);
+CREATE TABLE cn.shelves (id bigint PRIMARY KEY, closed boolean);
 CREATE TABLE cn.shelf_keepers (shelf_id bigint REFERENCES cn.shelves, user_id bigint REFERENCES cn.users,
   since date NOT NULL, PRIMARY KEY (shelf_id, user_id));
 GRANT USAGE ON SCHEMA cn TO app_user;
 GRANT SELECT ON ALL TABLES IN SCHEMA cn TO app_user;
 -- ann (1) owns docs 1 to 5, each inside the one before, and doc 6, archived; bo (2) is in group 2, which is in
 -- group 1, as group 3 is; dee (4) is no longer active; bot 1 may view doc 4; ann leads project (1,5) and is one of
--- its members, and group 3's members are its members too; cy is in club 2; shelf 1 is closed, shelf 2 open
+-- its members, and group 3's members are its members too; cy is in club 2; shelf 1 is closed, shelf 2 open,
+-- and whether shelf 3 is closed isn't known (NULL: the type's where doesn't hold)
 INSERT INTO cn.clubs VALUES (1), (2);
 INSERT INTO cn.users VALUES (1, true, NULL), (2, true, NULL), (3, true, 2), (4, false, NULL);
 INSERT INTO cn.bots VALUES (1, 1);
@@ -1188,7 +1209,7 @@ INSERT INTO cn.pages VALUES (1, NULL, true), (2, 1, false);
 INSERT INTO cn.projects VALUES (1, 5, 1);
 INSERT INTO cn.project_members VALUES (1, 5, 1);
 INSERT INTO cn.project_groups VALUES (1, 5, 3);
-INSERT INTO cn.shelves VALUES (1, true), (2, false);
+INSERT INTO cn.shelves VALUES (1, true), (2, false), (3, NULL);
 """
 WHY_POLICY = """app role app_user
 
@@ -1418,17 +1439,63 @@ def corners(db: str) -> None:
         ),
         said,
     )
-    rc, said, ways, _ = why("--as", "user:3", "doc", "five", "view")
+    # what no change makes count: an object or a person that isn't there (as authz.share says of a subject), or a row
+    # the type's where leaves out. Said, and nothing tried
+    rc, said, ways, _ = why("--as", "user:3", "doc", "999", "view")
     check(
-        "an id its key can't hold: no, and why each change couldn't be tried",
-        rc == 0
-        and said.startswith("no: user:3 does not hold view on doc five\n")
-        and 'could not be tried: share viewer on doc five with user 3 (invalid input syntax for type bigint: "five")'
-        in said,
+        "an object that isn't there: no, why not, and that there is no such doc; nothing tried",
+        rc == 0 and said.endswith("view = edit or viewer or reader or parent.view  (line 21)\nthere is no doc 999\n"),
         said,
     )
-    rc, said = cli(db, "why", "--as", "user:3", "nothing", "3", "view")
-    check("a type the policy doesn't have: named, exit 1", (rc, said) == (1, "no type nothing in the policy\n"), said)
+    rc, said, ways, _ = why("--as", "user:3", "doc", "five", "view")
+    check(
+        "an id its key can't hold: no, and there is no such doc",
+        rc == 0
+        and said
+        == "no: user:3 does not hold view on doc five\n  no   user 3 does not hold view on doc five\n"
+        "view = edit or viewer or reader or parent.view  (line 21)\nthere is no doc five\n",
+        said,
+    )
+    for who, there_is_no in (("user:999", "user 999"), ("user:abc", "user abc"), ("bot:9", "bot 9")):
+        rc, said, ways, _ = why("--as", who, "doc", "5", "view")
+        check(
+            f"as someone who isn't there ({who}): there is no {there_is_no}; nothing tried",
+            rc == 0 and said.endswith(f"(line 21)\nthere is no {there_is_no}\n"),
+            said,
+        )
+    rc, said, ways, _ = why("--as", "user:999", "doc", "999", "view")
+    check(
+        "... and neither of them there: both said",
+        rc == 0 and said.endswith("(line 21)\nthere is no user 999\nthere is no doc 999\n"),
+        said,
+    )
+    for shelf, which in (("1", "a closed shelf"), ("3", "a shelf not known to be open: the where is NULL")):
+        rc, said, ways, _ = why("--as", "user:3", "shelf", shelf, "use")
+        check(
+            f"a row the type's where leaves out ({which}) holds nothing: said, and nothing tried",
+            rc == 0
+            and said.endswith(
+                f"use = keeper  (line 45)\nshelf {shelf} fails the type's where {{not closed}}: no share or link "
+                "changes that\n"
+            ),
+            said,
+        )
+    # what isn't a permission of the policy (a type it doesn't have, a permission, a relation, one the compiler made
+    # for a deny): refused as authz.can and authz.explain refuse it
+    for question in (
+        ("nothing", "3", "view"),
+        ("doc", "5", "fly"),
+        ("doc", "5", "editor"),
+        ("page", "2", "read__base"),
+    ):
+        rc, said = cli(db, "why", "--as", "user:3", *question)
+        check(
+            f"why on {' '.join(question)}: refused in authz.can's words, with its code, exit 1",
+            rc == 1
+            and said.endswith("HINT: rowstile help AZ707\n")
+            and (rc, said) == cli(db, "can", "--as", "user:3", *question),
+            said,
+        )
     # Studio, where it may write: the changes the database refused to try, said as the command says them
     s = studio.Studio(f"dbname={db}", None, None, writable=True, port=0)
     s.start()
@@ -1465,10 +1532,89 @@ def corners(db: str) -> None:
             ],
             (status, w),
         )
+        status, w = Client(s).call("/api/why?as=user:3&type=doc&id=999&perm=view")
+        check(
+            "Studio says there is no such doc, as the command does, and tries nothing",
+            status == 200 and w.get("stops") == ["there is no doc 999"] and w["ways"] == [] and w["untried"] == [],
+            (status, w),
+        )
+    finally:
+        s.stop()
+    # read-only, the same answer, the changes listed and none tried
+    s = studio.Studio(f"dbname={db}", None, None, port=0)
+    s.start()
+    try:
+        status, w = Client(s).call("/api/why?as=user:3&type=doc&id=999&perm=view")
+        check(
+            "... and where it may not write, lists no change for it either",
+            status == 200 and not w["tried"] and w.get("stops") == ["there is no doc 999"] and w["ways"] == [],
+            (status, w),
+        )
+        status, w = Client(s).call("/api/why?as=bot:1&type=doc&id=2&perm=view")
+        check(
+            "... and as a service that signs in, why not as the database explains it to the service",
+            status == 200 and not w["tried"] and w["explain"][:1] == ["no   bot 1 does not hold view on doc 2"],
+            (status, w),
+        )
+        status, w = Client(s).call("/api/why?as=user:3&type=doc&id=5&perm=view")
+        check(
+            "... the changes that might grant it, the five that change least, as the command shows five",
+            status == 200
+            and not w["tried"]
+            and len(w["ways"]) == 5
+            and w["ways"][0]["text"] == "share viewer on doc 5 with user 3",
+            (status, w),
+        )
+        status, w = Client(s).call("/api/why?as=user:1&type=doc&id=6&perm=archive")
+        check(
+            "... and what no change to the data would do, said beside them (nothing tried, nothing is known to grant)",
+            status == 200 and w["notes"] == ["doc 6 must not meet {archived}: no share or link changes that"],
+            (status, w),
+        )
     finally:
         s.stop()
     check("... and nothing it tried stays", psql(db, data) == before, (before, psql(db, data)))
     subprocess.run(["dropdb", "--if-exists", db], capture_output=True)
+
+    # a condition this session can't read: its function is on the search path the policy was applied with, not on
+    # this one. Why goes on with the changes, as where nothing stops it
+    other = db + "_path"
+    subprocess.run(["dropdb", "--if-exists", other], capture_output=True)
+    subprocess.run(["createdb", other], check=True)
+    psql(
+        other,
+        "CREATE SCHEMA px; CREATE SCHEMA fx; "
+        "CREATE FUNCTION fx.open_now(c boolean) RETURNS boolean LANGUAGE sql IMMUTABLE AS 'SELECT NOT c'; "
+        "CREATE TABLE px.users (id bigint PRIMARY KEY); "
+        "CREATE TABLE px.shelves (id bigint PRIMARY KEY, closed boolean NOT NULL, keeper_id bigint REFERENCES px.users); "
+        "INSERT INTO px.users VALUES (1), (2); INSERT INTO px.shelves VALUES (1, true, 1); "
+        "GRANT USAGE ON SCHEMA px, fx TO app_user; GRANT SELECT ON ALL TABLES IN SCHEMA px TO app_user",
+    )
+    on_path = f"dbname={other} options='-c search_path=fx,public'"
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "path.authz")
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(
+                "app role app_user\n\ntype user = px.users\n\n"
+                "type shelf = px.shelves where {open_now(closed)}\n  keeper : user = keeper_id\n  can use = keeper\n"
+            )
+        rc, out = command(on_path, "apply", path)
+    if rc:
+        raise SystemExit(out)
+    rc, said = cli(other, "why", "--as", "user:2", "shelf", "1", "use")
+    check(
+        "a type's where this session can't read (its function is on the path the policy was applied with): no stop "
+        "said, and the changes tried",
+        rc == 0 and said.endswith("use = keeper  (line 7)\nno single change to shares or links grants it\n"),
+        said,
+    )
+    rc, said = command(on_path, "why", "--as", "user:2", "shelf", "1", "use")
+    check(
+        "... and on that path, the stop",
+        rc == 0 and said.endswith("shelf 1 fails the type's where {open_now(closed)}: no share or link changes that\n"),
+        said,
+    )
+    subprocess.run(["dropdb", "--if-exists", other], capture_output=True)
 
 
 if __name__ == "__main__":
