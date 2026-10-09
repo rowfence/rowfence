@@ -2,13 +2,16 @@
 
 For .authz files: errors while typing (from the compiler), hover, go to definition, find references, an outline,
 and completion. It needs nothing but Python's standard library and the compiler next to it. With a database in
-rowstile.toml it also completes table and column names (read once from the catalog).
+rowstile.toml it also completes table and column names (read once from the catalog), a column inside { } as SQL
+names it.
 
 A file of named tests (no types, only `test "..."` blocks) is checked against the policy rowstile.toml names.
 """
 
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import os
 import re
@@ -25,12 +28,15 @@ from authzlib import Compiler, PolicyError, parse_policy  # noqa: E402
 from authzlib.connection import Value as Json  # noqa: E402
 from authzlib.errors import split as split_code  # noqa: E402
 from authzlib.parse import (  # noqa: E402
+    IDENT,
+    QNAME,
     Expr,
     Loc,
     Policy,
     Type,
     collect_includes,
     disk_reader,
+    strip_comment,
 )
 
 if TYPE_CHECKING:
@@ -113,6 +119,7 @@ TOP_WORDS = ["app role", "type", "rules", "include", "scope", "caveat", "invaria
 EXPR_WORDS = ["or", "and", "not", "signed_in", "anyone", "nobody"]
 RULE_WORDS = ["select", "insert", "update", "delete", "mask", "after", "before"]
 TYPE_WORDS = ["can", "shared", "by", "if", "where", "roles", "from", "principal"]
+SHARE_FIELDS = ["object_id", "subject_type", "subject_id", "subject_relation"]  # what `shared if {...}` reads
 KIND_CLASS, KIND_FIELD, KIND_METHOD, KIND_NAMESPACE = 5, 8, 6, 3  # SymbolKind
 C_KEYWORD, C_FIELD, C_METHOD, C_CLASS, C_MODULE = 14, 5, 2, 7, 9  # CompletionItemKind
 
@@ -170,17 +177,30 @@ class Server:
 
         return collect_includes(text, read)
 
-    def included_by(self, path: str) -> str | None:
-        """The policy rowstile.toml names, when it includes this file: the file is a part of it, not a policy."""
+    def named_policy(self) -> str | None:
+        """The policy rowstile.toml names. One the command refuses (outside rowstile.toml's folder) is a mistake to
+        show on the file being checked: the command stops on it, after saying why on stderr."""
+        said = io.StringIO()
         try:
-            policy = self.cfg.policy
+            with contextlib.redirect_stderr(said):
+                return self.cfg.policy
+        except SystemExit:
+            raise PolicyError(f"line 1: {said.getvalue().strip()}") from None
+
+    def included_by(self, path: str) -> tuple[str, str] | None:
+        """The policy rowstile.toml names, and its text, when it includes this file: the file is a part of it, not
+        a policy."""
+        try:
+            policy = self.named_policy()
             if not policy or same_file(policy) == same_file(path):
                 return None
             folder = os.path.dirname(policy)
-            names = self.includes(policy, self.text_of(policy))
-        except (Exception, SystemExit):
+            text = self.text_of(policy)
+            names = self.includes(policy, text)
+        except Exception:
             return None
-        return policy if any(same_file(os.path.join(folder, *n.split("/"))) == same_file(path) for n in names) else None
+        part = any(same_file(os.path.join(folder, *n.split("/"))) == same_file(path) for n in names)
+        return (policy, text) if part else None
 
     @staticmethod
     def is_test_file(text: str) -> bool:
@@ -192,22 +212,23 @@ class Server:
     def check(self, uri: str) -> None:
         path, text = uri_path(uri), self.docs[uri]
         diags: dict[str, list[Diagnostic]] = {uri: []}
-        main = self.included_by(path)
-        if main is not None:
+        main: str | None = None
+        part = self.included_by(path)
+        if part is not None:
             # a file the policy includes is checked as the part of the policy it is: its mistakes land on it
-            main_uri = self.uri_of(main)
-            try:
-                path, text = main, self.text_of(main)
-            except OSError:
-                main = None
-            else:
-                diags = {uri: [], main_uri: []}
+            main, text = part
+            path = main
+            diags = {uri: [], self.uri_of(main): []}
         try:
             if main is None and self.is_test_file(text):
-                policy = self.cfg.policy
+                policy = self.named_policy()
                 if not policy:
                     raise PolicyError('line 1: to check tests, name the policy in rowstile.toml: policy = "..."')
-                ptext = self.text_of(policy)
+                try:
+                    ptext = self.text_of(policy)
+                except OSError as e:
+                    named = self.cfg.setting(None, "policy")
+                    raise PolicyError(f'line 1: rowstile.toml: policy = "{named}": {e.strerror or e}') from None
                 c = Compiler(parse_policy(ptext, None, files=self.includes(policy, ptext)))
                 c.add_test_files({THIS: text})
                 c.tests_function_sql()
@@ -300,13 +321,9 @@ class Server:
         s = lines[line]
         for m in WORD.finditer(s):
             if m.start() <= col <= m.end():
-                # which dotted part the cursor is in
-                parts, start = m.group(0).split("."), m.start()
-                for i, p in enumerate(parts):
-                    if start <= col <= start + len(p):
-                        return parts, i, s
-                    start += len(p) + 1
-                return parts, len(parts) - 1, s
+                # which dotted part the cursor is in: as many as the dots before it (just before a dot: the part
+                # it ends)
+                return m.group(0).split("."), s[m.start() : col].count("."), s
         return None, 0, s
 
     def resolve(self, uri: str, line: int, col: int) -> Symbol | None:
@@ -520,6 +537,8 @@ class Server:
         if not before.strip() and not before:
             add(TOP_WORDS, C_KEYWORD)
             return items
+        if strip_comment(before) != before:
+            return items  # in a comment (an editor asks again at every space typed)
         m = re.search(r"([A-Za-z_]\w*)\.(\w*)$", before)
         in_braces = before.count("{") > before.count("}")
         if m and not in_braces:
@@ -536,16 +555,25 @@ class Server:
                     add([name], C_MODULE, "table")
             return items
         if in_braces:
-            t = self.home_type(uri, line)
-            if t:
+            # the columns of the row the condition is about: a link table's in its where, the share being made in
+            # `shared if`, else the type's (in the type, or in the rules of its table)
+            ahead = before[: before.rfind("{")]
+            link = re.search(rf"({QNAME})\s*\(.*\)\s*where\s*$", ahead)
+            if link:
+                add(self.tables().get(link.group(1), []), C_FIELD, f"column of {link.group(1)}")
+            elif re.search(r"\bshared\b.*\bif\s*$", ahead):
+                add(SHARE_FIELDS, C_FIELD, "of the share being made")
+            elif t := self.home_type(uri, line):
                 add(self.tables().get(t.table, []), C_FIELD, f"column of {t.table}")
             add(["authz.uid()", "authz.ctx('')", "now()"], C_KEYWORD)
             return items
         kind, _ = self.block(uri, line)
         if not s[:1].isspace():
-            add(TOP_WORDS, C_KEYWORD)
-            if re.match(r"(type\s+\w+\s*=|rules)\s*\S*$", before):
-                add(list(self.tables()), C_MODULE, "table")
+            # a line that begins a block: its first word, then the table after `type x =` and `rules`
+            if re.match(r"(type\s+\w+\s*=|rules\s)\s*\S*$", before):
+                add(self.tables(), C_MODULE, "table")
+            elif not re.search(r"\s", before):
+                add(TOP_WORDS, C_KEYWORD)
             return items
         t = self.home_type(uri, line)
         if t:
@@ -565,10 +593,12 @@ class Server:
         return dedupe(items)
 
     def tables(self) -> dict[str, list[str]]:
-        """{schema.table: [columns]} from the database in rowstile.toml; empty without one."""
+        """{schema.table: [columns]} from the database in rowstile.toml; empty without one. Only the tables a
+        policy can name (no space in the name, say), and each column as a condition names it: quoted where SQL
+        needs it ("parentId", "user")."""
         if self.catalog is None:
             catalog: dict[str, list[str]] = {}
-            self.catalog = catalog
+            self.catalog = catalog  # read once, or tried once
             try:
                 import pgwire
 
@@ -577,15 +607,22 @@ class Server:
                     args = pgwire.parse_dsn(database)
                     args["timeout"] = 3
                     conn = pgwire.connect(**args)
-                    for schema, table, column in conn.query(
-                        "SELECT c.table_schema, c.table_name, c.column_name FROM information_schema.columns c "
-                        "WHERE c.table_schema NOT IN ('pg_catalog', 'information_schema', 'authz', 'authz_gen', "
-                        "'authz_int') ORDER BY 1, 2, c.ordinal_position"
-                    ):
-                        catalog.setdefault(f"{schema}.{table}", []).append(str(column))
-                    conn.close()
-            except (Exception, SystemExit):  # no database, its variable not set, or it is down: complete without it
+                    try:
+                        rows = conn.query(
+                            "SELECT c.table_schema, c.table_name, pg_catalog.quote_ident(c.column_name) "
+                            "FROM information_schema.columns c "
+                            "WHERE c.table_schema NOT IN ('pg_catalog', 'information_schema', 'authz', 'authz_gen', "
+                            "'authz_int') ORDER BY 1, 2, c.ordinal_position"
+                        )
+                    finally:
+                        conn.close()
+                    for schema, table, column in rows:
+                        if re.fullmatch(IDENT, str(schema)) and re.fullmatch(IDENT, str(table)):
+                            catalog.setdefault(f"{schema}.{table}", []).append(str(column))
+            except SystemExit:  # its variable isn't set: the command said so, on stderr (the editor's log)
                 pass
+            except Exception as e:  # no database there, or it refused: complete without it, and say why once
+                print(f"rowstile lsp: no table or column names to complete: {e}", file=sys.stderr)
         return self.catalog
 
     # --- the protocol ----------------------------------------------------------------------------

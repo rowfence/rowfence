@@ -24,7 +24,7 @@
 | `rowstile can\|explain\|perms\|list --as user:42 ...`, `rowstile who ...` | ask the database as someone |
 | `rowstile explain-rule --as user:42 app.files insert --row '{...}'` | why a write is (or would be) refused |
 | `rowstile sql --as user:42 "SELECT ..."` | a statement as the app role, signed in as someone; rolled back |
-| `rowstile lsp` | the language server: errors while typing, hover, go to definition, references, outline, completion |
+| `rowstile lsp` | the language server: errors while typing, hover, go to definition, references, outline, completion (of tables and columns too, with `database` in `rowstile.toml`: not `--db`, `DATABASE_URL` or the `PG*` variables) |
 | `rowstile mcp` | the MCP server, for coding agents (see below) |
 | `rowstile graph [p.authz]`, `rowstile client py\|ts [p.authz]` | diagram and typed helpers |
 | `rowstile reapply [--force]`, `rowstile remove --yes` | the policy in force again, after an upgrade (`--force`: and every inheritance table computed again); to take the policy out |

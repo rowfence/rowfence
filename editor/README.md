@@ -9,7 +9,9 @@ server (`rowstile lsp`, in `cli/lsp.py`):
   the folder's `edit`);
 - **outline** of types, relations, permissions and rules;
 - **completion**: after `rel.` the target type's permissions, inside a type its relations and permissions, and
-  with a `database` in `rowstile.toml`, table and column names;
+  with a `database` in `rowstile.toml`, table names and, inside `{ }`, the columns of the row the condition is
+  about, quoted where SQL needs it (`"parentId"`). Names are read from the database once, when first needed; when
+  it can't be reached, the server's log says why;
 - **test files** (only `test "..."` blocks) are checked against the policy `rowstile.toml` names.
 
 ## VS Code
