@@ -53,7 +53,7 @@ invariants
 
     $ rowstile prove policy.authz
     line 45: never workspace: view and not org.view
-      ok   holds in every world tried (400 worlds, up to 4 of each type)
+      ok   holds in every world tried (528 worlds, up to 4 of each type)
 
 The prover reads the policy, not the tables: to it `admin` and `member` are two relations, and it doesn't know
 that every admin row is a member row. With `can view = member` on the organisation it finds an admin who

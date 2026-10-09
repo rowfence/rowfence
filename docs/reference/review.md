@@ -9,7 +9,8 @@ says what a change does, in plain words, for the pull request:
 - **Meaning**: each declaration that changed, before and after, and every permission and rule that changes
   through something it uses. When only permissions and rules changed, each is checked against the base in
   many small worlds (made-up users, objects and links, `core/authzlib/evaluate.py`; among them the ones where
-  every condition holds, so a change behind a long `and` shows): if they all grant the same, the review says
+  every condition holds, or where most links do, so a change behind a long `and` shows, and chains of objects
+  one link longer than the policies read): if they all grant the same, the review says
   "Meaning unchanged". Formatting and comments are "unchanged" too; text inside quotes is not formatting. A
   condition the worlds can't read (a subquery, a function: anything beyond the row's own columns and
   `authz.uid()`) is a set of rows of its own there, so when a permission or rule changed only in such

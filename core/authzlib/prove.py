@@ -7,7 +7,9 @@ of each type, then up to 4, every kind of link and share, columns that simple co
 person who can sign in and as nobody. At each size, worlds drawn row by row take turns with the corners
 (evaluate.corners: each condition true on every row or on none): a counterexample that needs several conditions to
 hold at once is rare in a draw (one world in nine for two coin tosses of three values, per row), and found in a
-corner in a few worlds. A world where someone holds it is a counterexample, shrunk link by link
+corner in a few worlds. Then the worlds a draw rarely makes (evaluate.rare_worlds): dense ones, where a link table
+holds half its links or nearly all (a long `and` of links), and, for a policy that reads 2 links deep or more, chains
+one link longer than it reads. A world where someone holds it is a counterexample, shrunk link by link
 to the smallest that still breaks the invariant, and printed as a reviewer can read it. The same engine checks
 that a refactor changed nothing in rowstile review.
 """
@@ -16,7 +18,7 @@ from __future__ import annotations
 
 from typing import NotRequired, TypedDict
 
-from .evaluate import Data, Reference, World, corners, smallest
+from .evaluate import Data, Reference, World, corners, rare_worlds, smallest
 from .parse import Invariant, Policy
 
 WORLDS = 400
@@ -31,6 +33,7 @@ class Proof(TypedDict):
     line: str
     holds: bool
     worlds: int  # how many worlds were tried
+    size: NotRequired[int]  # the most rows of a type a world tried had
     who: NotRequired[str]  # for a broken one: who holds it ('nobody', a user id, 'bot:2')
     object: NotRequired[str]  # ...on which object
     world: NotRequired[list[str]]  # ...in this world, the smallest found
@@ -66,7 +69,8 @@ def worlds_to_try(pol: Policy, worlds: int, seed: int, max_size: int) -> list[Wo
         ]
         for i in range(max(len(drawn), len(cornered))):
             out += drawn[i : i + 1] + cornered[i : i + 1]
-    return out
+    # then the worlds a draw rarely makes: dense ones, and chains as long as the policy reads deep (evaluate.py)
+    return out + list(rare_worlds([pol], worlds, str(seed)))
 
 
 def prove(pol: Policy, worlds: int = WORLDS, seed: int = 0, max_size: int = MAX_SIZE) -> list[Proof]:
@@ -83,7 +87,9 @@ def prove(pol: Policy, worlds: int = WORLDS, seed: int = 0, max_size: int = MAX_
             "worlds": 0,
         }
         n = 0
-        for w in worlds_to_try(pol, worlds, seed, max_size):
+        tried = worlds_to_try(pol, worlds, seed, max_size)
+        result["size"] = max(w.size for w in tried)
+        for w in tried:
             n += 1
             data = w.data(pol)
             if broken(ref, inv, data):
@@ -113,7 +119,8 @@ def describe(results: list[Proof], max_size: int = MAX_SIZE) -> str:
     for r in results:
         lines.append(f"{r['line']}: {r['invariant']}")
         if r["holds"]:
-            lines.append(f"  ok   holds in every world tried ({r['worlds']} worlds, up to {max_size} of each type)")
+            size = r.get("size", max_size)
+            lines.append(f"  ok   holds in every world tried ({r['worlds']} worlds, up to {size} of each type)")
         else:
             who = r.get("who", "nobody")
             who = who if who == "nobody" else f"user {who}" if ":" not in who else who.replace(":", " ")

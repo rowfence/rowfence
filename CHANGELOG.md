@@ -346,6 +346,14 @@ Each release upgrades from the one before it. How releases are numbered and made
   (`PGPASSFILE`), and the like. **Upgrading**: `sslmode=verify-ca` or `verify-full` with no root certificate,
   which the command checked against the system's roots, now needs one, as in libpq: `sslrootcert=system` with
   `verify-full` for a server whose certificate a public authority signed.
+- `rowstile review` and `rowstile prove` missed two kinds of widening. One behind a long `and` of links:
+  `can approve = owner and legal and finance and security and privacy`, five link tables, changed to `(owner or
+  editor) and ...`, was "Meaning unchanged" with nothing flagged, and `never doc: approve and not owner` was said
+  to hold. And one that only a chain of more than four objects shows: a share that reaches three folders down,
+  widened to four. The small worlds they try now include dense ones, where half the links, three quarters or
+  nearly all of them hold, and, for a policy that reads two links deep or more, chains one link longer than it
+  reads (at most ten objects). Both take about a fifth to two fifths more time; `rowstile prove` says how large
+  its largest world was.
 
 ## 0.1.0 (alpha)
 
