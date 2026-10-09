@@ -148,6 +148,12 @@ MISSING_ROLE = "999999"
 MISSING_LINK = "ffffffffffffffff"
 
 
+def signs_in_as_user(u: str, types: dict[str, Type]) -> bool:
+    """Whether u signs in as a user id (a row of the user table or not), not as nobody or another principal."""
+    kind, pid = evaluate.principal_of(u, types)
+    return kind == "user" and bool(pid)
+
+
 def link_ids(links: list[tuple[str, str]]) -> list[str]:
     """The ids of an object's links (relation, id), and one no link has: what is tried to turn off, in order."""
     return [*sorted({lid for _, lid in links}), MISSING_LINK]
@@ -286,6 +292,7 @@ class Checker:
         self.types, self.rules = self.pol.types, self.pol.rules
         self.ref = Reference(self.pol)
         self._nocontext: dict[tuple[str, str, str], set[str]] | None = None
+        self._nocontext_all: dict[tuple[str, str, str], set[str]] | None = None
         self.policies: list[list[str]] = json.loads(
             self.db.run(
                 "SELECT coalesce(json_agg(json_build_array(schemaname || '.' || tablename, policyname, "
@@ -601,6 +608,19 @@ class Checker:
                     f"FROM authz.who({lit(t.name)}, i, {lit(p)}) x))), '[]') FROM (SELECT {idsql(t)} AS i "
                     f"FROM {qt(t.table)} ORDER BY md5({idsql(t)} || 'w') LIMIT 6) s",
                 )
+        # authz.who_among on the same rows, for every user id the suite signs in (rows of the user table or not):
+        # one public permission of each type, in turn
+        user_ids = [u for u in self.users if signs_in_as_user(u, self.types)]  # (a user's id is its name here)
+        for t in self.types.values():
+            public = [p for p, x in t.perms.items() if not x.hidden]
+            if public and user_ids:
+                p = public[self.checks % len(public)]
+                emit(
+                    ["who_among", t.name, p],
+                    f"SELECT coalesce(json_agg(json_build_array(i, (SELECT coalesce(json_agg(x ORDER BY x), '[]') "
+                    f"FROM authz.who_among({lit(t.name)}, i, {lit(p)}, {text_array(user_ids)}) x))), '[]') "
+                    f"FROM (SELECT {idsql(t)} AS i FROM {qt(t.table)} ORDER BY md5({idsql(t)} || 'w') LIMIT 6) s",
+                )
         lines.append("SELECT '[\"verify\"]', to_json(authz.verify());")
         # two blocks or more to a session, where there are enough
         random.Random(self.checks).shuffle(blocks)
@@ -878,12 +898,13 @@ class Checker:
         return {hashlib.sha256(x.encode()).hexdigest() for x in tokens}
 
     def check(self) -> list[str]:
-        self._nocontext = None
+        self._nocontext = self._nocontext_all = None
         snap = self.snapshot()
         problems: list[str] = []
         if snap[("verify",)] is not True:
             problems.append("authz.verify() is false: a closure table is stale")
         holders: dict[tuple[str, str, str], set[str]] = {}
+        among: dict[tuple[str, str, str], set[str]] = {}  # every user id signed in, a row or not (who_among)
         for u in self.users:
             data = evaluate.Data.of({tuple(k[2:]): v for k, v in snap.items() if k[0] == u and k[1] == "data"})
             state = self.ref.evaluate(data, u, self.links_of(u))
@@ -892,6 +913,8 @@ class Checker:
                     for i in state[(t.name, p)] & self.ref.ids(t):
                         if self.listed(u):
                             holders.setdefault((t.name, p, i), set()).add(u)
+                        if signs_in_as_user(u, self.types):
+                            among.setdefault((t.name, p, i), set()).add(u)
                     for i, line in snap[(u, "explain", t.name, p)]:
                         want = i in state[(t.name, p)] & self.ref.ids(t)
                         if not line or line.startswith("yes") != want:
@@ -1065,6 +1088,19 @@ class Checker:
                             f"authz.who('{t.name}', {i}, '{p}') extra {sorted(set(got) - want)} "
                             f"missing {sorted(want - set(got))}"
                         )
+                # authz.who_among, asked as an administrator too: each id signed in in turn, so one the user table
+                # doesn't have holds what nobody holds
+                for i, got in snap.get(("who_among", t.name, p), []):
+                    want = (
+                        set(among.get((t.name, p, i), set()))
+                        if not self.has_context()
+                        else self.who_reference(t, p, i, everyone=True)
+                    )
+                    if set(got) != want:
+                        problems.append(
+                            f"authz.who_among('{t.name}', {i}, '{p}', every user) extra {sorted(set(got) - want)} "
+                            f"missing {sorted(want - set(got))}"
+                        )
         return problems
 
     def check_scoped(self, snap: Snapshot, state: evaluate.State) -> list[str]:
@@ -1108,11 +1144,13 @@ class Checker:
         holds what nobody holds), not other principals, and not an id signed in that the table doesn't have."""
         return bool(u) and evaluate.principal_of(u, self.types)[0] == "user" and u in self.ref.ids(self.types["user"])
 
-    def who_reference(self, t: Type, p: str, i: str) -> set[str]:
-        """Holders of p on i when evaluated without any request context (what who() sees)."""
-        if self._nocontext is None:
+    def who_reference(self, t: Type, p: str, i: str, everyone: bool = False) -> set[str]:
+        """Holders of p on i when evaluated without any request context (what who() sees): the users it lists, or
+        everyone: every user id signed in, a row of the user table or not (what who_among sees)."""
+        if self._nocontext is None or self._nocontext_all is None:
             snap = self.snapshot_data_only()  # sets no context
             out: dict[tuple[str, str, str], set[str]] = {}
+            out_all: dict[tuple[str, str, str], set[str]] = {}
             for u in self.users:
                 data = evaluate.Data.of({tuple(k[2:]): v for k, v in snap.items() if k[0] == u and k[1] == "data"})
                 state = self.ref.evaluate(data, u, set())
@@ -1121,8 +1159,10 @@ class Checker:
                         for ii in state[(tt.name, pp)] & self.ref.ids(tt):
                             if self.listed(u):
                                 out.setdefault((tt.name, pp, ii), set()).add(u)
-            self._nocontext = out
-        return self._nocontext.get((t.name, p, i), set())
+                            if signs_in_as_user(u, self.types):
+                                out_all.setdefault((tt.name, pp, ii), set()).add(u)
+            self._nocontext, self._nocontext_all = out, out_all
+        return (self._nocontext_all if everyone else self._nocontext).get((t.name, p, i), set())
 
     def snapshot_data_only(self) -> Snapshot:
         lines: list[str] = []
