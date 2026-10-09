@@ -5118,6 +5118,57 @@ class Respelling(unittest.TestCase):
         self.assertNotRegex(sql, r"(?<![\"\w])(Gp|parentId|Archived)(?![\"\w])", "a name unquoted")
 
 
+class GeneratedShapes(unittest.TestCase):
+    """genpolicy's policies say now and then what no other draw does (also(), and the twins of variants()), drawn
+    apart from the rest: a seed's policy keeps all it drew before, the twelve seeds of the full run draw each of
+    them, and their twins compile (one that didn't would only be counted as refused)."""
+
+    def setUp(self) -> None:
+        sys.path.insert(0, os.path.join(ROOT, "tests"))
+        import genpolicy
+
+        self.g = genpolicy
+
+    NOT_FIRST = ("not", ["{b1}"])  # what also() puts first in a permission that inherits: (r1 and not {b1}) or ...
+
+    def test_what_a_seed_drew_stays(self) -> None:
+        for seed in range(1, 80):
+            with mock.patch.object(self.g, "also", lambda spec, x: None):
+                before = self.g.make(seed)
+            after = self.g.make(seed)
+            self.assertEqual(
+                (before.invariants, before.bot, before.user_where), (after.invariants, after.bot, after.user_where)
+            )
+            for b, a in zip(before.objs, after.objs, strict=True):
+                self.assertEqual((a.rels[: len(b.rels)], a.rules, a.where), (b.rels, b.rules, b.where), seed)
+                for p, e in b.perms.items():
+                    if a.perms[p] != e:  # a starting point put first, the rest as it was
+                        op, items = a.perms[p]
+                        self.assertEqual((op, items[0][1][1], items[1:]), ("or", self.NOT_FIRST, e[1]), seed)
+
+    def test_the_full_runs_seeds_draw_each_shape(self) -> None:
+        drawn: set[str] = set()
+        for seed in range(1, 13):
+            variants = self.g.variants(seed)
+            for label, spec in variants[1:]:
+                drawn.add(label)
+                try:
+                    Compiler(parse_policy(self.g.policy_text(spec), "gen.authz")).compile("gen.authz")
+                except PolicyError as e:  # only where the seed's own policy is refused too
+                    with self.assertRaises(PolicyError, msg=f"seed {seed} {label}: {e}"):
+                        Compiler(parse_policy(self.g.policy_text(variants[0][1]), "gen.authz"))
+            for o in variants[0][1].objs:
+                for rel in o.rels:
+                    if rel.kind == "table" and any(x.name == rel.name and x.kind == "column" for x in o.rels):
+                        drawn.add("parent again" if rel.name == "parent" else "a relation to users again")
+                for e in o.perms.values():
+                    if not isinstance(e, str) and e[0] == "or" and not isinstance(e[1][0], str):
+                        drawn |= {"a not first" for item in [e[1][0]] if item[1][1:] == [self.NOT_FIRST]}
+        self.assertLessEqual(
+            {"without rules", "without permissions", "parent again", "a relation to users again", "a not first"}, drawn
+        )
+
+
 class CheckCounts(unittest.TestCase):
     """tests/check_counts.py, which ci.sh runs on run_tests.sh's log: each suite passes as many checks as
     tests/check_counts.txt says, no fewer and no more; the random ones aren't counted."""
