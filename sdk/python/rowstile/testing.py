@@ -62,8 +62,7 @@ def _postgres() -> _Postgres:
     """The rowstile command's own Postgres client (standard library only), so copying a database needs no driver
     of the app's. Loaded from its file: nothing of the command becomes importable."""
     spec = importlib.util.spec_from_file_location("rowstile._pgwire", os.path.join(command_dir(), "pgwire.py"))
-    if spec is None or spec.loader is None:
-        raise RuntimeError("rowstile.testing: the command's Postgres client is missing from this installation")
+    assert spec is not None and spec.loader is not None  # a .py file's: its loader reads it, or says it isn't there
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return cast("_Postgres", module)

@@ -11,9 +11,10 @@ Queries by permission use set checks, never a function call per row:
 Queries[ObjectType, Permission]() has the same queries taking only the policy's names (the generated client's),
 so a misspelled one doesn't type-check.
 
-An ORM update or delete of a row the user may not change matches no row, and SQLAlchemy raises StaleDataError;
+An ORM update of a row the user may not change matches no row, and SQLAlchemy raises StaleDataError;
 why_stale() asks the database which it was, for each row of the flush that failed: NotFound (the row is
-hidden) or Refused (and why) for the first one the database says no for.
+hidden) or Refused (and why) for the first one the database says no for. An ORM delete that matches no row is
+only a warning in SQLAlchemy (an error with a version column alone): delete with Core's delete() and expect().
 """
 
 from __future__ import annotations

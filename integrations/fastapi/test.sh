@@ -30,6 +30,13 @@ if [ "${POOLER:-}" = pgbouncer ]; then          # the app through PgBouncer in t
   pooler_start "$NAME" "$APP_PORT" conf_app:app || exit 1
 fi
 export ROWSTILE_APP_URL="postgresql+asyncpg://conf_app:app@localhost:$APP_PORT/conf"
+# What the checks run of the SDK (sdk/python/rowstile), lines and branches (pyproject.toml's [tool.coverage]): every
+# Python process from here on, the tests' own subprocesses too, measures itself into CONFORMANCE_COVERAGE (a folder
+# of its own if not given), where the report is kept; it is printed at the end
+native() { if command -v cygpath >/dev/null; then cygpath -m "$1"; else echo "$1"; fi; }   # Windows' Python: C:/...
+COVERAGE=${CONFORMANCE_COVERAGE:-$(mktemp -d)}
+mkdir -p "$COVERAGE" && rm -f "$COVERAGE"/.coverage* "$COVERAGE/report.txt"
+export COVERAGE_PROCESS_START="$(native "$PWD/pyproject.toml")" COVERAGE_FILE="$(native "$COVERAGE")/.coverage"
 rc=0
 uv run --quiet alembic upgrade head || { echo "FAIL  11: alembic upgrade head"; rc=1; }
 uv run --quiet rowstile test >/tmp/conformance-policy-tests.log 2>&1 &&
@@ -41,5 +48,16 @@ uv run --quiet rowstile migrate --check >/dev/null &&
 # 12: the framework's test database, migrated the same way (the tests copy it for each worker)
 ROWSTILE_OWNER_URL=$ROWSTILE_TESTS_URL uv run --quiet alembic upgrade head || { echo "FAIL  12: alembic upgrade head, on the test database"; rc=1; }
 uv run --quiet pytest -q -p no:cacheprovider "$@" || rc=1
+unset COVERAGE_PROCESS_START
+uv run --quiet coverage combine --quiet && uv run --quiet coverage report >"$COVERAGE/report.txt"
+covered=$?
+cat "$COVERAGE/report.txt"
+if [ $# -gt 0 ]; then
+  echo "(some of the checks ran: the SDK's coverage isn't judged)"
+elif [ $covered = 0 ]; then
+  echo "ok    the checks run every line and branch of the Python SDK"
+else
+  echo "FAIL  lines or branches of the Python SDK no check runs (the report above: $COVERAGE/report.txt)"; rc=1
+fi
 [ -n "${KEEP:-}" ] || { [ "${POOLER:-}" = pgbouncer ] && pooler_stop "$NAME"; docker rm -f "$NAME" >/dev/null; }
 exit $rc
