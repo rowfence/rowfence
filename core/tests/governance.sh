@@ -435,5 +435,50 @@ admin "emptying a table whose columns hold relations is recorded" "truncate|app.
 admin "... and announced for every file" "1" \
   "SELECT count(*) FROM authz.changes WHERE pos > $POS AND object_type = 'file' AND object_ids = '{*}'"
 admin "inheritance tables still match a rebuild" "t" "SELECT authz.verify()"
+
+echo "-- a logical replication subscription that copies the trail"
+# it applies its publisher's rows in replica role, the trims made there among them: the guard lets its own worker
+# through, and nothing else (within one server the slot is made by hand first: CREATE SUBSCRIPTION would wait for
+# itself making it)
+WAL=$(PSQL -c "SHOW wal_level")
+if [ "$WAL" != logical ]; then
+  echo "skip  a subscription that copies the trail needs wal_level = logical, and this server has $WAL (core/ci.sh starts Postgres with logical)"
+elif [ -z "${PGSUPERUSER:-}" ]; then
+  echo "skip  a subscription that copies the trail needs a superuser to make it (PGSUPERUSER)"
+else
+  COPY_DB="${DB}_copy"
+  SU() { psql -X -q -At -U "$PGSUPERUSER" "$@"; }
+  dropdb --if-exists "$COPY_DB" 2>/dev/null
+  createdb "$COPY_DB" && PGOPTIONS="-c client_min_messages=error" psql -X -q -v ON_ERROR_STOP=1 -d "$COPY_DB" \
+    -f example/app_schema.sql -f /tmp/authz_governance.sql >/dev/null || { echo "FAIL  the database that subscribes"; fails=$((fails + 1)); }
+  SU -d "$DB" -c "CREATE PUBLICATION authz_governance_trail FOR TABLE authz.audit" \
+     -c "SELECT pg_create_logical_replication_slot('authz_governance_trail', 'pgoutput')" >/dev/null
+  SU -d "$COPY_DB" -c "CREATE SUBSCRIPTION authz_governance_trail
+       CONNECTION 'dbname=$DB host=${PGHOST:-/var/run/postgresql} port=${PGPORT:-5432} user=$PGSUPERUSER'
+       PUBLICATION authz_governance_trail WITH (create_slot = false, slot_name = 'authz_governance_trail')" >/dev/null
+  TRAIL="SELECT count(*) || ': ' || coalesce(string_agg(coalesce(reason, '-'), ', ' ORDER BY id), '') FROM authz.audit"
+  # waits (half a minute at most) until the copy holds what is published
+  copied() { for _ in $(seq 60); do [ "$(psql -X -At -d "$COPY_DB" -c "$TRAIL")" = "$(PSQL -c "$TRAIL")" ] && return 0; sleep 0.5; done; return 1; }
+  copied || echo "(the copy hasn't caught up yet: $(psql -X -At -d "$COPY_DB" -c "$TRAIL" | cut -c1-80))"
+  # an entry changed where it is published: only by DDL there, the owner turning the guard off a moment
+  PSQL -c "BEGIN" -c "ALTER TABLE authz.audit DISABLE TRIGGER authz_audit_append_only" \
+       -c "UPDATE authz.audit SET reason = 'changed where published' WHERE id = (SELECT max(id) FROM authz.audit)" \
+       -c "ALTER TABLE authz.audit ENABLE ALWAYS TRIGGER authz_audit_append_only" -c "COMMIT" >/dev/null
+  copied && echo "ok    a subscription that copies the trail applies an entry changed where it is published" ||
+    { echo "FAIL  the copy misses the change: $(psql -X -At -d "$COPY_DB" -c "$TRAIL" | cut -c1-120)"; fails=$((fails + 1)); }
+  PSQL -c "SELECT authz.trim_audit(interval '0')" >/dev/null
+  copied && echo "ok    ... and the deletes of authz.trim_audit there" ||
+    { echo "FAIL  the copy misses the trim: $(psql -X -At -d "$COPY_DB" -c "$TRAIL" | cut -c1-120)"; fails=$((fails + 1)); }
+  got=$(psql -X -q -At -d "$COPY_DB" -v VERBOSITY=verbose -c "DELETE FROM authz.audit" 2>&1 | grep '^ERROR:  ' | tail -n 1)
+  [ "$got" = "ERROR:  42501: the audit trail cannot be changed" ] && echo "ok    ... while its own sessions still can't delete an entry" ||
+    { echo "FAIL  a session where the trail is copied deletes an entry: $got"; fails=$((fails + 1)); }
+  # the subscription and its slot go first: neither database can be dropped while they are there (the slot's
+  # sender may take a moment to stop)
+  SU -d "$COPY_DB" -c "ALTER SUBSCRIPTION authz_governance_trail DISABLE" \
+     -c "ALTER SUBSCRIPTION authz_governance_trail SET (slot_name = NONE)" -c "DROP SUBSCRIPTION authz_governance_trail" >/dev/null
+  for _ in $(seq 20); do SU -d "$DB" -c "SELECT pg_drop_replication_slot('authz_governance_trail')" >/dev/null 2>&1 && break; sleep 0.5; done
+  SU -d "$DB" -c "DROP PUBLICATION authz_governance_trail" >/dev/null
+  dropdb "$COPY_DB"
+fi
 dropdb "$DB"
 if [ $fails -eq 0 ]; then echo "governance: all passed"; else echo "governance: $fails failed"; exit 1; fi
