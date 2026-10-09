@@ -54,7 +54,8 @@ $PYTHON ../../core/cli/rowstile_cli.py migrate --check >/dev/null &&
   echo "ok    the policy's lock file is up to date" || { echo "FAIL  rowstile migrate --check"; rc=1; }
 # 12: the framework's test database, migrated the same way (the tests copy it for each worker)
 ROWSTILE_OWNER_DSN=$ROWSTILE_TESTS_DSN $BIN/prisma migrate deploy >"$LOG/migrate-tests.log" 2>&1 || { cat "$LOG/migrate-tests.log"; exit 1; }
-(cd "$ROOT" && $BIN/tsc -b sdk/typescript) || { echo "FAIL  the SDK doesn't build"; exit 1; }
+# with source maps: what the checks run of the built files is reported on the SDK's sources (vitest.config.ts)
+(cd "$ROOT" && $BIN/tsc -b sdk/typescript --sourceMap) || { echo "FAIL  the SDK doesn't build"; exit 1; }
 $BIN/prisma generate >/dev/null 2>&1 || { echo "FAIL  prisma generate"; exit 1; }
 $PYTHON ../../core/cli/rowstile_cli.py client >/dev/null || exit 1
 git diff --quiet -- src/authz.gen.ts 2>/dev/null || { echo "FAIL  src/authz.gen.ts is out of date: rowstile client"; rc=1; }
@@ -68,7 +69,21 @@ if [ $? = 1 ] && grep -q "owners skip row-level security" "$LOG/server-owner.log
   echo "ok    13: the app refuses to start on the owner's connection"
 else cat "$LOG/server-owner.log"; echo "FAIL  13: the app started on the owner's connection"; rc=1; fi
 for _ in $(seq 60); do curl -sf "$CONFORMANCE_SERVER/api/projects" >/dev/null && curl -sf "$CONFORMANCE_SERVER_ONE/api/projects" >/dev/null && break; sleep 1; done
-$BIN/vitest run "$@" || { rc=1; echo "(server logs: $LOG)"; }
+# What the checks run of the SDK (sdk/typescript/*/src), lines, branches and functions: the report is printed, and
+# kept in CONFORMANCE_COVERAGE (a folder of its own if not given) with the details of each file
+native() { if command -v cygpath >/dev/null; then cygpath -m "$1"; else echo "$1"; fi; }   # Windows' Node: C:/...
+COVERAGE=${CONFORMANCE_COVERAGE:-$(mktemp -d)}
+export CONFORMANCE_COVERAGE=$(native "$COVERAGE")
+$BIN/vitest run --coverage "$@" || { rc=1; echo "(server logs: $LOG)"; }
+if [ $# -gt 0 ]; then
+  echo "(some of the checks ran: the SDK's coverage isn't judged)"
+elif node -e 'const t = require(process.argv[1]).total;
+  process.exit(["lines", "statements", "branches", "functions"].every((k) => t[k].pct === 100) ? 0 : 1)' \
+  "$CONFORMANCE_COVERAGE/coverage-summary.json"; then
+  echo "ok    the checks run every line, branch and function of the TypeScript SDK"
+else
+  echo "FAIL  lines, branches or functions of the TypeScript SDK no check runs (the report above: $COVERAGE/report.txt)"; rc=1
+fi
 stop
 [ -n "${KEEP:-}" ] || { [ "${POOLER:-}" = pgbouncer ] && pooler_stop "$NAME"; docker rm -f "$NAME" >/dev/null; }
 exit $rc

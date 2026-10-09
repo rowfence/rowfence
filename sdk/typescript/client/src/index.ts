@@ -415,11 +415,12 @@ export function calls(q: Queryable): AuthzCalls & {
   const c = {
     can: async (type: string, id: Id, perm: string) =>
       Boolean((await one("SELECT authz.can($1, $2::text, $3) AS ok", [type, idText(id), perm])).ok),
+    // (an array, empty at worst: authz.perms never answers null)
     perms: async (type: string, id: Id) =>
-      ((await one("SELECT authz.perms($1, $2::text) AS p", [type, idText(id)])).p ?? []) as any[],
+      (await one("SELECT authz.perms($1, $2::text) AS p", [type, idText(id)])).p as any[],
     permsOf: async (type: string, ids: readonly Id[]) => {
       const rows = (await q.query("SELECT id, perms FROM authz.perms_of($1, $2::text[])", [type, ids.map(idText)])).rows;
-      return Object.fromEntries(rows.map((r) => [r.id, r.perms ?? []])) as Record<string, any[]>;
+      return Object.fromEntries(rows.map((r) => [r.id, r.perms])) as Record<string, any[]>;
     },
     list: async (type: string, perm: string, page: { after?: Id; limit?: number } = {}) =>
       (await q.query("SELECT x FROM authz.list($1, $2, $3, $4) x",
@@ -450,15 +451,15 @@ export function calls(q: Queryable): AuthzCalls & {
     },
     verdict: async (table: string, command: string, id: Id, row?: object) => {
       const got = await one(EXPLAIN_RULE, [table, command, idText(id), row === undefined ? null : JSON.stringify(row)]);
-      // named as the database names it, as in a refused insert: "public.Note" for a model that says "Note"
-      if (typeof got.tbl === "string") names.set(table, got.tbl);
-      return verdict(names.get(table) ?? table, command, id, (got.e ?? null) as string[] | null,
-        typeof got.who === "string" ? got.who : undefined);
+      // named as the database names it, as in a refused insert: "public.Note" for a model that says "Note" (the
+      // statement's tbl and who are text, never null)
+      const named = String(got.tbl);
+      names.set(table, named);
+      return verdict(named, command, id, (got.e ?? null) as string[] | null, String(got.who));
     },
     tableName: async (table: string) => {
       if (!names.has(table) && !table.includes(".")) {
-        const got = await one(`SELECT ${TABLE_NAME} AS tbl`, [table]);
-        if (typeof got?.tbl === "string") names.set(table, got.tbl);
+        names.set(table, String((await one(`SELECT ${TABLE_NAME} AS tbl`, [table])).tbl));
       }
       return names.get(table) ?? table;
     },
@@ -492,7 +493,7 @@ export function changed(result: unknown): boolean {
  *  database words a refused insert: "permission denied: user 2 may not update row 7 of app.notes".
  *  who: "user 2", as the database says it; left out, whoever the code acts for now. */
 export function verdict(table: string, command: string, id: Id, why: string[] | null, who?: string): NotFound | Refused {
-  if (why === null || /^\s*yes\b/.test(why[0] ?? "")) return new NotFound(table, idShown(id));
+  if (why === null || /^\s*yes\b/.test(why[0])) return new NotFound(table, idShown(id));
   const p = current() ?? NOBODY;
   const by = who ?? (p.id === null ? "someone not signed in" : `${p.type} ${p.id}`);
   return new Refused(`permission denied: ${by} may not ${command} row ${idShown(id)} of ${table}`, table, command, why);

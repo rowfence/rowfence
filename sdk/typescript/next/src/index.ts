@@ -147,29 +147,26 @@ function events(req: Request, changes: ((onChange: () => void) => () => void) | 
     return json({ title: "Service Unavailable", status: 503, detail: "too many event streams open" }, 503);
   }
   const encoder = new TextEncoder();
-  let stop = () => {};
+  let stop: () => void;                             // set as the stream starts, which is at once
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
       streams.open += 1;
       let counted = true;
-      controller.enqueue(encoder.encode(": connected\n\n"));
-      const unsubscribe = changes(() => {
+      // a stream that ended, told of a change all the same: nothing to send, and it stops
+      const send = (text: string) => {
         try {
-          controller.enqueue(encoder.encode("event: changed\ndata: {}\n\n"));
+          controller.enqueue(encoder.encode(text));
         } catch {
           stop();
         }
-      });
-      const ping = setInterval(() => {
-        try {
-          controller.enqueue(encoder.encode(": ping\n\n"));
-        } catch {
-          stop();
-        }
-      }, 25000);
+      };
+      send(": connected\n\n");
+      const unsubscribe = changes(() => send("event: changed\ndata: {}\n\n"));
+      const ping = setInterval(() => send(": ping\n\n"), 25000);
       stop = () => {
-        if (counted) streams.open -= 1;
+        if (!counted) return;                      // once: a page that leaves cancels the stream and aborts the request
         counted = false;
+        streams.open -= 1;
         clearInterval(ping);
         unsubscribe();
         try { controller.close(); } catch { /* closed already */ }

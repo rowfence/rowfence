@@ -184,10 +184,10 @@ export function authz(options: ExtensionOptions = {}) {
       const name = m?.dbName ?? model;
       return m?.schema ? `${m.schema}.${name}` : name;
     };
-    // the row's key (the policy's key for the table) from the where of an update or delete: the fields
-    // options.keys names for the model, else id, else its one unique field or compound key
-    const keyOf = (model: string, where: Record<string, unknown> | undefined): Id | undefined => {
-      if (!where) return undefined;
+    // the row's key (the policy's key for the table) from the where of an update, a delete or a findUnique: the
+    // fields options.keys names for the model, else id, else its one unique field or compound key (Prisma refuses
+    // any of them without a where before a query)
+    const keyOf = (model: string, where: Record<string, unknown>): Id | undefined => {
       const named = options.keys?.[model];
       if (named) {
         const vals = named.map((k) => where[k]);
@@ -243,7 +243,7 @@ export function authz(options: ExtensionOptions = {}) {
           } catch (e) {
             if (model && isP2025(e) && (operation === "update" || operation === "delete")) {
               const table = tableOf(model);
-              const key = keyOf(model, (args as { where?: Record<string, unknown> }).where);
+              const key = keyOf(model, (args as { where: Record<string, unknown> }).where);
               if (key !== undefined) {
                 const v = await c.verdict(table, operation, key).catch(() => undefined);
                 if (v !== undefined) {
@@ -253,9 +253,12 @@ export function authz(options: ExtensionOptions = {}) {
               }
             }
             // a read that must find a row and found none: the row isn't there, or this user can't see it (the
-            // two answer alike). Left as Prisma's P2025 it is a 500, where an update or a delete is a 404
+            // two answer alike). Left as Prisma's P2025 it is a 500, where an update or a delete is a 404.
+            // findUnique's where is a key; findFirst's is any filter, which names a row only by its id
             if (model && isP2025(e) && (operation === "findUniqueOrThrow" || operation === "findFirstOrThrow")) {
-              const key = keyOf(model, (args as { where?: Record<string, unknown> }).where);
+              const where = (args as { where?: Record<string, unknown> }).where;
+              const key = operation === "findUniqueOrThrow" ? keyOf(model, where!)
+                : isScalar(where?.id) ? where?.id as Id : undefined;
               const table = await c.tableName(tableOf(model)).catch(() => tableOf(model));
               throw new NotFound(table, key === undefined ? undefined : idShown(key), { cause: e });
             }

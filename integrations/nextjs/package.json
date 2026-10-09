@@ -31,6 +31,7 @@
     "@types/pg": "^8.23.1",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
+    "@vitest/coverage-v8": "^4.1.11",
     "jsdom": "^27",
     "prisma": "7.10.0",
     "vitest": "^4.1.11"

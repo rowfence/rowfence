@@ -415,6 +415,14 @@ Each release upgrades from the one before it. How releases are numbered and made
   that key: a table keyed by its user's id, with `owner : user = user_id`, and no primary key. Lists find those
   rows by the key, with a full scan. It names that index now, as `authz.lint()` did, and `rowstile dev` warns of
   it at start.
+- `@rowstile/prisma`: a `findFirstOrThrow` that finds no row named a value of its filter as the row's key in
+  the 404: `where: { id: { gt: 5 } }` said `app.notes 5 not found`, and `where: { body: "x" }` said `app.notes x
+  not found`. It names the table, and the id only when the filter is one (`where: { id: 5 }`).
+  `findUniqueOrThrow` names the key as before.
+- `@rowstile/next`: an event stream (`authzRoutes`' `events`) whose page went away stopped listening to the
+  change feed twice, once when its stream was cancelled and again when its request was aborted (and once more
+  for a change told after that): a feed of your own given as `changes` was unsubscribed as many times. Once
+  now.
 
 ## 0.1.0 (alpha)
 
