@@ -183,7 +183,7 @@ class Grants:
         self, t: Type, r: Relation, src: Source, st: str, sid: str, sr: str = ""
     ) -> Callable[[str], Change | None]:
         """The change that links oid to subject sid through this source (None when it is a link table whose `where`
-        doesn't say which values make it true)."""
+        doesn't say which values make it true, or the subject's own table)."""
 
         def make(oid: str) -> Change | None:
             if src.kind == "shared":
@@ -212,6 +212,14 @@ class Grants:
             subject = holding(self.c.types[st], on, sid) + ([(src.type_col, lit(st))] if src.type_col else [])
             if src.kind == "table":
                 assert src.table and src.obj_col, f"{t.name}.{r.name}: a link table names the object's columns"
+                if src.table == self.c.types[st].table:
+                    # the subject's own row says where it is (a group inside a group, a user's team): no row to add,
+                    # and changing that row would move it out of where it is
+                    self.notes.append(
+                        f"{t.name}.{r.name} wasn't tried: {st} {sid}'s own row of {src.table} says it, and changing "
+                        f"that row would move {st} {sid}"
+                    )
+                    return None
                 pairs = holding(t, src.obj_col, oid) + subject
                 names, vals = [c for c, _ in pairs], [v for _, v in pairs]
                 # a source with a `where`: the row must also hold what the condition asks, if it says which values

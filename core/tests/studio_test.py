@@ -1149,7 +1149,8 @@ def main() -> None:
 # service that signs in, a deny, a condition, and a key of two columns
 WHY_SCHEMA = """
 CREATE SCHEMA cn;
-CREATE TABLE cn.users (id bigint PRIMARY KEY, active boolean NOT NULL DEFAULT true);
+CREATE TABLE cn.clubs (id bigint PRIMARY KEY);
+CREATE TABLE cn.users (id bigint PRIMARY KEY, active boolean NOT NULL DEFAULT true, club_id bigint REFERENCES cn.clubs);
 CREATE TABLE cn.bots (id bigint PRIMARY KEY, owner_id bigint REFERENCES cn.users);
 CREATE TABLE cn.groups (id bigint PRIMARY KEY, parent_id bigint REFERENCES cn.groups);
 CREATE TABLE cn.group_members (group_id bigint REFERENCES cn.groups, member_type text NOT NULL, member_id bigint,
@@ -1172,8 +1173,9 @@ GRANT USAGE ON SCHEMA cn TO app_user;
 GRANT SELECT ON ALL TABLES IN SCHEMA cn TO app_user;
 -- ann (1) owns docs 1 to 5, each inside the one before, and doc 6, archived; bo (2) is in group 2, which is in
 -- group 1, as group 3 is; dee (4) is no longer active; bot 1 may view doc 4; ann leads project (1,5) and is one of
--- its members, and group 3's members are its members too
-INSERT INTO cn.users VALUES (1, true), (2, true), (3, true), (4, false);
+-- its members, and group 3's members are its members too; cy is in club 2
+INSERT INTO cn.clubs VALUES (1), (2);
+INSERT INTO cn.users VALUES (1, true, NULL), (2, true, NULL), (3, true, 2), (4, false, NULL);
 INSERT INTO cn.bots VALUES (1, 1);
 INSERT INTO cn.groups VALUES (1, NULL), (2, 1), (3, 1);
 INSERT INTO cn.group_members VALUES (2, 'user', 2);
@@ -1221,6 +1223,10 @@ type project = cn.projects (org_id, id)
   editor : user, grp#member shared if {subject_type = 'user'}
   can share = lead
   can edit  = lead or member or editor
+
+type club = cn.clubs
+  member : user = cn.users(club_id -> id)
+  can enter = member
 """
 
 
@@ -1248,7 +1254,16 @@ def corners(db: str) -> None:
     )
     data = "SELECT (SELECT string_agg(s::text, ' ' ORDER BY s::text) FROM authz.shares s), " + ", ".join(
         f"(SELECT string_agg(x::text, ' ' ORDER BY x::text) FROM {t} x)"
-        for t in ("cn.group_members", "cn.docs", "cn.doc_editors", "cn.projects", "cn.project_members")
+        for t in (
+            "cn.users",
+            "cn.groups",
+            "cn.group_members",
+            "cn.docs",
+            "cn.doc_editors",
+            "cn.projects",
+            "cn.project_members",
+            "cn.project_groups",
+        )
     )
     before = psql(db, data)
 
@@ -1322,7 +1337,7 @@ def corners(db: str) -> None:
         and ways[:1] == ["share viewer on doc 2 with bot 1 (also gives view on 1 more doc for bot:1)  [line 17]"],
         said,
     )
-    rc, said, ways, _ = why("--as", "user:2", "project", "(1,5)", "edit")
+    rc, said, ways, after = why("--as", "user:2", "project", "(1,5)", "edit")
     check(
         "a key of two columns: a row of the link table, and the column, each from the key's fields",
         rc == 0
@@ -1343,6 +1358,23 @@ def corners(db: str) -> None:
             "set lead_id of project (1,5) to 2 (also gives share on it)  [line 32]",
             "add user 2 to cn.group_members for grp 3 (also gives belong on 1 more grp for user:2)  [line 9]",
         ],
+        said,
+    )
+    check(
+        "a group inside a group is said by the group's own row: no row of cn.groups to add for bo's group 2 (it is "
+        "there), and nothing that couldn't be tried",
+        after == [],
+        said,
+    )
+    rc, said, ways, after = why("--as", "user:3", "club", "1", "enter")
+    check(
+        "... nor a row of cn.users for cy, whose own row names her club: the note says changing it would move her",
+        rc == 0
+        and said.endswith(
+            "no single change to shares or links grants it\n"
+            "note: club.member wasn't tried: user 3's own row of cn.users says it, and changing that row would move "
+            "user 3\n"
+        ),
         said,
     )
     rc, said, ways, after = why("--as", "user:3", "page", "2", "read")
