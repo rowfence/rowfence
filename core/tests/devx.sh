@@ -337,10 +337,40 @@ sed -i 's/can edit  = share or editor or/can edit  = share or edtor or/' "$T/p/p
 ( cd "$T/p" && python3 "$OLDPWD/cli/rowstile_cli.py" dev --once ) > "$T/dev.log" 2>&1; rc=$?
 case "$(cat "$T/dev.log")" in *"policy.authz: line "*"edtor"*"nothing applied"*) [ $rc -eq 1 ] && ok "... a mistake stops it before applying, exit 1" || bad "dev mistake exit" "$rc";;
   *) bad "dev mistake" "$(cat "$T/dev.log")";; esac
+sed -i 's/edtor/editor/' "$T/p/policy.authz"
+# what it says of a test that fails, a test file it can't read, and a table the database doesn't have
+devonce() { ( cd "$T/p" && python3 "$OLDPWD/cli/rowstile_cli.py" dev --once ) > "$T/dev.log" 2>&1; rc=$?; }
+cp "$T/p/tests/docs.authz" "$T/docs.keep"
+sed -i 's/user $bo cannot view file $f/user $bo can view file $f/' "$T/p/tests/docs.authz"
+devonce
+case "$(cat "$T/dev.log")" in *"         ok    "*) bad "dev lists the checks that pass with the one that fails" "$(cat "$T/dev.log")";;
+  *"  x    1 of "*" checks fail"*"FAIL  tests/docs.authz line 13: user \$bo can view file \$f"*"does not hold view on file"*)
+    [ $rc -eq 1 ] && ok "dev on a failing test: which check, its line and why, not the ones that pass; exit 1" || bad "dev on a failing test: exit" "$rc";;
+  *) bad "dev on a failing test" "$(cat "$T/dev.log")";; esac
+cp "$T/docs.keep" "$T/p/tests/docs.authz"
+printf 'test "caf\351"\n  anyone cannot view file 11\n' > "$T/p/tests/latin.authz"
+devonce
+case "$(cat "$T/dev.log")" in *"  x    "*"tests/latin.authz: not UTF-8 (the byte at "*"): save it as UTF-8"*)
+  [ $rc -eq 1 ] && ok "... on a test file that isn't UTF-8: said, exit 1" || bad "dev on a test file not UTF-8: exit" "$rc";;
+  *) bad "dev on a test file not UTF-8" "$(cat "$T/dev.log")";; esac
+rm "$T/p/tests/latin.authz"
+sed -i 's/^type team = app.teams$/type team = app.teamz/' "$T/p/policy.authz"
+devonce
+case "$(cat "$T/dev.log")" in *"  x    the policy does not match this database:"*"table app.teamz not found [AZ601]"*"nothing applied"*)
+  [ $rc -eq 1 ] && ok "... on a table the database doesn't have: the database's words, nothing applied, exit 1" || bad "dev on a missing table: exit" "$rc";;
+  *) bad "dev on a missing table" "$(cat "$T/dev.log")";; esac
+sed -i 's/^type team = app.teamz$/type team = app.teams/' "$T/p/policy.authz"
+# a policy with neither tests nor invariants
+dropdb --if-exists "${DB}_plain" 2>/dev/null; createdb "${DB}_plain"
+PGOPTIONS="-c client_min_messages=error" psql -X -q -v ON_ERROR_STOP=1 -d "${DB}_plain" -f example/app_schema.sql >/dev/null
+printf 'app role app_user\ntype user = app.users\n' > "$T/plain.authz"
+out=$(python3 cli/rowstile_cli.py --db "dbname=${DB}_plain" dev --once --no-studio "$T/plain.authz" 2>&1); rc=$?
+case "$out" in *'  ok   no tests yet (rowstile.toml: tests = ["db/tests/*.authz"])'*) [ $rc -eq 0 ] && ok "... on a policy with neither tests nor invariants: no tests yet, exit 0" || bad "dev without tests: exit" "$rc";;
+  *) bad "dev without tests" "$out";; esac
+dropdb --if-exists "${DB}_plain"
 # the loop itself, left running: each save of the policy or of a test file runs it again, a mistake stops it
 # before applying, the migration is written once the saves stop, and Ctrl-C ends it, exit 0 (with job control
 # on: a background job otherwise ignores Ctrl-C)
-sed -i 's/edtor/editor/' "$T/p/policy.authz"
 printf '[migrations]\ntool = "sql"\ndir = "migrations"\nwrite_after = 1\n' >> "$T/p/rowstile.toml"
 set -m
 ( cd "$T/p" && exec python3 "$OLDPWD/cli/rowstile_cli.py" dev --no-studio ) > "$T/watch.log" 2>&1 &
@@ -348,6 +378,13 @@ watcher=$!
 set +m
 # waits (a minute at most) until the loop has said something, or said it n times
 seen() { for _ in $(seq 120); do [ "$(grep -c -- "$1" "$T/watch.log")" -ge "${2:-1}" ] && return 0; sleep 0.5; done; return 1; }
+passes() { grep -c "check(s) pass" "$T/watch.log"; }
+# saves a mistake: the loop drops the migration it was about to write, so once it says it applied nothing, none is
+# being written, and a check may change the files one writes
+mistake() {
+  local k; k=$(grep -c "nothing applied" "$T/watch.log")
+  sed -i 's/can edit  = share or editor or/can edit  = share or edtor or/' "$T/p/policy.authz"; seen "nothing applied" $((k + 1))
+}
 if seen "watching 2 file(s)" && seen "check(s) pass"; then
   printf -- '-- saved again\n' >> "$T/p/tests/docs.authz"
   seen "tests/docs.authz saved" && seen "check(s) pass" 2 && ok "dev runs again when a test file is saved" || bad "dev on a test file" "$(cat "$T/watch.log")"
@@ -358,6 +395,29 @@ if seen "watching 2 file(s)" && seen "check(s) pass"; then
   # (the lock file is written last: before it, Ctrl-C could stop the migration half written)
   seen "stopped editing" && seen "wrote policy.lock" && ls "$T/p/migrations/"*.sql >/dev/null 2>&1 &&
     ok "... and writes the migration once the saves stop ([migrations] write_after)" || bad "dev's migration" "$(cat "$T/watch.log")"
+  # a warning applying gives is shown once, then counted while it stays
+  n=$(passes); sed -i 's/^  can view  = edit or viewer or (parent.view and {inherit})$/& or {exists (select 1 from app.files f where f.folder_id = id)}/' "$T/p/policy.authz"
+  seen "check(s) pass" $((n + 1)) && grep -q "^  !    line [0-9]*: the condition {exists (select 1 from app.files f where f.folder_id = id)} names id" "$T/watch.log" &&
+    ok "... shows a warning applying gives" || bad "dev's warning" "$(cat "$T/watch.log")"
+  n=$(passes); sed -i 's/^  can share = owner or folder.share$/&\n  can comment = view/' "$T/p/policy.authz"
+  seen "check(s) pass" $((n + 1)) && grep -q "^  !    and 1 warning(s) shown before" "$T/watch.log" && [ "$(grep -c "names id, a column of" "$T/watch.log")" = 1 ] &&
+    ok "... once: the next change says it was shown before" || bad "dev's warning, shown again" "$(cat "$T/watch.log")"
+  n=$(passes); mv "$T/p/policy.authz" "$T/policy.away"
+  seen "  x    policy.authz: No such file or directory" && mv "$T/policy.away" "$T/p/policy.authz" && seen "check(s) pass" $((n + 1)) &&
+    ok "... says when the policy file is gone, and runs again once it is back" || bad "dev without its policy file" "$(cat "$T/watch.log")"
+  # a migration it may not write (a lock file a newer rowstile wrote) is said, and the loop goes on
+  mistake; sed -i '1s/^# rowstile [^:]*:/# rowstile 99.0.0:/' "$T/p/policy.lock"
+  n=$(passes); sed -i -e 's/edtor/editor/' -e '/^  can comment = view$/d' "$T/p/policy.authz"
+  seen "check(s) pass" $((n + 1)) && seen "the lock file was last written by rowstile 99.0.0, which is newer than this command" &&
+    printf -- '-- saved after it\n' >> "$T/p/tests/docs.authz" && seen "check(s) pass" $((n + 2)) &&
+    ok "... says why it writes no migration (a lock file a newer rowstile wrote), and goes on" || bad "dev's migration refused" "$(cat "$T/watch.log")"
+  # the server ends dev's session between two saves
+  pid=$(PSQL -c "SELECT pid FROM pg_stat_activity WHERE datname = '$DB' AND application_name = 'rowstile' AND pid <> pg_backend_pid() LIMIT 1")
+  PSQL -c "SELECT pg_terminate_backend($pid)" >/dev/null
+  for _ in $(seq 20); do [ "$(PSQL -c "SELECT count(*) FROM pg_stat_activity WHERE pid = $pid")" = 0 ] && break; sleep 0.25; done
+  n=$(passes); printf -- '-- saved once more\n' >> "$T/p/tests/docs.authz"
+  seen "  x    lost the database: " && printf -- '-- and again\n' >> "$T/p/tests/docs.authz" && seen "check(s) pass" $((n + 1)) &&
+    ok "... says it lost the database when the server ends its session, and connects again on the next save" || bad "dev losing the database" "$(cat "$T/watch.log")"
 else
   bad "dev didn't start watching" "$(cat "$T/watch.log")"
 fi

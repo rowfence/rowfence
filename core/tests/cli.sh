@@ -43,6 +43,8 @@ run diff "$T/main.authz"
 case "$out" in *" changes"*"folder"*"loses"*) [ $rc -eq 0 ] && ok "diff lists who loses what ($(echo "$out" | head -n 1 | sed 's/.*: //'))" || bad "diff exit" "$rc";; *) bad "diff" "$out";; esac
 run diff "$T/main.authz" --users 3
 [ $rc -eq 0 ] && ! echo "$out" | awk 'NR > 1 && $1 ~ /^(gains|loses)$/ && $2 != "3"' | grep -q . && ok "diff --users 3 lists only user 3" || bad "diff --users" "$out"
+run diff "$T/main.authz" --limit 1; n=$(echo "$out" | head -n 1 | sed 's/.*: \([0-9]*\) changes.*/\1/')
+[ $rc -eq 0 ] && [ "$n" -gt 1 ] && [ "$(echo "$out" | tail -n 1)" = "... and $((n - 1)) more (--limit)" ] && ok "diff --limit 1 lists one change, and says how many more" || bad "diff --limit" "$out"
 [ "$(PSQL -c "SELECT authz.verify()")" = t ] && [ "$(PSQL -c "SELECT count(*) FROM authz.policy_versions")" = 1 ] && ok "diff changed nothing" || bad "diff changed something"
 cp example/docs.authz "$T/parts/all.authz"
 run diff "$T/main.authz"; case "$out" in *"0 changes (nobody gains"*) ok "diff of the policy in force: nothing";; *) bad "diff same" "$out";; esac
@@ -135,6 +137,11 @@ case "$out" in *"broken.authz: can't format a policy that doesn't parse: "*) [ $
 run migrate "$T/main.authz" --tool bogus; [ $rc -eq 2 ] && case "$out" in "rowstile migrate: unknown tool 'bogus' (use one of "*) true;; *) false;; esac && ok "migrate for a tool it doesn't know says which it does" || bad "migrate --tool" "$rc $out"
 printf 'app role app_user\ntype user = app.users\n' > "$T/plain.authz"
 run prove "$T/plain.authz"; [ $rc -eq 0 ] && case "$out" in *"no invariants to prove"*) true;; *) false;; esac && ok "prove on a policy without invariants says there is nothing to prove" || bad "prove without invariants" "$rc $out"
+# a policy without rules names no role for row-level security: sql --as has none to take
+CLI apply "$T/plain.authz" >/dev/null 2>&1
+run sql --as user:1 "SELECT 1"
+[ $rc -eq 1 ] && [ "$out" = "no policy with rules is applied, so there is no app role to run as" ] && ok "sql --as on a policy without rules says there is no app role to run as, exit 1" || bad "sql --as without rules" "$rc $out"
+CLI apply "$T/main.authz" >/dev/null 2>&1
 
 echo "-- the command's own pages: help, version, an error code's page"
 out=$(python3 cli/rowstile_cli.py --version 2>&1); rc=$?
@@ -174,6 +181,9 @@ printf 'include "parts/latin.authz"\n' > "$T/inc_latin.authz"; cp "$T/latin.auth
 run check "$T/inc_latin.authz"; case "$out" in *"parts/latin.authz, is not UTF-8"*) ok "an included file that isn't UTF-8 is named";; *) bad "include not UTF-8" "$out";; esac
 python3 -c "open('$T/deep.authz', 'w').write('app role app_user\ntype user = app.users\ntype d = app.d\n  o : user = owner_id\n  can view = ' + '(' * 3000 + 'o' + ')' * 3000 + '\n')"
 run check "$T/deep.authz"; case "$out" in *Traceback*) bad "deep nesting gives a traceback" "${out: -200}";; *"nested too deep"*) ok "an expression nested too deep is said";; *) bad "deep" "${out:0:200}";; esac
+run apply "$T/deep.authz"
+[ $rc -eq 1 ] && [ "$out" = "rowstile apply: an expression in the policy is nested too deep to read" ] && [ "$(PSQL -c "SELECT authz.verify()")" = t ] &&
+  ok "... by apply too, which leaves the policy in force" || bad "apply deep" "$rc ${out: -200}"
 
 echo "-- rowstile.toml"
 P="$T/proj"; mkdir -p "$P/db/tests" "$P/out"; cp example/docs.authz "$P/db/policy.authz"
@@ -223,6 +233,9 @@ printf "DATABASE_URL='dbname=authz_no_such_db'\n" > "$E/.env.local"
 envrun sql --as user:1 "SELECT 1"
 [ $rc -eq 2 ] && case "$out" in "can't connect: "*"(the database is the one .env.local names)"*) true;; *) false;; esac &&
   ok ".env.local comes before .env, and a failed connection says which file named the database" || bad ".env.local" "$rc $out"
+envrun dev --once --no-studio
+[ $rc -eq 1 ] && case "$out" in *"  x    can't connect: "*"(the database is the one .env.local names)"*) true;; *) false;; esac &&
+  ok "... and so does rowstile dev, exit 1" || bad "dev that can't connect" "$rc $out"
 out=$(cd "$E" && DATABASE_URL="dbname=$DB" python3 "$CLI_PY" sql --as user:1 "SELECT 1" 2>&1); rc=$?
 [ $rc -eq 0 ] && ok "the environment comes before both" || bad "the environment first" "$rc $out"
 if [ -z "${PGPORT:-}" ]; then  # (a port of the suite's own would come first)
@@ -252,12 +265,38 @@ printf 'type zz = app.nothere\n  can nosuch = bogus\n' >> "$P/db/policy.authz"
 out=$(TOML client 2>&1); rc=$?
 [ $rc -eq 1 ] && [ "$(wc -c < "$P/out/c.py")" = "$size" ] && ok "a mistake in the policy leaves the client file as it was" || bad "client file emptied" "$rc $(wc -c < "$P/out/c.py") $out"
 cp example/docs.authz "$P/db/policy.authz"
+cp "$P/out/c.py" "$T/c.before"
+sed -i 's/^  can share = owner or folder.share$/&\n  can comment = view/' "$P/db/policy.authz"
+out=$(TOML client 2>&1); rc=$?
+[ $rc -eq 0 ] && ! cmp -s "$P/out/c.py" "$T/c.before" && grep -q "comment" "$P/out/c.py" && ok "... and a change to the policy writes it again" || bad "client file not written again" "$rc $out"
+cp example/docs.authz "$P/db/policy.authz"
+toml '[clients]\npy = "out/db.py"\n' client
+[ $rc -eq 0 ] && [ "$out" = "wrote out/db.py" ] && [ "$(cat "$P/out/db.py")" = "$(CLI client py)" ] &&
+  ok "... and without a policy in rowstile.toml, the policy in force's" || bad "clients from the database" "$rc $out"
+
+echo "-- snapshot: where it writes"
+toml 'policy = "db/policy.authz"\n' snapshot
+[ $rc -eq 0 ] && case "$out" in "wrote db/access.snapshot ("*" lines)") true;; *) false;; esac && [ -s "$P/db/access.snapshot" ] &&
+  ok "snapshot writes access.snapshot beside the policy" || bad "snapshot beside the policy" "$rc $out"
 
 echo "-- a server that goes away, two applies at once"
 ( sleep 2; psql -X -q -At -d postgres -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '$DB' AND query LIKE '%pg_sleep(7)%' AND pid <> pg_backend_pid()" >/dev/null ) &
 run sql --as user:5 "SELECT pg_sleep(7)"; wait
 case "$out" in *Traceback*) bad "a lost connection gives a traceback" "${out: -300}";;
   "lost the database: "*"terminating connection"*) [ $rc -eq 2 ] && ok "a server that ends the connection: its message, exit 2" || bad "lost exit" "$rc";; *) bad "lost the database" "$out";; esac
+# ... and one that ends it while the command waits inside a savepoint (diff, on a table another session holds):
+# going back to the savepoint finds the connection gone
+( PSQL -c "BEGIN" -c "LOCK TABLE app.folders IN ACCESS EXCLUSIVE MODE" -c "SELECT pg_sleep(6)" -c "COMMIT" >/dev/null 2>&1 ) &
+locker=$!
+for _ in $(seq 40); do [ "$(PSQL -c "SELECT count(*) FROM pg_locks WHERE relation = 'app.folders'::regclass AND mode = 'AccessExclusiveLock' AND granted")" = 1 ] && break; sleep 0.25; done
+( CLI diff "$T/main.authz" > "$T/diff.out" 2>&1; echo $? > "$T/diff.rc" ) &
+differ=$!
+for _ in $(seq 40); do w=$(PSQL -c "SELECT pid FROM pg_stat_activity WHERE datname = '$DB' AND application_name = 'rowstile' AND wait_event_type = 'Lock' LIMIT 1"); [ -n "$w" ] && break; sleep 0.25; done
+[ -n "$w" ] && PSQL -c "SELECT pg_terminate_backend($w)" >/dev/null
+wait "$differ"; wait "$locker"; out=$(cat "$T/diff.out")
+case "$out" in *Traceback*) bad "a connection lost inside a savepoint gives a traceback" "${out: -300}";;
+  "lost the database: "*) [ "$(cat "$T/diff.rc")" = 2 ] && ok "... and while the command waits inside a savepoint: lost the database, exit 2" || bad "lost in a savepoint: exit" "$(cat "$T/diff.rc")";;
+  *) bad "lost in a savepoint" "$out";; esac
 ( CLI apply --force "$T/main.authz" > "$T/a1.out" 2>&1; echo $? > "$T/a1.rc" ) &
 ( CLI apply --force "$T/main.authz" > "$T/a2.out" 2>&1; echo $? > "$T/a2.rc" ) &
 wait
@@ -275,6 +314,23 @@ out=$(python3 cli/rowstile_cli.py --db "dbname=authz_no_such_db" graph "$T/main.
 out=$(python3 cli/rowstile_cli.py --db "host=127.0.0.1 port=1 dbname=x connect_timeout=2" lint 2>&1)
 case "$out" in "can't connect: "*"no database was named"*) bad "a named database that doesn't answer" "$out";; "can't connect: "*) ok "... and a named one that doesn't answer is only that";;
   *) bad "a named database that doesn't answer" "$out";; esac
+
+echo "-- lint where it finds nothing"
+# an app role of its own (JIT off) that reads only the table the rules govern, and may change only its body
+N=authz_cli_lint
+R=authz_cli_lint_app
+dropdb --if-exists "$N" 2>/dev/null; psql -X -q -d postgres -c "DROP ROLE IF EXISTS $R" >/dev/null 2>&1
+createdb "$N" || exit 1
+PGOPTIONS="-c client_min_messages=error" psql -X -q -v ON_ERROR_STOP=1 -d "$N" \
+  -c "CREATE ROLE $R" -c "ALTER ROLE $R SET jit = off" -c "CREATE SCHEMA app" -c "CREATE TABLE app.users (id bigint PRIMARY KEY)" \
+  -c "CREATE TABLE app.notes (id bigint PRIMARY KEY, owner_id bigint NOT NULL REFERENCES app.users, body text)" \
+  -c "CREATE INDEX ON app.notes (owner_id)" -c "GRANT USAGE ON SCHEMA app TO $R" -c "GRANT SELECT, UPDATE (body) ON app.notes TO $R" >/dev/null || exit 1
+printf 'app role %s\ntype user = app.users\ntype note = app.notes\n  owner : user = owner_id\n  can edit = owner\nrules app.notes\n  select : edit\n  update : edit\n' "$R" > "$T/clean.authz"
+python3 cli/rowstile_cli.py --db "dbname=$N" apply "$T/clean.authz" >/dev/null 2>&1
+out=$(python3 cli/rowstile_cli.py --db "dbname=$N" lint 2>&1); rc=$?
+[ $rc -eq 0 ] && [ "$out" = "authz.lint(): nothing found" ] && ok "lint where it finds nothing says so, exit 0" || bad "lint, nothing found" "$rc $out"
+dropdb "$N"; psql -X -q -d postgres -c "DROP ROLE IF EXISTS $R" >/dev/null 2>&1
+
 echo "-- an owner that only administers the app role"
 # since PostgreSQL 16 a role that makes another gets ADMIN on it, not SET: what an owner on managed Postgres has
 # until it grants itself the role (the suites' owner has createrole_self_grant, which would hide it)

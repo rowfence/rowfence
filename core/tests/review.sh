@@ -69,6 +69,21 @@ case "$out" in *"Traceback"*) bad "a mistake in the policy gives a traceback" "$
   *"has no relation or permission 'nosuch'"*"[AZ203]"*) [ $rc -eq 1 ] && ok "a mistake in the pull request's policy: check's message, exit 1" || bad "mistake exit" "$rc";;
   *) bad "a mistake in the policy" "$out";; esac
 cp "$T/keep.authz" "$P/db/policy.authz"
+out=$(CLI review --base main db/nosuch.authz 2>&1); rc=$?
+[ $rc -eq 2 ] && [ "$out" = "db/nosuch.authz: No such file or directory" ] && ok "a policy file that isn't there: said, exit 2" || bad "review of a missing policy" "$rc $out"
+{ cat "$P/db/policy.authz"; printf -- '-- caf\351\n'; } > "$P/db/latin.authz"
+out=$(CLI review --base main db/latin.authz 2>&1); rc=$?
+case "$out" in "db/latin.authz: not UTF-8 (the byte at "*"): save it as UTF-8") [ $rc -eq 2 ] && ok "... nor one that isn't UTF-8" || bad "review of a policy not UTF-8: exit" "$rc";;
+  *) bad "review of a policy not UTF-8" "$out";; esac
+rm "$P/db/latin.authz"
+printf 'test "caf\351"\n  user 3 can view file 11\n' > "$P/db/tests/latin.authz"
+out=$(CLI review --base main 2>&1); rc=$?
+case "$out" in *"/db/tests/latin.authz: not UTF-8 (the byte at 9): save it as UTF-8") [ $rc -eq 2 ] && ok "a test file that isn't UTF-8: said, exit 2" || bad "review of a test file not UTF-8: exit" "$rc";;
+  *) bad "review of a test file not UTF-8" "$out";; esac
+rm "$P/db/tests/latin.authz"
+out=$(CLI --db "dbname=authz_review_no_such_db" review --base main 2>&1); rc=$?
+case "$out" in "can't connect: "*'database "authz_review_no_such_db" does not exist') [ $rc -eq 2 ] && ok "a review database that isn't there: can't connect, exit 2" || bad "review --db unreachable: exit" "$rc";;
+  *) bad "review --db unreachable" "$out";; esac
 
 echo "-- a pull request whose policy doesn't run on the review data"
 G checkout -q -- db && rm -f "$P"/db/migrations/*_authz_build_policy.sql && G clean -q -fd db
@@ -152,6 +167,12 @@ out=$(CLI review --base before 2>&1); rc=$?
 case "$out" in "Base     The policy at the base is written in the language before"*"\`role app_user\`, now \`app role app_user\`"*"Meaning  unchanged"*)
   [ $rc -eq 0 ] && ok "a base in the language before: read as that version meant it, and said" || bad "base before: exit" "$rc";;
   *) bad "a base in the language before" "$out";; esac
+{ G checkout -q -b broken && sed -i 's/can edit  = share or editor or/can edit  = share or edtor or/' "$P/db/policy.authz" &&
+  G commit -q -am broken && G checkout -q main; } || bad "setting up the branch broken"
+out=$(CLI review --base broken 2>&1); rc=$?
+case "$out" in *"db/policy.authz at broken: the policy at the base has a mistake: line "*": folder has no relation or permission 'edtor'"*"[AZ203]")
+  [ $rc -eq 1 ] && ok "a base whose policy has a mistake (in this language and the one before): said, with the base's line, exit 1" || bad "a base with a mistake: exit" "$rc";;
+  *) bad "a base with a mistake" "$out";; esac
 
 echo "-- the review database"
 G checkout -q -- db && G clean -q -fd db
@@ -195,6 +216,26 @@ if printf '%s\n' "$out" | grep -q '^ *changed '; then bad "a new policy: a decla
 else case "$out" in *"added    app role"*"after:  app role web"*"added    type user"*"after:  type user = public.users"*)
   [ $rc -eq 0 ] && ok "the pull request that adds the policy: each declaration added, its own app role and user type too" || bad "a new policy: exit" "$rc";;
   *) bad "a new policy" "$out";; esac; fi
+# without --base: main, also from a branch (HEAD isn't main: the policy is committed on the branch)
+{ git -C "$F" checkout -q -b feature && git -C "$F" add -A && git -C "$F" commit -q -m policy; } || bad "setting up the branch feature"
+out=$( (cd "$F" && python3 "$OLDPWD/cli/rowstile_cli.py" review db/policy.authz) 2>&1); rc=$?
+case "$out" in *"added    app role"*"after:  app role web"*) [ $rc -eq 0 ] && ok "without --base, the review compares with main" || bad "review without --base: exit" "$rc";;
+  *) bad "review without --base" "$out";; esac
+git -C "$F" branch -q -m main trunk
+out=$( (cd "$F" && python3 "$OLDPWD/cli/rowstile_cli.py" review db/policy.authz) 2>&1); rc=$?
+[ $rc -eq 2 ] && [ "$out" = "rowstile review: which commit to compare with? --base main (or a commit)" ] &&
+  ok "... and where there is no main or master, asks which commit" || bad "review without --base, no main" "$rc $out"
+
+echo "-- a policy in several files, at the base and in the pull request"
+I="$T/inc"; mkdir -p "$I/db/parts"
+printf 'include "parts/types.authz"\n' > "$I/db/policy.authz"
+printf 'app role web\ntype user = public.users\ntype doc = public.docs\n  owner : user = owner_id\n  can view = owner\n' > "$I/db/parts/types.authz"
+{ git -C "$I" init -q -b main && git -C "$I" config user.email t@example.com && git -C "$I" config user.name t &&
+  git -C "$I" add -A && git -C "$I" commit -q -m base; } || bad "setting up the repository with includes"
+printf '  can edit = owner\n' >> "$I/db/parts/types.authz"
+out=$( (cd "$I" && python3 "$OLDPWD/cli/rowstile_cli.py" review --base main db/policy.authz) 2>&1); rc=$?
+case "$out" in "Meaning  1 permission added"*) [ $rc -eq 0 ] && ok "a policy that includes files: the base's are read from git too" || bad "includes at the base: exit" "$rc";;
+  *) bad "includes at the base" "$out";; esac
 
 rm -rf "$T"
 dropdb --if-exists "$DB" 2>/dev/null

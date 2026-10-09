@@ -964,6 +964,9 @@ class Command(unittest.TestCase):
             cfg = rowstile_cli.Config(toml, {"clients": {"ts": "src/authz.gen.ts", "py": "authz.py"}})
             self.assertEqual(sorted(cfg.clients), ["py", "ts"])
             with open(os.path.join(d, "package.json"), "w", encoding="utf-8") as fh:
+                fh.write('{"dependencies": {"next": "16", "pg": "8"}}')
+            self.assertEqual(sorted(cfg.clients), ["py", "ts"])  # an app without the SDK: the whole client
+            with open(os.path.join(d, "package.json"), "w", encoding="utf-8") as fh:
                 fh.write('{"dependencies": {"next": "16", "@rowstile/prisma": "0.1.0"}}')
             self.assertEqual(sorted(cfg.clients), ["py", "ts-sdk"])
         names = Compiler(parse_policy(read(POLICIES["docs"]))).compile("x") and database.client(
@@ -1261,6 +1264,96 @@ class Command(unittest.TestCase):
         # init says which schema it reads when none is named: the question a first run asked of --help
         self.assertIn("those in public", rowstile_cli.command_help("init"))
 
+    def test_an_env_file_that_isnt_utf8_is_said(self) -> None:
+        # a .env saved in another encoding (an accent in a comment) isn't read: nothing of it reaches the
+        # environment, and a connection that fails says why
+        with tempfile.TemporaryDirectory() as d:
+            with open(os.path.join(d, ".env"), "wb") as fh:
+                fh.write("# the café's database\nDATABASE_URL=dbname=x\n".encode("latin-1"))
+            with mock.patch.dict(os.environ, {}, clear=True):
+                e = rowstile_cli.EnvFiles()
+                e.load(d)
+                self.assertNotIn("DATABASE_URL", os.environ)
+                self.assertEqual(len(e.skipped), 1, e.skipped)
+                self.assertTrue(e.skipped[0].startswith(".env can't be read ('utf-8' codec can't decode"), e.skipped)
+                with mock.patch.object(rowstile_cli, "ENV", e):
+                    self.assertTrue(rowstile_cli.cant_connect(OSError("x"), None).endswith(e.skipped[0]))
+
+    def test_dev_writes_migrations_only_with_a_migrations_table(self) -> None:
+        # rowstile dev writes the migration write_after seconds after the last save, and only in a project whose
+        # rowstile.toml has [migrations]: without it, never
+        config = lambda data: rowstile_cli.Config(None, data)
+        self.assertEqual(config({"policy": "db/policy.authz"}).write_after, 0)
+        self.assertEqual(config({"migrations": {"tool": "sql"}}).write_after, 300)
+        self.assertEqual(config({"migrations": {"write_after": 5}}).write_after, 5)
+        self.assertEqual(config({"migrations": {"write_after": 0}}).write_after, 0)
+
+    def test_rowstile_toml_needs_tomllib(self) -> None:
+        # Python 3.10 has no tomllib: the command runs there until it reads rowstile.toml, then says what it needs
+        # (tried on 3.10 itself; here the module is hidden)
+        import contextlib
+        import io
+
+        before = os.getcwd()
+        with tempfile.TemporaryDirectory() as d:
+            with open(os.path.join(d, "rowstile.toml"), "w", encoding="utf-8") as fh:
+                fh.write('policy = "db/policy.authz"\n')
+            err = io.StringIO()
+            os.chdir(d)
+            try:
+                with (
+                    mock.patch.dict(sys.modules, {"tomllib": None}),
+                    contextlib.redirect_stderr(err),
+                    self.assertRaises(SystemExit) as stop,
+                ):
+                    rowstile_cli.load_config()
+            finally:
+                os.chdir(before)
+        self.assertEqual(stop.exception.code, 2)
+        self.assertTrue(
+            err.getvalue().endswith("rowstile.toml: reading it needs Python 3.11 or newer (tomllib)\n"), err.getvalue()
+        )
+
+    def test_migrate_says_what_stops_the_tool_and_how_much_changed(self) -> None:
+        # Alembic with two heads (two branches each added a revision): said, and nothing written; a migration of
+        # many changes lists the first twenty of them, and how many more
+        text = read(POLICIES["docs"])
+        with tempfile.TemporaryDirectory() as d:
+            policy = os.path.join(d, "policy.authz")
+            with open(policy, "w", encoding="utf-8", newline="\n") as fh:
+                fh.write(text)
+            os.makedirs(os.path.join(d, "versions"))
+            for rev in ("aaa", "bbb"):
+                with open(os.path.join(d, "versions", f"{rev}.py"), "w", encoding="utf-8") as fh:
+                    fh.write(f'revision = "{rev}"\ndown_revision = None\n')
+            run = lambda *a: subprocess.run(
+                [sys.executable, os.path.join(ROOT, "cli", "rowstile_cli.py"), *a],
+                cwd=d,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+            )
+            p = run("migrate", "policy.authz", "--tool", "alembic", "--dir", "versions")
+            self.assertEqual(p.returncode, 2, p.stderr)
+            self.assertTrue(p.stderr.startswith("rowstile migrate: "), p.stderr)
+            self.assertTrue(
+                p.stderr.endswith("versions has several heads (aaa, bbb): merge them first (alembic merge heads)\n"),
+                p.stderr,
+            )
+            self.assertFalse(os.path.exists(os.path.join(d, "policy.lock")))
+            self.assertEqual(run("migrate", "policy.authz", "--tool", "sql").returncode, 0)
+            extra = "".join(f"  can extra{i} = view\n" for i in range(25))
+            with open(policy, "w", encoding="utf-8", newline="\n") as fh:
+                fh.write(
+                    replaced(
+                        text, "  can share = owner or folder.share\n", "  can share = owner or folder.share\n" + extra
+                    )
+                )
+            p = run("migrate", "policy.authz", "--tool", "sql")
+            self.assertEqual(p.returncode, 0, p.stderr)
+            self.assertEqual(p.stdout.count("  + type file: can extra"), 20, p.stdout)
+            self.assertIn("\n  ... and 5 more\n", p.stdout)
+
     def test_array_literal(self) -> None:
         self.assertEqual(database.text_array(["1", 'a"b', "c\\d"]), '{"1","a\\"b","c\\\\d"}')
 
@@ -1491,6 +1584,29 @@ class Migrations(unittest.TestCase):
         for journal, said in (({}, "isn't a journal (no entries)"), ({"entries": [1]}, "an entry that isn't one: 1")):
             with self.assertRaisesRegex(migrations.Error, re.escape(said)):
                 migrations.journal_of(journal)
+
+    def test_what_the_tools_folders_may_hold(self) -> None:
+        import migrations
+
+        # Alembic: an __init__.py among the revisions, as many projects have, is no revision
+        with tempfile.TemporaryDirectory() as d:
+            open(os.path.join(d, "__init__.py"), "w", encoding="utf-8").close()
+            with open(os.path.join(d, "aaa.py"), "w", encoding="utf-8") as fh:
+                fh.write('revision = "aaa"\ndown_revision = None\n')
+            py, _ = migrations.write_migration("alembic", d, "x", "SELECT 1;\n")
+            with open(py, encoding="utf-8") as fh:
+                self.assertIn("down_revision: str | None = 'aaa'", fh.read())
+        # Drizzle: a journal whose last migration has no snapshot (one written by hand): the next starts from none
+        with tempfile.TemporaryDirectory() as d:
+            os.makedirs(os.path.join(d, "meta"))
+            with open(os.path.join(d, "meta", "_journal.json"), "w", encoding="utf-8") as fh:
+                json.dump({"version": "7", "dialect": "postgresql", "entries": [{"idx": 0, "tag": "0000_init"}]}, fh)
+            migrations.write_migration("drizzle", d, "x", "SELECT 1;\n")
+            with open(os.path.join(d, "meta", "0001_snapshot.json"), encoding="utf-8") as fh:
+                snap = json.load(fh)
+            self.assertEqual((snap["prevId"], snap["tables"]), ("00000000-0000-0000-0000-000000000000", {}))
+            with open(os.path.join(d, "meta", "_journal.json"), encoding="utf-8") as fh:
+                self.assertEqual([e["tag"] for e in json.load(fh)["entries"]], ["0000_init", "0001_authz_x"])
 
     def test_the_alembic_revision_says_asyncpg_in_a_line(self) -> None:
         # a policy's revision is one script, and asyncpg takes one statement at a time: its own error carries the
