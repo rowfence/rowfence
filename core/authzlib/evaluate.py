@@ -473,8 +473,11 @@ class World:
                     for r in t.relations.values():
                         if any(sr and sr != "*" and st in p.types for st, sr in r.subjects()):
                             out.add((t.name, r.name))
+                governing: dict[str, Type] = {}  # a rule's table, its type's (AZ401: one type governs it)
+                for t in p.types.values():
+                    governing.setdefault(t.table, t)
                 for rule in p.rules:
-                    walk(next(t for t in p.types.values() if t.table == rule.table), rule.expr)
+                    walk(governing[rule.table], rule.expr)
                 for inv in p.invariants:
                     walk(p.types[inv.type], inv.expr)
             self._followed[id(pol)] = (pol, out)
@@ -889,8 +892,11 @@ def reach(pols: Iterable[Policy]) -> int:
 
         for t in pol.types.values():
             out = max([out, *(deep(t, p) for p in t.perms)])
+        governing: dict[str, Type] = {}  # a rule's table, its type's (AZ401: one type governs it)
+        for x in pol.types.values():
+            governing.setdefault(x.table, x)
         for rule in pol.rules:
-            out = max(out, depth(next(x for x in pol.types.values() if x.table == rule.table), rule.expr))
+            out = max(out, depth(governing[rule.table], rule.expr))
         for inv in pol.invariants:
             out = max(out, depth(pol.types[inv.type], inv.expr))
     return out
