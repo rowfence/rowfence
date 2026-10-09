@@ -552,6 +552,23 @@ def file_problem(e: OSError) -> str | None:
     return None if e.filename is None else f"{relative(str(e.filename))}: {e.strerror}"
 
 
+def database_stopped(e: pgwire.PgError | pgwire.ProtocolError | OSError) -> NoReturn:
+    """Says what stopped a command on its database: the server's words, with their detail and hint (exit 1); or,
+    when the server ended the session or the connection broke, that the database was lost (exit 2). An error that
+    names a file is that file's."""
+    if isinstance(e, pgwire.PgError):
+        if (e.code == "3F000" and 'schema "authz"' in e.message) or (
+            e.code == "42883" and "function authz." in e.message
+        ):
+            fail("no policy is applied [AZ609]\nHINT: rowstile apply db/policy.authz")  # as the other commands say it
+        if e.fields.get("S") in ("FATAL", "PANIC"):
+            fail(f"lost the database: {e.message}", 2)
+        detail, hint = e.fields.get("D"), e.fields.get("H")
+        fail(e.message + (f"\nDETAIL: {detail}" if detail else "") + (f"\nHINT: {hint}" if hint else ""))
+    said = file_problem(e) if isinstance(e, OSError) else None
+    fail(said or f"lost the database: {e}", 2)
+
+
 # --- asking as someone ---------------------------------------------------------------------------
 def principal(who: str) -> tuple[str, str]:
     """'user:42' -> ('user', '42'); 'anyone' -> ('user', '')."""
@@ -589,7 +606,7 @@ def read_tests(paths: list[str]) -> dict[str, str]:
         try:
             tests[relative(path).replace(os.sep, "/")] = read_text(path)
         except OSError as e:
-            raise Unreadable(f"{path}: {e.strerror}") from None
+            raise Unreadable(f"{relative(path)}: {e.strerror}") from None
     return tests
 
 
@@ -1020,6 +1037,9 @@ def main(argv: list[str]) -> None:
     for flag in ("--limit", "--port", "--studio-port", "--worlds", "--people", "--rounds"):
         if flag in opts and not (opts[flag].isdigit() and int(opts[flag]) > 0):
             fail(f"{flag} needs a whole number above 0, not {opts[flag]!r}", 2)
+    for flag in ("--port", "--studio-port"):
+        if flag in opts and int(opts[flag]) > 65535:
+            fail(f"{flag} needs a port, a whole number from 1 to 65535, not {opts[flag]!r}", 2)
     flags = {
         a
         for a in argv
@@ -1080,6 +1100,8 @@ def main(argv: list[str]) -> None:
         ENV.load(cfg.dir)
 
     if cmd == "lsp":
+        if dsn is not None:  # the editor's folder says where its database is: --db would be ignored
+            fail("rowstile lsp: --db is not an option it has: it reads the database rowstile.toml names", 2)
         from lsp import serve
 
         serve(cfg)
@@ -1170,6 +1192,10 @@ def main(argv: list[str]) -> None:
         path = args[0] if args else cfg.policy
         if not path:
             fail(f'rowstile dev: which policy file? (or name it in {CONFIG}: policy = "db/policy.authz")', 2)
+        try:
+            pgwire.parse_dsn(dsn)  # one it can't read is said before the loop starts, as the other commands say it
+        except ValueError as e:
+            fail(cant_connect(e, dsn), 2)
         dev = Dev(cfg, dsn, path)
         dev.studio_port = None if "--no-studio" in flags else int(opts.get("--studio-port", "4983"))
         sys.exit(0 if dev.run("--once" in flags) else 1)
@@ -1317,6 +1343,8 @@ def main(argv: list[str]) -> None:
             from authzlib import grant
 
             kind, ident = principal(opts["--as"])
+            if not ident:  # as its other usage errors
+                fail("rowstile why: as whom? someone signed in (user:42, bot:7): nobody can be given access", 2)
             type_name, oid, perm = args
             answer = transaction(conn, lambda db: database.why(db, kind, ident, type_name, oid, perm), keep=False)
             print(grant.describe(answer, opts["--as"], type_name, oid, perm))
@@ -1348,19 +1376,8 @@ def main(argv: list[str]) -> None:
             fail(f"unknown command '{cmd}'\n\n{__doc__}", 2)
     except database.Error as e:
         fail(str(e) + (f"\nHINT: {e.hint}" if e.hint else ""))
-    except pgwire.PgError as e:
-        if (e.code == "3F000" and 'schema "authz"' in e.message) or (
-            e.code == "42883" and "function authz." in e.message
-        ):
-            fail("no policy is applied [AZ609]\nHINT: rowstile apply db/policy.authz")  # as the other commands say it
-        if e.fields.get("S") in ("FATAL", "PANIC"):
-            fail(f"lost the database: {e.message}", 2)
-        detail = e.fields.get("D")
-        hint = e.fields.get("H")
-        fail(e.message + (f"\nDETAIL: {detail}" if detail else "") + (f"\nHINT: {hint}" if hint else ""))
-    except (OSError, pgwire.ProtocolError) as e:
-        said = file_problem(e) if isinstance(e, OSError) else None
-        fail(said or f"lost the database: {e}", 2)
+    except (pgwire.PgError, pgwire.ProtocolError, OSError) as e:
+        database_stopped(e)
     except Unreadable as e:
         fail(str(e), 2)
     except RecursionError:
@@ -1461,7 +1478,7 @@ def review_cmd(cfg: Config, args: list[str], opts: dict[str, str], flags: set[st
     try:
         head_text, head_files = read_policy(path)
     except OSError as e:
-        fail(f"{path}: {e.strerror}", 2)
+        fail(f"{relative(path)}: {e.strerror}", 2)
     base_text, base_files = base_policy(ref, path)
     lock = lock_path(cfg, path)
     base_lock = at_base(ref, lock)
@@ -1487,9 +1504,11 @@ def review_cmd(cfg: Config, args: list[str], opts: dict[str, str], flags: set[st
     except database.Error as e:
         fail(str(e) + (f"\nHINT: {e.hint}" if e.hint else ""))
     except review.PolicyError as e:
-        fail(f"{path}: {e}")
+        fail(f"{relative(path)}: {e}")
     except review.BaseMistake as e:
-        fail(f"{path} at {ref}: {e}")
+        fail(f"{relative(path)} at {ref}: {e}")
+    except (pgwire.PgError, pgwire.ProtocolError, OSError) as e:  # the review database's (--db)
+        database_stopped(e)
     finally:
         if conn is not None:
             abandon(conn)
@@ -1696,7 +1715,7 @@ def ask(conn: pgwire.Connection, cmd: str, args: list[str], opts: dict[str, str]
             )
         elif cmd == "sql":
             take_app_role(conn)
-            rows, cols = conn.query_described(args[0])
+            rows, cols = conn.query_described(args[0], text=True)  # values as Postgres writes them, as psql shows them
             if cols:
                 print(table(rows, cols))
                 print(f"({len(rows)} row{'s' if len(rows) != 1 else ''}, as {who}; rolled back)")
@@ -1755,4 +1774,7 @@ def quote_ident(name: str) -> str:
 
 
 if __name__ == "__main__":
+    # run as a script (npm, Docker), this module is __main__: what imports rowstile_cli by name at run time (Studio)
+    # gets this one, with the .env files it read, not a second copy without them
+    sys.modules.setdefault("rowstile_cli", sys.modules[__name__])
     main(sys.argv[1:])
