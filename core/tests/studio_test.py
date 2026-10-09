@@ -674,9 +674,8 @@ def main() -> None:
     )
     rc, out = cli(db, "studio", "--port", "99999")
     check(
-        "... a port there can't be",
-        (rc, out)
-        == (2, "Studio didn't start (bind(): port must be 0-65535.): rowstile studio --port N for another port\n"),
+        "... a port there can't be: refused before Studio starts, as a mistake in the command line",
+        (rc, out) == (2, "--port needs a port, a whole number from 1 to 65535, not '99999'\n"),
         (rc, out),
     )
     for label, target, said in (
