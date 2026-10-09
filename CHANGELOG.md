@@ -169,6 +169,14 @@ Each release upgrades from the one before it. How releases are numbered and made
   every check is in one that appeared, is said to be renamed, and its checks are compared under the new name:
   "1 test renamed. 2 checks changed what they expect", where it said "8 checks removed". The JSON has the
   names under `tests.renamed`.
+- A rule that names a relation to objects alone (`select : owner or parent`, where `parent.view` was meant) is
+  refused with AZ301, as it was when the relation has one source, also when it has a column and a link table.
+  It compiled, and gave no one anything through the relation: `delete : owner and not parent` let owners delete
+  every row they own, whatever its parent.
+- A deny on a permission that inherits through another type's permission (`can view = (owner or parent.view or
+  project.view) and not hidden`, where projects inherit from folders too) is refused saying so: "folder.view has
+  a deny, so it can only inherit within folder" (AZ306). It said "folder.view depends on itself" (AZ302), and
+  nothing of the deny.
 
 ## 0.1.0 (alpha)
 

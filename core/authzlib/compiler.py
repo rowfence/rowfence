@@ -492,20 +492,13 @@ class Core:
         """`view = view__base and not denied` means what `(... or parent.view) and not denied` says only if
         denied holds on everything below a denied object: denied inherits through every link view__base
         does (without a condition, or with the same one). Otherwise the deny would cut inheritance at the
-        denied object only, which needs each user's paths, and rowstile stores objects' ancestors."""
+        denied object only, which needs each user's paths, and rowstile stores objects' ancestors. (A deny whose
+        inheritance goes through another type's permission comes back to it: analyze_recursion says so.)"""
         for (tn, pn), negs in self.denies.items():
             t = self.T(tn)
             base_name = t.perms[pn].base
             assert base_name is not None  # split_denies gave every permission with a deny its base
             base = t.perms[base_name]
-            key = self.recursive.get((tn, base.name))
-            if key is None or len(self.scc_members[key]) != 1:
-                fail(
-                    base.loc,
-                    f"{tn}.{pn} has a deny, so it can only inherit within {tn} (like parent.{pn}), "
-                    f"not through permissions of other types",
-                    "AZ306",
-                )
             edges = self.perm_edges(t, base) or frozenset()
             for x in negs:
                 if not (isinstance(x, Not) and isinstance(x.item, Ref)):
@@ -921,6 +914,16 @@ class Core:
                 continue
             tnames = [tn for tn, _ in comp]
             first = self.T(comp[0][0]).perms[comp[0][1]]
+            # a deny's inheritance (its base, split_denies) that comes back to it through another type's permission
+            for tn, pn in comp:
+                deny = self.T(tn).perms[pn]
+                if deny.base is not None and (tn, deny.base) in members and len(set(tnames)) > 1:
+                    fail(
+                        deny.loc,
+                        f"{tn}.{pn} has a deny, so it can only inherit within {tn} (like parent.{pn}), "
+                        f"not through permissions of other types",
+                        "AZ306",
+                    )
             # every dependency inside the component must be a top-level inheritance item
             for tn, pn in comp:
                 t, perm = self.T(tn), self.T(tn).perms[pn]
@@ -1392,7 +1395,10 @@ class Core:
         if not direct:
             if loops:
                 fail(r.loc, f"{t.name}.{r.name} only contains itself; add a source of users", "AZ209")
-            if ext:
+            # the column sources left out (row_relation checks them on the row) may give users: then these give none
+            if ext and any(
+                sr or self.is_principal(st) for src in r.sources if src.kind == "column" for st, sr in src.subjects
+            ):
                 direct.append(f"SELECT NULL::{t.pktype} AS id WHERE false")
             else:
                 fail(

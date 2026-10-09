@@ -334,7 +334,9 @@ CODES = {
         "`can view = (reader or parent.view) and not blocked`: the deny must reach everything below, so "
         "`blocked` is a permission of the same type that inherits through the same relation "
         "(`can blocked = blocker or parent.blocked`), and the inheritance is joined with `and` only by the deny. "
-        "`blocked` has no deny of its own: that could cut it below a blocked object.",
+        "`blocked` has no deny of its own: that could cut it below a blocked object. And `view` inherits within "
+        "its own type: not through another type's permission (`project.view`, where projects and folders are "
+        "inside each other).",
         "type folder = app.folders\n  owner   : user = owner_id\n  parent  : folder = parent_id\n"
         "  blocker : user = app.folder_blocks(folder_id -> user_id)\n  can blocked = blocker\n"
         "  can view = (owner or parent.view) and not blocked\n",
