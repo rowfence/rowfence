@@ -276,6 +276,32 @@ sed -i 's/can edit  = share or editor or/can edit  = share or edtor or/' "$T/p/p
 ( cd "$T/p" && python3 "$OLDPWD/cli/rowstile_cli.py" dev --once ) > "$T/dev.log" 2>&1; rc=$?
 case "$(cat "$T/dev.log")" in *"policy.authz: line "*"edtor"*"nothing applied"*) [ $rc -eq 1 ] && ok "... a mistake stops it before applying, exit 1" || bad "dev mistake exit" "$rc";;
   *) bad "dev mistake" "$(cat "$T/dev.log")";; esac
+# the loop itself, left running: each save of the policy or of a test file runs it again, a mistake stops it
+# before applying, the migration is written once the saves stop, and Ctrl-C ends it, exit 0 (with job control
+# on: a background job otherwise ignores Ctrl-C)
+sed -i 's/edtor/editor/' "$T/p/policy.authz"
+printf '[migrations]\ntool = "sql"\ndir = "migrations"\nwrite_after = 1\n' >> "$T/p/rowstile.toml"
+set -m
+( cd "$T/p" && exec python3 "$OLDPWD/cli/rowstile_cli.py" dev --no-studio ) > "$T/watch.log" 2>&1 &
+watcher=$!
+set +m
+# waits (a minute at most) until the loop has said something, or said it n times
+seen() { for _ in $(seq 120); do [ "$(grep -c -- "$1" "$T/watch.log")" -ge "${2:-1}" ] && return 0; sleep 0.5; done; return 1; }
+if seen "watching 2 file(s)" && seen "check(s) pass"; then
+  printf -- '-- saved again\n' >> "$T/p/tests/docs.authz"
+  seen "tests/docs.authz saved" && seen "check(s) pass" 2 && ok "dev runs again when a test file is saved" || bad "dev on a test file" "$(cat "$T/watch.log")"
+  sed -i 's/can edit  = share or editor or/can edit  = share or edtor or/' "$T/p/policy.authz"
+  seen "policy.authz saved" && seen "nothing applied" && ok "... stops before applying a policy saved with a mistake" || bad "dev on a mistake" "$(cat "$T/watch.log")"
+  sed -i 's/edtor/editor/' "$T/p/policy.authz"
+  seen "check(s) pass" 3 && ok "... and applies it again once it is fixed" || bad "dev after the fix" "$(cat "$T/watch.log")"
+  # (the lock file is written last: before it, Ctrl-C could stop the migration half written)
+  seen "stopped editing" && seen "wrote policy.lock" && ls "$T/p/migrations/"*.sql >/dev/null 2>&1 &&
+    ok "... and writes the migration once the saves stop ([migrations] write_after)" || bad "dev's migration" "$(cat "$T/watch.log")"
+else
+  bad "dev didn't start watching" "$(cat "$T/watch.log")"
+fi
+kill -INT "$watcher" 2>/dev/null; wait "$watcher"; rc=$?
+[ $rc -eq 0 ] && ok "... and Ctrl-C ends it, exit 0" || bad "dev Ctrl-C" "$rc $(tail -n 3 "$T/watch.log")"
 run test example/docs.test.authz
 case "$out" in *"ok    user \$ann can edit file \$f"*"policy tests passed"*) [ $rc -eq 0 ] && ok "test runs named test files, exit 0" || bad "test exit" "$rc";;
   *) bad "test" "$out";; esac
