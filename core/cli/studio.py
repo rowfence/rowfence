@@ -209,17 +209,16 @@ class Studio:
 
         def run(db: Db) -> Message:
             c = self.compiler(db)
-            known = {r.table for r in c.pol.rules} | {t.table for t in c.types.values()}
-            if table not in known:
-                raise Problem(f"{table!r} is not a table the policy governs", 404)
+            # a table the policy governs is a type's: rules for any other are refused (AZ401)
             t = next((t for t in c.types.values() if t.table == table), None)
+            if t is None:
+                raise Problem(f"{table!r} is not a table the policy governs", 404)
             view = c.pol.views.get(table)
             masked = sorted({col for r in c.pol.rules if r.table == table and r.command == "mask" for col in r.columns})
-            key = f"({c.key(t, 'r')})::text" if t else "NULL::text"
-            order = key if t else "r.ctid"
+            key = f"({c.key(t, 'r')})::text"
             data = db.rows(
                 f"SELECT r.ctid::text AS authz_ctid, {key} AS authz_id, to_jsonb(r) AS authz_row "
-                f"FROM {qt(table)} r ORDER BY {order} LIMIT {ROWS + 1} OFFSET {offset}"
+                f"FROM {qt(table)} r ORDER BY {key} LIMIT {ROWS + 1} OFFSET {offset}"
             )
             more, data = len(data) > ROWS, data[:ROWS]
             total = db.rows(f"SELECT count(*) AS n FROM {qt(table)}")[0]["n"]
@@ -230,7 +229,7 @@ class Studio:
             db.rows(f"SET LOCAL ROLE {quoted(role)}")
             ids = [str(r["authz_id"]) for r in data]
             theirs: dict[str, Message] = {}
-            if view and t:
+            if view:
                 # a table read through its masked view (the app role can't read the table's masked columns, nor
                 # its ctid): the rows they see, with each masked column as they get it
                 seen = set[Json]()
@@ -253,14 +252,12 @@ class Studio:
                 }
                 seen_total = db.rows(f"SELECT count(*) AS n FROM {qt(table)}")[0]["n"]
             db.rows("RESET ROLE")
-            perms: dict[str, Json] = {}
-            if t:
-                perms = {
-                    str(r["id"]): r["perms"] or []
-                    for r in db.rows(
-                        "SELECT id, perms FROM authz.perms_of($1, $2::text[])", [t.name, database.text_array(ids)]
-                    )
-                }
+            perms: dict[str, Json] = {
+                str(r["id"]): r["perms"] or []
+                for r in db.rows(
+                    "SELECT id, perms FROM authz.perms_of($1, $2::text[])", [t.name, database.text_array(ids)]
+                )
+            }
             values = [as_object(r["authz_row"]) for r in data]
             columns: list[Json] = list(values[0]) if values else []
             out: list[Json] = []
@@ -282,7 +279,7 @@ class Studio:
                 )
             return {
                 "table": table,
-                "type": t.name if t else None,
+                "type": t.name,
                 "columns": columns,
                 "rows": out,
                 "offset": offset,
