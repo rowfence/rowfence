@@ -473,9 +473,12 @@ END $f$;"""
         u = self.T("user")
         is_user = f"EXISTS (SELECT 1 FROM {qt(u.table)} u WHERE u.{q(self.pk(u))} = x)"
 
+        # a type without permissions is still a type: asked for one, it has no such permission (as authz.list says)
+        no_perm = "      RAISE EXCEPTION 'no permission %.% in the policy', p_type, p_perm USING HINT = 'rowstile help AZ707';"
+
         def who_branch(t: Type) -> str | None:
             if not t.perms:
-                return None
+                return no_perm
             cases = "\n".join(
                 f"        WHEN {lit(p)} THEN\n"
                 f"          FOR v_c IN SELECT DISTINCT x::text FROM {self.who_fn(t, p)}(v_{t.pktype}) x WHERE {is_user} LOOP\n"
@@ -489,7 +492,7 @@ END $f$;"""
 
         def why_branch(t: Type) -> str | None:
             if not t.perms:
-                return None
+                return no_perm
             cases = "\n".join(
                 f"        WHEN {lit(p)} THEN RETURN QUERY SELECT * FROM {self.why_fn(t, p)}(v_{t.pktype}, 1, '{{}}');"
                 for p in self.public_perms(t)

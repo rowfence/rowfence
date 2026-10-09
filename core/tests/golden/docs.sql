@@ -3269,6 +3269,14 @@ BEGIN
         WHEN 'impersonate' THEN RETURN EXISTS (SELECT 1 FROM "app"."users" o WHERE o."id" = v_bigint AND (coalesce((exists (select 1 from app.org_members a join app.org_members b on a.org_id = b.org_id where a.user_id = (SELECT authz.uid()) and a.role = 'admin' and b.user_id = o.id)), false)));
         ELSE RAISE EXCEPTION 'no permission %.% in the policy', p_type, p_perm USING HINT = 'rowstile help AZ707';
       END CASE;
+    WHEN 'org' THEN
+      IF NOT pg_catalog.pg_input_is_valid(p_id, 'bigint') THEN RETURN false; END IF;
+      v_bigint := p_id::bigint;
+      RAISE EXCEPTION 'no permission %.% in the policy', p_type, p_perm USING HINT = 'rowstile help AZ707';
+    WHEN 'team' THEN
+      IF NOT pg_catalog.pg_input_is_valid(p_id, 'bigint') THEN RETURN false; END IF;
+      v_bigint := p_id::bigint;
+      RAISE EXCEPTION 'no permission %.% in the policy', p_type, p_perm USING HINT = 'rowstile help AZ707';
     WHEN 'folder' THEN
       IF NOT pg_catalog.pg_input_is_valid(p_id, 'bigint') THEN RETURN false; END IF;
       v_bigint := p_id::bigint;
@@ -3524,6 +3532,8 @@ DECLARE names text[];
 BEGIN
   CASE p_type
     WHEN 'user' THEN names := ARRAY['impersonate']::text[];
+    WHEN 'org' THEN names := ARRAY[]::text[];
+    WHEN 'team' THEN names := ARRAY[]::text[];
     WHEN 'folder' THEN names := ARRAY['share', 'edit', 'view', 'break_glass']::text[];
     WHEN 'file' THEN names := ARRAY['share', 'edit', 'view']::text[];
     ELSE RAISE EXCEPTION 'no type % in the policy', p_type USING HINT = 'rowstile help AZ707';
@@ -4527,6 +4537,14 @@ BEGIN
           END LOOP;
         ELSE RAISE EXCEPTION 'no permission %.% in the policy', p_type, p_perm USING HINT = 'rowstile help AZ707';
       END CASE;
+    WHEN 'org' THEN
+      IF NOT pg_catalog.pg_input_is_valid(p_id, 'bigint') THEN RETURN; END IF;
+      v_bigint := p_id::bigint;
+      RAISE EXCEPTION 'no permission %.% in the policy', p_type, p_perm USING HINT = 'rowstile help AZ707';
+    WHEN 'team' THEN
+      IF NOT pg_catalog.pg_input_is_valid(p_id, 'bigint') THEN RETURN; END IF;
+      v_bigint := p_id::bigint;
+      RAISE EXCEPTION 'no permission %.% in the policy', p_type, p_perm USING HINT = 'rowstile help AZ707';
     WHEN 'folder' THEN
       IF NOT pg_catalog.pg_input_is_valid(p_id, 'bigint') THEN RETURN; END IF;
       v_bigint := p_id::bigint;
@@ -4632,6 +4650,14 @@ BEGIN
         WHEN 'impersonate' THEN RETURN QUERY SELECT * FROM authz_int."user__impersonate__why"(v_bigint, 1, '{}');
         ELSE RAISE EXCEPTION 'no permission %.% in the policy', p_type, p_perm USING HINT = 'rowstile help AZ707';
       END CASE;
+    WHEN 'org' THEN
+      IF NOT pg_catalog.pg_input_is_valid(p_id, 'bigint') THEN RETURN; END IF;
+      v_bigint := p_id::bigint;
+      RAISE EXCEPTION 'no permission %.% in the policy', p_type, p_perm USING HINT = 'rowstile help AZ707';
+    WHEN 'team' THEN
+      IF NOT pg_catalog.pg_input_is_valid(p_id, 'bigint') THEN RETURN; END IF;
+      v_bigint := p_id::bigint;
+      RAISE EXCEPTION 'no permission %.% in the policy', p_type, p_perm USING HINT = 'rowstile help AZ707';
     WHEN 'folder' THEN
       IF NOT pg_catalog.pg_input_is_valid(p_id, 'bigint') THEN RETURN; END IF;
       v_bigint := p_id::bigint;
