@@ -190,6 +190,11 @@ sed -e '/or linked_into.view/d' -e '/^  linked_into : folder/d' example/docs.aut
 run diff "$T/nolinks.authz"; case "$out" in *" changes"*"loses"*) ok "diff: without links, people lose access";; *) bad "diff" "$out";; esac
 [ "$(state)" = "$before" ] && [ "$(PSQL -c "SELECT authz.verify()")" = t ] && ok "... and nothing changed" || bad "diff changed something" "$(state) vs $before"
 run diff example/docs.authz; case "$out" in *"0 changes (nobody gains"*) ok "diff of the policy in force: no changes";; *) bad "diff same policy" "$out";; esac
+sed 's/not {confidential}/not {confidentail}/' example/docs.authz > "$T/bad_cond.authz"
+run diff "$T/bad_cond.authz"
+case "$out" in "policy line 63: the condition {confidentail} doesn't run: column \"confidentail\" does not exist [AZ613]"*)
+  [ $rc -eq 1 ] && [ "$(state)" = "$before" ] && ok "diff names a condition Postgres refuses with its line, as applying does, and changes nothing" ||
+  bad "diff with a condition that doesn't run: exit or state" "$rc";; *) bad "diff with a condition that doesn't run" "$out";; esac
 
 echo "-- who may apply"
 PSQL -c "DROP ROLE IF EXISTS authz_apply_other" -c "CREATE ROLE authz_apply_other LOGIN" -c "GRANT CREATE ON DATABASE $DB TO authz_apply_other" \
@@ -306,6 +311,9 @@ run apply tests/multi.authz --force
 case "$out" in *": applied") ok "... and once the app's view is gone, a dropped column is no trouble";; *) bad "apply after the app's view is gone" "$out";; esac
 CLI remove --yes >/dev/null 2>&1
 [ "$(PSQL -c "SELECT has_table_privilege('app_user', 'mt.docs', 'SELECT')")" = t ] && ok "remove gives back the table-wide SELECT the mask replaced" || bad "mask privileges after remove"
+cols="FROM pg_attribute WHERE attrelid = 'mt.docs'::regclass AND attnum > 0 AND NOT attisdropped AND attacl IS NOT NULL"
+[ "$(PSQL -c "SELECT count(*) $cols")" = 0 ] && ok "... and takes back the SELECT on its other columns the mask gave instead" ||
+  bad "column privileges after remove" "$(PSQL -c "SELECT string_agg(attname || ' ' || attacl::text, ', ') $cols")"
 out=$(PSQL -c "GRANT SELECT ON mt.docs TO app_user" 2>&1); [ -z "$out" ] && ok "... and later grants aren't refused any more" || bad "mask guard left" "$out"
 
 echo "-- a condition Postgres refuses"
@@ -330,6 +338,27 @@ grep -q "nme = 'x'" "$T/bad_cond.authz" || bad "the example's files select rule 
 run apply "$T/bad_cond.authz"
 case "$out" in "policy line 79: the condition {nme = 'x'} doesn't run: column \"nme\" does not exist [AZ613]"*)
   ok "... also one in a select rule, where Postgres says no position";; *) bad "bad condition in a select rule" "$out";; esac
+# Postgres points into a condition whose text holds another's: the one that fails is named, not the other ({inherit},
+# lines 48 and 49, begins {inherit =}; and files have no column inherit)
+sed 's/(parent.view and {inherit})/(parent.view and {inherit =})/' example/docs.authz > "$T/bad_cond.authz"
+run apply "$T/bad_cond.authz"
+case "$out" in "policy line 50: the condition {inherit =} doesn't run: syntax error at or near \")\" [AZ613]"*)
+  ok "a condition another one's text begins: the one that fails is named, not the other";; *) bad "a condition another begins" "$out";; esac
+sed 's/not {confidential}/not {confidential or inherit}/' example/docs.authz > "$T/bad_cond.authz"
+run apply "$T/bad_cond.authz"
+case "$out" in "policy line 63: the condition {confidential or inherit} doesn't run: column \"inherit\" does not exist [AZ613]"*)
+  ok "... nor one whose text it holds";; *) bad "a condition that holds another" "$out";; esac
+# a condition that isn't true or false: Postgres points before it, at what holds it, and it is the only one there (a
+# test whose name has {} in it holds no condition)
+{ sed 's/not {confidential}/not {name}/' example/docs.authz; printf '%s\n' 'test "a {} in its name"' '  user 1 can edit file 11'; } > "$T/bad_cond.authz"
+run apply "$T/bad_cond.authz"
+case "$out" in "policy line 63: the condition {name} doesn't run: COALESCE types text and boolean cannot be matched [AZ613]"*)
+  ok "a condition that isn't true or false is named, where Postgres points before it";; *) bad "a condition that isn't true or false" "$out";; esac
+# a parenthesis left open reads on into the SQL around the condition, where Postgres finds the syntax error
+sed 's/({parent_id is null} and share)/({parent_id is null or (true} and share)/' example/docs.authz > "$T/bad_cond.authz"
+run apply "$T/bad_cond.authz"
+case "$out" in "policy line 74: the condition {parent_id is null or (true} doesn't run: syntax error at or near "*"[AZ613]"*)
+  ok "... and one with a parenthesis left open, the error found after it";; *) bad "a parenthesis left open" "$out";; esac
 [ "$(PSQL -c "SELECT to_regnamespace('authz_int') IS NULL")" = t ] && ok "... and nothing of it stays" || bad "a failed apply left something"
 dropdb "$DB"
 

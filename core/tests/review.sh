@@ -70,6 +70,28 @@ case "$out" in *"Traceback"*) bad "a mistake in the policy gives a traceback" "$
   *) bad "a mistake in the policy" "$out";; esac
 cp "$T/keep.authz" "$P/db/policy.authz"
 
+echo "-- a pull request whose policy doesn't run on the review data"
+G checkout -q -- db && rm -f "$P"/db/migrations/*_authz_build_policy.sql && G clean -q -fd db
+sed -i 's/not {confidential}/not {confidentail}/' "$P/db/policy.authz"
+sleep 1; CLI migrate >/dev/null
+out=$(CLI --db "dbname=$DB" review --base main 2>&1); rc=$?
+said="policy line 63: the condition {confidentail} doesn't run: column \"confidentail\" does not exist [AZ613]"
+case "$out" in *Traceback*) bad "a condition Postgres refuses gives a traceback" "$out";;
+  *"Access   not computed: $said"*"Tests    not run: the migration fails: $said"*"It fails on the review database: $said"*)
+    [ $rc -eq 0 ] && [ "$(PSQL -c "SELECT count(*) || '/' || max(lock) FROM authz.policy_versions")" = "$before" ] &&
+    ok "a condition Postgres refuses: Access, Tests and Deploy say which and why; the review database is left as it was" ||
+    bad "a condition Postgres refuses: exit or the database" "$rc";;
+  *) bad "a condition Postgres refuses" "$out";; esac
+G checkout -q -- db && G clean -q -fd db
+sed -i 's/not {confidential}/not {confidential or name::int > 0}/' "$P/db/policy.authz"
+sleep 1; CLI migrate >/dev/null
+out=$(CLI --db "dbname=$DB" review --base main 2>&1); rc=$?
+case "$out" in *Traceback*) bad "a condition that fails on a row gives a traceback" "$out";;
+  *"Access   not computed: invalid input syntax for type integer: "*) [ $rc -eq 0 ] &&
+    ok "... one that fails on a row of the review data: Access says why, and the review goes on" || bad "a condition that fails on a row: exit" "$rc";;
+  *) bad "a condition that fails on a row" "$out";; esac
+G checkout -q -- db && G clean -q -fd db
+
 echo "-- a refactor"
 G checkout -q -- db && rm -f "$P"/db/migrations/*_authz_build_policy.sql && G clean -q -fd db
 sed -i 's/can edit  = share or editor or (parent.edit and {inherit})/can edit  = editor or share or ({inherit} and parent.edit)/' "$P/db/policy.authz"

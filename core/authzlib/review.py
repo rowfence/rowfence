@@ -982,8 +982,8 @@ def access(db: Db, h: Side, examples: int = 3) -> Access:
 
     try:
         rows = database.diff(db, h.policy, h.files)
-    except database.Error as e:
-        return {"groups": [], "users_in_data": None, "error": str(e)}
+    except (database.Error, db.errors) as e:  # db.errors: a condition that fails on a row of the review data
+        return {"groups": [], "users_in_data": None, "error": getattr(e, "message", str(e))}
     users: dict[tuple[str, str, str], set[str]] = {}
     objects: dict[tuple[str, str, str], set[str]] = {}
     shown: dict[tuple[str, str, str], list[database.DiffRow]] = {}
