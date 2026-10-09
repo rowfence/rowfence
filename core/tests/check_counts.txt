@@ -7,7 +7,7 @@ capitals 35
 children 56
 cli 110
 concurrency 12
-confidence 39
+confidence 41
 cookbook 79
 devx 74
 docs 11

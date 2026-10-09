@@ -322,6 +322,35 @@ def main() -> None:
         [(m[0], m[1]) for m in work(behind_an_expression)] == [("app.team_members", ("user_id",))],
     )
 
+    def partial(d: Db) -> list[perf.Missing]:
+        # the policy's lookups are joins, which an index with a condition doesn't serve (Postgres scans the table)
+        d.script(
+            "DROP INDEX app.team_members_user_id_idx; "
+            "CREATE INDEX team_members_some ON app.team_members (user_id) WHERE user_id > 0"
+        )
+        return perf.missing_indexes(d, database.policy_compiler(*database.applied(d)))
+
+    check(
+        "an index with a condition (a partial one) serves no lookup",
+        [(m[0], m[1]) for m in work(partial)] == [("app.team_members", ("user_id",))],
+    )
+    # nor does one a failed CREATE INDEX CONCURRENTLY left unfinished (here a unique one, on a duplicate)
+    sql = lambda *s: subprocess.run(
+        ["psql", "-X", "-q", "-d", db, *(x for c in s for x in ("-c", c))], capture_output=True
+    )
+    sql("DROP INDEX app.team_members_user_id_idx", "INSERT INTO app.team_members VALUES (11, 1)")
+    sql("CREATE UNIQUE INDEX CONCURRENTLY team_members_user_id_idx ON app.team_members (user_id)")
+    check(
+        "... nor one a failed build left unfinished",
+        [(m[0], m[1]) for m in work(lambda d: perf.missing_indexes(d, database.policy_compiler(*database.applied(d))))]
+        == [("app.team_members", ("user_id",))],
+    )
+    sql(
+        "DROP INDEX app.team_members_user_id_idx",
+        "DELETE FROM app.team_members WHERE (team_id, user_id) = (11, 1)",
+        "CREATE INDEX team_members_user_id_idx ON app.team_members (user_id)",
+    )
+
     def capitals(d: Db) -> list[tuple[str, ...]]:
         # names with capital letters, as Prisma writes them: the table is looked up by its quoted name
         d.script(
