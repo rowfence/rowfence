@@ -99,7 +99,7 @@ class Server(ThreadingHTTPServer):
     allow_reuse_address = sys.platform != "win32"
 
     def server_bind(self) -> None:
-        if sys.platform == "win32":
+        if sys.platform == "win32":  # (Windows only) StudioPort runs it there
             self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
         super().server_bind()
 
