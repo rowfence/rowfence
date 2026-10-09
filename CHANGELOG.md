@@ -213,6 +213,10 @@ Each release upgrades from the one before it. How releases are numbered and made
   of relation "folders" does not exist". `rowstile apply`, `push` and `dev` ask lint as they apply, so such a
   policy couldn't be applied at all. Lint names the pair now, with the rule to add (`update org_id, parent_id
   after : parent.edit`). **Upgrading**: apply the policy again (or the next migration).
+- `authz.lint()` took an index with a condition (a partial index), or one that a failed `CREATE INDEX
+  CONCURRENTLY` left unfinished, for one that serves a lookup the permissions make, and said nothing of a
+  lookup that reads the whole table. `rowstile indexes` didn't count them, and lint doesn't now. **Upgrading**:
+  apply the policy again (or the next migration).
 
 ## 0.1.0 (alpha)
 
