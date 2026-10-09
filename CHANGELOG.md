@@ -105,6 +105,10 @@ Each release upgrades from the one before it. How releases are numbered and made
   1), and "Studio didn't start (...): rowstile studio --port N for another port" (exit 2). A page whose
   database stops answering while Studio runs is told "can't connect" (503), where Studio printed a traceback at
   each request.
+- The test Studio writes from "Ann should see this" didn't run for an object whose id isn't one word: a key
+  with text in it that holds a space or an apostrophe. The test's lines now quote such an id, as a test reads
+  it. Its copy of a row wrote an array column as JSON, which Postgres refuses ("malformed array literal"), and
+  a number with a fraction as a float, losing digits: each is now written as the column holds it.
 - Ctrl-C while `rowstile sql` (or `can`, `explain`, `perms`, `list`, `who`, `explain-rule`) waited on a statement,
   or while `rowstile review --db` worked on its database, stopped only once the statement had run its course. It
   stops at once now and ends the statement on the server, as the other commands did.
