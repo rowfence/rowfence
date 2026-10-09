@@ -273,6 +273,14 @@ def without_db(folder: str) -> None:
         fh.write(good)
     r = c.tool("check", policy="db/nothing.authz")
     check("a policy file that isn't there: a failed call", r["isError"] and r["structuredContent"]["exit_code"] == 2, r)
+    # what the command says of it reads like a mistake's line ("db: line 1: x.authz: No such file or directory"),
+    # with no code: no mistake in a policy
+    r = c.tool("check", policy="db: line 1: x.authz")
+    check(
+        "... nor one whose name reads like a mistake's line: no mistake given",
+        r["isError"] and "error" not in r["structuredContent"],
+        r,
+    )
     r = c.tool("prove", worlds=40)
     s = r["structuredContent"]
     check(

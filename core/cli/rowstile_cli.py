@@ -416,8 +416,8 @@ class Config:
         (a dependency on @rowstile/* in its package.json): the SDK has the rest."""
         out: dict[str, str] = {}
         for lang, p in self.section("clients").items():
-            if isinstance(p, str):
-                out["ts-sdk" if lang in ("ts", "typescript") and self.uses_ts_sdk() else lang] = self.file(p)
+            assert isinstance(p, str), "check_settings refuses a client that isn't a path"
+            out["ts-sdk" if lang in ("ts", "typescript") and self.uses_ts_sdk() else lang] = self.file(p)
         return out
 
     @property
@@ -685,6 +685,7 @@ class Dev:
         self.notices: list[pgwire.Fields] = []
         self.lint: set[str] | None = None
         self.studio_port: int | None = None  # rowstile dev starts Studio on it (None: not)
+        self.read: tuple[str, dict[str, str]] | None = None  # the policy and its files, as the last pass read them
 
     def connect(self) -> pgwire.Connection:
         if self.conn is None:
@@ -728,6 +729,7 @@ class Dev:
         except OSError as e:
             self.say("x", f"{relative(self.policy)}: {e.strerror}")
             return False
+        self.read = (text, files)
         try:
             msg = database.check(text, files)
         except RecursionError:
@@ -741,8 +743,8 @@ class Dev:
                 body = files.get(name, text) if name else text
                 lines = body.split("\n")
                 n = int(line.group(2))
-                if 0 < n <= len(lines):
-                    source = "\n  " + lines[n - 1].strip()
+                assert 0 < n <= len(lines), where  # a line of the file it read (tests/fuzz_parser.py checks)
+                source = "\n  " + lines[n - 1].strip()
             self.say(
                 "x",
                 f"{relative(self.policy)}: {where}{source}\nnothing applied: the database keeps the policy in force",
@@ -872,7 +874,7 @@ class Dev:
             try:
                 url = studio.Studio(
                     self.dsn, self.cfg, self.policy, writable=True, port=self.studio_port, read_policy=read_policy
-                ).start(background=True)
+                ).start()
                 print(f"Studio on {url}")
             except OSError as e:
                 print(f"Studio didn't start ({e}): rowstile dev --studio-port N for another port")
@@ -900,11 +902,10 @@ class Dev:
             return True
 
     def write_migration(self) -> None:
-        """'stopped editing': the migration for what changed, if the lock file is behind the policy."""
-        try:
-            text, files = read_policy(self.policy)
-        except OSError:
-            return
+        """'stopped editing': the migration for what changed, if the lock file is behind the policy: the policy
+        the last pass read, checked and pushed (a file changed since is the next pass's, not the migration's)."""
+        assert self.read is not None  # the timer is set by a pass that went through
+        text, files = self.read
         print(f"{time.strftime('%H:%M:%S')} stopped editing")
         try:
             migrate_cmd(self.cfg, self.policy, text, files, {}, False)
@@ -954,13 +955,12 @@ ARGUMENTS: dict[str, int | None] = {
 def command_help(cmd: str) -> str:
     """What `rowstile CMD --help` prints: that command's lines of the usage, and where the database comes from."""
     assert __doc__ is not None
-    lines = __doc__.splitlines()
-    start = next(i for i, line in enumerate(lines) if re.match(rf"    rowstile {re.escape(cmd)}(\s|$)", line))
-    end = next(i for i in range(start + 1, len(lines)) if not lines[i].startswith("     "))
-    database = next(i for i, line in enumerate(lines) if line.startswith("The database is "))
-    where = lines[database : database + 3]  # ... and that .env may hold its variables
+    # its line of the usage and the lines indented under it: each command has one (tests/unit_test.py asks)
+    own = re.search(rf"^    rowstile {re.escape(cmd)}(?: .*)?\n(?:     .*\n)*", __doc__, re.M)
+    assert own is not None, cmd
+    where = __doc__[__doc__.index("\nThe database is ") + 1 :].splitlines()[:3]  # ... and that .env may hold them
     return "\n".join(
-        [line[4:] for line in lines[start:end]] + ["", *where, "rowstile --help: every command, and rowstile.toml"]
+        [line[4:] for line in own[0].splitlines()] + ["", *where, "rowstile --help: every command, and rowstile.toml"]
     )
 
 
@@ -1149,16 +1149,14 @@ def main(argv: list[str]) -> None:
             msg = database.check(text, files)
             if msg:
                 fail(f"{relative(path)}: {msg.removeprefix('policy ')}")
-            try:
-                pol = parse_policy(text, None, files=files)
-            except database.PolicyError as e:
-                fail(f"{relative(path)}: {e}")
+            pol = parse_policy(text, None, files=files)  # read as check read it: no mistake now
             if not pol.invariants:
                 print(f"{relative(path)}: no invariants to prove (write them under 'invariants': never TYPE: ...)")
                 return
             results = prove.prove(pol, worlds=int(opts.get("--worlds", prove.WORLDS)))
             print(prove.describe(results))
-            sys.exit(0 if all(r["holds"] for r in results) else 1)
+            holds = all(r["holds"] for r in results)
+            sys.exit(0 if holds else 1)
         if cmd == "fmt":
             sys.exit(fmt_cmd(cfg, args, "--check" in flags))
         if cmd == "review":
@@ -1363,7 +1361,8 @@ def main(argv: list[str]) -> None:
         elif cmd == "reapply":
             transaction(conn, lambda db: database.reapply(db, rebuild="--force" in flags))
             print("applied again")
-        elif cmd == "remove":
+        else:
+            assert cmd == "remove", cmd  # every other command of ARGUMENTS is answered above
             if "--yes" not in flags:
                 fail(
                     "rowstile remove drops every view, trigger and row-level security policy the current policy made "
@@ -1372,8 +1371,6 @@ def main(argv: list[str]) -> None:
                 )
             transaction(conn, database.remove)
             print("removed")
-        else:
-            fail(f"unknown command '{cmd}'\n\n{__doc__}", 2)
     except database.Error as e:
         fail(str(e) + (f"\nHINT: {e.hint}" if e.hint else ""))
     except (pgwire.PgError, pgwire.ProtocolError, OSError) as e:
@@ -1432,13 +1429,16 @@ def base_policy(ref: str, path: str) -> tuple[str | None, dict[str, str]]:
 
 
 def base_tests(cfg: Config, ref: str) -> dict[str, str]:
-    """The test files rowstile.toml names, as they were at a commit."""
+    """The test files rowstile.toml names, as they were at a commit. What git can't read there (a repository
+    missing objects, a partial clone that can't fetch them) is left out: the review goes on without it."""
     import fnmatch
 
     here = git("rev-parse", "--show-prefix")  # this folder, from the top one
+    # review_cmd found the commit with git here: git answers this too, even inside .git or a bare repository
+    assert here is not None
     # from the top folder, wherever this runs; -z: names as they are (git quotes one with an accent otherwise)
     listed = git("ls-tree", "-r", "-z", "--name-only", "--full-tree", ref)
-    if here is None or listed is None:
+    if listed is None:  # the commit's folders can't be read
         return {}
     out: dict[str, str] = {}
     for pattern in cfg.test_globs():
@@ -1446,7 +1446,7 @@ def base_tests(cfg: Config, ref: str) -> dict[str, str]:
         for name in listed.split("\0"):
             if name and fnmatch.fnmatch(name, rel_pattern):
                 text = git("show", f"{ref}:{name}")
-                if text is not None:
+                if text is not None:  # (None: listed, and its text can't be read)
                     out[posixpath.relpath(name, here.strip() or ".")] = text  # named as read_tests names it
     return out
 
@@ -1713,7 +1713,8 @@ def ask(conn: pgwire.Connection, cmd: str, args: list[str], opts: dict[str, str]
                 if isinstance(lines, list)
                 else f"not found: {args[0]} {args[2] if len(args) > 2 else ''} isn't there, or {who} can't see it"
             )
-        elif cmd == "sql":
+        else:
+            assert cmd == "sql", cmd  # main asks only the questions above
             take_app_role(conn)
             rows, cols = conn.query_described(args[0], text=True)  # values as Postgres writes them, as psql shows them
             if cols:

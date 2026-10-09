@@ -161,6 +161,12 @@ out=$(python3 cli/rowstile_cli.py help errors 2>&1); rc=$?
 [ $rc -eq 0 ] && case "$out" in *AZ201*AZ709*) true;; *) false;; esac && ok "help errors lists the codes" || bad "help errors" "$rc ${out:0:80}"
 out=$(python3 cli/rowstile_cli.py help AZ999 2>&1); rc=$?
 [ $rc -eq 2 ] && [ "$out" = "rowstile help: no code AZ999 (rowstile help errors lists them)" ] && ok "help with a code that doesn't exist says so, exit 2" || bad "help AZ999" "$rc $out"
+# with its output closed (started by a service, or by pythonw on Windows, where there is no console): it answers by
+# its exit code all the same, and its errors still go to stderr
+python3 cli/rowstile_cli.py check example/docs.authz >&-; rc=$?
+out=$(python3 cli/rowstile_cli.py check "$T/bad.authz" 2>&1 >&-); rc2=$?
+[ $rc -eq 0 ] && [ $rc2 -eq 1 ] && case "$out" in "$T/bad.authz: parts/bad.authz line 3: "*) true;; *) false;; esac &&
+  ok "with its output closed: the same exit codes, and the mistake said on stderr" || bad "output closed" "$rc $rc2 $out"
 
 echo "-- questions to the database, as someone"
 want=$(PSQL -c "SET authz.user_id = '5'" -c "SELECT array_to_string(authz.perms('folder', 1), E'\n')")

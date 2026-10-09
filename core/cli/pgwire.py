@@ -72,10 +72,10 @@ def _parse_array(text: str) -> list[str | None]:
     if not text.startswith("{") or text.startswith("{{"):  # an array of arrays starts {{: an element never does
         raise ProtocolError(f"not an array of one dimension: {text!r}")
     out: list[str | None] = []
-    i, n = 1, len(text)
+    i = 1
     if text == "{}":
         return out
-    while i < n:
+    while True:  # to the closing brace, which ends every literal the server writes
         if text[i] == '"':
             i += 1
             buf = []

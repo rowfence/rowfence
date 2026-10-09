@@ -347,12 +347,13 @@ class Studio:
         return self.work(lambda db: {"mermaid": database.graph(*database.applied(db))})
 
     def diff(self, q: Query) -> Message:
-        if not self.policy_path or not self.read_policy:
+        path = self.policy_path
+        if not path or not self.read_policy:
             raise Problem("no policy file to compare with (rowstile.toml's policy)", 404)
         try:
-            text, files = self.read_policy(self.policy_path)
+            text, files = self.read_policy(path)
         except OSError as e:
-            raise Problem(f"{self.policy_path}: {e.strerror}", 404) from None
+            raise Problem(f"{path}: {e.strerror}", 404) from None
 
         def run(db: Db) -> Message:
             in_force, in_force_files = database.applied(db)
@@ -366,7 +367,10 @@ class Studio:
                     "rowstile review --db on a copy",
                     409,
                 )
-            rows = database.diff(db, text, files)
+            try:
+                rows = database.diff(db, text, files)
+            except RecursionError:  # said as the command says it
+                raise Problem(f"{path}: an expression in the policy is nested too deep to read") from None
             users: dict[tuple[str, str, str], set[str]] = {}
             ids: dict[tuple[str, str, str], set[str]] = {}
             for r in rows:
@@ -433,7 +437,8 @@ class Studio:
                         body.get("subject_relation") or "",
                     ],
                 )
-            elif what == "decide":
+            else:
+                assert what == "decide", what  # the API takes these three only
                 db.rows(
                     "SELECT 1 AS ok FROM authz.decide_request($1::bigint, $2, $3)",
                     [str(body["request"]), bool(body["approve"]), body.get("note")],
@@ -538,7 +543,8 @@ class Studio:
         ::1 first, where Studio doesn't listen (a page opened at localhost by hand is still answered)."""
         return f"http://127.0.0.1:{self.port}/?token={self.token}"
 
-    def start(self, background: bool = True) -> str:
+    def start(self) -> str:
+        """Serves in a thread of its own, which ends with the command; the address with the token."""
         studio = self
         gets: dict[str, Callable[[Query], Message]] = {
             "overview": studio.overview,
@@ -635,16 +641,13 @@ class Studio:
 
         self.server = Server(("127.0.0.1", self.port), Handler)
         self.port = self.server.server_address[1]
-        if background:
-            threading.Thread(target=self.server.serve_forever, daemon=True).start()
-        else:
-            self.server.serve_forever()
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
         return self.url()
 
     def stop(self) -> None:
-        if self.server:
-            self.server.shutdown()
-            self.server.server_close()
+        assert self.server is not None, "stop() after start()"
+        self.server.shutdown()
+        self.server.server_close()
 
 
 def as_object(value: Json) -> Message:
@@ -707,7 +710,7 @@ def serve(
         )
         sys.exit(1)
     try:
-        url = studio.start(background=True)
+        url = studio.start()
     except (OSError, OverflowError) as e:  # a port another program listens on, or one there can't be
         print(f"Studio didn't start ({e}): rowstile studio --port N for another port", file=sys.stderr)
         sys.exit(2)

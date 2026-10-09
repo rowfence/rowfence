@@ -367,6 +367,12 @@ Each release upgrades from the one before it. How releases are numbered and made
 - `rowstile prove`, `rowstile review` and `rowstile why` stopped with a Python traceback (`ValueError`) on a
   condition holding a whole number of more than 4300 digits, which Python won't read. Such a condition is the
   database's to read, as a subquery is.
+- `rowstile migrate` for Alembic took a merge revision's two parents for heads too when its `down_revision` is
+  laid out over several lines, as black and Ruff lay out a long tuple, and refused: "several heads: merge them
+  first". The merge is the head.
+- Studio's access diff of a policy file with an expression nested too deep to read answered with Python's words
+  (500), and a traceback where Studio runs (`rowstile dev`'s terminal): it says what the command says, "an
+  expression in the policy is nested too deep to read".
 
 ## 0.1.0 (alpha)
 
