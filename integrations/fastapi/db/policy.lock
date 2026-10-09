@@ -49,7 +49,7 @@ function authz.delete_role(p_role bigint) | 3b857912dc18 shape=7c823e86
 function authz.explain(p_type text, p_id bigint, p_perm text, p_user text) | e9fc8335de7a shape=0a2287cd
 function authz.explain(p_type text, p_id text, p_perm text, p_user text) | d7d0a4ccddaa shape=7d6de14b
 function authz.explain_rule(p_table text, p_command text, p_id text, p_row jsonb) | d2cee2cff1ba shape=1223ad2f
-function authz.lint() | 70eec7c426c5 shape=54cb1505
+function authz.lint() | c34f97869ddb shape=54cb1505
 function authz.list(p_type text, p_perm text, p_after text, p_limit int) | 6dfcb4009c12 shape=e713a7cc
 function authz.list_api_keys(p_principal_type text, p_principal_id text) | 9a3b10b6e81a shape=04dcffde
 function authz.list_links(p_type text, p_id bigint) | 740da2e3c91e shape=594bc19e
@@ -79,7 +79,7 @@ function authz.share(p_type text, p_id text, p_relation text, p_subject_type tex
 function authz.start_review(p_type text, p_id bigint, p_closes_at timestamptz) | ede0d805b2b1 shape=c2dba351
 function authz.start_review(p_type text, p_id text, p_closes_at timestamptz) | 102af3ff6add shape=879e84e5
 function authz.sync_members(p_type text, p_id text, p_relation text, p_members text[], OUT added int, OUT removed int) | 70552db6775a shape=c0ea90e1
-function authz.trim_audit(p_keep interval) | b857fd9cfd19 shape=59da80c2
+function authz.trim_audit(p_keep interval) | 9df54618f382 shape=59da80c2
 function authz.trim_changes(p_keep interval) | 99129c6c680e shape=5f059d1e
 function authz.uid() | 0f4adb0778a8 shape=12cd26c8
 function authz.unshare(p_type text, p_id bigint, p_relation text, p_subject_type text, p_subject_id bigint, p_subject_relation text) | 9fe75a510714 shape=55f81bb0
@@ -152,7 +152,7 @@ function authz_int."rel_audit_2_upd"() | c19cb7b57d0f shape=bdeab240
 function authz_int."service__me"() | ca69dedcea4f shape=d516704a
 function authz_int.actor() | 8bcfa089bd24 shape=36514ce1
 function authz_int.audit(p_action text, p_object_type text, p_object_id text, p_relation text, p_subject_type text, p_subject_id text, p_subject_relation text, p_detail jsonb) | dd7473f6f4fb shape=4b9c4b05
-function authz_int.audit_is_append_only() | 9841e693342c shape=6d19848d
+function authz_int.audit_is_append_only() | 8c5ce299a394 shape=6d19848d
 function authz_int.b64url(p text) | 5692fc0b5c1e shape=17f0c842
 function authz_int.caller_is_admin() | 33a690b7bfd1 shape=268ddaf7
 function authz_int.caller_role() | f21245c06777 shape=96997846
@@ -241,8 +241,8 @@ trigger "authz_rel_audit_2_del" ON "app"."project_services" | eec93f2a58ef
 trigger "authz_rel_audit_2_ins" ON "app"."project_services" | 2057a10b3243
 trigger "authz_rel_audit_2_trunc" ON "app"."project_services" | 8c26b1dd24c6
 trigger "authz_rel_audit_2_upd" ON "app"."project_services" | 60cbda3754e3
-trigger authz_audit_append_only ON authz.audit | cf002ee7a4e4
-trigger authz_audit_no_truncate ON authz.audit | 770f364384d3
+trigger authz_audit_append_only ON authz.audit | b7dda6de8867
+trigger authz_audit_no_truncate ON authz.audit | fa619d666219
 trigger authz_grant_audit ON authz.shares | fd0f4207936d
 trigger authz_role_audit ON authz.roles | d4799a1152c8
 trigger authz_role_gone ON authz.roles | c1f1e6ba7c5c

@@ -51,7 +51,7 @@ function authz.delete_role(p_role bigint) | 3b857912dc18 shape=7c823e86
 function authz.explain(p_type text, p_id integer, p_perm text, p_user text) | 1409a3a04a15 shape=7d31b532
 function authz.explain(p_type text, p_id text, p_perm text, p_user text) | 922d982d303f shape=7d6de14b
 function authz.explain_rule(p_table text, p_command text, p_id text, p_row jsonb) | d2cee2cff1ba shape=1223ad2f
-function authz.lint() | a367877621cc shape=54cb1505
+function authz.lint() | 883a7bdd366f shape=54cb1505
 function authz.list(p_type text, p_perm text, p_after text, p_limit int) | 6d0adb3f46d0 shape=e713a7cc
 function authz.list_api_keys(p_principal_type text, p_principal_id text) | 9a3b10b6e81a shape=04dcffde
 function authz.list_links(p_type text, p_id integer) | cec8e40d450f shape=92b36157
@@ -81,7 +81,7 @@ function authz.share(p_type text, p_id text, p_relation text, p_subject_type tex
 function authz.start_review(p_type text, p_id bigint, p_closes_at timestamptz) | ede0d805b2b1 shape=c2dba351
 function authz.start_review(p_type text, p_id text, p_closes_at timestamptz) | 102af3ff6add shape=879e84e5
 function authz.sync_members(p_type text, p_id text, p_relation text, p_members text[], OUT added int, OUT removed int) | aeac8f9ae7f2 shape=c0ea90e1
-function authz.trim_audit(p_keep interval) | b857fd9cfd19 shape=59da80c2
+function authz.trim_audit(p_keep interval) | 9df54618f382 shape=59da80c2
 function authz.trim_changes(p_keep interval) | 99129c6c680e shape=5f059d1e
 function authz.uid() | fb2fb32b221e shape=989761a7
 function authz.unshare(p_type text, p_id bigint, p_relation text, p_subject_type text, p_subject_id bigint, p_subject_relation text) | 9fe75a510714 shape=55f81bb0
@@ -162,7 +162,7 @@ function authz_int."user__forget"() | e8dca5ccbdb8 shape=4753fdb6
 function authz_int."user__forget_id"() | 22b466287ca9 shape=d0d8b00d
 function authz_int.actor() | 8bcfa089bd24 shape=36514ce1
 function authz_int.audit(p_action text, p_object_type text, p_object_id text, p_relation text, p_subject_type text, p_subject_id text, p_subject_relation text, p_detail jsonb) | dd7473f6f4fb shape=4b9c4b05
-function authz_int.audit_is_append_only() | 9841e693342c shape=6d19848d
+function authz_int.audit_is_append_only() | 8c5ce299a394 shape=6d19848d
 function authz_int.b64url(p text) | 5692fc0b5c1e shape=17f0c842
 function authz_int.caller_is_admin() | 33a690b7bfd1 shape=268ddaf7
 function authz_int.caller_role() | f21245c06777 shape=96997846
@@ -259,8 +259,8 @@ trigger "authz_user_forget_del" ON "app"."users" | 63d7b93c4cee
 trigger "authz_user_forget_id" ON "app"."users" | 0841800077c1
 trigger "authz_user_forget_moved" ON "app"."users" | f687a9d3607f
 trigger "authz_user_forget_trunc" ON "app"."users" | bffa33c0fe7f
-trigger authz_audit_append_only ON authz.audit | cf002ee7a4e4
-trigger authz_audit_no_truncate ON authz.audit | 770f364384d3
+trigger authz_audit_append_only ON authz.audit | b7dda6de8867
+trigger authz_audit_no_truncate ON authz.audit | fa619d666219
 trigger authz_grant_audit ON authz.shares | fd0f4207936d
 trigger authz_role_audit ON authz.roles | d4799a1152c8
 trigger authz_role_gone ON authz.roles | c1f1e6ba7c5c
