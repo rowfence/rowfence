@@ -99,21 +99,27 @@ class _SignIn:
         self.app, self.user = app, user
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if scope["type"] != "http" or self.user is None:
+        if scope["type"] != "http":
             return await self.app(scope, receive, send)
-        try:
-            got = self.user(Request(scope, receive))
-            # user(request) gave who, or an awaitable of who (ty sees what it awaits as an object)
-            who = cast("Who", await got) if inspect.isawaitable(got) else got
-        except HTTPException as e:  # a bad token, say: this runs outside FastAPI's own handling
-            answer = JSONResponse({"detail": e.detail}, status_code=e.status_code, headers=e.headers)
-            return await answer(scope, receive, send)
-        token, writes = _current.set(Principal.of(who)), _writes.set([])
+        token = None
+        if self.user is not None:
+            try:
+                got = self.user(Request(scope, receive))
+                # user(request) gave who, or an awaitable of who (ty sees what it awaits as an object)
+                who = cast("Who", await got) if inspect.isawaitable(got) else got
+            except HTTPException as e:  # a bad token, say: this runs outside FastAPI's own handling
+                answer = JSONResponse({"detail": e.detail}, status_code=e.status_code, headers=e.headers)
+                return await answer(scope, receive, send)
+            token = _current.set(Principal.of(who))
+        # the request's own writes, with user= or not: why_stale answers about them, also from a sync endpoint's
+        # worker thread, which sees this list
+        writes = _writes.set([])
         try:
             await self.app(scope, receive, send)
         finally:
             _writes.reset(writes)
-            _current.reset(token)
+            if token is not None:
+                _current.reset(token)
 
 
 def _json(problem: Problem) -> JSONResponse:
