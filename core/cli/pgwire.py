@@ -1,7 +1,9 @@
 """A small PostgreSQL client (protocol 3, extended query protocol, text results), standard
 library only. Enough for the rowstile command and tests: trust, password, MD5 and
 SCRAM-SHA-256 authentication (bound to the TLS channel when the server offers it, as channel_binding
-says); TCP (with TLS, as sslmode says) or Unix sockets.
+says, and only the methods require_auth allows); TCP (with TLS, as sslmode says, the server's certificate checked
+against the root certificate libpq would use) or Unix sockets. A connection string's settings are libpq's: each is
+honoured as libpq honours it, left alone where that changes nothing checked, or refused.
 
     conn = connect(host="/var/run/postgresql", user="app_user", password="...", database="app")
     conn.query("SELECT authz.can($1, $2, $3)", ["file", "11", "view"])   # -> [(True,)]
@@ -23,7 +25,7 @@ import sys
 import unicodedata
 import urllib.parse
 from collections.abc import Callable, Sequence
-from typing import TypeAlias, TypedDict
+from typing import NamedTuple, TypeAlias, TypedDict
 
 # what a column holds, decoded from its text form: NULL, a boolean, an integer, text, an array, or JSON
 Value: TypeAlias = "None | bool | int | float | str | list[Value] | dict[str, Value]"
@@ -40,8 +42,17 @@ class ConnectArgs(TypedDict):
     options: str | None
     timeout: float
     sslmode: str  # disable | allow | prefer | require | verify-ca | verify-full
-    sslrootcert: str | None  # the certificates verify-ca and verify-full trust (default: the system's)
+    # the root certificates the server's certificate is checked against: a file, or system (the system's); None:
+    # root.crt in libpq's folder, if it is there (then require checks against it too, as verify-ca)
+    sslrootcert: str | None
+    sslcrl: str | None  # revoked certificates, checked with a root certificate file (None: libpq's root.crl)
+    sslcrldir: str | None
+    ssl_min_protocol_version: str | None  # TLSv1.2 (and below: the command never goes below it) or TLSv1.3
+    ssl_max_protocol_version: str | None
     channel_binding: str  # disable | prefer | require
+    require_auth: str | None  # the ways the server may ask for the password, as libpq reads them
+    target_session_attrs: str  # any | read-write | read-only | primary | standby | prefer-standby
+    settings: dict[str, str]  # sent with the start-up: what PGDATESTYLE, PGTZ and PGGEQO set, as libpq sends them
 
 
 class PgError(Exception):
@@ -144,6 +155,8 @@ class Connection:
         database: str,
         options: str | None,
         channel_binding: str = "prefer",
+        require_auth: str | None = None,
+        settings: dict[str, str] | None = None,
     ) -> None:
         self.sock = sock
         self.buf = b""
@@ -154,7 +167,7 @@ class Connection:
         self.on_notice: Callable[[Fields], None] | None = None  # called with each NOTICE / WARNING the server sends
         self.address: tuple[str, int] | None = None  # where connect() went, for cancel()
         self.backend: tuple[int, int] | None = None  # this session's process id and key, for cancel()
-        self._startup(user, password, database, options, channel_binding)
+        self._startup(user, password, database, options, channel_binding, _auth_rules(require_auth), settings or {})
 
     # --- framing ----------------------------------------------------------
     def _send(self, kind: bytes, payload: bytes = b"") -> None:
@@ -210,10 +223,23 @@ class Connection:
 
     # --- start-up and authentication --------------------------------------
     def _startup(
-        self, user: str, password: str | None, database: str, options: str | None, channel_binding: str = "prefer"
+        self,
+        user: str,
+        password: str | None,
+        database: str,
+        options: str | None,
+        channel_binding: str = "prefer",
+        rules: AuthRules | None = None,
+        settings: dict[str, str] | None = None,
     ) -> None:
         body = struct.pack("!i", 196608)
-        params = {"user": user, "database": database, "client_encoding": "UTF8", "application_name": "rowstile"}
+        params = {
+            **(settings or {}),
+            "user": user,
+            "database": database,
+            "client_encoding": "UTF8",
+            "application_name": "rowstile",
+        }
         if options:
             params["options"] = options
         for k, v in params.items():
@@ -222,29 +248,29 @@ class Connection:
         self.sock.sendall(struct.pack("!i", len(body) + 4) + body)
         scram: _Scram | None = None
         bound = False  # signed in with SCRAM bound to this TLS channel, the server's proof checked
+        done = False  # this client did its part: sent the password, or checked the server's SCRAM proof
         while True:
             kind, payload = self._read()
             if kind == b"R":
                 code = struct.unpack("!i", payload[:4])[0]
+                # each request is checked before anything is answered to it (libpq's check_expected_areq)
+                _expected(code, rules, channel_binding, bound, done)
                 if code == 0:
-                    if channel_binding == "require" and not bound:
-                        raise ProtocolError(
-                            "the server signed this connection in without channel binding, and "
-                            "channel_binding=require asks for it"
-                        )
                     continue
-                if password is None:
+                if code in (3, 5, 10) and password is None:
                     raise ProtocolError("the server asks for a password")
-                if code == 3:
+                if code == 3 and password is not None:
                     self._send(b"p", self._cstr(password))
-                elif code == 5:
+                    done = True
+                elif code == 5 and password is not None:
                     salt = payload[4:8]
                     inner = hashlib.md5(password.encode() + user.encode()).hexdigest()
                     outer = hashlib.md5(inner.encode() + salt).hexdigest()
                     self._send(b"p", self._cstr("md5" + outer))
-                elif code == 10:
+                    done = True
+                elif code == 10 and password is not None:
                     mechs = [m.decode() for m in payload[4:].split(b"\0") if m]
-                    scram = _Scram(password, *self._binding(mechs, channel_binding))
+                    scram = _Scram(password, *self._binding(mechs, channel_binding, rules))
                     first = scram.client_first().encode()
                     self._send(b"p", self._cstr(scram.mechanism) + struct.pack("!i", len(first)) + first)
                 elif code == 11 and scram is not None:
@@ -252,6 +278,7 @@ class Connection:
                 elif code == 12 and scram is not None:
                     scram.verify(payload[4:].decode())
                     bound = scram.binding is not None
+                    done = True
                 else:
                     raise ProtocolError(f"unsupported authentication method {code}")
             elif kind == b"E":
@@ -266,32 +293,39 @@ class Connection:
                 return
             # N (notice): ignored
 
-    def _binding(self, mechs: list[str], channel_binding: str) -> tuple[str, bytes | None]:
+    def _binding(self, mechs: list[str], channel_binding: str, rules: AuthRules | None) -> tuple[str, bytes | None]:
         """How SCRAM starts on this connection (its GS2 header), and what binds it to the TLS channel: the hash
         of the server's certificate (tls-server-end-point, RFC 5929), when the server offers SCRAM-SHA-256-PLUS
         and channel_binding isn't disable. A server in the middle has another certificate, and then the
-        password exchange it passes on fails."""
+        password exchange it passes on fails. Chosen as libpq's pg_SASL_init chooses, and refused as it refuses,
+        before anything is sent."""
         tls = isinstance(self.sock, ssl.SSLSocket)
-        data = None
-        if tls and channel_binding != "disable" and "SCRAM-SHA-256-PLUS" in mechs:
-            data = _end_point(self.sock)
-        if data is not None:
-            return "p=tls-server-end-point,,", data
-        if channel_binding == "require":
-            raise ProtocolError(
-                "channel_binding=require needs TLS (sslmode=require or stronger)"
-                if not tls
-                else "the server doesn't offer channel binding (SCRAM-SHA-256-PLUS), and "
-                "channel_binding=require asks for it"
-                if "SCRAM-SHA-256-PLUS" not in mechs
-                else "the server's certificate is signed in a way channel binding has no hash for, "
-                "and channel_binding=require asks for it"
-            )
-        if "SCRAM-SHA-256" not in mechs:
+        if channel_binding == "require" and not tls:
+            raise ProtocolError("channel binding required, but SSL not in use")
+        if "SCRAM-SHA-256-PLUS" in mechs and not tls:
+            # a server offers it only over TLS: offered here, it belongs to a TLS connection other than this one
+            raise ProtocolError("server offered SCRAM-SHA-256-PLUS authentication over a non-SSL connection")
+        plus = tls and channel_binding != "disable" and "SCRAM-SHA-256-PLUS" in mechs
+        if not plus and "SCRAM-SHA-256" not in mechs:
             raise ProtocolError(f"unsupported SASL mechanisms {mechs}")
+        if rules is not None and not rules.scram:
+            name = "SCRAM-SHA-256-PLUS" if plus else "SCRAM-SHA-256"
+            raise ProtocolError(
+                f'authentication method requirement "{rules.text}" failed: server requested {name} authentication'
+            )
+        if channel_binding == "require" and not plus:
+            raise ProtocolError(
+                "channel binding is required, but server did not offer an authentication method that supports "
+                "channel binding"
+            )
+        if plus:
+            data = _end_point(self.sock)
+            if data is None:
+                raise ProtocolError("the server's certificate is signed in a way channel binding has no hash for")
+            return "p=tls-server-end-point,,", data
         # y: this client could have bound the channel and the server didn't offer to (the server checks that it
         # really didn't); n: it couldn't, or was told not to
-        return ("y,," if tls and channel_binding != "disable" and "SCRAM-SHA-256-PLUS" not in mechs else "n,,"), None
+        return ("y,," if tls and channel_binding != "disable" else "n,,"), None
 
     # --- queries ------------------------------------------------------------
     def query(self, sql: str, args: Sequence[object] = ()) -> list[tuple[Value, ...]]:
@@ -537,6 +571,84 @@ def _end_point(sock: socket.socket) -> bytes | None:
     return hashlib.new(name, cert).digest() if cert and name else None
 
 
+# what the server asks for, by the code of its authentication request: as libpq describes it in a refusal
+ASKED = {
+    3: "server requested a cleartext password",
+    5: "server requested a hashed password",
+    7: "server requested GSSAPI authentication",
+    8: "server requested GSSAPI authentication",
+    9: "server requested SSPI authentication",
+    10: "server requested SASL authentication",
+    11: "server requested SASL authentication",
+    12: "server requested SASL authentication",
+}
+# require_auth's methods, by the requests each allows (SCRAM and OAuth are SASL's mechanisms: below)
+METHODS = {"password": {3}, "md5": {5}, "gss": {7, 8}, "sspi": {8, 9}, "scram-sha-256": set(), "oauth": set()}
+
+
+class AuthRules(NamedTuple):
+    """require_auth, read: which authentication requests the server may make."""
+
+    text: str  # as given, for a refusal
+    codes: frozenset[int]  # the requests allowed
+    scram: bool  # SCRAM-SHA-256 allowed (the SASL mechanism this client does)
+    required: bool  # the server must ask for something: it may not sign the client in unasked (trust)
+
+
+def _auth_rules(text: str | None) -> AuthRules | None:
+    """require_auth as libpq reads it: the methods the server may ask for (password, md5, gss, sspi,
+    scram-sha-256, oauth, and none for signing in unasked), or, each after a !, those it may not."""
+    if not text:
+        return None
+    parts = text.split(",")
+    negated = parts[0].startswith("!")
+    codes: set[int] = set(ASKED) if negated else set()
+    mechs: set[str] = {"scram-sha-256", "oauth"} if negated else set()
+    required = not negated
+    seen: set[str] = set()
+    for part in parts:
+        method = part.removeprefix("!")
+        if part.startswith("!") != negated:
+            raise ValueError(
+                f'negative require_auth method "{part}" cannot be mixed with non-negative methods'
+                if negated is False
+                else f'require_auth method "{part}" cannot be mixed with negative methods'
+            )
+        if method not in METHODS and method != "none":
+            raise ValueError(f'invalid require_auth value: "{method}"')
+        if method in seen:
+            raise ValueError(f'require_auth method "{part}" is specified more than once')
+        seen.add(method)
+        if method == "none":
+            required = negated  # none: the server may sign in unasked; !none: it may not
+        elif METHODS[method]:
+            codes = codes - METHODS[method] if negated else codes | METHODS[method]
+        else:
+            mechs = mechs - {method} if negated else mechs | {method}
+    codes = codes | {10, 11, 12} if mechs else codes - {10, 11, 12}
+    return AuthRules(text, frozenset(codes), "scram-sha-256" in mechs, required)
+
+
+def _expected(code: int, rules: AuthRules | None, channel_binding: str, bound: bool, done: bool) -> None:
+    """Refuses an authentication request the settings don't allow, before anything is answered to it, as libpq's
+    check_expected_areq: require_auth's methods, and channel_binding=require, which takes only SCRAM bound to the
+    TLS channel. Code 0 is the server saying the client is signed in."""
+    if rules is not None:
+        if code == 0 and rules.required and not done:
+            reason = "server did not complete authentication"
+        elif code != 0 and code not in rules.codes:
+            reason = ASKED.get(code, "server requested an unknown authentication type")
+        else:
+            reason = None
+        if reason:
+            raise ProtocolError(f'authentication method requirement "{rules.text}" failed: {reason}')
+    if channel_binding == "require" and code not in (10, 11, 12):
+        if code != 0:
+            raise ProtocolError("channel binding required but not supported by server's authentication request")
+        if not bound:
+            raise ProtocolError("channel binding required, but server authenticated client without channel binding")
+
+
 class _Scram:
     def __init__(self, password: str, header: str = "n,,", binding: bytes | None = None) -> None:
         self.password = _saslprep(password).encode()
@@ -576,28 +688,130 @@ class _Scram:
 
 SSLMODES = ("disable", "allow", "prefer", "require", "verify-ca", "verify-full")
 CHANNEL_BINDINGS = ("disable", "prefer", "require")
-# what a connection string may say, and where it goes; anything else in a keyword string is refused
-KEYS = {
-    "host": "host",
-    "port": "port",
-    "user": "user",
-    "password": "password",
-    "dbname": "database",
-    "sslmode": "sslmode",
-    "sslrootcert": "sslrootcert",
-    "options": "options",
-    "connect_timeout": "timeout",
-    "channel_binding": "channel_binding",
+TARGETS = ("any", "read-write", "read-only", "primary", "standby", "prefer-standby")
+# TLS versions as libpq names them (in any case). This client never goes below TLSv1.2: a minimum below it is
+# taken as TLSv1.2, which only refuses more servers; a maximum below it is refused
+TLS_VERSIONS = {"tlsv1": 10, "tlsv1.1": 11, "tlsv1.2": 12, "tlsv1.3": 13}
+
+# libpq's connection settings (libpq 18), each with the variable that gives it where the connection string doesn't
+LIBPQ: dict[str, str | None] = {
+    "host": "PGHOST",
+    "hostaddr": "PGHOSTADDR",
+    "port": "PGPORT",
+    "dbname": "PGDATABASE",
+    "user": "PGUSER",
+    "password": "PGPASSWORD",
+    "passfile": "PGPASSFILE",
+    "require_auth": "PGREQUIREAUTH",
+    "channel_binding": "PGCHANNELBINDING",
+    "connect_timeout": "PGCONNECT_TIMEOUT",
+    "client_encoding": "PGCLIENTENCODING",
+    "options": "PGOPTIONS",
+    "application_name": "PGAPPNAME",
+    "fallback_application_name": None,
+    "keepalives": None,
+    "keepalives_idle": None,
+    "keepalives_interval": None,
+    "keepalives_count": None,
+    "tcp_user_timeout": None,
+    "replication": None,
+    "gssencmode": "PGGSSENCMODE",
+    "sslmode": "PGSSLMODE",
+    "sslnegotiation": "PGSSLNEGOTIATION",
+    "sslcompression": "PGSSLCOMPRESSION",
+    "sslcert": "PGSSLCERT",
+    "sslkey": "PGSSLKEY",
+    "sslcertmode": "PGSSLCERTMODE",
+    "sslpassword": None,
+    "sslrootcert": "PGSSLROOTCERT",
+    "sslcrl": "PGSSLCRL",
+    "sslcrldir": "PGSSLCRLDIR",
+    "sslsni": "PGSSLSNI",
+    "requirepeer": "PGREQUIREPEER",
+    "ssl_min_protocol_version": "PGSSLMINPROTOCOLVERSION",
+    "ssl_max_protocol_version": "PGSSLMAXPROTOCOLVERSION",
+    "min_protocol_version": "PGMINPROTOCOLVERSION",
+    "max_protocol_version": "PGMAXPROTOCOLVERSION",
+    "krbsrvname": "PGKRBSRVNAME",
+    "gsslib": "PGGSSLIB",
+    "gssdelegation": "PGGSSDELEGATION",
+    "target_session_attrs": "PGTARGETSESSIONATTRS",
+    "load_balance_hosts": "PGLOADBALANCEHOSTS",
+    "service": "PGSERVICE",
+    "scram_client_key": None,
+    "scram_server_key": None,
+    "oauth_issuer": None,
+    "oauth_client_id": None,
+    "oauth_client_secret": None,
+    "oauth_scope": None,
+    "sslkeylogfile": None,
 }
-# options that would change what the connection is, which this client can't do: never dropped in silence
+# what this client does with each. Honoured: done as libpq does it
+HONOURED = frozenset(
+    {
+        "host",
+        "port",
+        "dbname",
+        "user",
+        "password",
+        "options",
+        "connect_timeout",
+        "sslmode",
+        "sslrootcert",
+        "sslcrl",
+        "sslcrldir",
+        "ssl_min_protocol_version",
+        "ssl_max_protocol_version",
+        "channel_binding",
+        "require_auth",
+        "target_session_attrs",
+    }
+)
+# left alone: what they change is neither what is checked nor where the command connects
+IGNORED = {
+    "application_name": "the command names its sessions rowstile",
+    "fallback_application_name": "the command names its sessions rowstile",
+    "client_encoding": "the command reads and writes UTF-8 itself",
+    "keepalives": "TCP's own timers",
+    "keepalives_idle": "TCP's own timers",
+    "keepalives_interval": "TCP's own timers",
+    "keepalives_count": "TCP's own timers",
+    "tcp_user_timeout": "TCP's own timers",
+    "load_balance_hosts": "one host leaves nothing to balance",
+    "sslcompression": "TLS compression is off in OpenSSL",
+    "sslsni": "the name sent in the TLS handshake is a hint for routing, which nothing checks",
+    "sslpassword": "a client key's passphrase, and the command uses no client key",
+    "sslkeylogfile": "a log of the TLS keys, for debugging",
+    "krbsrvname": "GSS sign-in, which the command doesn't do",
+    "gsslib": "GSS sign-in, which the command doesn't do",
+    "gssdelegation": "GSS sign-in, which the command doesn't do",
+    "max_protocol_version": "the command speaks protocol 3.0, which no maximum excludes",
+}
+# taken with these values, which are what the command does anyway; any other is refused
+ONLY = {
+    "gssencmode": (("disable", "prefer"), "GSS encryption"),
+    "sslcertmode": (("disable", "allow"), "a client certificate"),
+    "sslnegotiation": (("postgres",), "TLS without asking the server first"),
+    "min_protocol_version": (("3.0",), "a protocol version above 3.0"),
+    "replication": (("0", "false", "off", "no"), "a replication connection"),
+}
+# never done: refused when given
 REFUSED = {
+    "service": "connection services",
+    "hostaddr": "a host address apart from its name",
     "sslcert": "client certificates",
     "sslkey": "client certificates",
-    "service": "connection services",
-    "passfile": "password files",
-    "gssencmode": "GSS encryption",
     "requirepeer": "requirepeer",
+    "scram_client_key": "SCRAM keys in place of the password",
+    "scram_server_key": "SCRAM keys in place of the password",
+    "oauth_issuer": "OAuth",
+    "oauth_client_id": "OAuth",
+    "oauth_client_secret": "OAuth",
+    "oauth_scope": "OAuth",
 }
+# and passfile, refused only when no password is given: libpq reads the file only then
+# what libpq sends with its start-up from these variables, as the session's settings
+STARTUP = {"PGDATESTYLE": "datestyle", "PGTZ": "timezone", "PGGEQO": "geqo"}
 BLANKS = " \t\n\r\f\v"  # what separates the settings of a keyword string (C's isspace, as libpq reads it)
 QUOTING = (
     "put a value with spaces in single quotes, and a quote or a backslash in a value after a backslash "
@@ -643,18 +857,19 @@ def _keywords(text: str) -> list[tuple[str, str]]:
 
 def parse_dsn(text: str | None) -> ConnectArgs:
     """connect() arguments from "host=... port=... user=... password=... dbname=... sslmode=..." (read as libpq
-    reads it) or a postgresql:// URL (its ?options too), with PGHOST, PGPORT, PGUSER, PGPASSWORD, PGDATABASE,
-    PGOPTIONS, PGSSLMODE, PGSSLROOTCERT and PGCHANNELBINDING for whatever is left out. Raises ValueError for a
-    setting it can't honour: an unknown one in a keyword string, one of REFUSED, or several hosts. A URL's other
-    options (an ORM's own: ?schema=, ?pgbouncer=) are left to whoever they are for."""
+    reads it) or a postgresql:// URL (its ?options too), with libpq's variables (PGHOST, PGSSLMODE, ...) for
+    whatever is left out. Each of libpq's settings is honoured as libpq honours it, left alone where that changes
+    nothing checked, or refused (ValueError, naming it); so are several hosts, and a setting libpq doesn't have, in
+    a keyword string. A URL's other options (an ORM's own: ?schema=, ?pgbouncer=) are left to whoever they are
+    for."""
     out: dict[str, str] = {}
 
     def setting(k: str, v: str, strict: bool) -> None:
-        if k in REFUSED:
-            raise ValueError(f"the connection asks for {REFUSED[k]} ({k}={v}), which the rowstile command doesn't do")
-        if k in KEYS:
-            out[KEYS[k]] = v
-        elif strict and k not in ("application_name", "target_session_attrs"):
+        if k == "requiressl":  # libpq's old way to say sslmode
+            k, v = "sslmode", "require" if v.startswith("1") else "prefer"
+        if k in LIBPQ:
+            out[k] = v
+        elif strict:
             raise ValueError(f"unknown connection setting '{k}' (use host, port, user, password, dbname, sslmode)")
 
     def one(hosts: str) -> str:
@@ -679,7 +894,7 @@ def parse_dsn(text: str | None) -> ConnectArgs:
             ("port", port),
             ("user", u.username),
             ("password", u.password),
-            ("database", u.path.lstrip("/") or None),
+            ("dbname", u.path.lstrip("/") or None),
         ):
             if v is not None:
                 out[k] = urllib.parse.unquote(v) if isinstance(v, str) else str(v)
@@ -688,33 +903,85 @@ def parse_dsn(text: str | None) -> ConnectArgs:
         text = ""
     for k, v in _keywords(text or ""):
         setting(k, v, strict=True)
-    host = one(out.setdefault("host", os.environ.get("PGHOST", "/var/run/postgresql")))
-    out.setdefault("port", os.environ.get("PGPORT", "5432"))
-    user = out.setdefault("user", os.environ.get("PGUSER", "postgres"))
-    password = out.get("password", os.environ.get("PGPASSWORD"))
-    sslmode = out.get("sslmode") or os.environ.get("PGSSLMODE") or "prefer"
+
+    def given(k: str) -> str | None:
+        """A setting as libpq takes it: from the string, else from its variable; empty is not given."""
+        var = LIBPQ[k]
+        return (out[k] if k in out else os.environ.get(var) if var else None) or None
+
+    def refused(k: str, what: str, then: str = "") -> ValueError:
+        how = f"{k}={out[k]}" if k in out else f"{LIBPQ[k]}={os.environ.get(LIBPQ[k] or '')}"
+        return ValueError(f"the connection asks for {what} ({how}), which the rowstile command doesn't do{then}")
+
+    for k, what in REFUSED.items():
+        if given(k):
+            raise refused(k, what)
+    for k, (values, what) in ONLY.items():
+        value = given(k)
+        if value and value not in values:
+            raise refused(k, what)
+    password = given("password")
+    if given("passfile") and not password:
+        raise refused("passfile", "a password file", ": give the password in the connection string or PGPASSWORD")
+    sslrootcert = given("sslrootcert")
+    sslmode = given("sslmode")
+    if sslmode is None and os.environ.get("PGREQUIRESSL", "").startswith("1"):
+        sslmode = "require"  # libpq's old variable, where nothing else says
+    if sslmode is None:
+        sslmode = "verify-full" if sslrootcert == "system" else "prefer"  # as libpq: the system's roots, checked
     if sslmode not in SSLMODES:
         raise ValueError(f"sslmode={sslmode}: one of {', '.join(SSLMODES)}")
-    channel_binding = out.get("channel_binding") or os.environ.get("PGCHANNELBINDING") or "prefer"
+    if sslrootcert == "system" and sslmode != "verify-full":
+        raise ValueError(f'weak sslmode "{sslmode}" may not be used with sslrootcert=system (use "verify-full")')
+    channel_binding = given("channel_binding") or "prefer"
     if channel_binding not in CHANNEL_BINDINGS:
         raise ValueError(f"channel_binding={channel_binding}: one of {', '.join(CHANNEL_BINDINGS)}")
-    if not out["port"].isdigit() or not out.get("timeout", "10").isdigit():
+    require_auth = given("require_auth")
+    _auth_rules(require_auth)  # read now, so that a mistake in it is said before connecting
+    target = given("target_session_attrs") or "any"
+    if target not in TARGETS:
+        raise ValueError(f'invalid target_session_attrs value: "{target}"')
+    tls = {k: given(k) for k in ("ssl_min_protocol_version", "ssl_max_protocol_version")}
+    for k, version in tls.items():
+        if version and version.lower() not in TLS_VERSIONS:
+            raise ValueError(f'invalid "{k}" value: "{version}"')
+    low, high = (TLS_VERSIONS[(v or "TLSv1.2").lower()] for v in tls.values())
+    if tls["ssl_max_protocol_version"] and high < low:
+        raise ValueError("invalid SSL protocol version range")
+    if tls["ssl_max_protocol_version"] and high < 12:
+        raise refused("ssl_max_protocol_version", "TLS older than TLSv1.2")
+    host = one(given("host") or "/var/run/postgresql")
+    port = given("port") or "5432"
+    user = given("user") or "postgres"
+    timeout = given("connect_timeout") or "10"
+    if not port.isdigit() or not timeout.isdigit():
         raise ValueError(
-            f"the port and connect_timeout are numbers, not {out['port']!r}"
-            if not out["port"].isdigit()
-            else f"connect_timeout is a number of seconds, not {out['timeout']!r}"
+            f"the port and connect_timeout are numbers, not {port!r}"
+            if not port.isdigit()
+            else f"connect_timeout is a number of seconds, not {timeout!r}"
         )
     return {
         "host": host,
-        "port": int(out["port"]),
+        "port": int(port),
         "user": user,
         "password": password,
-        "database": out.get("database") or os.environ.get("PGDATABASE", user),
-        "options": out.get("options") or os.environ.get("PGOPTIONS"),
-        "timeout": float(out.get("timeout", "10")) or 10,
+        "database": given("dbname") or user,
+        "options": given("options"),
+        "timeout": float(timeout) or 10,
         "sslmode": sslmode,
-        "sslrootcert": out.get("sslrootcert") or os.environ.get("PGSSLROOTCERT"),
+        "sslrootcert": sslrootcert,
+        "sslcrl": given("sslcrl"),
+        "sslcrldir": given("sslcrldir"),
+        "ssl_min_protocol_version": tls["ssl_min_protocol_version"],
+        "ssl_max_protocol_version": tls["ssl_max_protocol_version"],
         "channel_binding": channel_binding,
+        "require_auth": require_auth,
+        "target_session_attrs": target,
+        "settings": {
+            name: value
+            for var, name in STARTUP.items()
+            if (value := os.environ.get(var)) and value.lower() != "default"
+        },
     }
 
 
@@ -731,9 +998,39 @@ def _socket(host: str, port: int, timeout: float) -> socket.socket:
     return sock
 
 
-def _tls(sock: socket.socket, host: str, sslmode: str, sslrootcert: str | None) -> socket.socket:
-    """The socket under TLS, as sslmode says: asked for (SSLRequest), and taken if the server has it. require and
-    stronger refuse a server without it; verify-ca checks the server's certificate, verify-full its name too."""
+def _libpq_file(name: str) -> str | None:
+    """A file in libpq's own folder, where it looks for root.crt and root.crl: ~/.postgresql (HOME, else the
+    user's own folder), or %APPDATA%\\postgresql on Windows. None: there is no folder to look in."""
+    if sys.platform == "win32":
+        appdata = os.environ.get("APPDATA")
+        return os.path.join(appdata, "postgresql", name) if appdata else None
+    home = os.environ.get("HOME")
+    if not home:
+        import pwd
+
+        try:
+            home = pwd.getpwuid(os.geteuid()).pw_dir
+        except KeyError:
+            return None
+    return os.path.join(home, ".postgresql", name)
+
+
+def _tls(
+    sock: socket.socket,
+    host: str,
+    sslmode: str,
+    sslrootcert: str | None,
+    sslcrl: str | None = None,
+    sslcrldir: str | None = None,
+    minimum: str | None = None,
+    maximum: str | None = None,
+) -> socket.socket:
+    """The socket under TLS, as sslmode says, as libpq does it: asked for (SSLRequest), and taken if the server has
+    it; require and stronger refuse a server without it. The server's certificate is checked against the root
+    certificate libpq would use: sslrootcert, else root.crt in libpq's folder (require then checks it too, as
+    verify-ca), or the system's with sslrootcert=system. verify-ca and verify-full go on only with one, and
+    verify-full checks the server's name too. With a root certificate file, a certificate sslcrl, sslcrldir (else
+    root.crl in libpq's folder) says is revoked is refused."""
     sock.sendall(struct.pack("!ii", 8, 80877103))
     answer = sock.recv(1)
     if answer == b"N":
@@ -742,18 +1039,63 @@ def _tls(sock: socket.socket, host: str, sslmode: str, sslrootcert: str | None) 
         return sock
     if answer != b"S":
         raise ProtocolError("the server didn't answer as Postgres does (is this the right host and port?)")
-    if sslmode in ("verify-ca", "verify-full"):
-        context = ssl.create_default_context(cafile=sslrootcert)
-        context.check_hostname = sslmode == "verify-full"
-    else:
-        context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-        context.check_hostname = False
-        context.verify_mode = ssl.CERT_NONE  # encrypted, the server not checked: what require means
-    context.minimum_version = ssl.TLSVersion.TLSv1_2  # Python's default since 3.10, said for code scanners
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    context.check_hostname = False
+    context.verify_mode = ssl.CERT_NONE  # encrypted, the server not checked: require without a root certificate
+    root = sslrootcert or _libpq_file("root.crt")
+    if root == "system":
+        context.verify_mode = ssl.CERT_REQUIRED
+        context.load_default_certs()
+    elif root and os.path.exists(root):
+        try:
+            context.load_verify_locations(cafile=root)
+        except (OSError, ssl.SSLError) as e:
+            raise ProtocolError(f'could not read root certificate file "{root}": {e}') from None
+        context.verify_mode = ssl.CERT_REQUIRED
+        crl = sslcrl or (None if sslcrldir else _libpq_file("root.crl"))
+        if crl or sslcrldir:
+            try:
+                context.load_verify_locations(cafile=crl, capath=sslcrldir)
+                context.verify_flags |= ssl.VERIFY_CRL_CHECK_CHAIN  # every certificate of the chain, as libpq
+            except (OSError, ssl.SSLError):
+                pass  # none there: libpq goes on without one too
+    elif sslmode in ("verify-ca", "verify-full"):
+        raise ProtocolError(
+            (f'root certificate file "{root}" does not exist' if root else "no home folder to find root.crt in")
+            + ": give it with sslrootcert, use the system's trusted roots with sslrootcert=system, or set an sslmode "
+            "that doesn't check the server's certificate"
+        )
+    context.check_hostname = sslmode == "verify-full"  # what sslrootcert=system comes with (parse_dsn)
+    context.minimum_version = ssl.TLSVersion.TLSv1_3 if (minimum or "").lower() == "tlsv1.3" else ssl.TLSVersion.TLSv1_2
+    if maximum:
+        context.maximum_version = ssl.TLSVersion.TLSv1_2 if maximum.lower() == "tlsv1.2" else ssl.TLSVersion.TLSv1_3
     try:
         return context.wrap_socket(sock, server_hostname=host)
     except ssl.SSLError as e:
         raise ProtocolError(f"TLS with the server failed (sslmode={sslmode}): {e}") from None
+
+
+def _target(conn: Connection, wanted: str) -> None:
+    """target_session_attrs, checked as libpq checks a host once signed in: from what the server said as it started
+    (default_transaction_read_only, in_hot_standby), else by asking it. prefer-standby, with one host, takes it."""
+    said = None
+    if wanted in ("read-write", "read-only"):
+        reported = (conn.params.get("default_transaction_read_only"), conn.params.get("in_hot_standby"))
+        asked = None in reported  # not said as it started: asked, as libpq asks
+        read_only = conn.query("SHOW transaction_read_only")[0][0] == "on" if asked else "on" in reported
+        if read_only == (wanted == "read-write"):
+            said = "session is read-only" if read_only else "session is not read-only"
+    elif wanted in ("primary", "standby"):
+        reported_standby = conn.params.get("in_hot_standby")
+        if reported_standby is None:
+            standby = conn.query("SELECT pg_catalog.pg_is_in_recovery()")[0][0] is True
+        else:
+            standby = reported_standby == "on"
+        if standby == (wanted == "primary"):
+            said = "server is in hot standby mode" if standby else "server is not in hot standby mode"
+    if said:
+        conn.close()
+        raise ProtocolError(said)
 
 
 def connect(
@@ -767,13 +1109,23 @@ def connect(
     sslmode: str = "prefer",
     sslrootcert: str | None = None,
     channel_binding: str = "prefer",
+    sslcrl: str | None = None,
+    sslcrldir: str | None = None,
+    ssl_min_protocol_version: str | None = None,
+    ssl_max_protocol_version: str | None = None,
+    require_auth: str | None = None,
+    target_session_attrs: str = "any",
+    settings: dict[str, str] | None = None,
 ) -> Connection:
     sock = _socket(host, port, timeout)
     try:
         if not host.startswith("/") and sslmode != "disable":
-            sock = _tls(sock, host, sslmode, sslrootcert)
+            sock = _tls(
+                sock, host, sslmode, sslrootcert, sslcrl, sslcrldir, ssl_min_protocol_version, ssl_max_protocol_version
+            )
         # the timeout holds until it is signed in
-        conn = Connection(sock, user, password, database or user, options, channel_binding)
+        conn = Connection(sock, user, password, database or user, options, channel_binding, require_auth, settings)
+        _target(conn, target_session_attrs)
     except BaseException:
         sock.close()
         raise
