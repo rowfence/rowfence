@@ -512,6 +512,51 @@ def main() -> None:
         ms.stop()
     subprocess.run(["dropdb", "--if-exists", masks], capture_output=True)
 
+    print("-- rowstile why through a table that names its rows' type (tests/cross.authz: a project's backers)")
+    cross = db + "_cross"
+    subprocess.run(["dropdb", "--if-exists", cross], capture_output=True)
+    subprocess.run(["createdb", cross], check=True)
+    subprocess.run(
+        [
+            "psql",
+            "-X",
+            "-q",
+            "-v",
+            "ON_ERROR_STOP=1",
+            "-d",
+            cross,
+            "-f",
+            os.path.join(ROOT, "tests", "cross_schema.sql"),
+        ],
+        check=True,
+        capture_output=True,
+    )
+    rc, out = cli(cross, "apply", os.path.join(ROOT, "tests", "cross.authz"))
+    if rc:
+        raise SystemExit(out)
+    # bo leads project 1, which region 2 backs; folder 2, which has the same id, doesn't back it. Ann funds the
+    # project through its backer: the region's chief, not the folder's owner (a row's type, read as it is written)
+    psql(
+        cross,
+        "INSERT INTO cx.users VALUES (1, 'ann'), (2, 'bo'); INSERT INTO cx.folders (id, owner_id) VALUES (2, 2); "
+        "INSERT INTO cx.regions (id, chief_id) VALUES (2, 2); INSERT INTO cx.projects (id, lead_id) VALUES (1, 2); "
+        "INSERT INTO cx.backings VALUES (1, 'region', 2)",
+    )
+    rc, said = cli(cross, "why", "--as", "user:1", "project", "1", "fund")
+    after = said.splitlines()
+    ways = (
+        [x.strip() for x in after[after.index("would be granted by:") + 1 :]] if "would be granted by:" in after else []
+    )
+    check(
+        "the backer of the type its row names: the region's chief, and nothing of the folder of the same id",
+        rc == 0
+        and any(w.startswith(("set chief_id of region 2 to 1", "share chief on region 2 with user 1")) for w in ways)
+        and not any("folder 2" in w for w in ways),
+        said,
+    )
+    check("... and nothing of it stays", psql(cross, "SELECT chief_id FROM cx.regions WHERE id = 2") == "2")
+    subprocess.run(["dropdb", "--if-exists", cross], capture_output=True)
+
     subprocess.run(["dropdb", "--if-exists", db], capture_output=True)
     print("studio: all passed" if not fails else f"studio: {fails} failed")
     sys.exit(1 if fails else 0)
