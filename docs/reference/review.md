@@ -40,6 +40,9 @@ base's policy is in the language before. The review reads it as that version mea
 at the top, with the old forms it found (`--json` lists them all). Meaning then says whether the rewrite
 grants the same.
 
+The pull request that adds the policy has none at the base. Each declaration is listed as added, the app role
+and the user type too, and the review compares with a policy that allows nothing.
+
 [`review-ci/github/action.yml`](../../review-ci/github/action.yml) runs it on each pull request and keeps one comment up to date (and the annotations);
 [`review-ci/gitlab/rowstile-review.gitlab-ci.yml`](../../review-ci/gitlab/rowstile-review.gitlab-ci.yml) does the same for merge requests. `rowstile fmt --check` in CI
 keeps text diffs to real changes. On GitHub, the workflow may post the comment once it has

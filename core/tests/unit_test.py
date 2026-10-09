@@ -1406,6 +1406,17 @@ class Review(unittest.TestCase):
             (self.text, {}, tests_before or {}), (new, {}, tests_after or {}), base_lock, None, None, worlds=120
         )
 
+    def test_a_new_policy_is_added_whole(self) -> None:
+        # the pull request that adds the policy: nothing at the base. Every declaration is added, the app role and
+        # the user type too: none is said to change from a role or a table nobody wrote
+        text = replaced(self.text, "app role app_user\n", "app role web\n")
+        r = self.review.review(None, (text, {}, {}), None, None, None, worlds=120)
+        changed = r["meaning"]["changed"]
+        self.assertEqual({c["kind"] for c in changed}, {"added"})
+        self.assertIn(("app role", "app role web"), [(c["what"], c["after"]) for c in changed])
+        self.assertIn("type user", [c["what"] for c in changed])
+        self.assertNotRegex(self.review.text(r), r"(?m)^\s+changed\s")
+
     def test_comments_only(self) -> None:
         r = self.run_review(replaced(self.text, "app role app_user\n", "app role app_user   -- the app's role\n\n"))
         self.assertEqual(r["meaning"]["equivalent"], "text")

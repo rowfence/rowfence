@@ -64,6 +64,10 @@ Each release upgrades from the one before it. How releases are numbered and made
 
 ### Fixed
 
+- `rowstile review` of the pull request that adds the policy said its app role and its user type changed, from
+  `app role app_user` and `type user = app.users`, which nobody wrote: with no policy at the base, it compared
+  with a made-up one. Each declaration is now added, the app role and the user type too, and Meaning and Risk
+  compare with a policy that allows nothing.
 - `authz.create_role` made a role for a type without custom roles, or for one the policy doesn't have, when
   the role granted nothing: a role nobody could be given. Given a permission, it refused, saying roles there
   "cannot grant" it. It says "no custom roles on team in the policy" (AZ707) for both now. **Upgrading**: apply

@@ -102,6 +102,17 @@ case "$out" in "Base     The policy at the base is written in the language befor
   [ $rc -eq 0 ] && ok "a base in the language before: read as that version meant it, and said" || bad "base before: exit" "$rc";;
   *) bad "a base in the language before" "$out";; esac
 
+echo "-- the pull request that adds the policy: none at the base"
+F="$T/first"; mkdir -p "$F/db"
+{ git -C "$F" init -q -b main && git -C "$F" config user.email t@example.com && git -C "$F" config user.name t &&
+  echo "# app" > "$F/README.md" && git -C "$F" add -A && git -C "$F" commit -q -m base; } || bad "setting up the new repository"
+printf 'app role web\ntype user = public.users\ntype doc = public.docs\n  owner : user = owner_id\n  can view = owner\n' > "$F/db/policy.authz"
+out=$( (cd "$F" && python3 "$OLDPWD/cli/rowstile_cli.py" review --base main db/policy.authz) 2>&1); rc=$?
+if printf '%s\n' "$out" | grep -q '^ *changed '; then bad "a new policy: a declaration said to change from one nobody wrote" "$out"
+else case "$out" in *"added    app role"*"after:  app role web"*"added    type user"*"after:  type user = public.users"*)
+  [ $rc -eq 0 ] && ok "the pull request that adds the policy: each declaration added, its own app role and user type too" || bad "a new policy: exit" "$rc";;
+  *) bad "a new policy" "$out";; esac; fi
+
 rm -rf "$T"
 dropdb --if-exists "$DB" 2>/dev/null
 [ $fails -eq 0 ] && echo "review: all passed" || { echo "review: $fails failed"; exit 1; }

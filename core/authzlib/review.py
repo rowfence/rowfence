@@ -337,25 +337,33 @@ class Side:
 
 
 def review(
-    base: Given,
+    base: Given | None,
     head: Given,
     base_lock: str | None = None,
     head_lock: str | None = None,
     db: Db | None = None,
     worlds: int = 200,
 ) -> Review:
-    """base, head: (policy text, files, tests {name: text}). base_lock/head_lock: the lock files' text (for
-    Deploy). db: a database at the base branch's state with the review data (for Access and Tests).
-    A base this language refuses is read in the one before (a pull request that upgrades rowstile, and rewrites
-    the policy for it): Meaning then says whether the rewrite says the same."""
-    try:
-        b = Side(*base)
-    except PolicyError as e:
+    """base, head: (policy text, files, tests {name: text}); base None: there is no policy at the base, the pull
+    request adds it. base_lock/head_lock: the lock files' text (for Deploy). db: a database at the base branch's
+    state with the review data (for Access and Tests). A base this language refuses is read in the one before (a
+    pull request that upgrades rowstile, and rewrites the policy for it): Meaning then says whether the rewrite says
+    the same."""
+    if base is None:
+        h = Side(*head)
+        # a new policy: compared with one that allows nothing, in the head's own app role and user type (made up
+        # ones would read as changed), and each of its declarations listed as added
+        b = Side("\n".join(h.entities[k][0] for k in ("app role", "type user") if k in h.entities) + "\n", None, None)
+        b.entities = {}
+    else:
         try:
-            b = Side(*base, previous=True)
-        except PolicyError:
-            raise BaseMistake(f"the policy at the base has a mistake: {e}") from None
-    h = Side(*head)
+            b = Side(*base)
+        except PolicyError as e:
+            try:
+                b = Side(*base, previous=True)
+            except PolicyError:
+                raise BaseMistake(f"the policy at the base has a mistake: {e}") from None
+        h = Side(*head)
     said, flags = meaning(b, h, worlds), risk(b, h, worlds)
     if said["equivalent"] not in (None, "text") and any(f["why"] in ALLOWS_MORE for f in flags):
         said = meaning(b, h, worlds, refactor=False)  # Risk found an example the comparison's worlds didn't
