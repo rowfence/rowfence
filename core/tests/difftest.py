@@ -355,8 +355,8 @@ class Checker:
             lines.append(f"SELECT {lit(json.dumps(key))}, ({sql});")
 
         self.db.run("\n".join(self.as_app_functions()))
-        self.shares_tried = self.shareable()
-        self.links_tried = self.shareable("link")
+        self.shares_tried = self.shareable(conditions=True)
+        self.links_tried = self.shareable("link")  # (a link's `shared if` would read its hash, made at random)
         # who tries to share in this snapshot: one user, in turn (each attempt is a subtransaction of its own)
         sharer = self.users[self.checks % len(self.users)]
         # what lets someone share anything on an object of a type: share, or a permission a relation is shared by
@@ -364,11 +364,10 @@ class Checker:
         for row in self.db.rows("SELECT object_type || '|' || shared_by FROM authz_int.shared_relations"):
             tname, by = row[0].split("|")
             self.share_perms.setdefault(tname, {"share"}).add(by)
-        # whom each user tries to share with: a user of the data, the same for everyone
-        self.share_target = next(
-            (pid for kind, pid in (evaluate.principal_of(u, self.types) for u in self.users) if kind == "user" and pid),
-            "",
-        )
+        # whom the sharer tries to share with: a user id, another in each snapshot (one that is no row, or fails the
+        # user type's where, now and then: what a `shared if` may ask about)
+        targets = [u for u in self.users if signs_in_as_user(u, self.types)]
+        self.share_target = targets[self.checks % len(targets)] if targets else ""
         # the custom roles API, tried by the same user: the types that may own roles (manage_roles), the types that
         # have them with the permissions a role there may give (every other turn, one more it may not), and the
         # roles there are, owned by such a type
@@ -427,6 +426,18 @@ class Checker:
                 lines.append(f"SET authz_ctx.{k} = {lit(v)};")
             for key, sql in self.ref.data_queries():
                 emit([u, "data", *key], sql)
+            # a `shared if` on the shares the one whose turn it is tries: the rows on which it holds, for the share as
+            # it would be made, evaluated as conditions are (by the database, as the policy's owner, them signed in)
+            for (tname, rname), (_, _, cond) in self.shares_tried.items() if pid and u == sharer else ():
+                if cond:
+                    t = self.types[tname]
+                    emit(
+                        [u, "share if", tname, rname],
+                        f"SELECT coalesce(json_agg({idsql(t, 'o')}), '[]') FROM {qt(t.table)} o WHERE (SELECT "
+                        f"coalesce(({cond}), false) FROM (SELECT ({idsql(t, 'o')})::{t.pktype} AS object_id, "
+                        f"'user'::text AS subject_type, {lit(self.share_target)}::text AS subject_id, "
+                        "''::text AS subject_relation) this)",
+                    )
             # the database's answers, as the app role
             lines.append(f"SET ROLE {self.role};")
             for t in self.types.values():
@@ -472,13 +483,21 @@ class Checker:
             if pid and u == sharer:
                 # the APIs that share, tried by whoever's turn it is (a user, or a service), each attempt undone:
                 # authz.share and unshare, what sharing lets through and how it refuses
-                for tname, rname in self.shares_tried:
-                    ids = "ARRAY[" + ", ".join(lit(i) for i in sample[tname]) + "]::text[]"
+                for (tname, rname), (by, _, _) in self.shares_tried.items():
+                    t = self.types[tname]
+                    # the sample rows, and two that they may share it on (if the database says so: what they get
+                    # there is judged all the same)
+                    rows = "SELECT unnest(ARRAY[" + ", ".join(lit(i) for i in sample[tname]) + "]::text[])"
+                    if by in t.perms:
+                        rows += (
+                            f" UNION (SELECT {idsql(t)} FROM {qt(t.table)} WHERE authz.can({lit(tname)}, {idsql(t)}, "
+                            f"{lit(by)}) ORDER BY md5({idsql(t)}) LIMIT 2)"
+                        )
                     for what in ("share", "unshare"):
                         emit(
                             [u, what, tname, rname],
                             f"SELECT coalesce(json_agg(json_build_array(i, difftest_app.try_{what}({lit(tname)}, i, "
-                            f"{lit(rname)}, 'user', {lit(self.share_target)}))), '[]') FROM unnest({ids}) i",
+                            f"{lit(rname)}, 'user', {lit(self.share_target)}))), '[]') FROM ({rows}) s(i)",
                         )
                 for tname, rname in self.links_tried:
                     ids = "ARRAY[" + ", ".join(lit(i) for i in sample[tname]) + "]::text[]"
@@ -733,25 +752,28 @@ class Checker:
         )
         return lines
 
-    def shareable(self, subject: str = "user") -> dict[tuple[str, str], tuple[str, list[str]]]:
-        """The relations a subject (a user, or a link) may be shared without a `shared if`: (type, relation) -> (the
-        permission sharing it needs, the permissions it feeds into, which the sharer must hold too), as the compiled
-        catalog says."""
-        plain = {
-            (t.name, r.name)
+    def shareable(
+        self, subject: str = "user", conditions: bool = False
+    ) -> dict[tuple[str, str], tuple[str, list[str], str | None]]:
+        """The relations a subject (a user, or a link) may be shared: (type, relation) -> (the permission sharing it
+        needs, the permissions it feeds into, which the sharer must hold too, as the compiled catalog says; and the
+        relation's `shared if` for that subject, as the policy says). Without conditions, those with a `shared if`
+        are left out."""
+        conds = {
+            (t.name, r.name): src.shared_if
             for t in self.types.values()
             for r in t.relations.values()
             for src in r.sources
-            if src.kind == "shared" and (subject, None) in src.subjects and not src.shared_if
+            if src.kind == "shared" and (subject, None) in src.subjects
         }
-        out: dict[tuple[str, str], tuple[str, list[str]]] = {}
+        out: dict[tuple[str, str], tuple[str, list[str], str | None]] = {}
         for row in self.db.rows(
             "SELECT object_type || '|' || relation || '|' || shared_by || '|' || array_to_string(required, ',') "
             f"FROM authz_int.shared_relations WHERE subject = {lit(subject)}"
         ):
             tname, rname, by, required = row[0].split("|")
-            if (tname, rname) in plain:
-                out[(tname, rname)] = (by, [p for p in required.split(",") if p])
+            if (tname, rname) in conds and (conditions or not conds[(tname, rname)]):
+                out[(tname, rname)] = (by, [p for p in required.split(",") if p], conds[(tname, rname)])
         return out
 
     def expected_rule(self, state: evaluate.State, table: str, command: str) -> set[str]:
@@ -942,10 +964,13 @@ class Checker:
             # user, the permission sharing needs, one it gives). An id the user table doesn't have signs in as
             # nobody, who shares nothing, though a condition alone may give them a permission.
             signed_in = self.ref.principal is not None
-            for (tname, rname), (by, required) in self.shares_tried.items():
+            for (tname, rname), (by, required, cond) in self.shares_tried.items():
                 t = self.types[tname]
                 for i, got in snap.get((u, "share", tname, rname), []):
                     want = self.share_verdict(state, signed_in, t, i, by, required, to_user=True)
+                    # last, the relation's `shared if`, on the share as it would be made (evaluated beside the data)
+                    if want == "ok" and cond and i not in snap.get((u, "share if", tname, rname), []):
+                        want = "42501: the policy does not allow this share"
                     if not str(got).startswith(want) or (want == "42501: you cannot share" and "(needs" in str(got)):
                         problems.append(
                             f"user {u}: authz.share('{tname}', {i}, '{rname}', user {self.share_target}) says "
@@ -967,7 +992,7 @@ class Checker:
                             f"{got!r}, expected {want!r}"
                         )
             # create_link: the same rule, for a link (no one to look up)
-            for (tname, rname), (by, required) in self.links_tried.items():
+            for (tname, rname), (by, required, _) in self.links_tried.items():
                 t = self.types[tname]
                 for i, got in snap.get((u, "create_link", tname, rname), []):
                     want = self.share_verdict(state, signed_in, t, i, by, required, to_user=False)
