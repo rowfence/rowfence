@@ -21,7 +21,7 @@ import tempfile
 import threading
 import types
 import unittest
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from typing import ClassVar, cast
 from unittest import mock
 
@@ -5300,6 +5300,106 @@ class Decisions(unittest.TestCase):
         # no caveat in the policy: none of those; a share to an object is a link of a tree, which never expires
         self.assertEqual({str(k[1]) for k in queries("docs")}, {"expired", "not started"})
         self.assertEqual([k for k in queries("alt") if k[2:4] == ("doc", "shortcut")], [])
+
+    def test_difftest_watches_each_principal_with_what_was_asked_as_them(self) -> None:
+        # difftest's wiring, on a database made up whose every answer says in what session it was asked (who was
+        # signed in, their context, the role): each principal is watched once a snapshot, with the data and the
+        # shares asked in their own session (their context set, as the owner: a caveat judges a share by the
+        # context), with their links; and the one asked with a scope too, with that scope, alone
+        import random
+
+        import difftest
+
+        statement = re.compile(
+            r"^(?:SET (?P<set>[\w.]+) = '(?P<value>(?:[^']|'')*)';|SET ROLE (?P<role>\w+);|RESET (?P<reset>[\w.]+);"
+            r"|SELECT '(?P<key>\[(?:[^']|'')*\])', )",
+            re.M,
+        )
+        session_of = (
+            "authz.user_id",
+            "authz.principal_type",
+            "authz_ctx.mode",
+            "authz_ctx.ip",
+            "authz_ctx.links",
+            "ROLE",
+        )
+        scoped: list[tuple[str, str, str]] = []  # the session each scoped question was asked in: who, and the scope
+
+        def answer(key: tuple[str | int, ...], session: dict[str, str]) -> object:
+            asked = "|".join(session.get(k, "") for k in session_of)
+            if key == ("verify",):
+                return True
+            if key[0] == "scoped":
+                who = (session.get("authz.user_id", ""), session.get("authz.principal_type", ""))
+                scoped.append((*who, session.get("authz.scopes", "")))
+            elif key[1] == "data" and key[2] in ("ids", "valid"):
+                return [asked]  # (one row of each type, named by the session)
+            elif key[1] == "decisions":
+                return [[asked] * (3 if key[2] == "role share" else 2)]
+            return []
+
+        class Made(difftest.DB):
+            """A database that answers each question by its key, and by the session it is asked in."""
+
+            def run(self, sql: str, check: bool = True) -> tuple[int, str, str]:
+                return 0, "[]", ""  # (the policy expressions and column rules read back: none; what it makes: done)
+
+            def rows(self, sql: str) -> list[list[str]]:
+                session: dict[str, str] = {}
+                out: list[list[str]] = []
+                for m in statement.finditer(sql):
+                    if m["set"]:
+                        session[m["set"]] = m["value"].replace("''", "'")
+                    elif m["role"]:
+                        session["ROLE"] = m["role"]
+                    elif m["reset"]:
+                        session.pop(m["reset"], None)
+                    else:
+                        key = m["key"].replace("''", "'")
+                        out.append([key, json.dumps(answer(tuple(json.loads(key)), session))])
+                return out
+
+            def rows_together(self, scripts: Sequence[str]) -> list[list[str]]:
+                return [row for script in scripts for row in self.rows(script)]  # (each a session of its own)
+
+        watched: list[tuple[str, evaluate.Data, set[str], dict[tuple[str | int, ...], list[list[str]]], str]] = []
+
+        class Watching(decisions.Decisions):
+            def observe(
+                self,
+                data: evaluate.Data,
+                user: str,
+                links: Iterable[str] = (),
+                shares: "decisions.Shares | None" = None,
+                scope: str = "",
+            ) -> None:
+                given = {k: [[str(x) for x in row] for row in rows] for k, rows in (shares or {}).items()}
+                watched.append((user, data, set(links), given, scope))
+                super().observe(data, user, links, shares, scope)
+
+        gen = difftest.MultiGen(random.Random(1))  # (every principal in a context of their own, with a link)
+        with mock.patch.object(difftest, "Decisions", Watching), mock.patch.object(difftest, "SESSIONS", 3):
+            checker = difftest.Checker(Made("made up"), os.path.join(ROOT, gen.policy), gen, decisions=True)
+            for _ in range(2):
+                scoped.clear()
+                watched.clear()
+                checker.check()
+                self.assertEqual([w[0] for w in watched], checker.users)
+                for u, data, links, shares, _ in watched:
+                    kind, pid = evaluate.principal_of(u, checker.types)
+                    ctx = gen.context(u)
+                    mine = "|".join([pid, "" if kind == "user" else kind, ctx["mode"], ctx["ip"], ctx["links"], ""])
+                    self.assertEqual(data.ids["folder"], [mine], u)
+                    self.assertEqual(set(shares), {k for k, _ in checker.decisions_queries}, u)
+                    self.assertEqual({row[0] for rows in shares.values() for row in rows}, {mine}, u)
+                    self.assertEqual(links, checker.links_of(u), u)
+                with_scope = [(evaluate.principal_of(u, checker.types), scope) for u, *_, scope in watched if scope]
+                self.assertEqual(len(with_scope), 1)
+                (kind, pid), scope = with_scope[0]
+                self.assertEqual(set(scoped), {(pid, "" if kind == "user" else kind, scope)})
+        assert isinstance(checker.decisions, Watching)
+        self.assertEqual((checker.decisions.snapshots, checker.decisions.asked), (2, set(checker.users)))
+        self.assertTrue(checker.decisions.lines)  # (its parts named by line: the policy's text was read)
 
     def test_unforced_it_answers_as_the_evaluator(self) -> None:
         # what it watches with is the evaluator overridden only where told: otherwise the very same answers
