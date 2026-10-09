@@ -731,10 +731,6 @@ def split(message: str) -> tuple[str, str | None]:
     return (message[: m.start()], m.group(1)) if m else (message, None)
 
 
-def group_of(code: str) -> str:
-    return next(name for prefix, name in GROUPS if code.startswith(prefix))
-
-
 def message(code: str) -> str | None:
     """What the compiler says about the page's mistake (None for mistakes only a database finds)."""
     from . import Compiler, PolicyError, parse_policy

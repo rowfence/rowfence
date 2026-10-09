@@ -260,7 +260,7 @@ CREATE OR REPLACE FUNCTION authz.uid() RETURNS {u.pktype} {attrs} AS $uid$ {body
             "RAISE EXCEPTION 'no permission %.% in the policy', p_type, p_perm USING HINT = 'rowstile help AZ707';"
         )
 
-        def can_branch(t: Type) -> str | None:
+        def can_branch(t: Type) -> str:
             if not t.perms:  # a type without permissions is still a type: it has no such permission
                 return f"      {no_perm}"
             # the permission on the object's own row, as a write rule checks it: that object's lookups (and

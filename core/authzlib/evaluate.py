@@ -674,10 +674,8 @@ class World:
         return lines
 
 
-def shown(v: Scalar) -> str:
-    """A column's value as SQL writes it."""
-    if v is None:
-        return "null"
+def shown(v: str | int | float | bool) -> str:
+    """A column's value as SQL writes it (describe leaves NULL out: a smaller world's columns are NULL)."""
     if isinstance(v, bool):
         return "true" if v else "false"
     return f"'{v}'" if isinstance(v, str) else str(v)

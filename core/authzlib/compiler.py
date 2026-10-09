@@ -84,8 +84,9 @@ class NextTree(TypedDict):
 
 
 def rule_name(rule: Rule) -> str:
-    if rule.command == "mask":
-        return "mask " + ", ".join(rule.columns)
+    """A write rule's head, as the policy writes it (`update owner_id after`), for messages."""
+    # (two masks of one column are refused as masked twice before two rules alike, and refusals explain writes)
+    assert rule.command != "mask", "a mask is never named in a message about rules"
     if not rule.columns:
         return "update after" if rule.command == "update check" else rule.command
     return "update " + ", ".join(rule.columns) + (" after" if rule.command == "update check" else "")
@@ -770,15 +771,13 @@ class Core:
         own line: a typo in a relation's only use would otherwise be reported as the relation being unused."""
         used: set[Name] = set()
 
-        def walk(t: Type, node: Expr, loc: Loc | None) -> None:
+        def walk(t: Type, node: Expr, loc: Loc) -> None:
             match node:
                 case ("ref", name):
-                    if loc is not None:
-                        self.lookup(t, name, loc)
+                    self.lookup(t, name, loc)
                     used.add((t.name, name))
                 case ("arrow", rel, perm) | ("arrow_on", rel, perm, _):
-                    if loc is not None:
-                        self.lookup(t, rel, loc)
+                    self.lookup(t, rel, loc)
                     used.add((t.name, rel))
                     r = t.relations.get(rel)
                     for st, _sr in r.subjects() if r else []:
@@ -800,9 +799,8 @@ class Core:
                         used.add((st, sr))
         for rule in self.rules:
             governing = [t for t in self.types.values() if t.table == rule.table]
-            for t in governing:
-                # names are looked up here when one type governs the table (with several, each reads its own)
-                walk(t, rule.expr, rule.loc if len(governing) == 1 else None)
+            assert len(governing) == 1, "validate refuses rules for a table no type or two types map to (AZ401)"
+            walk(governing[0], rule.expr, rule.loc)
         for inv in self.pol.invariants:
             walk(self.T(inv.type), inv.expr, inv.loc)
         for test in self.tests:
@@ -924,43 +922,36 @@ class Core:
                         f"not through permissions of other types",
                         "AZ306",
                     )
-            # every dependency inside the component must be a top-level inheritance item
+            # every dependency inside the component must be a top-level inheritance item. split_inherit reads one
+            # (and refuses following a relation to groups, type:*, anyone or links: a tree links objects alone)
             for tn, pn in comp:
                 t, perm = self.T(tn), self.T(tn).perms[pn]
                 for item in self.top_items(perm):
-                    arrow, _conds = self.split_inherit(t, perm, item)
-                    if arrow:
-                        r = t.relations.get(arrow.rel)
-                        if r:
-                            for st, sr in r.subjects():
-                                if not sr and st in self.types and (st, arrow.perm) in members:
-                                    self.check_tree_relation(t, r, perm)
-                    else:
-                        inner: set[Name] = set()
-                        self.deps(t, item, inner)
-                        if inner & members and isinstance(item, And):
-                            for x in item.items:
-                                if (
-                                    isinstance(x, Arrow)
-                                    and x.rel in t.relations
-                                    and any(
-                                        not sr and (st, x.perm) in members for st, sr in t.relations[x.rel].subjects()
-                                    )
-                                ):
-                                    fail(
-                                        perm.loc,
-                                        f"inheritance through {x.rel} can only be narrowed with "
-                                        f"{{conditions}} on the row, e.g. ({x.rel}.{pn} and {{inherit}})",
-                                        "AZ304",
-                                    )
-                        if inner & members:
-                            fail(
-                                perm.loc,
-                                f"{tn}.{pn} depends on itself; a permission can only recurse as "
-                                f"'or rel.perm' (optionally 'and {{condition}}') through a relation "
-                                f"to objects, and a group only as 'member : group#member'",
-                                "AZ302",
-                            )
+                    if self.split_inherit(t, perm, item)[0] is not None:
+                        continue
+                    inner: set[Name] = set()
+                    self.deps(t, item, inner)
+                    if inner & members and isinstance(item, And):
+                        for x in item.items:
+                            if (
+                                isinstance(x, Arrow)
+                                and x.rel in t.relations
+                                and any(not sr and (st, x.perm) in members for st, sr in t.relations[x.rel].subjects())
+                            ):
+                                fail(
+                                    perm.loc,
+                                    f"inheritance through {x.rel} can only be narrowed with "
+                                    f"{{conditions}} on the row, e.g. ({x.rel}.{pn} and {{inherit}})",
+                                    "AZ304",
+                                )
+                    if inner & members:
+                        fail(
+                            perm.loc,
+                            f"{tn}.{pn} depends on itself; a permission can only recurse as "
+                            f"'or rel.perm' (optionally 'and {{condition}}') through a relation "
+                            f"to objects, and a group only as 'member : group#member'",
+                            "AZ302",
+                        )
             if len(set(tnames)) != len(tnames):
                 fail(
                     first.loc,
@@ -973,16 +964,6 @@ class Core:
             self.scc_members[key] = sorted(comp)
             for v in comp:
                 self.recursive[v] = key
-
-    def check_tree_relation(self, t: Type, r: Relation, perm: Perm) -> None:
-        for src in r.sources:
-            if src.kind == "shared" and any(sr == "*" or st in ("anyone", "link") for st, sr in src.subjects):
-                fail(
-                    perm.loc,
-                    f"{t.name}.{r.name} is used for inheritance, so it can't be shared with "
-                    f"user:* (or another type:*), anyone or link",
-                    "AZ301",
-                )
 
     @staticmethod
     def top_items(perm: Perm) -> list[Expr]:
@@ -1019,18 +1000,7 @@ class Core:
         members = set(self.scc_members[key])
         arrow, conds = self.split_inherit(t, perm, item)
         if arrow is None or conds is None:
-            # an 'and' with the inheritance arrow and something other than conditions
-            if isinstance(item, And):
-                for x in item.items:
-                    if isinstance(x, Arrow) and x.rel in t.relations:
-                        for st, sr in t.relations[x.rel].subjects():
-                            if not sr and (st, x.perm) in members:
-                                fail(
-                                    perm.loc,
-                                    f"inheritance through {x.rel} can only be narrowed with "
-                                    f"{{conditions}} on the row, e.g. ({x.rel}.{perm.name} and {{inherit}})",
-                                    "AZ304",
-                                )
+            # a plain item: analyze_recursion refused one that narrows the inheritance with more than conditions (AZ304)
             return [], item
         r = t.relations[arrow.rel]
         inside = [st for st, _ in r.subjects() if (st, arrow.perm) in members]
@@ -1146,13 +1116,11 @@ class Core:
     def id_vars(self) -> str:
         return "".join(f" v_{pt} {pt};" for pt in sorted({t.pktype for t in self.types.values()}))
 
-    def dispatch_type(self, per_type: Callable[[Type], str | None], missing_type: str = NO_SUCH_TYPE) -> str:
+    def dispatch_type(self, per_type: Callable[[Type], str], missing_type: str = NO_SUCH_TYPE) -> str:
         """CASE over types, with p_id checked and converted to the type's key in v_<pktype>."""
         branches = []
         for t in self.types.values():
             body = per_type(t)
-            if body is None:
-                continue
             branches.append(
                 f"    WHEN {lit(t.name)} THEN\n"
                 f"      IF NOT pg_catalog.pg_input_is_valid(p_id, {lit(t.keytype)}) THEN RETURN {self._invalid}; END IF;\n"
@@ -1494,8 +1462,9 @@ class Core:
                         f"AND g.subject_type = {lit(st)} AND g.subject_relation = '' "
                         f"AND g.subject_id {self.ids_in(inner, text=True)} AND {self.live()}"
                     )
-        if not parts:
-            parts.append(f"SELECT NULL::{t.pktype} AS id WHERE false")
+        # each type is named by a source read here: without the column sources (ext, row_arrow), the arrow follows
+        # every type of the relation, which the sources left name some of
+        assert parts, f"no source of {t.name}.{r.name} names {', '.join(targets)}"
         self.add_view(view, union(parts), f"-- {t.name}.{r.name}.{perm_name}\n", t)
         self.view_state[view] = "done"
         return view
