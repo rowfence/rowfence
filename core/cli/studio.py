@@ -462,14 +462,17 @@ class Studio:
                 if not row:
                     return None
                 j = as_object(row[0]["j"])
-                # the columns the table fills itself (a serial key) are left to it; a key it doesn't fill gets a
-                # new value, or the copy would collide with the row it was copied from
+                # the columns the table fills itself (an identity, a sequence's next value, a generated column) are
+                # left to it, and any other is copied, a column with a default too: the row's value is what the
+                # policy reads. A key it doesn't fill gets a new value, or the copy would collide with the row
                 own = {
                     r["a"]
                     for r in db.rows(
-                        "SELECT attname AS a FROM pg_catalog.pg_attribute WHERE attrelid = $1::regclass "
-                        "AND attnum > 0 AND (atthasdef OR attidentity <> '')",
-                        [tt.table],
+                        "SELECT a.attname AS a FROM pg_catalog.pg_attribute a LEFT JOIN pg_catalog.pg_attrdef d "
+                        "ON d.adrelid = a.attrelid AND d.adnum = a.attnum WHERE a.attrelid = $1::regclass "
+                        "AND a.attnum > 0 AND (a.attidentity <> '' OR a.attgenerated <> '' "
+                        "OR pg_catalog.pg_get_expr(d.adbin, d.adrelid) LIKE 'nextval(%')",
+                        [qt(tt.table)],
                     )
                 }
                 j = {k: v for k, v in j.items() if k not in own}

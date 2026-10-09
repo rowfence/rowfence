@@ -106,9 +106,14 @@ Each release upgrades from the one before it. How releases are numbered and made
   database stops answering while Studio runs is told "can't connect" (503), where Studio printed a traceback at
   each request.
 - The test Studio writes from "Ann should see this" didn't run for an object, or someone, whose id isn't one
-  word: a key with text in it that holds a space or an apostrophe. The test's lines now quote such an id, as
-  a test reads it. Its copy of a row wrote an array column as JSON, which Postgres refuses ("malformed array literal"), and
-  a number with a fraction as a float, losing digits: each is now written as the column holds it.
+  word: a key with text in it that holds a space or an apostrophe. The test's lines now quote such an id, as a
+  test reads it. Its copy of a row wrote an array column as JSON, which Postgres refuses ("malformed array
+  literal"), and a number with a fraction as a float, losing digits: each is now written as the column holds
+  it. The copy also left out every column with a default, and so took the default where the row holds another
+  value: the copy of a folder that doesn't inherit inherited, a confidential file's wasn't confidential, a
+  locked note's wasn't locked. It copies them now, and leaves to the table only what it fills itself (an
+  identity, a sequence's next value, a generated column). And on tables named with capitals, as Prisma names
+  them, it failed: `relation "public.user" does not exist`.
 - Studio says what the other commands say. With the policy taken out while it runs (`rowstile remove`), the
   tab of shares and requests said "function authz.act_as(unknown, unknown) does not exist", and why and the
   access diff said "no policy is applied [AZ609]" without how to apply one: each now says "no policy is applied
