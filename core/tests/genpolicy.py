@@ -23,7 +23,8 @@ counted and their seeds printed. For each of the others, after every one of a fe
   - authz.check_invariants() against the reference evaluator
 and at the end, `rowstile prove`: an invariant it says holds must not be broken by the data seen.
 A failing policy is shrunk (an invariant, a rule, a type, a part of a permission taken away while it still fails)
-and printed with its seed, so `--only SEED` runs it again.
+and printed with its seed, so `--only SEED` runs it again. With --decisions, each policy's parts that never decided
+an answer in those checks are said after it (tests/decisions.py).
 """
 
 from __future__ import annotations
