@@ -19,6 +19,7 @@ from typing import Any
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
+CLI = os.path.join(ROOT, "cli", "rowstile_cli.py")
 sys.path.insert(0, ROOT)
 sys.path.insert(0, os.path.join(ROOT, "cli"))
 import rowstile_cli  # noqa: E402
@@ -51,12 +52,34 @@ def psql(db: str, sql: str) -> str:
 
 
 def cli(db: str, *args: str) -> tuple[int, str]:
+    return command(f"dbname={db}", *args)
+
+
+def command(dsn: str, *args: str) -> tuple[int, str]:
+    """The command run with --db DSN: its exit code, and what it printed."""
+    r = subprocess.run([sys.executable, CLI, "--db", dsn, *args], capture_output=True, text=True, timeout=120)
+    return r.returncode, r.stdout + r.stderr
+
+
+def made_and_copied(db: str, named: str, var: str, table: str, where: str) -> tuple[str, str]:
+    """The row a named test's `given <var>` makes (in a transaction rolled back), and the row it copies, each
+    as JSON without its key: the same when the copy is faithful. Or what the database said of the given."""
+    given = named.split(f"given {var} = {{", 1)[-1].split("}\n", 1)[0].replace(' RETURNING "id"', " RETURNING *")
     r = subprocess.run(
-        [sys.executable, os.path.join(ROOT, "cli", "rowstile_cli.py"), "--db", f"dbname={db}", *args],
+        [
+            "psql",
+            "-X",
+            "-q",
+            "-At",
+            "-d",
+            db,
+            "-c",
+            f"BEGIN; WITH n AS ({given}) SELECT to_jsonb(n) - 'id' FROM n; ROLLBACK",
+        ],
         capture_output=True,
         text=True,
     )
-    return r.returncode, r.stdout + r.stderr
+    return (r.stdout + r.stderr).strip(), psql(db, f"SELECT to_jsonb(r) - 'id' FROM {table} r WHERE {where}")
 
 
 class Client:
@@ -69,7 +92,7 @@ class Client:
             headers["Host"] = host
         data = None
         if body is not None:
-            data = json.dumps(body).encode()
+            data = body if isinstance(body, bytes) else json.dumps(body).encode()
             headers["Content-Type"] = "application/json"
         req = urllib.request.Request(
             self.base + path, data=data, headers=headers, method="POST" if body is not None else "GET"
@@ -233,6 +256,8 @@ def main() -> None:
         )
         status, r2 = c.call("/api/rows?table=app.folders&as=anyone")
         check("... and as nobody", status == 200 and r2["visible_total"] < r["visible_total"], r2)
+        status, same = c.call("/api/rows?table=app.folders&as=2")
+        check("someone written without a type is a user: as=2 sees what user:2 sees", status == 200 and same == r, same)
         check("only tables the policy governs", c.call("/api/rows?table=pg_catalog.pg_authid&as=user:2")[0] == 404)
         before = shares()
         status, w = c.call("/api/why?as=user:3&type=folder&id=3&perm=edit")
@@ -290,6 +315,43 @@ def main() -> None:
             and "duplicate key" not in out,
             out[-800:],
         )
+        status, t = c.call("/api/test?as=user:3&type=folder&id=1&perm=view&expect=cannot")
+        made, row = made_and_copied(db, t["named"], "it", "app.folders", "id = 1")
+        check(
+            "a copy of a row with a NULL (folder 1 has no parent): every column the same, the key aside",
+            status == 200 and made == row and '"parent_id": null' in row,
+            (made, row),
+        )
+        # a test names what isn't there as it is, and brings no copy of it
+        for label, path, givens, last in (
+            (
+                "an object that isn't there",
+                "as=user:3&type=folder&id=999&perm=view",
+                ["who"],
+                "user $who can view folder 999",
+            ),
+            (
+                "someone who isn't there",
+                "as=user:999&type=folder&id=1&perm=view",
+                ["it"],
+                "user 999 can view folder $it",
+            ),
+            (
+                "nobody signed in",
+                "as=anyone&type=folder&id=1&perm=view&expect=cannot",
+                ["it"],
+                "anyone cannot view folder $it",
+            ),
+        ):
+            status, t = c.call(f"/api/test?{path}")
+            lines = [x.strip() for x in t.get("named", "").splitlines()]
+            check(
+                f"a test for {label}: named as it is, with no copy of it",
+                status == 200
+                and [x.split(" = {", 1)[0].removeprefix("given ") for x in lines if x.startswith("given ")] == givens
+                and lines[-1] == last,
+                (status, t),
+            )
         status, g = c.call("/api/graph")
         check("the graph", status == 200 and g["mermaid"].startswith("%%") and "flowchart" in g["mermaid"], g)
         status, d = c.call("/api/diff")
@@ -369,6 +431,45 @@ def main() -> None:
             )
         finally:
             s.stop()
+        # what the access diff can't compare with: said on the page's tab
+        broken = os.path.join(tmp, "broken.authz")
+        edit = "  can edit  = share or editor or (parent.edit and {inherit})"
+        with open(broken, "w", encoding="utf-8") as fh:
+            fh.write(text.replace(edit, edit.replace("editor", "editr")))
+        line = text.splitlines().index(edit) + 1
+        for label, path, writable, want, starts, ends in (
+            ("no policy file", None, False, 404, "no policy file to compare with (rowstile.toml's policy)", ""),
+            (
+                "a policy file that isn't there",
+                "/nowhere/p.authz",
+                False,
+                404,
+                "/nowhere/p.authz: No such file or directory",
+                "",
+            ),
+            # on a Studio that may build it: the file's mistake, with its line
+            (
+                "a policy file with a mistake",
+                broken,
+                True,
+                400,
+                f"policy line {line}: folder has no relation or permission 'editr' (it has: ",
+                ") [AZ203]",
+            ),
+        ):
+            s = studio.Studio(dsn, None, path, writable=writable, port=0, read_policy=rowstile_cli.read_policy)
+            s.start(background=True)
+            try:
+                status, d = Client(s).call("/api/diff")
+                said = str(d.get("detail", ""))
+                check(
+                    f"the access diff with {label}: {want}, and says so",
+                    status == want
+                    and (said == starts if not ends else said.startswith(starts) and said.endswith(ends)),
+                    (status, d),
+                )
+            finally:
+                s.stop()
 
     print("-- Studio, able to write (rowstile dev, or --write)")
     rw = studio.Studio(dsn, None, policy, writable=True, port=0, read_policy=rowstile_cli.read_policy)
@@ -392,6 +493,44 @@ def main() -> None:
             "a share as someone who may not: refused, with the database's reason",
             status == 403 and "cannot share" in e["detail"],
             e,
+        )
+        # the folder's owner may share it: what stops these is Studio
+        status, e = c.call("/api/share", {**body, "as": "user:1"}, host="evil.example:4983")
+        check(
+            "a share asked for another host (a DNS name pointed here): refused, and nothing changes",
+            status == 403 and e["detail"] == "Studio answers on localhost only" and shares() == before,
+            e,
+        )
+        status, e = c.call("/api/share", body)
+        check(
+            "a share with nobody to make it: refused, and says to pick someone",
+            status == 400
+            and e["detail"] == "as whom? pick someone to view as: they make the change"
+            and shares() == before,
+            e,
+        )
+        for label, path, sent, words in (
+            ("a share that names no type", "/api/share", {"as": "user:1", "id": "3"}, "'type'"),
+            (
+                "a body that isn't JSON",
+                "/api/share",
+                b"as=user:1&type=folder",
+                "Expecting value: line 1 column 1 (char 0)",
+            ),
+            (
+                "an offset that isn't a number",
+                "/api/rows?table=app.folders&as=user:1&offset=two",
+                None,
+                "invalid literal for int() with base 10: 'two'",
+            ),
+        ):
+            status, e = c.call(path, sent)
+            check(f"{label}: 400, missing or wrong", status == 400 and e["detail"] == f"missing or wrong: {words}", e)
+        status, e = c.call("/api/why?as=user:3&type=folder&id=3&perm=fly")
+        check(
+            "why, trying changes, on a permission the type doesn't have: says so",
+            status == 400 and e["detail"] == "folder has no permission fly",
+            (status, e),
         )
         status, _ = c.call("/api/share", {**body, "as": "user:1"})
         _, r = c.call("/api/rows?table=app.folders&as=user:3")
