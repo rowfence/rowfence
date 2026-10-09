@@ -340,6 +340,16 @@ class Studio:
                     }
                     for w in answer.ways
                 ],
+                # the changes the database refused to try, and its reason: said, as the command says them
+                "untried": [
+                    {
+                        "text": w.text,
+                        "error": w.refused,
+                        "lines": list[Json](sorted({str(ch.loc) for ch in w.changes})),
+                        "kinds": list[Json]([ch.kind for ch in w.changes]),
+                    }
+                    for w in answer.untried
+                ],
             }
 
         return self.work(run, write=True)  # each change is undone in its savepoint either way

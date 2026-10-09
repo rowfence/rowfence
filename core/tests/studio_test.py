@@ -1169,11 +1169,14 @@ CREATE TABLE cn.project_members (org_id bigint, project_id bigint, user_id bigin
   PRIMARY KEY (org_id, project_id, user_id), FOREIGN KEY (org_id, project_id) REFERENCES cn.projects);
 CREATE TABLE cn.project_groups (org_id bigint, project_id bigint, group_id bigint REFERENCES cn.groups,
   PRIMARY KEY (org_id, project_id, group_id), FOREIGN KEY (org_id, project_id) REFERENCES cn.projects);
+CREATE TABLE cn.shelves (id bigint PRIMARY KEY, closed boolean NOT NULL);
+CREATE TABLE cn.shelf_keepers (shelf_id bigint REFERENCES cn.shelves, user_id bigint REFERENCES cn.users,
+  since date NOT NULL, PRIMARY KEY (shelf_id, user_id));
 GRANT USAGE ON SCHEMA cn TO app_user;
 GRANT SELECT ON ALL TABLES IN SCHEMA cn TO app_user;
 -- ann (1) owns docs 1 to 5, each inside the one before, and doc 6, archived; bo (2) is in group 2, which is in
 -- group 1, as group 3 is; dee (4) is no longer active; bot 1 may view doc 4; ann leads project (1,5) and is one of
--- its members, and group 3's members are its members too; cy is in club 2
+-- its members, and group 3's members are its members too; cy is in club 2; shelf 1 is closed, shelf 2 open
 INSERT INTO cn.clubs VALUES (1), (2);
 INSERT INTO cn.users VALUES (1, true, NULL), (2, true, NULL), (3, true, 2), (4, false, NULL);
 INSERT INTO cn.bots VALUES (1, 1);
@@ -1185,6 +1188,7 @@ INSERT INTO cn.pages VALUES (1, NULL, true), (2, 1, false);
 INSERT INTO cn.projects VALUES (1, 5, 1);
 INSERT INTO cn.project_members VALUES (1, 5, 1);
 INSERT INTO cn.project_groups VALUES (1, 5, 3);
+INSERT INTO cn.shelves VALUES (1, true), (2, false);
 """
 WHY_POLICY = """app role app_user
 
@@ -1227,6 +1231,10 @@ type project = cn.projects (org_id, id)
 type club = cn.clubs
   member : user = cn.users(club_id -> id)
   can enter = member
+
+type shelf = cn.shelves where {not closed}
+  keeper : user = cn.shelf_keepers(shelf_id -> user_id)
+  can use = keeper
 """
 
 
@@ -1263,6 +1271,7 @@ def corners(db: str) -> None:
             "cn.projects",
             "cn.project_members",
             "cn.project_groups",
+            "cn.shelf_keepers",
         )
     )
     before = psql(db, data)
@@ -1327,6 +1336,18 @@ def corners(db: str) -> None:
             '"added_by" of relation "doc_editors" violates not-null constraint)'
             for n in (5, 4, 3, 2)
         ],
+        said,
+    )
+    rc, said, ways, _ = why("--as", "user:3", "shelf", "2", "use")
+    check(
+        "a permission only a row the table refuses would give: no change that could be tried grants it, and why",
+        rc == 0
+        and said.endswith(
+            "use = keeper  (line 45)\n"
+            "no single change that could be tried grants it\n"
+            'could not be tried: add user 3 to cn.shelf_keepers for shelf 2 (null value in column "since" of '
+            'relation "shelf_keepers" violates not-null constraint)\n'
+        ),
         said,
     )
     rc, said, ways, _ = why("--as", "bot:1", "doc", "2", "view")
@@ -1408,6 +1429,44 @@ def corners(db: str) -> None:
     )
     rc, said = cli(db, "why", "--as", "user:3", "nothing", "3", "view")
     check("a type the policy doesn't have: named, exit 1", (rc, said) == (1, "no type nothing in the policy\n"), said)
+    # Studio, where it may write: the changes the database refused to try, said as the command says them
+    s = studio.Studio(f"dbname={db}", None, None, writable=True, port=0)
+    s.start()
+    try:
+        status, w = Client(s).call("/api/why?as=user:3&type=shelf&id=2&perm=use")
+        check(
+            "Studio says what couldn't be tried, with the database's reason, as the command does",
+            status == 200
+            and w["tried"]
+            and w["ways"] == []
+            and w.get("untried")
+            == [
+                {
+                    "text": "add user 3 to cn.shelf_keepers for shelf 2",
+                    "error": 'null value in column "since" of relation "shelf_keepers" violates not-null constraint',
+                    "lines": ["line 44"],
+                    "kinds": ["link"],
+                }
+            ],
+            (status, w),
+        )
+        status, w = Client(s).call("/api/why?as=user:3&type=doc&id=5&perm=view")
+        check(
+            "... beside the changes that grant it",
+            status == 200
+            and w["ways"]
+            and [(u["text"], u["error"]) for u in w.get("untried", [])]
+            == [
+                (
+                    f"add user 3 to cn.doc_editors for doc {n}",
+                    'null value in column "added_by" of relation "doc_editors" violates not-null constraint',
+                )
+                for n in (5, 4, 3, 2)
+            ],
+            (status, w),
+        )
+    finally:
+        s.stop()
     check("... and nothing it tried stays", psql(db, data) == before, (before, psql(db, data)))
     subprocess.run(["dropdb", "--if-exists", db], capture_output=True)
 

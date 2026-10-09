@@ -11,7 +11,8 @@
 /** @typedef {{id: string | null, visible: boolean, values: Record<string, unknown>, masked: string[], perms: string[]}} Row */
 /** @typedef {{table: string, type: string | null, columns: string[], rows: Row[], offset: number, more: boolean, total: number, visible_total: number}} Rows */
 /** @typedef {{text: string, grants: boolean, more_objects: number, more_people: number, also: string[], elsewhere: {type: string, perm: string, n: number}[], fewer_people: number, lines: string[], kinds: string[]}} Way */
-/** @typedef {{holds: boolean, explain: string[], needs: string, tried: boolean, notes: string[], ways: Way[]}} Why */
+/** @typedef {{text: string, error: string, lines: string[], kinds: string[]}} Untried */
+/** @typedef {{holds: boolean, explain: string[], needs: string, tried: boolean, notes: string[], ways: Way[], untried: Untried[]}} Why */
 /** @typedef {{check: string, named: string}} Test */
 /** @typedef {{change: string, type: string, what: string, users: number, objects: number}} Summary */
 /** @typedef {{change: string, type: string, what: string, id: string, user_id: string | null}} Change */
@@ -226,7 +227,13 @@ async function why(type, id, perm, out) {
            w.more_people ? `and to ${w.more_people} more ${w.more_people === 1 ? "person" : "people"} on this ${type}` : "",
            w.fewer_people ? `takes it from ${w.fewer_people} ${w.fewer_people === 1 ? "person" : "people"}` : ""].filter(Boolean).join(", ")) : null))));
     } else {
-      parts.push(el("p", {}, "No single change to shares or links grants it."));
+      parts.push(el("p", {}, a.untried.length ? "No single change that could be tried grants it." : "No single change to shares or links grants it."));
+    }
+    // the changes the database refused to try, with its reason (rowstile why's "could not be tried")
+    if (a.untried.length) {
+      parts.push(el("p", {}, "Could not be tried:"));
+      parts.push(el("ul", { class: "ways" }, a.untried.map((u) => el("li", {}, u.text, " ", el("code", { class: "muted" }, u.lines.join(", ")),
+        el("div", { class: "also" }, u.error)))));
     }
     for (const n of a.notes) parts.push(el("p", { class: "muted" }, n));
   }

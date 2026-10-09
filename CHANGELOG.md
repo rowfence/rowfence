@@ -455,6 +455,10 @@ Each release upgrades from the one before it. How releases are numbered and made
   id)`), `rowstile why` tried to add a row for a team that is there, which can't be done: "could not be tried:
   add team 10 to app.teams for team 11 (null value in column "org_id" ...)". It doesn't try that: putting a team
   inside another moves it out of where it is.
+- Studio, where it may write, left out the changes the database refused to try. Where `rowstile why` said "no
+  single change that could be tried grants it" and "could not be tried: add user 3 to app.doc_editors for doc 5
+  (null value in column "added_by" ...)", Studio's page said "No single change to shares or links grants it". It
+  says them, with the database's reason, as the command does.
 
 ## 0.1.0 (alpha)
 
