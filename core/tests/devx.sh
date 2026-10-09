@@ -121,6 +121,15 @@ case "$out" in *"P0001: no permission file.fly in the policy"*) ok "a permission
   *) bad "can, an unknown permission" "$out";; esac
 out=$(as 1 "SELECT * FROM authz.who('file', '11', 'fly')")
 case "$out" in *"P0001: no permission file.fly in the policy"*) ok "... asking who holds it too";; *) bad "who, an unknown permission" "$out";; esac
+# a type without permissions (team) is still a type: no such permission, and none held
+out=$(as 1 "SELECT authz.can('team', '10', 'view')")
+case "$out" in *"P0001: no permission team.view in the policy"*) ok "... on a type that has no permissions too";;
+  *) bad "can, a type without permissions" "$out";; esac
+out=$(psql -X -q -At -d "$DB" -v VERBOSITY=verbose -c "SELECT * FROM authz.who('team', '10', 'view')" 2>&1)  # as one who may ask
+case "$out" in *"P0001: no permission team.view in the policy"*) ok "... asking who holds it on such a type";;
+  *) bad "who, a type without permissions" "$out";; esac
+out=$(as 1 "SELECT cardinality(authz.perms('team', '10'))")
+[ "$out" = 0 ] && ok "... and the permissions held on it: none" || bad "perms, a type without permissions" "$out"
 out=$(as 6 "SELECT authz.explain_rule('app.files', 'update', '11') IS NULL")
 [ "$out" = t ] && ok "... and one the user can't see: NULL too" || bad "explain invisible" "$out"
 out=$(as 2 "SELECT array_to_string(authz.explain_rule('app.files', 'update', '12', '{\"name\": \"x\"}'), '|')")

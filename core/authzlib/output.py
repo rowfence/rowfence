@@ -261,8 +261,8 @@ CREATE OR REPLACE FUNCTION authz.uid() RETURNS {u.pktype} {attrs} AS $uid$ {body
         )
 
         def can_branch(t: Type) -> str | None:
-            if not t.perms:
-                return None
+            if not t.perms:  # a type without permissions is still a type: it has no such permission
+                return f"      {no_perm}"
             # the permission on the object's own row, as a write rule checks it: that object's lookups (and
             # its ancestors, for recursive permissions), not every object the user holds it on. On any row with
             # the key, as the views say: a table that inherits from this one may hold a second (the primary
@@ -277,11 +277,10 @@ CREATE OR REPLACE FUNCTION authz.uid() RETURNS {u.pktype} {attrs} AS $uid$ {body
         self._invalid = "false"
         can_body = self.dispatch_type(can_branch)
         list_cases = self._list_cases
-        perms_cases = "\n".join(
+        perms_cases = "\n".join(  # every type: one without permissions has an empty list of them
             f"    WHEN {lit(t.name)} THEN names := ARRAY[{', '.join(lit(p) for p in ps)}]::text[];"
             for t in self.types.values()
             for ps in [perms_of[t.name]]
-            if ps
         )
         id_types = sorted({t.pktype for t in self.types.values()} - {"text"})
         overloads = "\n".join(

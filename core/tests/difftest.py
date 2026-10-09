@@ -364,6 +364,14 @@ class Checker:
                         f"FROM (SELECT {idsql(t)} AS i FROM {qt(t.table)} TABLESAMPLE BERNOULLI (30) "
                         f"UNION SELECT '999999') ids",
                     )
+            # authz.perms_of (authz.perms for each): every permission held on a few objects at once, a list's buttons
+            for t in self.types.values():
+                ids = "ARRAY[" + ", ".join(lit(i) for i in sample[t.name]) + "]::text[]"
+                emit(
+                    [u, "perms_of", t.name],
+                    f"SELECT coalesce(json_agg(json_build_array(x.id, x.perms)), '[]') "
+                    f"FROM authz.perms_of({lit(t.name)}, {ids}) x",
+                )
             if kind == "user" and pid:
                 # authz.explain asked by the user themselves: about a row they can't see, nothing
                 for t in self.types.values():
@@ -599,6 +607,13 @@ class Checker:
                                 f"user {u}: authz.explain('{t.name}', {i}, '{p}') asked by themselves says "
                                 f"{line!r}, expected {'yes' if want else 'no'}"
                             )
+            # perms_of: the public permissions held on each object, no more (a type without any: none)
+            for t in self.types.values():
+                public = [p for p, x in t.perms.items() if not x.hidden]
+                for i, got in snap.get((u, "perms_of", t.name), []):
+                    want = sorted(p for p in public if i in state[(t.name, p)] & self.ref.ids(t))
+                    if sorted(got or []) != want:
+                        problems.append(f"user {u}: authz.perms_of('{t.name}', [{i}]) says {got}, expected {want}")
             # explain_rule as the app asks it: nothing about a row the user can't see; on one they see, yes exactly
             # where the rules let the command through
             for table in dict.fromkeys(r.table for r in self.rules):

@@ -64,6 +64,10 @@ Each release upgrades from the one before it. How releases are numbered and made
 
 ### Fixed
 
+- `authz.can`, `authz.who` and `authz.explain` said "no type team in the policy" for a type the policy has but
+  that has no permissions, and `authz.perms` and `perms_of` refused it the same way. They say "no permission
+  team.view in the policy" now, as `authz.list` did, and `perms` gives none. **Upgrading**: apply the policy
+  again (or the next migration).
 - A condition in a select rule that Postgres refuses (a column the table doesn't have, say) was reported in
   Postgres's words alone, without its line: Postgres says no position in a row-level security policy's own
   expression. `rowstile apply` now names it with its line, as it does the others (AZ613).

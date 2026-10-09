@@ -3869,6 +3869,10 @@ BEGIN
     AND coalesce((o.active), false))));
         ELSE RAISE EXCEPTION 'no permission %.% in the policy', p_type, p_perm USING HINT = 'rowstile help AZ707';
       END CASE;
+    WHEN 'org' THEN
+      IF NOT pg_catalog.pg_input_is_valid(p_id, 'bigint') THEN RETURN false; END IF;
+      v_bigint := p_id::bigint;
+      RAISE EXCEPTION 'no permission %.% in the policy', p_type, p_perm USING HINT = 'rowstile help AZ707';
     WHEN 'team' THEN
       IF NOT pg_catalog.pg_input_is_valid(p_id, 'authz_gen."team__key"') THEN RETURN false; END IF;
       v_text := p_id::authz_gen."team__key"::text;
@@ -4189,6 +4193,7 @@ BEGIN
   CASE p_type
     WHEN 'user' THEN names := ARRAY['oversee']::text[];
     WHEN 'bot' THEN names := ARRAY['manage_keys']::text[];
+    WHEN 'org' THEN names := ARRAY[]::text[];
     WHEN 'team' THEN names := ARRAY['share']::text[];
     WHEN 'project' THEN names := ARRAY['edit', 'view', 'browse']::text[];
     WHEN 'folder' THEN names := ARRAY['share', 'edit', 'view']::text[];
@@ -5371,6 +5376,10 @@ BEGIN
           END LOOP;
         ELSE RAISE EXCEPTION 'no permission %.% in the policy', p_type, p_perm USING HINT = 'rowstile help AZ707';
       END CASE;
+    WHEN 'org' THEN
+      IF NOT pg_catalog.pg_input_is_valid(p_id, 'bigint') THEN RETURN; END IF;
+      v_bigint := p_id::bigint;
+      RAISE EXCEPTION 'no permission %.% in the policy', p_type, p_perm USING HINT = 'rowstile help AZ707';
     WHEN 'team' THEN
       IF NOT pg_catalog.pg_input_is_valid(p_id, 'authz_gen."team__key"') THEN RETURN; END IF;
       v_text := p_id::authz_gen."team__key"::text;
@@ -5507,6 +5516,10 @@ BEGIN
         WHEN 'manage_keys' THEN RETURN QUERY SELECT * FROM authz_int."bot__manage_keys__why"(v_bigint, 1, '{}');
         ELSE RAISE EXCEPTION 'no permission %.% in the policy', p_type, p_perm USING HINT = 'rowstile help AZ707';
       END CASE;
+    WHEN 'org' THEN
+      IF NOT pg_catalog.pg_input_is_valid(p_id, 'bigint') THEN RETURN; END IF;
+      v_bigint := p_id::bigint;
+      RAISE EXCEPTION 'no permission %.% in the policy', p_type, p_perm USING HINT = 'rowstile help AZ707';
     WHEN 'team' THEN
       IF NOT pg_catalog.pg_input_is_valid(p_id, 'authz_gen."team__key"') THEN RETURN; END IF;
       v_text := p_id::authz_gen."team__key"::text;
