@@ -391,6 +391,9 @@ Each release upgrades from the one before it. How releases are numbered and made
   app (`authz.uid()`), or every share of the relation. Applying reads them now, and refuses one that doesn't run
   with its line (AZ613), as it does the other conditions. **Upgrading**: for a policy with such a `where` or
   `shared if`, `rowstile migrate` writes a migration: those functions made again, and read.
+- A caveat that doesn't run (a column that isn't there), when it reads what its share was made with
+  (`arg('ip')`), was said as another condition's mistake: applying named the policy's other caveat, or no line
+  at all. It names the caveat's line.
 
 ## 0.1.0 (alpha)
 

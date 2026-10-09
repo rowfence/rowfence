@@ -32,7 +32,7 @@ from .connection import Db, Value, flag, number, text, text_or_none
 from .governance import DIFF_ROWS
 from .output import DROP_MASKED_VIEWS, DROP_OLD_POLICIES, LOST_RULES
 from .parse import KEYWORDS, Expr, Loc, braced, read_lines
-from .sqlutil import IF_PARTITIONED, POLICY_MARKS, lit, q, qt, row_cond, sql_code, this_spans, with_uid
+from .sqlutil import CAVEAT_ARG, IF_PARTITIONED, POLICY_MARKS, lit, q, qt, row_cond, sql_code, this_spans, with_uid
 from .testing import FN as TESTS_FN
 
 if TYPE_CHECKING:
@@ -320,10 +320,17 @@ def condition_error(err: Exception, sql: str, policy: str, files: Files) -> Erro
 
 
 def as_compiled(cond: str) -> re.Pattern[str]:
-    """The condition as the compiled SQL writes it: each `this.` as the alias of wherever it is placed."""
+    """The condition as the compiled SQL writes it: each `this.` as the alias of wherever it is placed, and a
+    caveat's arg('ip') as what the share it goes with was made with, (<alias>.caveat_args ->> 'ip')
+    (Compiler.caveat_sql), or as written (where it is a function's call)."""
+    alias = r'(?:"(?:[^"]|"")+"|[A-Za-z_][A-Za-z0-9_]*)'
+    spans = [(start, end, alias + r"\.") for start, end in this_spans(cond)] + [
+        (m.start(), m.end(), rf"(?:{re.escape(m.group(0))}|\({alias}\.caveat_args ->> '{re.escape(m.group(1))}'\))")
+        for m in CAVEAT_ARG.finditer(cond)
+    ]
     parts, last = [], 0
-    for start, end in this_spans(cond):
-        parts += [re.escape(cond[last:start]), r'(?:"(?:[^"]|"")+"|[A-Za-z_][A-Za-z0-9_]*)\.']
+    for start, end, pattern in sorted(spans):
+        parts += [re.escape(cond[last:start]), pattern]
         last = end
     return re.compile("".join(parts) + re.escape(cond[last:]))
 

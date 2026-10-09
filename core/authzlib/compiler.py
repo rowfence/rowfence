@@ -33,6 +33,7 @@ from .parse import (
     names_roles,
 )
 from .sqlutil import (
+    CAVEAT_ARG,
     check_stable_condition,
     lit,
     names_this,
@@ -1123,7 +1124,7 @@ class Core:
 
     @staticmethod
     def caveat_sql(c: Caveat, alias: str = "g") -> str:
-        return with_uid(re.sub(r"\barg\s*\(\s*'([^']*)'\s*\)", rf"({alias}.caveat_args ->> '\1')", c.sql))
+        return with_uid(CAVEAT_ARG.sub(rf"({alias}.caveat_args ->> '\1')", c.sql))
 
     # --- functions over every type: one branch per type, the id converted to its key ----------------
     def id_vars(self) -> str:
