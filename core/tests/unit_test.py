@@ -4883,6 +4883,10 @@ class HandAnswers(unittest.TestCase):
 
         for sql in ("kind in (other_kind)", "kind in ()", "id in (select doc_id from holds)"):
             self.assertIsNone(simple(sql), sql)
+        # a whole number longer than Python reads (4300 digits): the database's to read, as any other it can't
+        for sql in ("size > " + "9" * 4301, "size in (1, " + "9" * 5000 + ")"):
+            self.assertIsNone(simple(sql), sql[:20])
+        self.assertIsNotNone(simple("size > " + "9" * 4300))
 
 
 class Encodings(unittest.TestCase):

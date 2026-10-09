@@ -357,6 +357,9 @@ Each release upgrades from the one before it. How releases are numbered and made
 - `rowstile check`, and everything that compiles a policy, stopped with a Python traceback (`KeyError: 'anyone'`,
   or `'link'`) on a permission that follows a relation shared with `anyone` or a link: `pub : anyone shared by
   edit` with `can view = pub.see`. It says what `user:*` there got: AZ301, there is nothing to follow.
+- `rowstile prove`, `rowstile review` and `rowstile why` stopped with a Python traceback (`ValueError`) on a
+  condition holding a whole number of more than 4300 digits, which Python won't read. Such a condition is the
+  database's to read, as a subquery is.
 
 ## 0.1.0 (alpha)
 
