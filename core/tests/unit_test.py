@@ -3525,6 +3525,16 @@ class Wire(unittest.TestCase):
         refused(f"sslmode=verify-ca sslrootcert={authority} sslcrldir={crls.replace(os.sep, '/')}", "revoked")
         shutil.copy(revoked, os.path.join(self.folder, "root.crl"))
         refused(f"sslmode=require sslrootcert={authority}", "certificate revoked")
+        # with no folder of libpq's (no home), the root certificate sslrootcert names is still checked, and no list
+        # of revoked certificates is looked for
+        with mock.patch.object(self.pgwire, "_libpq_file", return_value=None):
+            connect(f"sslmode=require sslrootcert={authority}")
+            refused(f"sslmode=require sslrootcert={other}", "certificate verify failed")
+        # a root certificate file that holds no certificate: refused, saying which file, before anything is sent
+        unreadable = os.path.join(self.home.name, "not-a-certificate.crt").replace(os.sep, "/")
+        with open(unreadable, "w", encoding="utf-8") as fh:
+            fh.write("not a certificate\n")
+        refused(f"sslmode=require sslrootcert={unreadable}", f'^could not read root certificate file "{unreadable}"')
         # TLS's version: TLSv1.3 where both have it, TLSv1.2 at most if the maximum says so; a minimum of TLSv1.3
         # refuses a server that stops at TLSv1.2
         os.remove(os.path.join(self.folder, "root.crl"))
