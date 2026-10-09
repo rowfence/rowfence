@@ -8,17 +8,25 @@ database: check, prove, push, test, why, lint.
 
 import json
 import os
+import queue
 import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 from typing import Any
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
+sys.path.insert(0, ROOT)
+sys.path.insert(0, os.path.join(ROOT, "cli"))
+import mcp  # noqa: E402
+
 fails = 0
 # an answer from the server: its shape is what the checks check
 Answer = Any
+WAIT = 120  # seconds an answer may take (a tool call runs the command once; push and test touch a database)
 
 
 def check(label: str, ok: object, detail: object = "") -> None:
@@ -41,13 +49,24 @@ class Client:
         assert self.p.stdin is not None and self.p.stdout is not None
         self.stdin, self.stdout = self.p.stdin, self.p.stdout
         self.n = 0
+        # the server's lines as they come, so that a server that doesn't answer fails the suite instead of hanging it
+        self.lines: queue.Queue[bytes] = queue.Queue()
+        threading.Thread(target=self.pump, daemon=True).start()
+
+    def pump(self) -> None:
+        for line in self.stdout:
+            self.lines.put(line)
+        self.lines.put(b"")  # the server's output ended
 
     def send(self, obj: object) -> None:
         self.stdin.write((obj if isinstance(obj, str) else json.dumps(obj)).encode() + b"\n")
         self.stdin.flush()
 
     def read(self) -> Answer:
-        return json.loads(self.stdout.readline())
+        try:
+            return json.loads(self.lines.get(timeout=WAIT))
+        except queue.Empty:
+            raise AssertionError(f"no answer in {WAIT} s") from None
 
     def request(self, method: str, params: object = None) -> Answer:
         self.n += 1
@@ -121,7 +140,89 @@ def protocol(folder: str) -> None:
         "... nor does one nested too deep to read end it",
         c.read()["error"]["code"] == -32700 and c.request("ping")["result"] == {},
     )
+    c.send("")
+    check("an empty line is no message: the next answer is the ping's", c.request("ping")["result"] == {})
+    # JSON-RPC's batch, which protocol 2025-03-26 asks a server to take: an array of answers, none for a notification
+    c.send(
+        [
+            {"jsonrpc": "2.0", "id": "b1", "method": "ping"},
+            {"jsonrpc": "2.0", "method": "notifications/initialized"},
+            {"jsonrpc": "2.0", "id": "b2", "method": "tools/list"},
+        ]
+    )
+    r = c.read()
+    check(
+        "a batch: one answer for each request in it, in an array",
+        isinstance(r, list)
+        and [a["id"] for a in r] == ["b1", "b2"]
+        and r[0]["result"] == {}
+        and r[1]["result"]["tools"],
+        r,
+    )
+    c.send([{"jsonrpc": "2.0", "method": "notifications/initialized"}])
+    check("... of notifications only: no answer", c.request("ping")["result"] == {})
+    c.send([1, {"jsonrpc": "2.0", "id": "b3", "method": "ping"}])
+    r = c.read()
+    check(
+        "... what isn't a request in it: an error in its place",
+        isinstance(r, list)
+        and [(a["id"], a.get("error", {}).get("code")) for a in r] == [(None, -32600), ("b3", None)],
+        r,
+    )
+    c.send([])
+    r = c.read()
+    check("... an empty one: an error, not an array", r["error"]["code"] == -32600 and r["id"] is None, r)
+    c.send({"jsonrpc": "2.0", "id": None, "method": "ping"})
+    r = c.read()
+    check(
+        "a request whose id is null (MCP gives every request one): an error, not silence",
+        r["id"] is None and r["error"]["code"] == -32600 and "not null" in r["error"]["message"],
+        r,
+    )
+    r = c.request("tools/call", ["check"])
+    check(
+        "params that aren't an object: an error saying so",
+        r["error"]["code"] == -32602 and r["error"]["message"].startswith("tools/call: params is an object"),
+        r,
+    )
+    r = c.request("tools/call", {"name": "test", "arguments": {"files": "db/tests/docs.authz"}})
+    check(
+        "test's files as one string, not a list: refused",
+        r["error"]["code"] == -32602 and r["error"]["message"] == "test: files: a list of file names",
+        r,
+    )
+    r = c.request(
+        "tools/call", {"name": "why", "arguments": {"as": "user:1", "type": "folder", "id": None, "perm": "view"}}
+    )
+    check(
+        "an id that is null: refused, not run as the id 'None'",
+        r.get("error", {}).get("message") == "why: id: a string, not null",
+        r,
+    )
+    r = c.request("tools/call", {"name": "why", "arguments": {"as": "user:1", "type": "folder", "id": 3, "perm": True}})
+    check("... nor a permission that is true", r.get("error", {}).get("message") == "why: perm: a string, not true", r)
+    # an argument longer than a process may be given (Linux takes 128 kB): the call fails, and the server carries on
+    r = c.request("tools/call", {"name": "check", "arguments": {"policy": "p" * 300000}})
+    check(
+        "a call the server can't make: an error naming why, and the server carries on",
+        r["error"]["code"] == -32603
+        and r["error"]["message"].startswith("OSError: ")
+        and c.request("ping")["result"] == {},
+        r,
+    )
     check("it stops when its input closes", c.close() == 0)
+    # a call that runs longer than the server waits (600 s; here a moment): stopped, and a failed call
+    request: Answer = {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "check", "arguments": {}}}
+    with mock.patch.object(mcp, "TIMEOUT", 0.001):
+        r = mcp.Server().handle(request)
+    result: Answer = r["result"] if r else {}
+    check(
+        "a call that takes too long: stopped, and said so",
+        result.get("isError") is True
+        and result["structuredContent"]["exit_code"] == 2
+        and result["content"][0]["text"] == "rowstile check took more than 0.001 s and was stopped",
+        r,
+    )
 
 
 def without_db(folder: str) -> None:
