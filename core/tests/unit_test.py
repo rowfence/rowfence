@@ -3095,6 +3095,30 @@ class Fmt(unittest.TestCase):
         with self.assertRaisesRegex(FormatError, "AZ104"):  # a mistake: its message, not an assertion
             format(self.BASE.replace("can view = owner", "can view"))
 
+    def test_a_type_continued_on_the_next_line(self) -> None:
+        # a type's where on the line below its type: it hangs so that the condition starts under the table
+        from authzlib.fmt import format
+
+        src = self.BASE.replace("type doc = app.docs\n", "type doc = app.docs\n    where {not archived}\n")
+        want = self.BASE.replace("type doc = app.docs\n", "type doc = app.docs\n     where {not archived}\n")
+        self.assertEqual(format(src), want)
+        self.assertEqual(format(want), want)
+
+    def test_a_layout_that_would_change_what_the_policy_says_is_refused(self) -> None:
+        # the layout is read back before it is written: a bug in it that changed a declaration, or a test, is refused
+        from authzlib import fmt
+
+        text = self.BASE + '\ntest "x"\n  user 1 can view doc 1\n'
+        for old, new in (("can view = owner", "can view = owner or {true}"), ("can view doc 1", "cannot view doc 1")):
+            with (
+                mock.patch.object(fmt, "format_policy", lambda t, old=old, new=new: t.replace(old, new)),
+                self.assertRaisesRegex(
+                    fmt.FormatError, r"^formatting would change what the policy says \(a bug in rowstile fmt"
+                ),
+            ):
+                fmt.format(text)
+        self.assertEqual(fmt.format(text), text)  # (the layout itself says the same)
+
 
 class Confidence(unittest.TestCase):
     """rowstile prove (invariants in small worlds) and coverage (branches no test makes true)."""
@@ -3429,6 +3453,20 @@ class Confidence(unittest.TestCase):
         self.assertEqual(r["covered"], 3)
         self.assertIn(("line 49", "folder.edit", "editor"), r["missing"])
         self.assertIn('branches no "can" check reaches (line ', coverage.summary(r))
+
+    def test_coverage_of_every_branch_and_of_none(self) -> None:
+        # what rowstile test --coverage prints when a test makes every branch true, and when there are no
+        # permissions; rowstile dev's line then says nothing more than how many checks pass
+        from authzlib import coverage
+
+        c = Compiler(parse_policy(self.HEAD + "type doc = app.docs\n  can see = signed_in\n"))
+        c.compile("x")
+        r = coverage.report(c, ["yes  user 1 holds see on doc 1\n  doc.see = signed_in\n  yes  signed_in"])
+        self.assertEqual(coverage.describe(r), "coverage: 1 of 1 branches made true by a test (all of them)")
+        self.assertEqual(coverage.summary(r), "")
+        c = Compiler(parse_policy(self.HEAD + "type doc = app.docs\n"))
+        c.compile("x")
+        self.assertEqual(coverage.describe(coverage.report(c, [])), "coverage: no permissions")
 
     def test_coverage_of_a_deny_inside_inheritance(self) -> None:
         from authzlib import coverage
