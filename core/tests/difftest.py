@@ -80,6 +80,10 @@ def refusals_of(pol: Policy) -> re.Pattern[str]:
 # a share's end in the past, far enough that a clock set back (Docker Desktop's VM resyncing its clock, seconds at a
 # time) doesn't make it live again half way through a check, which reads the data and the answers at different times
 EXPIRED = "now() - interval '1 hour'"
+# a share's start ahead, far enough that it doesn't come during a run (a soak's takes hours): not started throughout.
+# A generator gives one in place of one of its draws' live shares, so that its draws, and all it makes, stay the same
+LATER = "now() + interval '1 day'"
+SHARE_COLUMNS = "object_type, object_id, relation, subject_type, subject_id, subject_relation, expires_at, starts_at"
 
 # How many sessions answer a snapshot's questions, side by side (DIFFTEST_SESSIONS=1: one after the other). The
 # questions are the same either way, each user's in one session from first to last: what it saves is the wait.
@@ -1404,7 +1408,16 @@ class DocsGen(Gen):
         r = self.r
         folders = ints(ids, "folder") or list(range(1, 26))
         files = ints(ids, "file") or list(range(1, 51))
-        expires = r.choice(["NULL", "NULL", "NULL", "now() - interval '1 hour'", "now() + interval '1 day'"])
+        # live, not started yet, expired, or live until tomorrow
+        expires, starts = r.choice(
+            [
+                ("NULL", "NULL"),
+                ("NULL", "NULL"),
+                ("NULL", LATER),
+                (EXPIRED, "NULL"),
+                ("now() + interval '1 day'", "NULL"),
+            ]
+        )
         kind = r.random()
         if kind < 0.6:
             obj, oid, rel = "folder", r.choice(folders), r.choice(["viewer", "editor"])
@@ -1421,8 +1434,8 @@ class DocsGen(Gen):
             obj, oid, rel = "file", r.choice(files), "viewer"
             st, sid, sr = r.choice([("user", r.choice(self.users), ""), ("team", r.randint(10, 15), "member")])
         return (
-            f"INSERT INTO authz.shares VALUES ('{obj}', {oid}, '{rel}', '{st}', {sid}, '{sr}', {expires}) "
-            "ON CONFLICT DO NOTHING;"
+            f"INSERT INTO authz.shares ({SHARE_COLUMNS}) VALUES ('{obj}', {oid}, '{rel}', '{st}', {sid}, '{sr}', "
+            f"{expires}, {starts}) ON CONFLICT DO NOTHING;"
         )
 
     def change(self, ids: Ids) -> str:
@@ -1584,11 +1597,17 @@ class AltGen(Gen):
             row = ("doc", r.choice(docs), "shortcut", "doc", r.choice(docs), "")
         else:
             row = ("grp", r.choice(groups), "member", "grp", r.choice(groups), "member")
-        expires = "NULL"
-        if row[2] != "shortcut" and r.random() < 0.25:
-            expires = r.choice(["now() - interval '1 hour'", "now() + interval '1 day'"])
+        expires, starts = "NULL", "NULL"
+        if row[2] != "shortcut":  # (a link of a tree: it never expires, nor starts later)
+            draw = r.random()
+            if draw < 0.25:
+                expires = r.choice(["now() - interval '1 hour'", "now() + interval '1 day'"])
+            elif draw < 0.31:  # not started yet (with no draw of its own)
+                starts = LATER
         vals = ", ".join(lit(x) if isinstance(x, str) else str(x) for x in row)
-        return f"INSERT INTO authz.shares VALUES ({vals}, {expires}) ON CONFLICT DO NOTHING;"
+        return (
+            f"INSERT INTO authz.shares ({SHARE_COLUMNS}) VALUES ({vals}, {expires}, {starts}) ON CONFLICT DO NOTHING;"
+        )
 
     def change(self, ids: Ids) -> str:
         r = self.r
@@ -1986,10 +2005,12 @@ class CompositeGen(Gen):
             to, ts = self.team(ids)
             subj = ("team", None, "member")
             sid = f"ROW({to}, {lit(ts)})::text"
-        expires = r.choice(["NULL", "NULL", "now() - interval '1 hour'", "now() + interval '1 day'"])
+        expires, starts = r.choice(
+            [("NULL", "NULL"), ("NULL", LATER), (EXPIRED, "NULL"), ("now() + interval '1 day'", "NULL")]
+        )
         return (
-            f"INSERT INTO authz.shares VALUES ('folder', {lit(self.id_text(o, f))}, 'viewer', {lit(subj[0])}, "
-            f"{sid}, {lit(subj[2])}, {expires}) ON CONFLICT DO NOTHING;"
+            f"INSERT INTO authz.shares ({SHARE_COLUMNS}) VALUES ('folder', {lit(self.id_text(o, f))}, 'viewer', "
+            f"{lit(subj[0])}, {sid}, {lit(subj[2])}, {expires}, {starts}) ON CONFLICT DO NOTHING;"
         )
 
     def change(self, ids: Ids) -> str:
@@ -2103,11 +2124,13 @@ class LoopGen(Gen):
 
     def grant(self, ids: Ids | None = None) -> str:
         r = self.r
-        expires = r.choice(["NULL", "NULL", "now() - interval '1 hour'", "now() + interval '1 day'"])
+        expires, starts = r.choice(
+            [("NULL", "NULL"), ("NULL", LATER), (EXPIRED, "NULL"), ("now() + interval '1 day'", "NULL")]
+        )
         sid = r.choice(ints(ids, "setting") or list(range(1, 7)))
         return (
-            f"INSERT INTO authz.shares VALUES ('setting', {sid}, 'admin', 'user', {r.choice(self.users)}, '', "
-            f"{expires}) ON CONFLICT DO NOTHING;"
+            f"INSERT INTO authz.shares ({SHARE_COLUMNS}) VALUES ('setting', {sid}, 'admin', 'user', "
+            f"{r.choice(self.users)}, '', {expires}, {starts}) ON CONFLICT DO NOTHING;"
         )
 
     def change(self, ids: Ids) -> str:
@@ -2243,10 +2266,12 @@ class CrossGen(Gen):
                 f"INSERT INTO authz.shares VALUES ('project', {r.choice(projects)}, 'host', 'folder', "
                 f"{r.choice(folders)}, '', NULL) ON CONFLICT DO NOTHING;"
             )
-        expires = r.choice(["NULL", "NULL", EXPIRED, "now() + interval '1 day'"])
+        expires, starts = r.choice(
+            [("NULL", "NULL"), ("NULL", LATER), (EXPIRED, "NULL"), ("now() + interval '1 day'", "NULL")]
+        )
         return (
-            f"INSERT INTO authz.shares VALUES ('folder', {r.choice(folders)}, 'viewer', 'user', "
-            f"{r.choice(self.users)}, '', {expires}) ON CONFLICT DO NOTHING;"
+            f"INSERT INTO authz.shares ({SHARE_COLUMNS}) VALUES ('folder', {r.choice(folders)}, 'viewer', 'user', "
+            f"{r.choice(self.users)}, '', {expires}, {starts}) ON CONFLICT DO NOTHING;"
         )
 
     def change(self, ids: Ids) -> str:

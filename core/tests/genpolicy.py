@@ -529,11 +529,20 @@ class GenPolicyGen(Gen):
             subject.split("#")[1] if "#" in subject else "",
         )
         sid = "*" if subject in ("user:*", "anyone") else r.choice(self.subject_ids(subject, ids))
-        expires = r.choice(["NULL", "NULL", "NULL", difftest.EXPIRED, "now() + interval '1 day'"])
+        # live, not started yet, expired, or live until tomorrow
+        expires, starts = r.choice(
+            [
+                ("NULL", "NULL"),
+                ("NULL", "NULL"),
+                ("NULL", difftest.LATER),
+                (difftest.EXPIRED, "NULL"),
+                ("now() + interval '1 day'", "NULL"),
+            ]
+        )
         return (
-            f"INSERT INTO authz.shares (object_type, object_id, relation, subject_type, subject_id, subject_relation, "
-            f"expires_at) VALUES ({lit(o.name)}, {lit(r.choice(self.subject_ids(o.name, ids)))}, {lit(rel.name)}, "
-            f"{lit(st)}, {lit(sid)}, {lit(sr)}, {expires}) ON CONFLICT DO NOTHING;"
+            f"INSERT INTO authz.shares ({difftest.SHARE_COLUMNS}) VALUES ({lit(o.name)}, "
+            f"{lit(r.choice(self.subject_ids(o.name, ids)))}, {lit(rel.name)}, {lit(st)}, {lit(sid)}, {lit(sr)}, "
+            f"{expires}, {starts}) ON CONFLICT DO NOTHING;"
         )
 
     def change(self, ids: Ids) -> str:
