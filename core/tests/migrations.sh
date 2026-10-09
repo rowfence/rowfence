@@ -63,6 +63,17 @@ out=$(CLI migrate --check --downgrade 2>&1); rc=$?
 cp "$T/lock" "$P/db/policy.lock"
 grep -q '^> type folder: can edit = share or editor or (parent.edit and {inherit})$' "$P/db/policy.lock" &&
   ok "the lock file starts with the policy's lines" || bad "lock meaning" "$(head -12 "$P/db/policy.lock")"
+# two branches that each wrote a migration, merged with the conflict markers left in the lock file: refused, the line
+# and what to do said, nothing written
+sed -i '3i<<<<<<< HEAD' "$P/db/policy.lock"
+for args in "migrate --check" "migrate"; do
+  out=$(CLI $args 2>&1); rc=$?
+  case "$out" in *"line 3 of the lock file isn't one rowstile migrate writes (<<<<<<< HEAD): a merge"*"[AZ619]") [ $rc -eq 1 ] &&
+    [ "$(ls "$P/db/migrations" | wc -l)" = 1 ] && [ "$(sed 3d "$P/db/policy.lock")" = "$(cat "$T/lock")" ] &&
+    ok "$args: a lock file a merge left its conflict markers in: refused with the line, exit 1" || bad "$args on a merged lock: exit $rc";;
+    *) bad "$args on a merged lock" "$out";; esac
+done
+cp "$T/lock" "$P/db/policy.lock"
 
 echo "-- a change"
 sed -i 's/^  can share = owner or folder.share$/  can share = owner or folder.share\n  can comment = folder.view/' "$P/db/policy.authz"

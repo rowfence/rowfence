@@ -253,6 +253,13 @@ class Lock:
         return digest(self.text, 16) if self.text else None
 
 
+class LockError(ValueError):
+    """A line of a lock file that rowstile migrate doesn't write: most often a conflict marker a merge left."""
+
+    def __init__(self, n: int, line: str) -> None:
+        super().__init__(f"line {n} of the lock file isn't one rowstile migrate writes ({line.strip()[:40]})")
+
+
 def always_hash(c: Compiled) -> str:
     """The steps every migration runs, as one hash: a new version of rowstile that changes one of them is a
     migration, even when nothing else changed."""
@@ -280,8 +287,10 @@ def lock_of(c: Compiled) -> str:
 
 
 def parse_lock(text: str | None) -> Lock:
+    """The lock file's text read; LockError for a line that is none of the policy's nor says what was made (a
+    merge's conflict marker, say)."""
     lock = Lock(text=text or "")
-    for line in (text or "").split("\n"):
+    for n, line in enumerate((text or "").split("\n"), 1):
         if line.startswith(("# rowstile ", "# rowfence ", "# authzc ")):  # rowstile's names before, too
             lock.version = line.split()[2].rstrip(":")
         if not line or line.startswith("#"):
@@ -292,6 +301,8 @@ def parse_lock(text: str | None) -> Lock:
         head, _, attrs = line.partition(" | ")
         kind, _, key = head.partition(" ")
         words = attrs.split()
+        if not words:  # each line of what was made gives its hash after a bar
+            raise LockError(n, line)
         if kind == "tree":
             lock.trees[key] = words[0]
         elif kind == "step":

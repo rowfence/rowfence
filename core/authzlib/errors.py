@@ -630,6 +630,18 @@ CODES = {
         "",
         when="command",
     ),
+    "AZ619": Code(
+        "A lock file rowstile can't read",
+        "`rowstile migrate` writes the lock file (`db/policy.lock`): the policy's lines, then what the migrations "
+        "made so far, each with a hash. A line of another kind is refused, by its number: most often a conflict "
+        "marker (`<<<<<<<`, `=======`, `>>>>>>>`). Two branches each wrote a migration, and a merge left both lock "
+        "files in one. Keep the lock file and the migrations of the branch merged into, and leave out the other "
+        "branch's new migration, then run `rowstile migrate` again: it writes one migration from there to the merged "
+        "policy. `rowstile review` says its Deploy part can't be computed from such a lock at the base.",
+        "",
+        "",
+        when="command",
+    ),
     "AZ701": Code(
         "Nobody signed in",
         "A query needed to know who is asking, and nobody signed in in this transaction. Every transaction starts "

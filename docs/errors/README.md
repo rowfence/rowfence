@@ -74,6 +74,7 @@ Every mistake rowstile reports ends with its code: `line 4: folder.owner: unknow
 - [AZ616](AZ616.md): An older command, a newer database
 - [AZ617](AZ617.md): Something is built on a masked view that can't be replaced in place
 - [AZ618](AZ618.md): The owner may not switch to the app role
+- [AZ619](AZ619.md): A lock file rowstile can't read
 
 ## What apps see
 
