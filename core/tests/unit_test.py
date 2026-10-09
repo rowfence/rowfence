@@ -9,13 +9,16 @@ files, what the rowstile command runs against a database, its file reading, and 
 
 import fnmatch
 import glob
+import io
 import itertools
 import json
 import os
 import re
+import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import types
 import unittest
 from collections.abc import Callable, Sequence
@@ -5423,6 +5426,89 @@ class Why(unittest.TestCase):
                 "org.admin wasn't tried: it reads app.org_members where {expires > now()}, and it isn't known "
                 "which values make that true"
             ],
+        )
+
+
+WINDOWS_ONLY = (
+    "Windows only: elsewhere no socket may bind an address and port another one listens on, whatever its options"
+)
+
+
+class StudioPort(unittest.TestCase):
+    """Studio's port on 127.0.0.1 is held by Studio alone: a port another program holds is refused, and no other
+    program may bind it while Studio runs. On Windows SO_REUSEADDR lets a socket bind an address and port another
+    one listens on, so Studio's server leaves it off there and asks for SO_EXCLUSIVEADDRUSE (studio_test.py starts
+    the command on a port that is taken, on Linux)."""
+
+    def held(self, reuse: bool) -> int:
+        """A port another program listens on, with SO_REUSEADDR (as python -m http.server sets it) or without."""
+        s = socket.socket()
+        self.addCleanup(s.close)
+        if reuse:
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        s.bind(("127.0.0.1", 0))
+        s.listen()
+        return s.getsockname()[1]
+
+    def test_the_socket_options_are_the_ones_meant(self) -> None:
+        import studio
+
+        s = studio.Studio(None, port=0)
+        s.start()
+        self.addCleanup(s.stop)
+        assert s.server is not None
+        if sys.platform == "win32":
+            self.assertEqual(s.server.socket.getsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE), 1)
+            self.assertEqual(s.server.socket.getsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR), 0)
+        else:
+            # there it only lets a restart take the port again while it waits after a close
+            self.assertNotEqual(s.server.socket.getsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR), 0)
+
+    @unittest.skipUnless(sys.platform == "win32", WINDOWS_ONLY)
+    def test_a_port_another_program_holds_is_refused(self) -> None:
+        import studio
+
+        for reuse in (True, False):
+            with self.subTest(reuse=reuse):
+                s = studio.Studio(None, port=self.held(reuse))
+                with self.assertRaises(OSError):
+                    s.start()
+                    self.addCleanup(s.stop)  # it took the port: stopped once the test is done
+
+    @unittest.skipUnless(sys.platform == "win32", WINDOWS_ONLY)
+    def test_no_other_program_may_bind_the_port_studio_holds(self) -> None:
+        import studio
+
+        s = studio.Studio(None, port=0)
+        s.start()
+        self.addCleanup(s.stop)
+        other = socket.socket()
+        self.addCleanup(other.close)
+        other.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        with self.assertRaises(OSError):
+            other.bind(("127.0.0.1", s.port))
+
+    @unittest.skipUnless(sys.platform == "win32", WINDOWS_ONLY)
+    def test_studio_says_it_did_not_start_and_how_to_choose_another_port(self) -> None:
+        import studio
+
+        port = self.held(True)
+        said, ended = io.StringIO(), list[object]()
+
+        def run() -> None:
+            try:
+                studio.serve(None, rowstile_cli.Config(), None, False, port, rowstile_cli.read_policy)
+            except SystemExit as e:
+                ended.append(e.code)
+
+        # no database: the port is all this asks about. A Studio that took it would serve until stopped
+        with mock.patch.object(studio.Studio, "work"), mock.patch.object(sys, "stderr", said):
+            serving = threading.Thread(target=run, daemon=True)
+            serving.start()
+            serving.join(20)
+        self.assertEqual(ended, [2], said.getvalue())
+        self.assertRegex(
+            said.getvalue(), r"\AStudio didn't start \(.+\): rowstile studio --port N for another port\n\Z"
         )
 
 

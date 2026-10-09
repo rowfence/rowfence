@@ -98,6 +98,10 @@ Each release upgrades from the one before it. How releases are numbered and made
 - `rowstile remove` gave back the table-wide SELECT a mask had replaced, and left the SELECT on the table's
   other columns that the mask gave instead. It takes those back too: the table's privileges are as they were
   before the policy.
+- On Windows, Studio (`rowstile studio`, and the one `rowstile dev` starts) holds its port on 127.0.0.1 alone,
+  as it does on Linux. On a port another program listens on, it says it didn't start and how to choose another
+  port, where Windows let it start beside the other program; and no other program can bind its port while it
+  runs.
 - `rowstile studio` printed a Python traceback when it couldn't start: on a database it can't reach (a server
   that isn't running, a database that isn't there), connected as a role that can't read rowstile's tables (an
   app's own `DATABASE_URL`, say), and on a port another program listens on. It says "can't connect: ..." as the
