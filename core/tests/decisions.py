@@ -452,7 +452,9 @@ class Decisions:
                 deep = f"{d} deep" if d < DEEPEST else f"{d} or more deep"
                 # (that deep, some answer is new, or none: it held where it decided)
                 self.add(Part(("depth", c, d), what, f"{kind} {deep}{via}", loc, ups=False, trues=False, falses=False))
-            self.add(Part(("loop", c), what, f"{kind} round a loop in the data{via}", loc, ups=False, falses=False))
+            # inheritance through columns alone never goes round a loop: the database refuses one (AZ713)
+            if rec.nested or any(src.kind != "column" for a, t in rec.arrows for src in t.relations[a.rel].sources):
+                self.add(Part(("loop", c), what, f"{kind} round a loop in the data{via}", loc, ups=False, falses=False))
 
     # --- watching --------------------------------------------------------------------------------------------
     def observe(
@@ -486,7 +488,8 @@ class Decisions:
         for c in range(len(self.recursions)):
             if not all(self.parts[("depth", c, d)].down for d in range(1, DEEPEST + 1)):
                 self.depths(c, asked)
-            if not self.parts[("loop", c)].down:
+            loop = self.parts.get(("loop", c))
+            if loop is not None and not loop.down:
                 self.loop(c, asked)
         if scope:
             self.scoped(scope, asked)
