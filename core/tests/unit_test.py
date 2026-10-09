@@ -2180,34 +2180,58 @@ test
 
     def test_the_review_data_in_words(self) -> None:
         """Who gains and loses, said as who they are: a service is no user, nor is someone not signed in (both were
-        counted as users). And a project without a lock file has its policy applied whole on the review data: when
-        that fails, Tests said "the migration fails", and Deploy nothing."""
+        counted as users), and a user whose id holds a ':' is a user. And a project without a lock file has its
+        policy applied whole on the review data: when that fails, Tests said "the migration fails", and Deploy
+        nothing."""
         rows = [
+            {"change": "gains", "user_id": "google:123", "type": "file", "what": "permission view", "id": "11"},
+            # (org is a type, but none that signs in: a user's id)
+            {"change": "gains", "user_id": "org:9", "type": "file", "what": "permission view", "id": "12"},
             {"change": "gains", "user_id": "bot:7", "type": "folder", "what": "permission view", "id": "1"},
-            {"change": "gains", "user_id": "bot:7", "type": "folder", "what": "permission view", "id": "2"},
-            {"change": "gains", "user_id": None, "type": "folder", "what": "permission view", "id": "1"},
+            {"change": "gains", "user_id": None, "type": "folder", "what": "permission view", "id": "2"},
             {"change": "gains", "user_id": "3", "type": "folder", "what": "permission view", "id": "1"},
             {"change": "loses", "user_id": "bot:7", "type": "file", "what": "permission edit", "id": "11"},
         ]
-        head = replaced(self.text, "  can break_glass = org.member\n", "")
+        head = replaced(
+            replaced(self.text, "  can break_glass = org.member\n", ""),
+            "type org = app.orgs\n",
+            "type bot = app.bots principal\n\ntype org = app.orgs\n",
+        )
         for error, deploy in (
             ("column x not found", " **It fails on the review database: column x not found**"),
             (None, " Applied on the review database in 0.2 s."),
         ):
-            ran = {"deployed": None if error else 0.2, "error": error, "tests": [], "how": {}}
+            how = {("user:google:123", "file", "11", "view"): ["yes  owner"]}
+            ran = {"deployed": None if error else 0.2, "error": error, "tests": [], "how": how}
             with (
                 mock.patch.object(database, "diff", return_value=rows),
-                mock.patch.object(database, "review_run", return_value=ran),
+                mock.patch.object(database, "review_run", return_value=ran) as run,
             ):
                 r = self.review.review((self.text, {}, {}), (head, {}, {}), None, None, mock.Mock(), worlds=10)
             s = self.review.summary(r)
             self.assertEqual(
                 s["Access"],
-                "1 user, 1 bot and someone not signed in gain `view` on 2 folders. 1 bot loses `edit` on 1 file.",
+                "2 users gain `view` on 2 files; 1 user, 1 bot and someone not signed in gain `view` on 2 folders. "
+                "1 bot loses `edit` on 1 file.",
+            )
+            md = self.review.markdown(r)
+            self.assertIn(
+                "| gains | `file` view | 2 users | 2 | user google:123, file 11: owner; user org:9, file 12 |", md
             )
             self.assertIn(
-                "| gains | `folder` view | 1 user, 1 bot and someone not signed in | 2 | bot 7, folder 1; bot 7, folder 2 |",
-                self.review.markdown(r),
+                "| gains | `folder` view | 1 user, 1 bot and someone not signed in | 2 | "
+                "bot 7, folder 1; nobody signed in, folder 2 |",
+                md,
+            )
+            # what it asks database.review_run to explain: each one as --as writes it
+            self.assertEqual(
+                run.call_args.args[5],
+                [
+                    ("user:google:123", "file", "11", "view"),
+                    ("user:org:9", "file", "12", "view"),
+                    ("bot:7", "folder", "1", "view"),
+                    ("", "folder", "2", "view"),
+                ],
             )
             self.assertTrue(s["Deploy"].startswith("no lock file, so no migrations: "), s["Deploy"])
             self.assertTrue(s["Deploy"].endswith(deploy), s["Deploy"])
@@ -2232,6 +2256,61 @@ test
             database.granting(explained),
             ["yes  bot 7 holds view on folder 2", "yes  bot_viewer", "yes  bot_viewer: a row in app.folder_bots names"],
         )
+
+    class Explaining:
+        """A database with the pull request's policy in force: authz.explain answers, and refuses file 13."""
+
+        class Refused(Exception):
+            pass
+
+        def __init__(self) -> None:
+            self.said: list[tuple[str, list[Value]]] = []
+
+        @property
+        def errors(self) -> type[Exception]:
+            return self.Refused
+
+        def rows(self, sql: str, args: Sequence[Value] = ()) -> list[Row]:
+            self.said.append((sql, list(args)))
+            if "authz.explain" in sql and args[1] == "13":
+                raise self.Refused("canceling statement due to statement timeout")
+            if "authz.explain" in sql:
+                return [{"l": "yes  it holds view on file"}, {"l": "  file.view = owner"}, {"l": "  yes  owner"}]
+            return []
+
+        def script(self, sql: str) -> None:
+            self.said.append((sql, []))
+
+        def warn(self, message: str, detail: str | None = None, hint: str | None = None) -> None:
+            pass
+
+    def test_how_is_asked_as_each_one_and_a_refusal_left_out(self) -> None:
+        # each example asked as who it is: a user by their id (one with a ':' in it too), a bot signed in as itself,
+        # nobody as nobody; one explain refuses has no how, and the review goes on (the tests run)
+        db = self.Explaining()
+        wanted = [
+            ("user:google:123", "file", "11", "view"),
+            ("bot:7", "file", "12", "view"),
+            ("user:3", "file", "13", "view"),
+            ("", "file", "14", "view"),
+        ]
+        with mock.patch.object(database, "apply"), mock.patch.object(database, "test", return_value=[]) as test:
+            ran = database.review_run(db, self.text, {}, {}, None, wanted)
+        self.assertEqual(sorted(ran["how"]), sorted(w for w in wanted if w[2] != "13"))
+        self.assertEqual(ran["how"][("bot:7", "file", "12", "view")], ["yes  owner"])
+        test.assert_called_once()
+        self.assertEqual(
+            [args for sql, args in db.said if "authz.explain" in sql or "authz.act_as" in sql],
+            [
+                ["file", "11", "view", "google:123"],
+                ["bot", "7"],
+                ["file", "12", "view", None],
+                ["file", "13", "view", "3"],
+                ["file", "14", "view", None],
+            ],
+        )
+        # each in a savepoint undone after it: nothing an example did stays, a bot's sign-in say
+        self.assertEqual(sum("ROLLBACK TO SAVEPOINT authz_review_explain" in sql for sql, _ in db.said), 4)
 
 
 class Graph(unittest.TestCase):
