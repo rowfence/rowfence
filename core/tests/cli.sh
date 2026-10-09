@@ -108,6 +108,17 @@ run explain-rule --as user:3 app.files insert --row '{folder_id: 6}'; [ $rc -eq 
 run explain-rule --as user:3 app.files insert --row '[1]'; [ $rc -eq 2 ] && case "$out" in *"JSON object"*) true;; *) false;; esac && ok "explain-rule --row wants an object" || bad "--row" "$rc $out"
 run diff "$T/main.authz" --limit; [ $rc -eq 2 ] && [ "$out" = "--limit needs a value" ] && ok "an option without its value is refused" || bad "option without value" "$rc $out"
 run client rb "$T/main.authz"; [ $rc -eq 2 ] && [ "$out" = "rowstile client: which language, py or ts?" ] && ok "client in a language it doesn't write is refused" || bad "client rb" "$rc $out"
+run client py; fromdb=$out
+run client py "$T/main.authz"; [ $rc -eq 0 ] && [ -n "$out" ] && [ "$out" = "$fromdb" ] && ok "client py from the file alone is the one the applied policy gives" || bad "client py from a file" "$rc ${out:0:120}"
+which='which policy file? (or name it in rowstile.toml: policy = "db/policy.authz")'
+run check; [ $rc -eq 2 ] && [ "$out" = "rowstile check: $which" ] && ok "a command without its policy file, and no rowstile.toml, asks which" || bad "check without a file" "$rc $out"
+run dev; [ $rc -eq 2 ] && [ "$out" = "rowstile dev: $which" ] && ok "... dev too" || bad "dev without a file" "$rc $out"
+run review; [ $rc -eq 2 ] && [ "$out" = "rowstile review: $which" ] && ok "... and review" || bad "review without a file" "$rc $out"
+run fmt; [ $rc -eq 2 ] && [ "$out" = "rowstile fmt: which files? (or name the policy in rowstile.toml)" ] && ok "... and fmt asks which files" || bad "fmt without files" "$rc $out"
+run fmt "$T/nosuch.authz"; [ $rc -eq 2 ] && [ "$out" = "$T/nosuch.authz: No such file or directory" ] && ok "fmt on a file that isn't there says so, exit 2" || bad "fmt on a missing file" "$rc $out"
+printf 'app role app_user\ntype user = app.users\n  can view = (\n' > "$T/broken.authz"; cp "$T/broken.authz" "$T/broken.before"
+run fmt "$T/broken.authz"
+case "$out" in *"broken.authz: can't format a policy that doesn't parse: "*) [ $rc -eq 1 ] && cmp -s "$T/broken.authz" "$T/broken.before" && ok "fmt on a policy that doesn't parse says so, exit 1, and leaves the file" || bad "fmt on a broken file: exit or file" "$rc";; *) bad "fmt on a broken file" "$rc $out";; esac
 run migrate "$T/main.authz" --tool bogus; [ $rc -eq 2 ] && case "$out" in "rowstile migrate: unknown tool 'bogus' (use one of "*) true;; *) false;; esac && ok "migrate for a tool it doesn't know says which it does" || bad "migrate --tool" "$rc $out"
 printf 'app role app_user\ntype user = app.users\n' > "$T/plain.authz"
 run prove "$T/plain.authz"; [ $rc -eq 0 ] && case "$out" in *"no invariants to prove"*) true;; *) false;; esac && ok "prove on a policy without invariants says there is nothing to prove" || bad "prove without invariants" "$rc $out"
@@ -131,6 +142,9 @@ echo "-- questions to the database, as someone"
 want=$(PSQL -c "SET authz.user_id = '5'" -c "SELECT array_to_string(authz.perms('folder', 1), E'\n')")
 run perms --as user:5 folder 1; [ $rc -eq 0 ] && [ "$out" = "${want:-(none)}" ] && ok "perms: what someone holds on an object, as authz.perms says" || bad "perms" "$rc $out (wanted $want)"
 run perms --as user:5 folder 999999; [ $rc -eq 0 ] && [ "$out" = "(none)" ] && ok "... and (none) where they hold nothing" || bad "perms none" "$rc $out"
+want=$(PSQL -c "SELECT array_to_string(authz.perms('folder', 1), E'\n')")  # nobody signed in
+run perms --as anyone folder 1; [ $rc -eq 0 ] && [ "$out" = "${want:-(none)}" ] && ok "--as anyone asks as nobody signed in" || bad "--as anyone" "$rc $out (wanted $want)"
+run perms --as 5 folder 1; [ $rc -eq 2 ] && [ "$out" = "--as 5: write it as user:42, bot:7 or anyone" ] && ok "--as without a type is refused, with how to write it" || bad "--as 5" "$rc $out"
 run can folder 1 view; [ $rc -eq 2 ] && [ "$out" = "rowstile can: as whom? --as user:42 (or bot:7, or anyone)" ] && ok "a question without --as asks as whom" || bad "can without --as" "$rc $out"
 run can --as user:5 folder 1; [ $rc -eq 2 ] && [ "$out" = "rowstile can: see rowstile --help" ] && ok "a question an argument short is refused" || bad "can short" "$rc $out"
 run explain-rule --as user:3 app.files; [ $rc -eq 2 ] && case "$out" in "rowstile explain-rule --as WHO TABLE"*) true;; *) false;; esac && ok "explain-rule without a command shows how to ask" || bad "explain-rule short" "$rc $out"
@@ -159,6 +173,10 @@ toml 'policy = "db/policy.authz"\ntest = ["db/tests/*.authz"]\n' check
 toml 'policy = "db/policy.authz"\n[migrations]\ntests = ["x"]\n' check
 [ $rc -eq 2 ] && ok "a setting in the wrong table is refused" || bad "wrong table" "$rc $out"
 toml '\357\273\277policy = "db/policy.authz"\n' check; [ $rc -eq 0 ] && ok "a byte order mark is skipped" || bad "BOM" "$rc $out"
+toml 'policy = "db/policy.authz\n' check
+[ $rc -eq 2 ] && case "$out" in "$P/rowstile.toml: "*) true;; *) false;; esac && ok "a rowstile.toml that isn't TOML is named, with what is wrong, exit 2" || bad "toml syntax" "$rc $out"
+toml 'policy = "db/policy.authz"\nmigrations = "db/migrations"\n' check
+[ $rc -eq 2 ] && [ "$out" = "$P/rowstile.toml: [migrations] is a table of settings" ] && ok "a table written as one setting is refused" || bad "table as setting" "$rc $out"
 toml 'policy = "db/policy.authz"\ntests = ["db/nothere/*.authz"]\n' test
 case "$out" in *"matches no file"*) ok "a tests pattern that matches no file is said";; *) bad "no test file" "${out:0:200}";; esac
 toml 'policy = "/etc/passwd"\n' check
