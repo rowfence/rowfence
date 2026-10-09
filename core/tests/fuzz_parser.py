@@ -6,8 +6,9 @@
 Starts from the example policies and mutates them at random (drop, repeat, swap or replace tokens and
 lines, insert odd characters, cut the text short), then parses and compiles each. A policy may be
 accepted or refused; what must never happen is any other exception (an IndexError, a KeyError, a
-RecursionError...), a refusal without a line number, or a case taking seconds. Policy authors are
-trusted (see docs/threat-model.md), so this is about robustness and clear errors, not an attack surface.
+RecursionError...), a refusal without a line number or at a line the policy doesn't have (rowstile dev shows
+that line), or a case taking seconds. Policy authors are trusted (see docs/threat-model.md), so this is about
+robustness and clear errors, not an attack surface.
 """
 
 import argparse
@@ -129,6 +130,9 @@ def main() -> int:
             refused += 1
             if not re.match(r"(line )?\d+|[^:]+:\d+", str(e)):
                 problems.append((n, f"refused without a line number: {e}", text))
+            line = re.match(r"line (\d+):", str(e))
+            if line and not 0 < int(line.group(1)) <= len(text.split("\n")):  # rowstile dev shows that line
+                problems.append((n, f"refused at a line the policy doesn't have: {e}", text))
         except Exception:
             problems.append((n, traceback.format_exc(limit=3), text))
         took = time.perf_counter() - started

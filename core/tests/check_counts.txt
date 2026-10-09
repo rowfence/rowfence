@@ -5,18 +5,18 @@ adversarial 86
 apply 108
 capitals 35
 children 56
-cli 126
+cli 127
 concurrency 12
 confidence 41
 cookbook 79
-devx 93
+devx 97
 docs 11
 governance 149
 identity 50
 keep unchanged trees 7
 language server 84
 masks 25
-mcp 49
+mcp 50
 migrate vs apply 43
 migrations 52
 moves 22
@@ -27,6 +27,6 @@ races 4
 review 41
 scenario 93
 signed sessions 36
-studio 106
+studio 109
 tools 36
-unit 297
+unit 302

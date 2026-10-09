@@ -7,7 +7,9 @@ page that has the token, on localhost. And rowstile studio, the command: what it
     PGHOST=... PGUSER=... python3 tests/studio_test.py [--db authz_studio]
 """
 
+import contextlib
 import http.client
+import io
 import json
 import os
 import select
@@ -253,7 +255,7 @@ def main() -> None:
     print("-- Studio, read-only")
     dsn = f"dbname={db}"
     ro = studio.Studio(dsn, None, policy, writable=False, port=0, read_policy=rowstile_cli.read_policy)
-    ro.start(background=True)
+    ro.start()
     c = Client(ro)
     try:
         status, page = c.call("/")
@@ -451,7 +453,7 @@ def main() -> None:
                 )
             )
         s = studio.Studio(dsn, None, changed, writable=False, port=0, read_policy=rowstile_cli.read_policy)
-        s.start(background=True)
+        s.start()
         try:
             status, d = Client(s).call("/api/diff")
             check(
@@ -462,7 +464,7 @@ def main() -> None:
         finally:
             s.stop()
         s = studio.Studio(dsn, None, changed, writable=True, port=0, read_policy=rowstile_cli.read_policy)
-        s.start(background=True)
+        s.start()
         try:
             before = psql(db, "SELECT count(*) FROM authz.policy_versions")
             status, d = Client(s).call("/api/diff")
@@ -485,6 +487,9 @@ def main() -> None:
         with open(broken, "w", encoding="utf-8") as fh:
             fh.write(text.replace(edit, edit.replace("editor", "editr")))
         line = text.splitlines().index(edit) + 1
+        deep = os.path.join(tmp, "deep.authz")
+        with open(deep, "w", encoding="utf-8") as fh:
+            fh.write(text.replace(edit, "  can edit  = " + "(" * 3000 + "share" + ")" * 3000))
         for label, path, writable, want, starts, ends in (
             ("no policy file", None, False, 404, "no policy file to compare with (rowstile.toml's policy)", ""),
             (
@@ -504,9 +509,18 @@ def main() -> None:
                 f"policy line {line}: folder has no relation or permission 'editr' (it has: ",
                 ") [AZ203]",
             ),
+            # as the command says it, where Python's words came back (500), and a traceback where Studio runs
+            (
+                "an expression nested too deep",
+                deep,
+                True,
+                400,
+                f"{deep}: an expression in the policy is nested too deep to read",
+                "",
+            ),
         ):
             s = studio.Studio(dsn, None, path, writable=writable, port=0, read_policy=rowstile_cli.read_policy)
-            s.start(background=True)
+            s.start()
             try:
                 status, d = Client(s).call("/api/diff")
                 said = str(d.get("detail", ""))
@@ -521,7 +535,7 @@ def main() -> None:
 
     print("-- Studio, able to write (rowstile dev, or --write)")
     rw = studio.Studio(dsn, None, policy, writable=True, port=0, read_policy=rowstile_cli.read_policy)
-    rw.start(background=True)
+    rw.start()
     c = Client(rw)
     try:
         before = shares()
@@ -574,6 +588,21 @@ def main() -> None:
         ):
             status, e = c.call(path, sent)
             check(f"{label}: 400, missing or wrong", status == 400 and e["detail"] == f"missing or wrong: {words}", e)
+        # what Studio didn't foresee (here a body nested deeper than Python's JSON reader goes): 500, with what went
+        # wrong, the traceback where Studio runs, and the server goes on
+        logged = io.StringIO()
+        with contextlib.redirect_stderr(logged):
+            status, e = c.call("/api/share", b"[" * 100000 + b"]" * 100000)
+        check(
+            "a request Studio didn't foresee: 500, and what went wrong",
+            status == 500 and e["title"] == "Error" and "maximum recursion depth exceeded" in e["detail"],
+            (status, e),
+        )
+        check(
+            "... its traceback where Studio runs, and the server goes on",
+            "RecursionError" in logged.getvalue() and c.call("/api/overview")[0] == 200,
+            logged.getvalue()[-300:],
+        )
         status, e = c.call("/api/why?as=user:3&type=folder&id=3&perm=fly")
         check(
             "why, trying changes, on a permission the type doesn't have: says so",
@@ -616,7 +645,7 @@ def main() -> None:
         "size = 12345678901234567.89 WHERE id = 5",
     )
     s = studio.Studio(dsn, None, policy, writable=False, port=0, read_policy=rowstile_cli.read_policy)
-    s.start(background=True)
+    s.start()
     try:
         # Secrets doesn't inherit, where the column's default does: the policy reads the row's value
         status, t = Client(s).call("/api/test?as=user:3&type=folder&id=5&perm=edit&expect=cannot")
@@ -712,7 +741,7 @@ def main() -> None:
     gone = studio.Studio(
         "host=/nowhere dbname=x", None, None, writable=False, port=0, read_policy=rowstile_cli.read_policy
     )
-    gone.start(background=True)
+    gone.start()
     try:
         status, e = Client(gone).call("/api/overview")
         check(
@@ -729,8 +758,8 @@ def main() -> None:
         raise SystemExit(out)
     ro = studio.Studio(dsn, None, policy, writable=False, port=0, read_policy=rowstile_cli.read_policy)
     rw = studio.Studio(dsn, None, policy, writable=True, port=0, read_policy=rowstile_cli.read_policy)
-    ro.start(background=True)
-    rw.start(background=True)
+    ro.start()
+    rw.start()
     try:
         for label, s, path in (
             ("the overview", ro, "/api/overview"),
@@ -787,7 +816,7 @@ def main() -> None:
         port=0,
         read_policy=rowstile_cli.read_policy,
     )
-    ms.start(background=True)
+    ms.start()
     c = Client(ms)
     try:
 
@@ -884,7 +913,7 @@ def main() -> None:
     ks = studio.Studio(
         f"dbname={keys}", None, os.path.join(HERE, "composite.authz"), port=0, read_policy=rowstile_cli.read_policy
     )
-    ks.start(background=True)
+    ks.start()
     try:
         for label, ask, written in (
             ("a key of several columns", "type=project&id=(1,5)&perm=edit", "edit project (1,5)"),
@@ -935,7 +964,7 @@ def main() -> None:
     s = studio.Studio(
         f"dbname={caps}", None, os.path.join(HERE, "prisma.authz"), port=0, read_policy=rowstile_cli.read_policy
     )
-    s.start(background=True)
+    s.start()
     try:
         status, t = Client(s).call("/api/test?as=user:2&type=note&id=2&perm=edit&expect=cannot")
     finally:
@@ -1016,7 +1045,7 @@ def main() -> None:
             if rc:
                 raise SystemExit(out)
             s = studio.Studio(f"dbname={plain}", None, path, port=0, read_policy=rowstile_cli.read_policy)
-            s.start(background=True)
+            s.start()
             try:
                 status, e = Client(s).call("/api/rows?table=app.notes&as=user:1")
                 check(f"{label} ({want})", status == want and e.get("detail") == said, (status, e))
@@ -1024,7 +1053,7 @@ def main() -> None:
                 s.stop()
         # its users are keyed by text: a test as someone whose id isn't one word
         s = studio.Studio(f"dbname={plain}", None, path, port=0, read_policy=rowstile_cli.read_policy)
-        s.start(background=True)
+        s.start()
         try:
             status, t = Client(s).call("/api/test?as=user:o%27brien&type=note&id=1&perm=edit&expect=cannot")
         finally:

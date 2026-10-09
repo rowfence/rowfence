@@ -466,6 +466,62 @@ else
 fi
 kill -INT "$watcher" 2>/dev/null; wait "$watcher"; rc=$?
 [ $rc -eq 0 ] && ok "... and Ctrl-C ends it, exit 0" || bad "dev Ctrl-C" "$rc $(tail -n 3 "$T/watch.log")"
+# Studio beside the loop (without --no-studio): on the port given, able to write (this is a development database);
+# on a port another program holds it doesn't start, and the loop goes on without it
+mkdir -p "$T/s"; cp "$T/p/policy.authz" "$T/s/policy.authz"
+printf 'policy = "policy.authz"\ndatabase = "dbname=%s"\n' "$DB" > "$T/s/rowstile.toml"
+# starts the loop with Studio on port $1, and waits (a minute at most) until it watches
+looping() {
+  set -m
+  ( cd "$T/s" && exec python3 "$OLDPWD/cli/rowstile_cli.py" dev --studio-port "$1" ) > "$T/s.log" 2>&1 &
+  watcher=$!
+  set +m
+  for _ in $(seq 120); do grep -q "^watching" "$T/s.log" && break; sleep 0.5; done
+}
+port=$(python3 -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')
+looping "$port"
+token=$(sed -n "s|^Studio on http://127.0.0.1:$port/?token=\([A-Za-z0-9_-]*\)$|\1|p" "$T/s.log")
+writes=$(python3 -c "import json, sys, urllib.request
+r = urllib.request.Request('http://127.0.0.1:$port/api/overview', headers={'X-Studio-Token': sys.argv[1]})
+print(json.load(urllib.request.urlopen(r, timeout=60))['writable'])" "$token" 2>&1)
+kill -INT "$watcher"; wait "$watcher"; rc=$?
+[ -n "$token" ] && [ "$writes" = True ] && [ $rc -eq 0 ] &&
+  ok "dev starts Studio beside the loop, on the port given, able to write" || bad "dev's Studio" "$rc $writes $(cat "$T/s.log")"
+python3 -c 'import socket, sys, time
+s = socket.socket(); s.bind(("127.0.0.1", 0)); s.listen()
+with open(sys.argv[1], "w") as fh: fh.write(str(s.getsockname()[1]))
+time.sleep(120)' "$T/held" &
+holder=$!
+for _ in $(seq 40); do [ -s "$T/held" ] && break; sleep 0.25; done
+port=$(cat "$T/held")
+looping "$port"
+kill -INT "$watcher"; wait "$watcher"; rc=$?
+kill "$holder"; wait "$holder" 2>/dev/null
+case "$(cat "$T/s.log")" in *"Studio didn't start ("*"): rowstile dev --studio-port N for another port"*"watching 1 file(s)"*)
+  [ $rc -eq 0 ] && ok "... on a port another program holds: says so and how to pick another, and the loop goes on" || bad "dev with Studio's port held: exit" "$rc";;
+  *) bad "dev with Studio's port held" "$(cat "$T/s.log")";; esac
+# with its output closed (a service, or pythonw on Windows, where there is no console): the pass all the same
+( cd "$T/s" && python3 "$OLDPWD/cli/rowstile_cli.py" dev --once --no-studio >&- ) 2> "$T/s.log"; rc=$?
+[ $rc -eq 0 ] && [ ! -s "$T/s.log" ] && ok "dev --once with its output closed: exit 0, nothing on stderr" || bad "dev with its output closed" "$rc $(cat "$T/s.log")"
+# the database lost once the pass is through, as dev looks for the lookups no index serves: here a session waits to
+# lock rowstile's table of policies while a slow test runs, dev's look waits behind it, and is ended there. The pass
+# stands (exit 0), and no traceback
+printf 'test "slow"\n  given s = {SELECT 1 FROM pg_sleep(2)}\n  anyone cannot view file 11\n' > "$T/s/slow.authz"
+printf 'tests = ["slow.authz"]\n' >> "$T/s/rowstile.toml"
+( cd "$T/s" && exec python3 "$OLDPWD/cli/rowstile_cli.py" dev --once --no-studio ) > "$T/s.log" 2>&1 &
+pass=$!
+pid=
+for _ in $(seq 80); do pid=$(PSQL -c "SELECT pid FROM pg_stat_activity WHERE datname = '$DB' AND application_name = 'rowstile' AND wait_event = 'PgSleep'"); [ -n "$pid" ] && break; sleep 0.25; done
+( PSQL -c "BEGIN" -c "LOCK TABLE authz.policy_versions" -c "SELECT pg_sleep(3)" -c "COMMIT" >/dev/null 2>&1 ) &
+locker=$!
+for _ in $(seq 80); do [ -n "$pid" ] && [ "$(PSQL -c "SELECT wait_event_type FROM pg_stat_activity WHERE pid = $pid")" = Lock ] && break; sleep 0.25; done
+[ -n "$pid" ] && PSQL -c "SELECT pg_terminate_backend($pid)" >/dev/null
+wait "$pass"; rc=$?
+wait "$locker"
+case "$(cat "$T/s.log")" in *Traceback*) bad "dev on a database lost as it looks for missing indexes gives a traceback" "$(cat "$T/s.log")";;
+  *"check(s) pass"*) [ $rc -eq 0 ] && [ -n "$pid" ] && ok "... and the database lost after the pass, as it looks for missing indexes: the pass stands, exit 0" ||
+    bad "dev losing the database as it looks for missing indexes: exit" "$rc ($pid)";;
+  *) bad "dev losing the database as it looks for missing indexes" "$(cat "$T/s.log")";; esac
 run test example/docs.test.authz
 case "$out" in *"ok    user \$ann can edit file \$f"*"policy tests passed"*) [ $rc -eq 0 ] && ok "test runs named test files, exit 0" || bad "test exit" "$rc";;
   *) bad "test" "$out";; esac

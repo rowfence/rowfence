@@ -855,6 +855,92 @@ class Command(unittest.TestCase):
             self.assertEqual(rowstile_cli.relative(path), path)
             self.assertEqual(studio.shown(path), path)
             self.assertIsNone(rowstile_cli.Config(os.path.join(d, "rowstile.toml"), {}).below(path))
+        # the MCP server's check names the file with the mistake as the command said it
+        import mcp
+
+        said = f"{path}: line 3: folder has no relation or permission 'editr' [AZ203]\n"
+        with other_drive, mock.patch.object(mcp, "run", return_value=(1, said)):
+            result = mcp.call(None, "check", {})["structuredContent"]
+        error = result.get("error") if isinstance(result, dict) else result
+        self.assertEqual(error.get("file") if isinstance(error, dict) else error, path.replace(os.sep, "/"))
+
+    def test_an_editors_address_on_windows_names_the_drive(self) -> None:
+        # an editor on Windows sends file:///C:/a%20b/p.authz: the file is C:/a b/p.authz, not /C:/...
+        import lsp
+
+        with mock.patch.object(sys, "platform", "win32"):
+            self.assertEqual(lsp.uri_path("file:///C:/a%20b/p.authz"), os.path.normpath("C:/a b/p.authz"))
+            self.assertEqual(lsp.uri_path("file:///srv/p.authz"), os.path.normpath("/srv/p.authz"))
+
+    def test_a_warning_on_a_connection_with_no_handler_goes_nowhere(self) -> None:
+        # Studio's connections have none: a warning applying gives in its access diff (a policy that makes more
+        # objects than the lock table holds) goes nowhere, and the diff goes on
+        import pgwire
+
+        db = rowstile_cli.Db(cast(pgwire.Connection, types.SimpleNamespace(on_notice=None)))
+        self.assertIsNone(db.warn("this makes about 9000 objects in one transaction", hint="raise it"))
+        got: list[dict[str, str]] = []
+        rowstile_cli.Db(cast(pgwire.Connection, types.SimpleNamespace(on_notice=got.append))).warn("w", "d", "h")
+        self.assertEqual(got, [{"S": "WARNING", "V": "WARNING", "M": "w", "D": "d", "H": "h"}])
+
+    def test_init_finds_the_stack_in_a_folder_it_cant_list(self) -> None:
+        # a project folder it may read files of but not list (no r, an x): the requirements files aren't found,
+        # what pyproject.toml says is, and init goes on (a traceback stopped it, after it had written the policy)
+        import stack
+
+        with tempfile.TemporaryDirectory() as d:
+            with open(os.path.join(d, "pyproject.toml"), "w", encoding="utf-8") as fh:
+                fh.write('[project]\ndependencies = ["fastapi"]\n')
+            with open(os.path.join(d, "requirements.txt"), "w", encoding="utf-8") as fh:
+                fh.write("sqlalchemy\n")
+            self.assertEqual(stack.detect(d).found, ["FastAPI", "SQLAlchemy"])
+            with mock.patch.object(stack.os, "listdir", side_effect=PermissionError(13, "Permission denied", d)):
+                self.assertEqual(stack.detect(d).found, ["FastAPI"])
+
+    def test_review_reads_what_git_can_of_the_base(self) -> None:
+        # a repository missing objects of the base (an interrupted fetch, a partial clone that can't reach its
+        # remote): the base's test files git can't read are left out, and the review goes on without them
+        import shutil
+        import stat
+
+        if shutil.which("git") is None:
+            self.skipTest("git is not installed")
+        before = os.getcwd()
+        with tempfile.TemporaryDirectory() as d:
+            os.makedirs(os.path.join(d, "tests"))
+            for name, text in (("a.authz", "test one\n"), ("b.authz", "test two\n")):
+                with open(os.path.join(d, "tests", name), "w", encoding="utf-8", newline="\n") as fh:
+                    fh.write(text)
+
+            def git(*args: str) -> str:
+                return subprocess.run(
+                    ["git", "-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "core.autocrlf=false", *args],
+                    cwd=d,
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                ).stdout.strip()
+
+            def lose(spec: str) -> None:
+                """The object spec names taken out of the repository (git writes its objects read-only)."""
+                sha = git("rev-parse", spec)
+                path = os.path.join(d, ".git", "objects", sha[:2], sha[2:])
+                os.chmod(path, stat.S_IWRITE | stat.S_IREAD)
+                os.remove(path)
+
+            for args in (["init", "-q"], ["add", "-A"], ["commit", "-q", "-m", "base"]):
+                git(*args)
+            cfg = rowstile_cli.Config(os.path.join(d, "rowstile.toml"), {"tests": ["tests/*.authz"]})
+            os.chdir(d)
+            try:
+                both = {"tests/a.authz": "test one\n", "tests/b.authz": "test two\n"}
+                self.assertEqual(rowstile_cli.base_tests(cfg, "HEAD"), both)
+                lose("HEAD:tests/b.authz")
+                self.assertEqual(rowstile_cli.base_tests(cfg, "HEAD"), {"tests/a.authz": "test one\n"})
+                lose("HEAD:tests")
+                self.assertEqual(rowstile_cli.base_tests(cfg, "HEAD"), {})
+            finally:
+                os.chdir(before)
 
     def test_prints_utf8_whatever_the_systems_encoding(self) -> None:
         # on Windows, Python writes into a pipe or a file in the system's code page: an arrow or a name in another
@@ -1263,6 +1349,10 @@ class Command(unittest.TestCase):
             self.assertEqual(len(re.findall(r"^rowstile \S", text, re.M)), 2, text)  # its own, and the last line
         # init says which schema it reads when none is named: the question a first run asked of --help
         self.assertIn("those in public", rowstile_cli.command_help("init"))
+        # each of a command's lines, to the last; and where the database comes from, .env files too
+        review = rowstile_cli.command_help("review")
+        self.assertRegex(review, r"\n +\(exit 0 whatever it finds: test and migrate --check gate\)\n\n")
+        self.assertIn("\nWithout --db, those variables may be in .env.local or .env beside rowstile.toml", review)
 
     def test_an_env_file_that_isnt_utf8_is_said(self) -> None:
         # a .env saved in another encoding (an accent in a comment) isn't read: nothing of it reaches the
@@ -1354,6 +1444,50 @@ class Command(unittest.TestCase):
                 self.assertEqual(p.returncode, code, p.stderr)
                 self.assertEqual(p.stdout.count("  + type file: can extra"), 20, p.stdout)
                 self.assertIn("\n  ... and 5 more\n", p.stdout)
+
+    def test_migrate_finds_alembics_head_as_revisions_are_written(self) -> None:
+        # a merge's revisions, laid out over lines (black and Ruff do it to a long tuple): the merge is the head, where
+        # the two it merges were taken for heads too ("several heads: merge them first"). And a revision that names
+        # no down_revision (Alembic wants one, None for the first) counts as a first one
+        with tempfile.TemporaryDirectory() as d:
+            with open(os.path.join(d, "policy.authz"), "w", encoding="utf-8", newline="\n") as fh:
+                fh.write(read(POLICIES["docs"]))
+
+            def head_written(revisions: dict[str, str | None]) -> str:
+                """The down_revision of the revision rowstile migrate writes after these (name: their down_revision,
+                None for no such line), or what it said instead."""
+                versions = tempfile.mkdtemp(dir=d)
+                for name, down in revisions.items():
+                    with open(os.path.join(versions, f"{name}.py"), "w", encoding="utf-8") as fh:
+                        fh.write(f'"""{name}"""\n\nrevision: str = "{name}"\n')
+                        if down is not None:
+                            fh.write(f"down_revision: Union[str, Sequence[str], None] = {down}\n")
+                        fh.write("branch_labels = None\n")
+                lock = os.path.join(d, "policy.lock")
+                if os.path.exists(lock):
+                    os.remove(lock)
+                p = subprocess.run(
+                    [sys.executable, os.path.join(ROOT, "cli", "rowstile_cli.py"), "migrate", "policy.authz"]
+                    + ["--tool", "alembic", "--dir", versions],
+                    cwd=d,
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                )
+                written = [f for f in os.listdir(versions) if f.endswith("_policy.py")]
+                if p.returncode or len(written) != 1:
+                    return p.stderr
+                with open(os.path.join(versions, written[0]), encoding="utf-8") as fh:
+                    return re.findall(r"(?m)^down_revision: str \| None = (.*)$", fh.read())[0]
+
+            merged: dict[str, str | None] = {
+                "r0": "None",
+                "r1": '"r0"',
+                "r2": '"r0"',
+                "m": '(\n    "r1",\n    "r2",\n)',
+            }
+            self.assertEqual(head_written(merged), "'m'")
+            self.assertEqual(head_written({"x": None}), "'x'")
 
     def test_a_file_it_cant_write_is_named(self) -> None:
         # the client's path is a folder: the file and why, exit 2, where the command stopped with a traceback
@@ -3358,6 +3492,16 @@ class Wire(unittest.TestCase):
             certificate = ssl.PEM_cert_to_DER_cert(fh.read())
         self.assertEqual(self.pgwire._signature_hash(certificate), "sha256")
         self.assertIsNone(self.pgwire._signature_hash(b"not a certificate"))
+
+        # a signature algorithm named by something else than an OID (DER's tag 6): no hash, even where its bytes
+        # are those of one (OpenSSL takes no such certificate; this reads the bytes alone)
+        def signed_with(tag: int) -> bytes:
+            sha256_with_rsa = bytes.fromhex("2a864886f70d01010b")  # 1.2.840.113549.1.1.11
+            algorithm = bytes([0x30, 2 + len(sha256_with_rsa), tag, len(sha256_with_rsa)]) + sha256_with_rsa
+            return bytes([0x30, 2 + len(algorithm), 0x30, 0]) + algorithm  # what is signed (empty), the algorithm
+
+        self.assertEqual(self.pgwire._signature_hash(signed_with(6)), "sha256")
+        self.assertIsNone(self.pgwire._signature_hash(signed_with(4)))  # an OCTET STRING
         # RSA-PSS names its hash in its parameters; SHA-1, also when none is named, counts as SHA-256 (RFC 5929).
         # Made with openssl req -x509 -newkey rsa-pss -sigopt rsa_padding_mode:pss -sha384 (and -sha1); a server
         # holding each signed in with channel_binding=require, from psql and from this client alike
@@ -3506,6 +3650,14 @@ class Wire(unittest.TestCase):
         conn.on_notice = notices.append
         self.assertEqual(conn.query("SELECT 7"), [(7,)])
         self.assertEqual(notices, [{"S": "WARNING", "M": "careful"}])
+        conn.close()
+        # ... and on a connection with no handler (Studio's), it is read past: the rows come all the same
+        port, seen, done = self.talking(
+            signed_in + ready, [said(b"1") + said(b"2") + column + warning + row + done_with]
+        )
+        conn = self.pgwire.connect(host="127.0.0.1", port=port, sslmode="disable", timeout=5)
+        self.assertIsNone(conn.on_notice)
+        self.assertEqual(conn.query("SELECT 7"), [(7,)])
         conn.close()
         # parameters as psycopg sends them: a list as an array (the generated Python client's who_among, through
         # this client's cursor), a dict as JSON

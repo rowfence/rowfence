@@ -219,23 +219,23 @@ def call(dsn: str | None, name: Json, arguments: Json) -> Message:
 
         first, mistake = errors.split(out.strip().split("\n")[0])
         m = ERROR.match(first)
-        if m:
+        # a mistake in the policy: its line, and its code (each has one), not a file whose name reads like a line
+        if m and mistake is not None and mistake in errors.CODES:
             # an included file is named relative to the policy's folder
             path = os.path.join(os.path.dirname(m.group("file")), m.group("inc")) if m.group("inc") else m.group("file")
             try:
                 path = os.path.relpath(path)  # relative to the project, as the agent names files
             except ValueError:
                 pass  # another drive
-            found: Message = {
+            # with the code's page: what the mistake means, and the same mistake fixed
+            result["error"] = {
                 "file": path.replace(os.sep, "/"),
                 "line": int(m.group("line")),
                 "message": m.group("message"),
+                "code": mistake,
+                "help": errors.page(mistake),
             }
-            if mistake is not None and mistake in errors.CODES:
-                # the code's page: what the mistake means, and the same mistake fixed
-                found.update(code=mistake, help=errors.page(mistake))
-                out += f"\n{errors.page(mistake)}"
-            result["error"] = found
+            out += f"\n{errors.page(mistake)}"
     # a finding (a mistake, a failing test, a counterexample) is an answer; exit code 2 is a call that couldn't
     # run (no policy file, no database, a wrong argument), which the agent has to fix first
     return {

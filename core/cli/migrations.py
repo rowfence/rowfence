@@ -235,7 +235,8 @@ def drizzle(folder: str, name: str, sql: str, now: float | None) -> list[str]:
 
 # --- Alembic: a revision after the current head, with its SQL beside it --------------------------------
 REVISION = re.compile(r"^revision\s*(?::\s*str\s*)?=\s*['\"]([^'\"]+)['\"]", re.M)
-DOWN = re.compile(r"^down_revision\s*(?::[^=]*)?=\s*(.+)$", re.M)
+# its value: a merge's tuple of revisions may go on over lines, as black and Ruff lay out a long one
+DOWN = re.compile(r"^down_revision\s*(?::[^=]*)?=\s*(\([^)]*\)|.+)$", re.M)
 
 
 def alembic_heads(folder: str) -> list[str]:
