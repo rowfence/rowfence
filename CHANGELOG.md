@@ -87,6 +87,17 @@ Each release upgrades from the one before it. How releases are numbered and made
   not switch to the app role (as an owner that made the role on PostgreSQL 16 or later): the refused switch
   read as the statement refused. It says what to grant first now (AZ618), as it did for a policy with rules;
   so does `test --coverage`.
+- A condition Postgres refuses was named with another condition's line when that one's text is part of it:
+  `{inherit =}` was reported as `{inherit}`, two lines up, and so was `{confidential or inherit}` on a table
+  without that column. `rowstile apply`, `push` and `dev` name the one that fails now. A syntax error Postgres
+  finds after the condition, as with a parenthesis left open in a rule, is named too: it was reported in
+  Postgres's words alone (AZ613).
+- `rowstile diff` names a condition Postgres refuses with its line, as `apply` does (AZ613): it gave Postgres's
+  words alone. `rowstile review --db` stopped with a traceback on a pull request with such a condition, or
+  one that fails on a row of the review data (`{name::int > 0}`); Access says why now, and the review goes on.
+- `rowstile remove` gave back the table-wide SELECT a mask had replaced, and left the SELECT on the table's
+  other columns that the mask gave instead. It takes those back too: the table's privileges are as they were
+  before the policy.
 - Ctrl-C while `rowstile sql` (or `can`, `explain`, `perms`, `list`, `who`, `explain-rule`) waited on a statement,
   or while `rowstile review --db` worked on its database, stopped only once the statement had run its course. It
   stops at once now and ends the statement on the server, as the other commands did.

@@ -243,21 +243,28 @@ def failing_condition(db: Db, err: Exception, policy: str, files: Files) -> Erro
         (
             Error(f"policy {loc}: the condition {{{cond}}} doesn't run: {said} [AZ613]", code)
             for table, cond, loc in row_conditions(c)
-            if said and fails_alike(db, table, cond, said)
+            if said and fails_alike(db, table, cond, said, code)
         ),
         None,
     )
 
 
-def fails_alike(db: Db, table: str, cond: str, said: str) -> bool:
-    """Whether a condition, tried alone on its table's rows, fails with the message said."""
+SYNTAX_ERROR = "42601"
+
+
+def fails_alike(db: Db, table: str, cond: str, said: str, code: str = "") -> bool:
+    """Whether a condition, tried alone on its table's rows, fails with the message said. A syntax error with any
+    message: its words name what follows the condition (an unclosed parenthesis reads on into the SQL around it),
+    which is another text there."""
     alias = q(table.split(".")[1])
     try:
         with savepoint(db, "authz_probe"):
             db.rows(f"SELECT ({row_cond(cond, alias)}) AS x FROM {qt(table)} AS {alias} LIMIT 0")
     except db.errors as e:
         got = getattr(e, "fields", None)
-        return isinstance(got, dict) and str(got.get("M", "")) == said
+        return isinstance(got, dict) and (
+            str(got.get("M", "")) == said or code == SYNTAX_ERROR == str(got.get("C", ""))
+        )
     return False
 
 
@@ -289,6 +296,8 @@ def condition_error(err: Exception, sql: str, policy: str, files: Files) -> Erro
                     continue
                 for m in as_compiled(written).finditer(where):
                     found.append((m.start(), len(m.group(0)), loc, cond))
+    # a condition whose text is part of another's ({inherit} in {inherit =}) matches inside it too: only whole ones
+    found = [f for f in found if not any(g[0] <= f[0] and f[0] + f[1] <= g[0] + g[1] and g[1] > f[1] for g in found)]
     # the one the error points into (or just after), or the only one there: never a guess among several
     inside = [f for f in found if at is not None and f[0] <= at <= f[0] + f[1] + 2]
     if inside:
@@ -796,13 +805,16 @@ def diff(
     db: Db, policy: str, files: Mapping[str, object] | str | None = None, users: list[str] | None = None
 ) -> list[DiffRow]:
     """Who would gain and lose what if the policy were applied: rows of change, user_id, type, what, id.
-    Runs the new policy in a savepoint and undoes it."""
+    Runs the new policy in a savepoint and undoes it (a condition Postgres refuses is named, as applying names it)."""
+    files = files_map(files)
     parts = compiled(policy, files, lambda c: c.diff_parts("the policy", users or None))
     rows: list[DiffRow] = []
     try:
         with savepoint(db, "authz_diff"):
-            for step in ("setup", "before", "body", "after"):
-                db.script(parts[step])
+            db.script(parts["setup"])
+            db.script(parts["before"])
+            run_policy(db, parts["body"], policy, files)
+            db.script(parts["after"])
             rows = [
                 {
                     "change": text(r, "change"),
@@ -1035,6 +1047,8 @@ DECLARE r record;
 BEGIN
   FOR r IN SELECT * FROM authz.masked_tables LOOP
     IF to_regclass(r.tbl) IS NOT NULL AND EXISTS (SELECT 1 FROM pg_roles WHERE rolname = r.role) THEN
+      -- (taking the table's SELECT back takes the SELECT on its other columns the mask gave instead)
+      EXECUTE format('REVOKE SELECT ON %s FROM %I', r.tbl, r.role);
       EXECUTE format('GRANT SELECT ON %s TO %I', r.tbl, r.role);
     END IF;
     DELETE FROM authz.masked_tables WHERE tbl = r.tbl AND role = r.role;
