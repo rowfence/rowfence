@@ -1766,7 +1766,8 @@ class Core:
         return seen
 
     def lookup_key(self, t: Type, item: Expr) -> tuple[str, str, str | None] | None:
-        """(relation, permission, condition) for rel.perm or (rel.perm and {cond})."""
+        """(relation, permission, condition) for rel.perm or (rel.perm and {cond}), where rel links to objects (one
+        to anyone or links is refused where the arrow is made, targets)."""
         cond = None
         if isinstance(item, And) and len(item.items) == 2:
             arrows = [x for x in item.items if isinstance(x, Arrow)]
@@ -1776,7 +1777,7 @@ class Core:
         if (
             isinstance(item, Arrow)
             and item.rel in t.relations
-            and all(not sr for _, sr in t.relations[item.rel].subjects())
+            and all(not sr and st in self.types for st, sr in t.relations[item.rel].subjects())
         ):
             return (item.rel, item.perm, cond)
         return None
