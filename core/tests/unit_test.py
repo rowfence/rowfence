@@ -5184,7 +5184,8 @@ class Decisions(unittest.TestCase):
             self.FOLDERS, ["user: ann\nfolder: 1, 2\nfolder 2 parent folder 1\nfolder 1 owner user ann\n"], ["ann"]
         )
         self.assertEqual([two.parts[k].nevers() for k in depths], [[], ["never decisive"], ["never decisive"]])
-        self.assertEqual(two.parts[("loop", 0)].nevers(), ["never true", "never decisive"])
+        # through a column alone, no loop to watch: the database refuses one (AZ713)
+        self.assertNotIn(("loop", 0), two.parts)
         four = self.watch(
             self.FOLDERS,
             [
@@ -5197,20 +5198,18 @@ class Decisions(unittest.TestCase):
             [four.parts[k].down for k in depths],
             ["folder.view on 2 for ann", "folder.view on 3 for ann", "folder.view on 4 for ann"],
         )
+        # through a table, folders 1 and 2 may be inside each other: 2 holds view through the loop alone
+        linked = self.FOLDERS.replace("= parent_id", "= app.folder_links(folder_id -> parent_id)")
+        world = (
+            "user: ann\nfolder: 1, 2, 3\nfolder 2 parent folder 1\nfolder 3 parent folder 2\nfolder 1 owner user ann\n"
+        )
+        tree = self.watch(linked, [world], ["ann"])
         self.assertIn(
             "  folder.view: inheritance round a loop in the data (through parent.view) at line 6: never true, "
             "never decisive",
-            four.report("hand"),
+            tree.report("hand"),
         )
-        # folders 1 and 2 inside each other: 2 holds view through the loop alone
-        loop = self.watch(
-            self.FOLDERS,
-            [
-                "user: ann\nfolder: 1, 2, 3\nfolder 1 parent folder 2\nfolder 2 parent folder 1\n"
-                "folder 3 parent folder 2\nfolder 1 owner user ann\n"
-            ],
-            ["ann"],
-        )
+        loop = self.watch(linked, [world + "folder 1 parent folder 2\n"], ["ann"])
         self.assertEqual(loop.parts[("loop", 0)].down, "folder.view on 2 for ann")
 
     def test_how_deep_groups_inside_groups_decided(self) -> None:
