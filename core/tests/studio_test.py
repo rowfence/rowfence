@@ -890,7 +890,7 @@ def main() -> None:
         ks.stop()
     subprocess.run(["dropdb", "--if-exists", keys], capture_output=True)
 
-    print("-- Studio through an app role the owner may not take, and with no rules")
+    print("-- Studio through an app role the owner may not take, with no rules, and users keyed by text")
     # since PostgreSQL 16 a role that makes another gets ADMIN on it, not SET (the suites' owner has
     # createrole_self_grant, which would hide it): as on managed Postgres until the owner grants itself the role
     plain, app = f"{db}_plain", "authz_studio_plain_app"
@@ -909,20 +909,18 @@ def main() -> None:
             "-c",
             f"CREATE ROLE {app}",
             "-c",
-            "CREATE SCHEMA app; CREATE TABLE app.users (id bigint PRIMARY KEY); "
-            "CREATE TABLE app.notes (id bigint PRIMARY KEY, owner_id bigint NOT NULL REFERENCES app.users, body text); "
+            "CREATE SCHEMA app; CREATE TABLE app.users (id text PRIMARY KEY); "
+            "CREATE TABLE app.notes (id bigint PRIMARY KEY, owner_id text NOT NULL REFERENCES app.users, body text); "
             f"GRANT USAGE ON SCHEMA app TO {app}; GRANT SELECT ON app.users TO {app}; "
             f"GRANT SELECT, UPDATE ON app.notes TO {app}; "
-            "INSERT INTO app.users VALUES (1), (2); INSERT INTO app.notes VALUES (1, 1, 'mine')",
+            "INSERT INTO app.users VALUES ('1'), ('o''brien'); INSERT INTO app.notes VALUES (1, '1', 'mine')",
         ],
         env=dict(os.environ, PGOPTIONS="-c createrole_self_grant= -c client_min_messages=error"),
         check=True,
         capture_output=True,
     )
     me = psql(plain, "SELECT current_user")
-    types = (
-        f"app role {app}\ntype user = app.users\ntype note = app.notes\n  owner : user = owner_id\n  can edit = owner\n"
-    )
+    types = f"app role {app}\ntype user = app.users (id text)\ntype note = app.notes\n  owner : user = owner_id\n  can edit = owner\n"
     with tempfile.TemporaryDirectory() as tmp:
         for label, text, want, said in (
             (
@@ -952,6 +950,26 @@ def main() -> None:
                 check(f"{label} ({want})", status == want and e.get("detail") == said, (status, e))
             finally:
                 s.stop()
+        # its users are keyed by text: a test as someone whose id isn't one word
+        s = studio.Studio(f"dbname={plain}", None, path, port=0, read_policy=rowstile_cli.read_policy)
+        s.start(background=True)
+        try:
+            status, t = Client(s).call("/api/test?as=user:o%27brien&type=note&id=1&perm=edit&expect=cannot")
+        finally:
+            s.stop()
+        rc, out = -1, ""
+        if status == 200:
+            with open(os.path.join(tmp, "made.authz"), "w", encoding="utf-8") as fh:
+                fh.write(f'test "on the data there"\n  {t["check"]}\n\n{t["named"]}')
+            rc, out = cli(plain, "test", os.path.join(tmp, "made.authz"))
+        check(
+            "a test as someone whose id isn't one word: quoted, and the check and the test run as written",
+            status == 200
+            and t["check"] == "user 'o''brien' cannot edit note 1"
+            and rc == 0
+            and out.count("ok    ") == 2,
+            (status, t, out[-600:]),
+        )
     subprocess.run(["dropdb", "--if-exists", plain], capture_output=True)
     psql("postgres", f"DROP ROLE IF EXISTS {app}")
 
