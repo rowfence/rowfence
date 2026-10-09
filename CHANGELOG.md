@@ -129,6 +129,39 @@ Each release upgrades from the one before it. How releases are numbered and made
   `update` rule after the change too, which Postgres doesn't check there: it could say "no" of an update that
   goes through. After the change it gives the `update after` rule alone. **Upgrading**: apply the policy again
   (or the next migration).
+- `rowstile review` said "nothing flagged" for a column rule that allows more than before when its line was
+  written `update owner_id before : ...` (another way to say `update owner_id : ...`) or with its columns as
+  `a,b`: it named the rule by its text, and looked for what allows more under the name the rule is read with.
+  It names a rule as it reads it now, and flags what it lets through.
+- `rowstile review --db` stopped with a traceback when the pull request's policy reads a column the review
+  database doesn't have yet (one the pull request's own migration of the app adds). Access now says it isn't
+  computed, and why; the review goes on, and says the tests didn't run and the migration fails on the review
+  database.
+- `rowstile review` made up differences next to a condition it can't read (a subquery, a function) that the
+  pull request reworded. The small worlds hold such a condition as rows of its own, drawn by its text, so a
+  permission that reads it, or one that only reordered its `or` around it, was said to allow more than before,
+  with an example, or named as the difference that makes the change no refactor. The worlds now take that
+  condition as the base wrote it and compare the rest; the review still says it can't compare the condition.
+  A rule written `after` is named so in a difference, not `update check`.
+- `rowstile review` said "Meaning unchanged" for a change inside a condition's `$$...$$` string (`{status =
+  $$a  b$$}`): it read the spaces there as layout. Text between `$$` is compared as written, as between quotes.
+- `rowstile review` called a change between `signed_in`, `anyone` and `nobody` a condition it can't read, in SQL
+  the policy never wrote (`{authz.uid() IS NOT NULL}` -> `{true}`), and flagged no widening: from `signed_in` to
+  `anyone` is one, for someone not signed in. It compares them now, as the reference evaluator reads them. And a
+  difference for someone not signed in was said to be for "user (nobody signed in)".
+- `rowstile review` said "nothing flagged" of a widening its own comparison had found ("not a refactor: ...
+  differs for ..."), when the worlds Risk draws missed it. Risk takes that example too.
+- `rowstile review` of a base written in the language before this one, with a mistake, gave the mistake this
+  language finds first: an old form to write anew (`role app_user`). It gives the base's mistake, as the language
+  it is written in finds it.
+- `rowstile review --db` called a service a user: "1 user gains `view`" when a bot gains it, and "user bot:7"
+  in the comment's examples, without how it gains (`authz.explain` was asked for a user of that name). Someone
+  not signed in was a user too. It says "1 bot gains `view`", "bot 7" with how, and "someone not signed in".
+- How someone gains, in the comment's examples, listed a condition that holds inside a part that doesn't:
+  `{inherit}` in a `(parent.view and {inherit})` that doesn't hold. It lists only what grants it.
+- `rowstile review --db` in a project without a lock file (`rowstile apply`, no migrations) said "the migration
+  fails" when applying the policy on the review data failed, and Deploy said nothing of it, nor how long applying
+  took. Both say what happened now.
 - Ctrl-C while `rowstile sql` (or `can`, `explain`, `perms`, `list`, `who`, `explain-rule`) waited on a statement,
   or while `rowstile review --db` worked on its database, stopped only once the statement had run its course. It
   stops at once now and ends the statement on the server, as the other commands did.

@@ -28,7 +28,7 @@ from . import Compiler, PolicyError, migrate, parse_policy
 from .conditions import simple
 from .connection import Db
 from .evaluate import Difference, Reference, compare, worlds_to_try
-from .parse import Expr, Loc, Policy, Rule, Type, read_lines
+from .parse import KEYWORDS, Expr, Loc, Perm, Policy, Rule, Type, read_lines
 from .statements import split
 
 MARK = "<!-- rowstile review -->"
@@ -39,6 +39,8 @@ class BaseMistake(Exception):
 
 
 WIDE = ("anyone", "link")
+# who an example is about when nobody is signed in (as the comparison's examples say it too)
+NOBODY = "(nobody signed in)"
 
 
 # --- what review() returns (as JSON too: rowstile review --json) ------------------------------------
@@ -167,7 +169,8 @@ class Group(TypedDict):
     change: str  # gains | loses
     type: str
     what: str
-    users: int
+    users: int  # how many: users, other principals and someone not signed in
+    who: str  # who they are, in words: '2 users and 1 bot'
     objects: int
     examples: list[Example]
 
@@ -194,29 +197,34 @@ Given: TypeAlias = "tuple[str, dict[str, str] | None, dict[str, str] | None]"
 
 # --- the policy's entities -------------------------------------------------------------------------
 def squeeze(s: str) -> str:
-    """One space for each run of spaces, outside quotes: 'a  b' in a condition is another text than 'a b'."""
+    """One space for each run of spaces, outside quotes ('...', "..." and $$...$$, the dollar quote a condition may
+    use): 'a  b' in a condition is another text than 'a b'."""
     out: list[str] = []
     quote = ""
-    for ch in s.strip():
+    s = s.strip()
+    i = 0
+    while i < len(s):
+        ch = "$$" if s.startswith("$$", i) else s[i]
+        i += len(ch)
         if quote:
-            out.append(ch)
             if ch == quote:
                 quote = ""
-        elif ch in "'\"":
+        elif ch in ("'", '"', "$$"):
             quote = ch
-            out.append(ch)
         elif ch.isspace():
-            if out and out[-1] != " ":
+            if out[-1] != " ":  # (never the first: s is stripped)
                 out.append(" ")
-        else:
-            out.append(ch)
+            continue
+        out.append(ch)
     return "".join(out)
 
 
-def entities(policy: str, files: dict[str, str] | None) -> dict[str, tuple[str, Loc]]:
-    """{key: (text, line)}: each declaration of the policy, its text normalized, and where it is written.
-    Keys: 'type folder', 'folder.editor' (a relation: its sources joined), 'folder.edit' (a permission),
+def entities(policy: str, files: dict[str, str] | None, pol: Policy) -> dict[str, tuple[str, Loc]]:
+    """{key: (text, line)}: each declaration of the policy (pol: as parsed), its text normalized, and where it is
+    written. Keys: 'type folder', 'folder.editor' (a relation: its sources joined), 'folder.edit' (a permission),
     'rule app.folders update', 'scope read', 'caveat x', 'app role', 'invariant <text>'. Tests are left out."""
+    # a rule by its head as read (rule_head): `update a,b before` is `update a, b`, as the rest of the review names it
+    heads = {r.loc: rule_head(r) for r in pol.rules}
     out: dict[str, tuple[str, Loc]] = {}
     block: tuple[str, str | None] | None = None
     skip = False
@@ -265,8 +273,7 @@ def entities(policy: str, files: dict[str, str] | None) -> dict[str, tuple[str, 
                 continue
             out[f"{name}: {s}"] = (s, loc)
         elif kind == "rules":
-            head, _, expr = s.partition(":")
-            out[f"rule {name} {' '.join(head.split())}"] = (expr.strip(), loc)
+            out[f"rule {name} {heads[loc]}"] = (s.partition(":")[2].strip(), loc)
         elif kind == "invariants":
             out[f"invariant {s}"] = (s, loc)
     return out
@@ -321,6 +328,14 @@ def closure(graph: dict[tuple[str, str], set[tuple[str, str]]], start: tuple[str
 
 
 # --- the review --------------------------------------------------------------------------------------
+def written_before(policy: str, files: dict[str, str] | None) -> bool:
+    """Whether a policy is written in the language before this one: read that way, it has old forms."""
+    try:
+        return bool(parse_policy(policy, None, files=files or {}, previous=True).previous)
+    except PolicyError:
+        return False
+
+
 class Side:
     def __init__(
         self, policy: str, files: dict[str, str] | None, tests: dict[str, str] | None, previous: bool = False
@@ -333,7 +348,7 @@ class Side:
         copy = parse_policy(policy, None, files=self.files, previous=previous)
         Compiler(copy).compile("the policy", transaction=False)
         self.pol.previous = copy.previous  # (with what compiling read the old way too)
-        self.entities = entities(policy, self.files)
+        self.entities = entities(policy, self.files, self.pol)
 
 
 def review(
@@ -361,10 +376,13 @@ def review(
         except PolicyError as e:
             try:
                 b = Side(*base, previous=True)
-            except PolicyError:
-                raise BaseMistake(f"the policy at the base has a mistake: {e}") from None
+            except PolicyError as old:
+                # the mistake as the language it is written in says it: this one would only name its old forms
+                mistake = old if written_before(base[0], base[1]) else e
+                raise BaseMistake(f"the policy at the base has a mistake: {mistake}") from None
         h = Side(*head)
-    said, flags = meaning(b, h, worlds), risk(b, h, worlds)
+    said = meaning(b, h, worlds)
+    flags = risk(b, h, worlds, said.get("counterexample"))
     if said["equivalent"] not in (None, "text") and any(f["why"] in ALLOWS_MORE for f in flags):
         said = meaning(b, h, worlds, refactor=False)  # Risk found an example the comparison's worlds didn't
     out: Review = {
@@ -380,7 +398,7 @@ def review(
         from . import database
 
         wanted = [
-            (e["user"] if e["user"] != "(nobody signed in)" else "", g["type"], e["id"], g["what"][11:])
+            (e["user"] if e["user"] != NOBODY else "", g["type"], e["id"], g["what"][11:])
             for g in (out["access"] or {}).get("groups", [])
             if g["change"] == "gains" and g["what"].startswith("permission ")
             for e in g["examples"][:2]
@@ -388,14 +406,13 @@ def review(
         ran = database.review_run(db, h.policy, h.files, h.tests, base_lock, wanted)
         for g in (out["access"] or {}).get("groups", []):
             for e in g["examples"]:
-                how = ran["how"].get(
-                    (e["user"] if e["user"] != "(nobody signed in)" else "", g["type"], e["id"], g["what"][11:])
-                )
+                how = ran["how"].get((e["user"] if e["user"] != NOBODY else "", g["type"], e["id"], g["what"][11:]))
                 if how:
                     e["how"] = ", ".join(x.removeprefix("yes").strip() for x in how)
         out["deploy"]["on_review_data"] = {"seconds": ran["deployed"], "error": ran["error"]}
         run: TestRun = (
-            {"error": f"the migration fails: {ran['error']}"}
+            # without a lock file the policy is applied whole, as the project does (database.review_run)
+            {"error": f"{'the migration fails' if base_lock else 'applying the policy fails'}: {ran['error']}"}
             if ran["error"]
             else {
                 "checks": len(ran["tests"]),
@@ -426,26 +443,37 @@ def changes(b: Side, h: Side) -> list[Changed]:
     return changed
 
 
+def declared(pol: Policy, what: str) -> Perm | Rule | None:
+    """A permission ('type.perm') or a rule ('rule table command [columns]') of a policy, by its key."""
+    if what.startswith("rule "):
+        return next((r for r in pol.rules if f"rule {r.table} {rule_head(r)}" == what), None)
+    m = re.match(r"^(\w+)\.(\w+)$", what)
+    if m and m.group(1) in pol.types and m.group(2) in pol.types[m.group(1)].perms:
+        return pol.types[m.group(1)].perms[m.group(2)]
+    return None
+
+
 def expr_of(side: Side, what: str) -> Expr | None:
     """The expression of a permission ('type.perm') or a rule ('rule table command [columns]') on one side."""
-    if what.startswith("rule "):
-        return next((r.expr for r in side.pol.rules if f"rule {r.table} {rule_head(r)}" == what), None)
-    m = re.match(r"^(\w+)\.(\w+)$", what)
-    if m and m.group(1) in side.pol.types and m.group(2) in side.pol.types[m.group(1)].perms:
-        return side.pol.types[m.group(1)].perms[m.group(2)].expr
-    return None
+    found = declared(side.pol, what)
+    return found.expr if found is not None else None
 
 
 def unreadable_pairs(b: Expr, h: Expr) -> list[tuple[str, str]] | None:
     """When two expressions have one shape and differ only in conditions the review can't read (a subquery, a
-    function: conditions.simple reads neither), those conditions, before and after. The small worlds hold such a
-    condition as rows of its own, chosen per world, so two texts are two unrelated sets there: the worlds can't
-    say whether the change gives more or less. None when they differ in anything else."""
+    function: conditions.simple reads neither; signed_in, anyone and nobody it reads), those conditions, before
+    and after. The small worlds hold such a condition as rows of its own, chosen per world, so two texts are two
+    unrelated sets there: the worlds can't say whether the change gives more or less. None when they differ in
+    anything else."""
+
+    def unread(sql: str) -> bool:
+        return simple(sql) is None and sql not in KEYWORDS.values()
+
     match b, h:
         case (("cond", sb), ("cond", sh)):
             if squeeze(sb) == squeeze(sh):
                 return []
-            return [(sb, sh)] if simple(sb) is None and simple(sh) is None else None
+            return [(sb, sh)] if unread(sb) and unread(sh) else None
         case (("not", ib), ("not", ih)):
             return unreadable_pairs(ib, ih)
         case (("and", ib), ("and", ih)) | (("or", ib), ("or", ih)):
@@ -470,6 +498,21 @@ def unreadable_changes(b: Side, h: Side, changed: list[Changed]) -> dict[str, li
         if pairs:
             out[c["what"]] = pairs
     return out
+
+
+def as_read(b: Side, h: Side, unreadable: dict[str, list[tuple[str, str]]]) -> Policy:
+    """The head's policy as the small worlds compare it with the base's: what changed only in conditions the review
+    can't read (unreadable) is as the base wrote it. A world draws the rows such a condition holds for by its text,
+    so a reworded one holds for other rows there whatever it says, and what reads it differs there too: a difference
+    the review would make up. Those changes are said to be beyond it; everything else is compared."""
+    if not unreadable:
+        return h.pol
+    pol = parse_policy(h.policy, None, files=h.files)
+    for what in unreadable:
+        mine, theirs = declared(pol, what), declared(b.pol, what)
+        assert mine is not None and theirs is not None, what  # unreadable_changes compared the two
+        mine.expr = theirs.expr
+    return pol
 
 
 def meaning(b: Side, h: Side, worlds: int, refactor: bool = True) -> Meaning:
@@ -500,11 +543,19 @@ def meaning(b: Side, h: Side, worlds: int, refactor: bool = True) -> Meaning:
     if unreadable:
         out["unreadable"] = sorted(unreadable)
     if refactor:
-        found = compare(b.pol, h.pol, worlds=worlds)
-        if found is None:
+        found = compare(b.pol, as_read(b, h, unreadable), worlds=worlds)
+        if found is None and not unreadable:
             out["equivalent"] = f"{worlds} small worlds"
             return out
-        if found["what"] not in unreadable:  # a world's choice for an unreadable condition is no difference
+        if found is not None:
+            # a rule named as the policy writes it (compare says `update check` for `after`)
+            names = {
+                f"rule {r.table} {r.command}" + (f" {', '.join(r.columns)}" if r.columns else ""): (
+                    f"rule {r.table} {rule_head(r)}"
+                )
+                for r in h.pol.rules
+            }
+            found["what"] = names.get(found["what"], found["what"])
             out["counterexample"] = found
     # what changes through something it uses
     graph = uses(h.pol)
@@ -614,19 +665,20 @@ ALLOWS_MORE = (
 )
 
 
-def grants_more(b: Side, h: Side, whats: list[str], worlds: int) -> dict[str, tuple[str, str]]:
-    """For each of whats ('type.perm', or 'rule table command [columns]') where, in some small world, the head
-    grants something the base didn't: (who, the object). A rule the base doesn't have allowed nobody."""
-    ref_b, ref_h = Reference(b.pol), Reference(h.pol)
-    rules_b = {f"rule {r.table} {rule_head(r)}": r for r in b.pol.rules}
-    rules_h = {f"rule {r.table} {rule_head(r)}": r for r in h.pol.rules}
-    left = [w for w in whats if not w.startswith("rule ") or w in rules_h]
+def grants_more(base: Policy, head: Policy, whats: list[str], worlds: int) -> dict[str, tuple[str, str]]:
+    """For each of whats ('type.perm', or 'rule table command [columns]': a rule of the head) where, in some small
+    world, the head grants something the base didn't: (who, the object). A rule the base doesn't have allowed
+    nobody."""
+    ref_b, ref_h = Reference(base), Reference(head)
+    rules_b = {f"rule {r.table} {rule_head(r)}": r for r in base.rules}
+    rules_h = {f"rule {r.table} {rule_head(r)}": r for r in head.rules}
+    left = list(whats)
     found: dict[str, tuple[str, str]] = {}
-    for w in worlds_to_try((b.pol, h.pol), worlds, "risk"):
+    for w in worlds_to_try((base, head), worlds, "risk"):
         if not left:
             break
-        db_, dh = w.data(b.pol), w.data(h.pol)
-        for user in w.principals((b.pol, h.pol)):
+        db_, dh = w.data(base), w.data(head)
+        for user in w.principals((base, head)):
             sb, sh = ref_b.evaluate(db_, user, ("tok1",)), ref_h.evaluate(dh, user, ("tok1",))
             for what in list(left):
                 if what.startswith("rule "):
@@ -643,12 +695,28 @@ def grants_more(b: Side, h: Side, whats: list[str], worlds: int) -> dict[str, tu
 
 
 def named(user: str) -> str:
-    """Who an example is about, in words: user 1, service 3, nobody signed in."""
-    who = user or "nobody signed in"
-    return (who if ":" in who or who.startswith("nobody") else f"user {who}").replace(":", " ")
+    """Who an example is about, in words: user 1, service 3, nobody signed in ('' or, as an example and the
+    comparison write it, '(nobody signed in)')."""
+    if user in ("", NOBODY):
+        return "nobody signed in"
+    return user.replace(":", " ") if ":" in user else f"user {user}"
 
 
-def risk(b: Side, h: Side, worlds: int) -> list[Flag]:
+def who_of(ids: Iterable[str]) -> str:
+    """Who a group of Access is about, in words: '2 users', '1 user and 1 bot', 'someone not signed in' (ids:
+    a user's id, type:id for another principal, '' for someone not signed in)."""
+    kinds: dict[str, int] = {}
+    for i in ids:
+        kind = i.partition(":")[0] if ":" in i else "user" if i else ""
+        kinds[kind] = kinds.get(kind, 0) + 1
+    said = [plural(n, k) for k, n in sorted(kinds.items(), key=lambda kn: (kn[0] != "user", kn[0])) if k]
+    said += ["someone not signed in"] if "" in kinds else []
+    return ", ".join(said[:-1]) + " and " + said[-1] if len(said) > 1 else said[0]
+
+
+def risk(b: Side, h: Side, worlds: int, seen: Difference | None = None) -> list[Flag]:
+    """seen: Meaning's example of a difference (evaluate.compare's), from worlds of its own: one where the head
+    grants what the base didn't is one more widening found."""
     flags: list[Flag] = []
 
     def line(key: str) -> str | None:
@@ -764,7 +832,11 @@ def risk(b: Side, h: Side, worlds: int) -> list[Flag]:
         )
     own = [w for w in own if w not in unreadable]
     through = {w: via for w, via in through.items() if not all(v in unreadable for v in via)}
-    more = grants_more(b, h, list(dict.fromkeys([*own, *through, *everything])), worlds)
+    more = grants_more(b.pol, as_read(b, h, unreadable), list(dict.fromkeys([*own, *through, *everything])), worlds)
+    if seen is not None and seen["after"] and not seen["before"]:
+        types = {t.table: t.name for t in h.pol.types.values()}  # a rule's row is one of its table's type
+        tname = types[seen["what"].split()[1]] if seen["what"].startswith("rule ") else seen["what"].split(".")[0]
+        more.setdefault(seen["what"], (named(seen["user"]), f"{tname} {seen['object']}"))
     kinds = {c["what"]: c["kind"] for c in changed}
     for what in own:
         if what not in more:
@@ -1002,8 +1074,9 @@ def access(db: Db, h: Side, examples: int = 3) -> Access:
                 "type": type_,
                 "what": what,
                 "users": len(users[key]),
+                "who": who_of(users[key]),
                 "objects": len(objects[key]),
-                "examples": [{"user": r["user_id"] or "(nobody signed in)", "id": r["id"]} for r in shown[key]],
+                "examples": [{"user": r["user_id"] or NOBODY, "id": r["id"]} for r in shown[key]],
             }
         )
     return {"groups": out, "users_in_data": None}
@@ -1056,10 +1129,9 @@ def summary(r: Review) -> dict[str, str]:
             # "1 user gains", "2 users gain"
             does = lambda g: verb + ("s" if g["users"] == 1 else "")
             return "; ".join(
-                f"{plural(g['users'], 'user')} {does(g)} `{g['what'].replace('permission ', '')}` "
-                f"on {plural(g['objects'], g['type'])}"
+                f"{g['who']} {does(g)} `{g['what'].replace('permission ', '')}` on {plural(g['objects'], g['type'])}"
                 if g["what"].startswith("permission ")
-                else f"{plural(g['users'], 'user')} {does(g)} {g['what']} in `{g['type']}` ({plural(g['objects'], 'row')})"
+                else f"{g['who']} {does(g)} {g['what']} in `{g['type']}` ({plural(g['objects'], 'row')})"
                 for g in gs[:3]
             ) + (f"; and {len(gs) - 3} more" if len(gs) > 3 else "")
 
@@ -1105,12 +1177,21 @@ def summary(r: Review) -> dict[str, str]:
         parts.append(f"{plural(len(t['unread']), 'test file')} can't be read, so its checks aren't compared")
     lines["Tests"] = ". ".join(parts) + "." if parts else "no change to what the tests claim."
     d = r["deploy"]
+    ran = d.get("on_review_data")
+    # what bringing the policy in (its migrations, or applying it when there are none) did on the review data
+    on_data = (
+        ""
+        if not ran
+        else f" **It fails on the review database: {ran['error']}**"
+        if ran["error"]
+        else f" Applied on the review database in {ran['seconds']} s."
+    )
     if d.get("error"):
         lines["Deploy"] = f"not computed: {d['error']}"
     elif d.get("no_lock"):
         lines["Deploy"] = (
             "no lock file, so no migrations: `rowstile apply` applies the policy, and keeps the "
-            "inheritance tables whose definition didn't change."
+            "inheritance tables whose definition didn't change." + on_data
         )
     elif not d["migrations"]:
         lines["Deploy"] = "no migration: nothing the database holds changes."
@@ -1128,13 +1209,7 @@ def summary(r: Review) -> dict[str, str]:
             if beside
             else "No inheritance table rebuilt."
         )
-        ran = d.get("on_review_data")
-        if ran:
-            text += (
-                f" **It fails on the review database: {ran['error']}**"
-                if ran["error"]
-                else f" Applied on the review database in {ran['seconds']} s."
-            )
+        text += on_data
         if d["lock_current"] is False:
             text += " **The lock file is behind the policy: run `rowstile migrate` and commit what it writes.**"
         lines["Deploy"] = text.strip()
@@ -1181,16 +1256,16 @@ def markdown(r: Review, title: str = "rowstile: what this pull request changes")
             "",
             "<details><summary>Access</summary>",
             "",
-            "| change | what | users | objects | examples |",
+            "| change | what | who | objects | examples |",
             "|---|---|---|---|---|",
         ]
         for g in a["groups"]:
             ex = "; ".join(
-                f"user {e['user']}, {g['type']} {e['id']}" + (f": {e['how']}" if e.get("how") else "")
+                f"{named(e['user'])}, {g['type']} {e['id']}" + (f": {e['how']}" if e.get("how") else "")
                 for e in g["examples"][:2]
             )
             out.append(
-                f"| {g['change']} | `{g['type']}` {g['what'].replace('permission ', '')} | {g['users']} | "
+                f"| {g['change']} | `{g['type']}` {g['what'].replace('permission ', '')} | {g['who']} | "
                 f"{g['objects']} | {ex.replace('|', '/')} |"
             )
         out += ["", "</details>"]
