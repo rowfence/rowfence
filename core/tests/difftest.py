@@ -1821,7 +1821,7 @@ class MultiGen(Gen):
             st, sid, sr = "team", str(r.randint(1, 4)), "member"
         sid_sql = sid if sid.startswith("encode(") else lit(sid)
         expires = r.choice(["NULL"] * 4 + ["now() - interval '1 hour'", "now() + interval '1 day'"])
-        starts = r.choice(["NULL"] * 4 + ["now() + interval '1 hour'", "now() - interval '1 day'"])
+        starts = r.choice(["NULL"] * 4 + [LATER, "now() - interval '1 day'"])
         caveat, args = r.choice(
             [("NULL", "NULL")] * 4
             + [
@@ -1888,7 +1888,7 @@ class MultiGen(Gen):
             lambda: self.grant(ids),
             lambda: f"DELETE FROM authz.shares WHERE object_id = '{r.choice([f, p])}';",
             lambda: f"UPDATE authz.shares SET expires_at = {EXPIRED} WHERE random() < 0.2;",
-            lambda: "UPDATE authz.shares SET starts_at = now() + interval '1 hour' WHERE random() < 0.1;",
+            lambda: f"UPDATE authz.shares SET starts_at = {LATER} WHERE random() < 0.1;",
             lambda: (
                 f"INSERT INTO authz.role_permissions VALUES ({r.choice([1, 2, 3])}, 'edit') ON CONFLICT DO NOTHING;"
             ),
