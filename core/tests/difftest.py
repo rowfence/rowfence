@@ -333,6 +333,19 @@ class Checker:
             lines.append(f"SELECT {lit(json.dumps(key))}, ({sql});")
 
         self.db.run("\n".join(self.as_app_functions()))
+        self.shares_tried = self.shareable()
+        # who tries to share in this snapshot: one user, in turn (each attempt is a subtransaction of its own)
+        sharer = self.users[self.checks % len(self.users)]
+        # what lets someone share anything on an object of a type: share, or a permission a relation is shared by
+        self.share_perms: dict[str, set[str]] = {}
+        for row in self.db.rows("SELECT object_type || '|' || shared_by FROM authz_int.shared_relations"):
+            tname, by = row[0].split("|")
+            self.share_perms.setdefault(tname, {"share"}).add(by)
+        # whom each user tries to share with: a user of the data, the same for everyone
+        self.share_target = next(
+            (pid for kind, pid in (evaluate.principal_of(u, self.types) for u in self.users) if kind == "user" and pid),
+            "",
+        )
         # the rows explain is asked about by each user themselves, whether they may see them or not: picked here
         sample = {
             t.name: [
@@ -382,6 +395,14 @@ class Checker:
                             f"SELECT coalesce(json_agg(json_build_array(i, (SELECT e FROM authz.explain("
                             f"{lit(t.name)}, i, {lit(p)}, NULL) e LIMIT 1))), '[]') FROM unnest({ids}) i",
                         )
+                # authz.share tried as the user, and undone: what sharing lets through, and how it refuses
+                for tname, rname in self.shares_tried if u == sharer else ():
+                    ids = "ARRAY[" + ", ".join(lit(i) for i in sample[tname]) + "]::text[]"
+                    emit(
+                        [u, "share", tname, rname],
+                        f"SELECT coalesce(json_agg(json_build_array(i, difftest_app.try_share({lit(tname)}, i, "
+                        f"{lit(rname)}, 'user', {lit(self.share_target)}))), '[]') FROM unnest({ids}) i",
+                    )
                 # authz.explain_rule's verdict on an update that changes nothing, and on a delete, as the app asks it
                 for table in dict.fromkeys(r.table for r in self.rules):
                     t = self.ref.type_of_table(table)
@@ -542,7 +563,35 @@ class Checker:
                 f"CREATE OR REPLACE FUNCTION difftest_app.q{n}() RETURNS json LANGUAGE sql STABLE "
                 f"BEGIN ATOMIC {sql}; END;"
             )
+        # authz.share tried as the caller and always undone: 'ok', or the refusal's SQLSTATE and words
+        lines.append(
+            "CREATE OR REPLACE FUNCTION difftest_app.try_share(t text, i text, r text, st text, sid text) RETURNS text "
+            "LANGUAGE plpgsql AS $f$ BEGIN BEGIN PERFORM authz.share(t, i, r, st, sid); "
+            "RAISE EXCEPTION USING ERRCODE = 'P0099', MESSAGE = 'shared'; "
+            "EXCEPTION WHEN OTHERS THEN RETURN CASE WHEN SQLSTATE = 'P0099' THEN 'ok' ELSE SQLSTATE || ': ' || SQLERRM END; "
+            "END; END $f$;"
+        )
         return lines
+
+    def shareable(self) -> dict[tuple[str, str], tuple[str, list[str]]]:
+        """The relations a user may be shared without a `shared if`: (type, relation) -> (the permission sharing it
+        needs, the permissions it feeds into, which the sharer must hold too), as the compiled catalog says."""
+        plain = {
+            (t.name, r.name)
+            for t in self.types.values()
+            for r in t.relations.values()
+            for src in r.sources
+            if src.kind == "shared" and ("user", None) in src.subjects and not src.shared_if
+        }
+        out: dict[tuple[str, str], tuple[str, list[str]]] = {}
+        for row in self.db.rows(
+            "SELECT object_type || '|' || relation || '|' || shared_by || '|' || array_to_string(required, ',') "
+            "FROM authz_int.shared_relations WHERE subject = 'user'"
+        ):
+            tname, rname, by, required = row[0].split("|")
+            if (tname, rname) in plain:
+                out[(tname, rname)] = (by, [p for p in required.split(",") if p])
+        return out
 
     def expected_rule(self, state: evaluate.State, table: str, command: str) -> set[str]:
         t = self.ref.type_of_table(table)
@@ -607,6 +656,33 @@ class Checker:
                                 f"user {u}: authz.explain('{t.name}', {i}, '{p}') asked by themselves says "
                                 f"{line!r}, expected {'yes' if want else 'no'}"
                             )
+            # authz.share as the user: through exactly where the reference says they hold what sharing it needs,
+            # refused otherwise, in the order the guards go (nobody signed in or nothing to share there, no such
+            # user, the permission sharing needs, one it gives). An id the user table doesn't have signs in as
+            # nobody, who shares nothing, though a condition alone may give them a permission.
+            signed_in = self.ref.principal is not None
+            for (tname, rname), (by, required) in self.shares_tried.items():
+                t = self.types[tname]
+                for i, got in snap.get((u, "share", tname, rname), []):
+
+                    def holds(p: str, t: Type = t, i: str = i, state: evaluate.State = state) -> bool:
+                        return p in t.perms and i in state[(t.name, p)] & self.ref.ids(t)
+
+                    if not signed_in or not any(holds(p) for p in self.share_perms.get(tname, {"share"})):
+                        want = "42501: you cannot share"
+                    elif self.share_target not in self.ref.ids(self.types["user"]):
+                        want = "23503: there is no"
+                    elif not holds(by):
+                        want = f"42501: you cannot share {tname} {i} (needs {by})"
+                    elif not all(holds(p) for p in required):
+                        want = "42501: you cannot grant"
+                    else:
+                        want = "ok"
+                    if not str(got).startswith(want) or (want == "42501: you cannot share" and "(needs" in str(got)):
+                        problems.append(
+                            f"user {u}: authz.share('{tname}', {i}, '{rname}', user {self.share_target}) says "
+                            f"{got!r}, expected {want!r}"
+                        )
             # perms_of: the public permissions held on each object, no more (a type without any: none)
             for t in self.types.values():
                 public = [p for p, x in t.perms.items() if not x.hidden]
@@ -952,6 +1028,7 @@ class DocsGen(Gen):
                 f"INSERT INTO app.team_members VALUES ({r.choice(teams)}, {r.choice(self.users)}) ON CONFLICT DO NOTHING;"
             ),
             lambda: f"DELETE FROM app.team_members WHERE user_id = {r.choice(self.users)};",
+            lambda: self.sync(r.choice(teams)),
             lambda: (
                 f"UPDATE app.teams SET parent_id = {r.choice(teams + [None, None]) or 'NULL'} WHERE id = {r.choice(teams)};"
             ),
@@ -975,6 +1052,18 @@ class DocsGen(Gen):
         if r.random() < 0.15:  # several changes in one transaction
             return "BEGIN;\n" + "\n".join(r.choice(ops)() for _ in range(r.randint(2, 4))) + "\nCOMMIT;"
         return r.choice(ops)()
+
+    def sync(self, team: int) -> str:
+        """authz.sync_members makes a team's rows of app.team_members a list an identity provider sends: then
+        they are that list, no more, no less (and the checks after the change judge what it gives)."""
+        members = sorted(self.r.sample(self.users, self.r.randint(0, 3)), key=int)
+        listed = "ARRAY[" + ", ".join(f"'{m}'" for m in members) + "]::text[]"
+        return (
+            f"DO $s$ BEGIN PERFORM authz.sync_members('team', '{team}', 'member', {listed}); "
+            f"IF (SELECT coalesce(array_agg(user_id::text ORDER BY user_id), '{{}}') FROM app.team_members "
+            f"WHERE team_id = {team}) IS DISTINCT FROM {listed} THEN "
+            f"RAISE EXCEPTION 'sync_members left another list than %', {listed}; END IF; END $s$;"
+        )
 
 
 class AltGen(Gen):
