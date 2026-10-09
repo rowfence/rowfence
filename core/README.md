@@ -60,7 +60,7 @@ the stock Postgres image. CI runs it in parts, each on a machine of its own, sid
 | `tests/confidence_test.py` | `rowstile prove`, `test --coverage`, `snapshot`, `indexes`, `plans` and `bench`, on the docs example |
 | `tests/lsp_test.py` | the language server over its protocol, as an editor uses it; where there is a database (`createdb` works), also the tables and columns it completes from one |
 | `tests/mcp_test.py` | the MCP server over its protocol, as a coding agent's client uses it: each tool in a project folder |
-| `tests/studio_test.py` | `rowstile why` and Studio's API: read-only unless `--write`, only for the page that has the token, on localhost |
+| `tests/studio_test.py` | `rowstile why` and Studio's API: read-only unless `--write`, only for the page that has the token, on localhost; and `rowstile studio` itself: what it prints, and what stops it starting |
 | `tests/cookbook.sh` | the cookbook's recipes (`docs/cookbook/<name>.md` and its folder): each one's tables and rows load, its policy applies without a warning, its tests pass, its invariants are proved, and every line its page shows is in them |
 | `tests/races.sh` | the full run and `--proofs`: every pair of tree writes raced in two sessions at each isolation level; the inheritance tables match a rebuild after each |
 | `tests/stress.sh` | the full run and `--proofs`: 16 clients writing a folder tree at once at each isolation level; the tables match a rebuild afterwards, and the biggest moves and links on the tree they leave each take under 10 s alone |

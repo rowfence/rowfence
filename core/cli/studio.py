@@ -104,7 +104,13 @@ class Studio:
 
     # --- the database ----------------------------------------------------------------------------------
     def connect(self) -> pgwire.Connection:
-        return pgwire.connect(**pgwire.parse_dsn(self.dsn))
+        """A connection for one request. A database it can't reach is said as the command says it."""
+        from rowstile_cli import cant_connect
+
+        try:
+            return pgwire.connect(**pgwire.parse_dsn(self.dsn))
+        except (ValueError, OSError, pgwire.PgError, pgwire.ProtocolError) as e:
+            raise Problem(cant_connect(e, self.dsn), 503) from None
 
     def work(self, fn: Callable[[Db], T], write: bool = False) -> T:
         """fn(db) in one transaction: READ ONLY and rolled back, unless this is a write Studio may make."""
@@ -667,10 +673,26 @@ def serve(
     studio = Studio(dsn, cfg, policy_path, writable, port, read_policy=read_policy)
     try:
         studio.work(lambda db: database.applied(db))
+    except Problem as e:  # the database can't be reached: said as the other commands say it
+        print(e, file=sys.stderr)
+        sys.exit(2)
     except database.Error as e:
         print(f"rowstile studio: {e}" + (f"\nHINT: {e.hint}" if e.hint else ""), file=sys.stderr)
         sys.exit(1)
-    url = studio.start(background=True)
+    except pgwire.PgError as e:  # connected, and refused: a role that can't read rowstile's tables, say
+        detail, hint = e.fields.get("D"), e.fields.get("H")
+        print(
+            f"rowstile studio: {e.message}"
+            + (f"\nDETAIL: {detail}" if detail else "")
+            + (f"\nHINT: {hint}" if hint else ""),
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    try:
+        url = studio.start(background=True)
+    except (OSError, OverflowError) as e:  # a port another program listens on, or one there can't be
+        print(f"Studio didn't start ({e}): rowstile studio --port N for another port", file=sys.stderr)
+        sys.exit(2)
     print(
         f"rowstile studio: {url}  ({'can write: shares and requests' if writable else 'read-only'}; Ctrl-C stops it)",
         flush=True,

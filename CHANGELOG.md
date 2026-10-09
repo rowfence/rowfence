@@ -98,6 +98,13 @@ Each release upgrades from the one before it. How releases are numbered and made
 - `rowstile remove` gave back the table-wide SELECT a mask had replaced, and left the SELECT on the table's
   other columns that the mask gave instead. It takes those back too: the table's privileges are as they were
   before the policy.
+- `rowstile studio` printed a Python traceback when it couldn't start: on a database it can't reach (a server
+  that isn't running, a database that isn't there), connected as a role that can't read rowstile's tables (an
+  app's own `DATABASE_URL`, say), and on a port another program listens on. It says "can't connect: ..." as the
+  other commands do (exit 2), the database's words ("rowstile studio: permission denied for schema authz", exit
+  1), and "Studio didn't start (...): rowstile studio --port N for another port" (exit 2). A page whose
+  database stops answering while Studio runs is told "can't connect" (503), where Studio printed a traceback at
+  each request.
 - Ctrl-C while `rowstile sql` (or `can`, `explain`, `perms`, `list`, `who`, `explain-rule`) waited on a statement,
   or while `rowstile review --db` worked on its database, stopped only once the statement had run its course. It
   stops at once now and ends the statement on the server, as the other commands did.
