@@ -2484,6 +2484,10 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM authz_int.perms WHERE type = p_owner_type AND perm = 'manage_roles') THEN
     RAISE EXCEPTION '% has no manage_roles permission in the policy', p_owner_type USING HINT = 'rowstile help AZ707';
   END IF;
+  -- a type without `roles` (or one the policy doesn't have): a role there would be one nobody can be given
+  IF NOT EXISTS (SELECT 1 FROM authz_int.role_subjects WHERE object_type = p_object_type) THEN
+    RAISE EXCEPTION 'no custom roles on % in the policy', p_object_type USING HINT = 'rowstile help AZ707';
+  END IF;
   IF authz.uid() IS NULL OR NOT authz.can(p_owner_type, p_owner_id, 'manage_roles') THEN
     RAISE EXCEPTION 'you cannot manage roles of % %', p_owner_type, p_owner_id USING ERRCODE = 'insufficient_privilege', HINT = 'rowstile help AZ705';
   END IF;
