@@ -601,6 +601,33 @@ def main() -> None:
     finally:
         rw.stop()
 
+    print("-- a test's copy of a row: each value as the column holds it")
+    psql(
+        db,
+        "ALTER TABLE app.folders ADD COLUMN tags text[], ADD COLUMN meta jsonb, ADD COLUMN size numeric; "
+        "ALTER TABLE app.folders ALTER COLUMN inherit DROP DEFAULT; "
+        'UPDATE app.folders SET tags = \'{plans,"q3 review"}\', meta = \'{"color": "red"}\', '
+        "size = 12345678901234567.89 WHERE id = 4",
+    )
+    s = studio.Studio(dsn, None, policy, writable=False, port=0, read_policy=rowstile_cli.read_policy)
+    s.start(background=True)
+    try:
+        status, t = Client(s).call("/api/test?as=user:3&type=folder&id=4&perm=edit&expect=cannot")
+        made, row = made_and_copied(db, t["named"], "it", "app.folders", "id = 4")
+        check(
+            "an array, json, a number with a fraction, a boolean the table doesn't fill: the copy is the row",
+            status == 200 and made == row and '"tags": ["plans", "q3 review"]' in row,
+            (made, row),
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            with open(os.path.join(tmp, "made.authz"), "w", encoding="utf-8") as fh:
+                fh.write(t["named"])
+            _, out = cli(db, "test", os.path.join(tmp, "made.authz"))
+        ran = out.split("user 3 cannot edit folder 4", 1)[-1].split("invariants", 1)[0]
+        check("... and the test runs as it is", "ok    " in ran and "FAIL" not in ran, out[-800:])
+    finally:
+        s.stop()
+
     print("-- rowstile studio, the command")
     p, line, at = serving(db)
     check(
@@ -771,6 +798,62 @@ def main() -> None:
     finally:
         ms.stop()
     subprocess.run(["dropdb", "--if-exists", masks], capture_output=True)
+
+    print("-- a test on a key of several columns, and on text in a key (tests/composite.authz)")
+    keys = f"{db}_keys"
+    subprocess.run(["dropdb", "--if-exists", keys], capture_output=True)
+    subprocess.run(["createdb", keys], check=True)
+    subprocess.run(
+        ["psql", "-X", "-q", "-v", "ON_ERROR_STOP=1", "-d", keys, "-f", os.path.join(HERE, "composite_schema.sql")],
+        check=True,
+        capture_output=True,
+    )
+    psql(
+        keys,
+        "INSERT INTO cx.users VALUES (1, NULL), (2, 1); INSERT INTO cx.orgs VALUES (1); "
+        "INSERT INTO cx.teams (org_id, slug, lead_id) VALUES (1, 'a b', 1), (1, 'it''s', 1); "
+        "INSERT INTO cx.projects VALUES (1, 5, 1, NULL)",
+    )
+    rc, out = cli(keys, "apply", os.path.join(HERE, "composite.authz"))
+    if rc:
+        raise SystemExit(out)
+    ks = studio.Studio(
+        f"dbname={keys}", None, os.path.join(HERE, "composite.authz"), port=0, read_policy=rowstile_cli.read_policy
+    )
+    ks.start(background=True)
+    try:
+        for label, ask, written in (
+            ("a key of several columns", "type=project&id=(1,5)&perm=edit", "edit project (1,5)"),
+            (
+                "a key with a space in its text: quoted",
+                "type=team&id=(1,%22a%20b%22)&perm=share",
+                "share team '(1,\"a b\")'",
+            ),
+            (
+                "... and an apostrophe: quoted, and doubled",
+                "type=team&id=(1,it%27s)&perm=share",
+                "share team '(1,it''s)'",
+            ),
+        ):
+            status, t = Client(ks).call(f"/api/test?as=user:2&{ask}&expect=cannot")
+            rc, out = -1, ""
+            if status == 200:
+                with tempfile.TemporaryDirectory() as tmp:
+                    with open(os.path.join(tmp, "made.authz"), "w", encoding="utf-8") as fh:
+                        fh.write(f'test "on the data there"\n  {t["check"]}\n\n{t["named"]}')
+                    rc, out = cli(keys, "test", os.path.join(tmp, "made.authz"))
+            check(
+                f"a test on {label}: no copy of the row, and the check and the test run as written",
+                status == 200
+                and t["check"] == f"user 2 cannot {written}"
+                and "given it" not in t["named"]
+                and rc == 0
+                and out.count("ok    ") == 2,
+                (status, t, out[-600:]),
+            )
+    finally:
+        ks.stop()
+    subprocess.run(["dropdb", "--if-exists", keys], capture_output=True)
 
     print("-- rowstile why through a table that names its rows' type (tests/cross.authz: a project's backers)")
     cross = db + "_cross"

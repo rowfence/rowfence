@@ -83,6 +83,11 @@ def principal(who: str | None) -> Who:
     return kind, ident
 
 
+def word(ident: str) -> str:
+    """An id as a test's line reads it: as it is when it is one word, else quoted, its quotes doubled."""
+    return ident if re.fullmatch(r"[^\s{}']+", ident) else "'" + ident.replace("'", "''") + "'"
+
+
 class Studio:
     def __init__(
         self,
@@ -444,30 +449,31 @@ class Studio:
         expect = q.get("expect", "can")
         if expect not in ("can", "cannot"):
             raise Problem("expect: can or cannot")
-        subject = "anyone" if who[0] is None else f"{who[0]} {who[1]}" if who[0] != "user" else f"user {who[1]}"
+        subject = "anyone" if who[0] is None else f"{who[0]} {word(who[1] or '')}"
 
         def run(db: Db) -> Message:
             c = self.compiler(db)
             if type_name not in c.types:
                 raise Problem(f"no type {type_name} in the policy", 404)
             t = c.types[type_name]
-            check = f"{subject} {expect} {perm} {type_name} {oid}"
+            check = f"{subject} {expect} {perm} {type_name} {word(oid)}"
 
             def value(v: Json) -> str:
                 if v is None:
                     return "NULL"
                 if isinstance(v, bool):
                     return "true" if v else "false"
-                if isinstance(v, (int, float)):
+                if isinstance(v, int):
                     return str(v)
-                return lit(json.dumps(v) if isinstance(v, (dict, list)) else str(v))
+                return lit(str(v))
 
             def insert(tt: Type, ident: str | None, var: str) -> str | None:
                 """A given that makes a copy of the row, as a new row: None when it isn't there, or its key has
                 several columns (the test then names the row that is there)."""
                 if tt.pk is None or tt.composite:
                     return None
-                row = db.rows(f"SELECT to_jsonb(r) AS j FROM {qt(tt.table)} r WHERE {c.key_is(tt, 'r', lit(ident))}")
+                this = c.key_is(tt, "r", lit(ident))
+                row = db.rows(f"SELECT to_jsonb(r) AS j FROM {qt(tt.table)} r WHERE {this}")
                 if not row:
                     return None
                 j = as_object(row[0]["j"])
@@ -482,6 +488,12 @@ class Studio:
                     )
                 }
                 j = {k: v for k, v in j.items() if k not in own}
+                # what JSON doesn't give back as the column holds it (an array, a row, a number with a fraction):
+                # the column's own text, which Postgres reads back as it was
+                texts = [k for k, v in j.items() if isinstance(v, (dict, list, float))]
+                if texts:
+                    cast = ", ".join(f"r.{quoted(k)}::text AS {quoted(k)}" for k in texts)
+                    j.update(db.rows(f"SELECT {cast} FROM {qt(tt.table)} r WHERE {this}")[0])
                 vals = {k: value(v) for k, v in j.items()}
                 if tt.pk in vals:
                     kind = tt.key[0][1]
@@ -499,7 +511,7 @@ class Studio:
                 )
 
             lines = [f'test "{check}"']
-            someone = "anyone" if who[0] is None else f"{who[0]} {who[1]}"
+            someone = subject
             if who[0] is not None and who[0] in c.types:
                 g = insert(c.types[who[0]], who[1], "who")
                 if g:
@@ -511,7 +523,7 @@ class Studio:
             lines.append(
                 "  -- add the rows that link them (the relations the explanation names), and change what must be unique"
             )
-            lines.append(f"  {someone} {expect} {perm} {type_name} {'$it' if g else oid}")
+            lines.append(f"  {someone} {expect} {perm} {type_name} {'$it' if g else word(oid)}")
             return {"check": check, "named": "\n".join(lines) + "\n"}
 
         return self.work(run)
