@@ -183,7 +183,10 @@ class Parser:
             return self.take("str")[1:-1].replace("''", "'")
         if self.peek("num"):
             text = self.take("num")
-            return float(text) if "." in text else int(text)
+            try:
+                return float(text) if "." in text else int(text)
+            except ValueError:  # more digits than Python reads as a whole number (4300): the database's to read
+                raise NotSimple(text[:40]) from None
         if self.peek("word", "true") or self.peek("word", "false"):
             return self.take("word") == "true"
         if self.peek("word", "null"):
