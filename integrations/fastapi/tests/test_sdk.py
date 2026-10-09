@@ -7,7 +7,9 @@ import io
 import os
 import subprocess
 import sys
+import threading
 from collections.abc import AsyncIterator
+from concurrent.futures import ThreadPoolExecutor
 from types import MappingProxyType
 from unittest import mock
 
@@ -26,7 +28,7 @@ from rowstile import NotFound, NotSignedIn, Principal, Refused
 from rowstile import sqlalchemy as authz_sa
 from rowstile.fastapi import Rowstile
 from rowstile.testing import AssertNotFound, AssertRefused, database_per_worker
-from sqlalchemy import BigInteger, Connection, MetaData, Text, create_engine, join, select, text, update
+from sqlalchemy import BigInteger, Connection, Engine, MetaData, Text, create_engine, join, select, text, update
 from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, column_property, mapped_column
@@ -189,6 +191,80 @@ async def test_why_stale_for_the_engine_that_wrote(app: FastAPI) -> None:
             assert isinstance(verdict, Refused) and verdict.message == REFUSED, verdict
     finally:
         engine.dispose()
+
+
+def refused_flush(engine: Engine, note: int = 1) -> StaleDataError:
+    """An ORM update of a note the user may see but not edit (cy: note 1, bo: note 3): what SQLAlchemy raised."""
+    with pytest.raises(StaleDataError) as e, Session(engine) as s, s.begin():
+        row = s.get(Note, note)
+        assert row is not None
+        row.body = "x"
+    return e.value
+
+
+def test_outside_a_block_each_thread_is_asked_about_its_own_write() -> None:
+    # two people at once, signed in by install()'s user() alone (as a Flask app or a worker thread may be): each
+    # one's why_stale_sync answers about the row it wrote, not the other's (bo can't even see note 1)
+    me = threading.local()
+    engine = authz_sa.install(create_engine(SYNC), user=lambda: me.user)
+    both_wrote = threading.Barrier(2, timeout=60)
+
+    def person(user: int, note: int) -> str:
+        me.user = user
+        failed = refused_flush(engine, note)
+        both_wrote.wait()  # the other one has written too
+        return repr(authz_sa.why_stale_sync(failed))
+
+    try:
+        with ThreadPoolExecutor(2) as pool:
+            bo, cy = pool.submit(person, 2, 3), pool.submit(person, 3, 1)
+            said = bo.result(), cy.result()
+    finally:
+        engine.dispose()
+    assert said == (
+        "Refused('permission denied: user 2 may not update row 3 of app.notes')",
+        "Refused('permission denied: user 3 may not update row 1 of app.notes')",
+    ), said
+
+
+def test_outside_a_block_a_later_transaction_isnt_asked_about_an_earlier_write() -> None:
+    engine = authz_sa.install(create_engine(SYNC), user=lambda: 3)
+    try:
+        verdict = authz_sa.why_stale_sync(refused_flush(engine))  # outside a block, a flush is asked about too
+        assert isinstance(verdict, Refused) and verdict.message == REFUSED, verdict
+        refused_flush(engine)
+        # a later transaction, whose flush wrote no row it can ask about (a model mapped to a join): it can't
+        # tell, rather than answer about the earlier one's row
+        with pytest.raises(StaleDataError) as e, Session(engine) as s, s.begin():
+            row = s.scalars(select(NoteInProject).where(NoteInProject.note_id == 1)).one()
+            row.body = "x"
+        assert authz_sa.why_stale_sync(e.value) is None
+    finally:
+        engine.dispose()
+
+
+def test_a_block_isnt_asked_about_a_write_made_outside_it() -> None:
+    engine = authz_sa.install(create_engine(SYNC), user=lambda: 3)
+    try:
+        refused_flush(engine)  # outside a block
+        with rowstile.acting_as(3):  # a block that wrote nothing has nothing to say
+            assert authz_sa.why_stale_sync() is None
+    finally:
+        engine.dispose()
+
+
+async def test_outside_a_block_an_async_flush_is_asked_about_too() -> None:
+    engine = authz_sa.install(create_async_engine(APP), user=lambda: 3)
+    try:
+        with pytest.raises(StaleDataError) as e:
+            async with AsyncSession(engine) as s, s.begin():
+                note = await s.get(Note, 1)
+                assert note is not None
+                note.body = "x"
+        verdict = await authz_sa.why_stale(e.value)
+        assert isinstance(verdict, Refused) and verdict.message == REFUSED, verdict
+    finally:
+        await engine.dispose()
 
 
 async def test_core_updates_expect_a_row(app: FastAPI) -> None:
