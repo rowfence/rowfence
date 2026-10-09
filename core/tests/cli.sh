@@ -104,6 +104,19 @@ run lint --colour; [ $rc -eq 2 ] && case "$out" in *"--colour is not an option"*
 out=$(python3 cli/rowstile_cli.py --db "dbname=authz_no_such_db" bogus 2>&1); rc=$?
 case "$out" in "unknown command 'bogus'"*) [ $rc -eq 2 ] && ok "an unknown command is said before connecting" || bad "unknown command exit" "$rc";; *) bad "unknown command" "${out:0:120}";; esac
 run sql --as user:5 "SELECT count(*) FROM app.files -- --limit 3"; [ $rc -eq 0 ] && ok "sql's statement is left as it is" || bad "sql" "$rc $out"
+# Ctrl-C while sql waits on a statement: it stops at once, and the statement ends on the server too (started with job
+# control on, as a terminal starts it: a background job otherwise ignores Ctrl-C)
+sleeping() { PSQL -c "SELECT count(*) FROM pg_stat_activity WHERE query LIKE '%pg_sleep(30)%' AND state = 'active' AND pid <> pg_backend_pid()"; }
+set -m
+python3 cli/rowstile_cli.py --db "dbname=$DB" sql --as user:5 "SELECT pg_sleep(30)" > "$T/sleep.out" 2>&1 &
+sleeper=$!
+set +m
+for _ in $(seq 60); do [ "$(sleeping)" = 1 ] && break; sleep 0.5; done
+began=$(date +%s); kill -INT "$sleeper"; wait "$sleeper"; rc=$?; took=$(( $(date +%s) - began ))
+for _ in $(seq 20); do [ "$(sleeping)" = 0 ] && break; sleep 0.5; done
+[ $rc -eq 130 ] && [ "$(cat "$T/sleep.out")" = "stopped: nothing was kept" ] && [ $took -lt 10 ] && [ "$(sleeping)" = 0 ] &&
+  ok "Ctrl-C while sql waits on a statement: stopped at once (exit 130), and the statement ended on the server" ||
+  bad "Ctrl-C during sql" "exit $rc after ${took}s, still running on the server: $(sleeping), said: $(cat "$T/sleep.out")"
 run explain-rule --as user:3 app.files insert --row '{folder_id: 6}'; [ $rc -eq 2 ] && case "$out" in *"--row: not JSON: {folder_id: 6}"*"The shell took the double quotes"*) true;; *) false;; esac && ok "explain-rule shows a row a Windows shell took the quotes out of, and how to write it there" || bad "explain-rule --row without quotes" "$out"
 run explain-rule --as user:3 app.files insert --row '[1]'; [ $rc -eq 2 ] && case "$out" in *"JSON object"*) true;; *) false;; esac && ok "explain-rule --row wants an object" || bad "--row" "$rc $out"
 run diff "$T/main.authz" --limit; [ $rc -eq 2 ] && [ "$out" = "--limit needs a value" ] && ok "an option without its value is refused" || bad "option without value" "$rc $out"

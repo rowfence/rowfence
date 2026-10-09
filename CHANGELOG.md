@@ -67,6 +67,9 @@ Each release upgrades from the one before it. How releases are numbered and made
 
 ### Fixed
 
+- Ctrl-C while `rowstile sql` (or `can`, `explain`, `perms`, `list`, `who`, `explain-rule`) waited on a statement,
+  or while `rowstile review --db` worked on its database, stopped only once the statement had run its course. It
+  stops at once now and ends the statement on the server, as the other commands did.
 - `rowstile init` on a schema whose users table is keyed by two columns (a tenant's and its own) asked which
   table holds the users, and naming it with `--users` then failed on its key. It says at once that the user
   table needs a key of one column.
