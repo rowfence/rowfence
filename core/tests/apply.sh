@@ -110,6 +110,29 @@ CLI reapply >/dev/null 2>&1
               FROM authz.shares WHERE object_type = 'file' AND relation = 'viewer'")" = "0 2" ] &&
   ok "applying makes the ids of shares stored as written canonical, keeping one of two spellings" ||
   bad "canonical ids" "$(PSQL -c "SELECT string_agg(object_id || '>' || subject_id, ' ') FROM authz.shares WHERE object_type = 'file' AND relation = 'viewer'")"
+# applying again warns of what the policy can't make safe: a foreign key that deletes rows of a governed table by
+# cascade (which skips row-level security), and a table that lost its rules (its row-level security stays on)
+PSQL -c "ALTER TABLE app.files ADD CONSTRAINT files_folder_cascade FOREIGN KEY (folder_id) REFERENCES app.folders ON DELETE CASCADE" >/dev/null
+run apply "$T/docs.authz" --force
+case "$out" in *"foreign key files_folder_cascade on app.files is ON DELETE CASCADE: deleting a row of app.folders also deletes rows of app.files, and cascades skip row-level security"*"$T/docs.authz: applied")
+  ok "re-applying warns of a foreign key that deletes a governed table's rows by cascade";; *) bad "a cascading foreign key" "$out";; esac
+PSQL -c "ALTER TABLE app.files DROP CONSTRAINT files_folder_cascade" >/dev/null
+sed '/^rules app.files$/,/^$/d' "$T/docs.authz" > "$T/nofiles.authz"
+run apply "$T/nofiles.authz"
+case "$out" in *"app.files has no rules any more, and row-level security is still on, so the app role sees none of its rows"*"$T/nofiles.authz: applied")
+  [ "$(PSQL -c "SELECT relrowsecurity FROM pg_class WHERE oid = 'app.files'::regclass")" = t ] &&
+    ok "re-applying warns of a table that lost its rules, whose row-level security stays on" || bad "row-level security after the rules went";;
+  *) bad "a table that lost its rules" "$out";; esac
+# a policy for another app role: the role it named before keeps no row and none of rowstile's functions
+psql -X -q -d postgres -c "DROP ROLE IF EXISTS authz_apply_web" -c "CREATE ROLE authz_apply_web" >/dev/null 2>&1
+sed 's/^app role app_user$/app role authz_apply_web/' "$T/docs.authz" > "$T/web.authz"
+run apply "$T/web.authz"
+[ $rc -eq 0 ] && [ "$(PSQL -c "SET ROLE app_user" -c "SET authz.user_id = 1" -c "SELECT count(*) FROM app.files")" = 0 ] &&
+  [ "$(PSQL -c "SELECT has_schema_privilege('app_user', 'authz', 'USAGE') OR has_schema_privilege('app_user', 'authz_gen', 'USAGE')")" = f ] &&
+  ok "re-applying for another app role takes the old one's access away: no row, none of rowstile's functions" ||
+  bad "the app role the policy no longer names" "$out"
+run apply "$T/docs.authz"; [ $rc -eq 0 ] || bad "applying for app_user again" "$out"
+psql -X -q -d postgres -c "DROP ROLE authz_apply_web" >/dev/null || bad "dropping the role the policy named for a while"
 psql -X -q -d "$DB" -c "BEGIN" -c "LOCK app.files IN ACCESS SHARE MODE" -c "SELECT pg_sleep(20)" -c "COMMIT" >/dev/null 2>&1 &
 sleep 1; t=$SECONDS
 run apply "$T/docs.authz" --force
@@ -132,9 +155,13 @@ psql -X -q -d "$TDB" -c "SET ROLE app_user" -c "SET authz.user_id = 5" -c "SELEC
 out=$(TCLI test 2>&1); rc=$?
 [ $rc -eq 0 ] && echo "$out" | grep -q "policy tests passed" && ok "rowstile test passes ($(echo "$out" | grep -c 'ok '))" || bad "test" "$out"
 sed 's/user 3 can view file 11/user 3 cannot view file 11/' example/docs.authz > "$T/failing.authz"
-TCLI apply "$T/failing.authz" >/dev/null 2>&1
+printf '\ntest "one that fails too"\n  user 3 cannot view file 11\n' >> "$T/failing.authz"
+applied=$(TCLI apply "$T/failing.authz" 2>&1); arc=$?
 out=$(TCLI test 2>&1); rc=$?
 case "$out" in *"FAIL"*"user 3 cannot view file 11"*) [ $rc -eq 1 ] && ok "... and a failing test fails it" || bad "test exit" "$rc";; *) bad "failing test" "$out";; esac
+# applying runs none of a policy's tests (named ones write): the one whose tests fail above applied
+[ $arc -eq 0 ] && [ "$applied" = "$T/failing.authz: applied" ] &&
+  ok "apply runs no test: that policy applied, its tests failing (the section's and a named one)" || bad "applying a policy whose tests fail" "$applied"
 [ "$(psql -X -At -d "$TDB" -c "SELECT count(*) FROM pg_proc WHERE proname = 'authz_policy_tests'")" = 0 ] && ok "testing leaves nothing behind" || bad "test function left"
 dropdb "$TDB"
 # a policy without rules makes no row-level security policy to find the app role by: the tests switch to the

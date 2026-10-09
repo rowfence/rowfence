@@ -200,6 +200,9 @@ check "closing the review revokes what was marked" "1" "SET authz.user_id = 5; S
 check "... carol lost the offer letter" "f" "SET authz.user_id = 3; SELECT authz.can('file', 13, 'view')"
 check "... dave (not decided) kept it" "t" "SET authz.user_id = 4; SELECT authz.can('file', 13, 'view')"
 expect_code "a closed review cannot be changed" "42501: you cannot decide in review 2" -c "SET authz.user_id = 5" -c "SELECT authz.review_decide($REV, 1, false)"
+admin "the audit trail has the requests, their answers and the reviews" "approve_request|close_review|deny_request|request_access|start_review" \
+  "SELECT string_agg(DISTINCT action, '|' ORDER BY action) FROM authz.audit
+   WHERE action IN ('request_access', 'approve_request', 'deny_request', 'start_review', 'close_review')"
 
 echo "-- reviews respect 'shared by'"
 sed -e 's/^  editor      : user, team#member shared$/  editor      : user, team#member, link shared by manage_editors/' \
@@ -429,11 +432,21 @@ fi
 expect_code "the app role cannot trim" "42501: permission denied for function trim_audit" -c "SELECT authz.trim_audit(interval '0')"
 # emptying a governed table whose own columns hold relations (a file's folder and owner): last, the files are gone
 POS=$(PSQL -c "SELECT coalesce(max(pos), 0) FROM authz.changes")
+# a share on a file and one to a team's members, which emptying their tables takes away
+as 5 -c "SELECT authz.share('file', 13, 'viewer', 'user', 4)" -c "SELECT authz.share('folder', 1, 'viewer', 'team', 10, 'member')" >/dev/null
+SHARED="SELECT count(*) FILTER (WHERE object_type = 'file') || '|' || count(*) FILTER (WHERE subject_type = 'team') FROM authz.shares"
+before=$(PSQL -c "$SHARED")
+{ [ "${before%%|*}" -gt 0 ] && [ "${before##*|}" -gt 0 ]; } 2>/dev/null ||
+  { echo "FAIL  a share on a file and one to a team, to empty their tables under: $before"; fails=$((fails + 1)); }
 PSQL -c "TRUNCATE app.files" >/dev/null
 admin "emptying a table whose columns hold relations is recorded" "truncate|app.files" \
   "SELECT action || '|' || (detail ->> 'table') FROM authz.audit WHERE action = 'truncate' AND object_type = 'file'"
 admin "... and announced for every file" "1" \
   "SELECT count(*) FROM authz.changes WHERE pos > $POS AND object_type = 'file' AND object_ids = '{*}'"
+admin "... and the shares on its rows go with them" "0" "SELECT count(*) FROM authz.shares WHERE object_type = 'file'"
+PSQL -c "TRUNCATE app.teams CASCADE" >/dev/null
+admin "emptying a table takes the shares to its rows too (to a team's members), and no other" "0|true" \
+  "SELECT count(*) FILTER (WHERE subject_type = 'team') || '|' || (count(*) FILTER (WHERE subject_type = 'user') > 0) FROM authz.shares"
 admin "inheritance tables still match a rebuild" "t" "SELECT authz.verify()"
 
 echo "-- a logical replication subscription that copies the trail"

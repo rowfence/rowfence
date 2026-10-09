@@ -52,11 +52,12 @@ test "a write, however it starts"
   as user $ann allowed {WITH x AS (SELECT 1) UPDATE app.folders SET name = 'x' WHERE id = $top}
   as user $bo allowed {WITH x AS (SELECT 1) SELECT FROM app.folders WHERE id = $top}
   as user $ann sees 1 {SELECT FROM app.folders WHERE id = $top;}
+  as user $ann refused {DELETE FROM app.users WHERE id = $ann}
   given f    = {INSERT INTO app.files (folder_id, owner_id, name) VALUES ($top, $ann, 'a') RETURNING id}
   as user $ann refused {INSERT INTO app.files (id, folder_id, owner_id, name) VALUES ($f, $top, $ann, 'twice')}
 EOF
 out=$(rows "$T/w.authz" | awk -F'\t' '$1 != "invariants" {print $3}' | tr -d '\n')
-[ "$out" = tttttf ] && ok "a write after WITH or a comment that changes no row is refused; a read of no row is allowed; sees takes a final ;" || bad "writes however they start" "$(rows "$T/w.authz")"
+[ "$out" = ttttttf ] && ok "a write after WITH or a comment that changes no row is refused, and one the app role has no privilege for; a read of no row is allowed; sees takes a final ;" || bad "writes however they start" "$(rows "$T/w.authz")"
 out=$(rows "$T/w.authz" | awk -F'\t' '$3 == "f" {print $4}')
 case "$out" in *"error: "*) ok "... and an error that isn't a refusal fails 'refused' too";; *) bad "refused by another error" "$out";; esac
 # with scope: a line checked as a key or a token limited to those scopes would be (the docs app: read is

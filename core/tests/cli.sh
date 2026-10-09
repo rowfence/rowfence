@@ -353,6 +353,11 @@ printf 'app role %s\ntype user = app.users\ntype note = app.notes\n  owner : use
 python3 cli/rowstile_cli.py --db "dbname=$N" apply "$T/clean.authz" >/dev/null 2>&1
 out=$(python3 cli/rowstile_cli.py --db "dbname=$N" lint 2>&1); rc=$?
 [ $rc -eq 0 ] && [ "$out" = "authz.lint(): nothing found" ] && ok "lint where it finds nothing says so, exit 0" || bad "lint, nothing found" "$rc $out"
+# a warning fails it too: an update rule the app role has no privilege for
+psql -X -q -d "$N" -c "REVOKE UPDATE (body) ON app.notes FROM $R" >/dev/null
+out=$(python3 cli/rowstile_cli.py --db "dbname=$N" lint 2>&1); rc=$?
+case "$out" in *"warning"*"app.notes"*"the policy has a rule for update"*) [ $rc -eq 1 ] && ok "... and where it finds a warning, exit 1" || bad "lint on a warning: exit" "$rc";;
+  *) bad "lint on a warning" "$out";; esac
 dropdb "$N"; psql -X -q -d postgres -c "DROP ROLE IF EXISTS $R" >/dev/null 2>&1
 
 echo "-- an owner that only administers the app role"

@@ -54,6 +54,8 @@ PSQL -c "CREATE ROLE authz_masks_reader" >/dev/null 2>&1
 PSQL -c "GRANT SELECT ON mt.docs TO authz_masks_reader" -c "GRANT authz_masks_reader TO app_user" >/dev/null
 [ "$(PSQL -c "SELECT severity FROM authz.lint() WHERE object = 'mt.docs.body'")" = "error" ] &&
   ok "lint reports a column readable through a role membership" || bad "lint misses the membership"
+out=$(apply /tmp/authz_masks.sql)
+case "$out" in *"could still read masked columns of mt.docs"*) ok "... and applying refuses it, as for PUBLIC";; *) bad "apply with the column readable through a role" "$out";; esac
 PSQL -c "REVOKE authz_masks_reader FROM app_user" -c "DROP OWNED BY authz_masks_reader" -c "DROP ROLE authz_masks_reader" >/dev/null
 PSQL -c "ALTER TABLE mt.docs RENAME COLUMN body TO body2" >/dev/null 2>&1
 out=$(PSQL -c "SELECT count(*) FROM authz.lint()" 2>&1); case "$out" in [0-9]*) ok "a renamed masked column doesn't break lint";; *) bad "lint after rename" "$out";; esac
