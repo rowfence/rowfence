@@ -409,6 +409,13 @@ run apply "$T/bad_cond.authz"
 case "$out" in "policy line 33: the condition {subject_type <> 'user' or subject_idd = '*' or exists "*"} doesn't run: column \"subject_idd\" does not exist [AZ613]"*)
   ok "... a shared if that doesn't run (authz.share alone reads it), named by its relation's line";;
   *) bad "a shared if that doesn't run" "$out";; esac
+# a caveat that reads what its share was made with (arg('ip'), which the compiled SQL writes another way): the
+# caveat's own line, not the other caveat's, the one whose text the failing statement shows as written
+sed "s/= arg('ip')}/= arg('ip') and ip_ok}/" tests/multi.authz > "$T/bad_cond.authz"
+grep -q "arg('ip') and ip_ok" "$T/bad_cond.authz" || bad "multi.authz has no caveat = arg('ip') to break"
+run apply "$T/bad_cond.authz"
+case "$out" in "policy line 54: the condition {authz.ctx('ip') = arg('ip') and ip_ok} doesn't run: column \"ip_ok\" does not exist [AZ613]"*)
+  ok "a caveat that doesn't run, reading arg(): named by its own line";; *) bad "a caveat that doesn't run" "$out";; esac
 fresh "$DB"
 quiet -d "$DB" -f example/app_schema.sql -c "CREATE TABLE app.bots (id bigint PRIMARY KEY, active boolean)" >/dev/null || exit 1
 { cat example/docs.authz; printf '\ntype bot = app.bots principal where {activ}\n'; } > "$T/bad_cond.authz"

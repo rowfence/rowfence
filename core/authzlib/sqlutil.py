@@ -387,6 +387,8 @@ def sql_code(sql: str) -> list[tuple[bool, str]]:
 
 # `this.` in a condition: the row the condition is about (not a part of a longer name, nor after a dot)
 THIS = re.compile(r"(?<![\w.$\"])this\s*\.\s*(?=[A-Za-z_\"])", re.IGNORECASE)
+# `arg('ip')` in a caveat: what the share was made with (Compiler.caveat_sql)
+CAVEAT_ARG = re.compile(r"\barg\s*\(\s*'([^']*)'\s*\)")
 
 
 def this_spans(sql: str) -> list[tuple[int, int]]:
