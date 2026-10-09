@@ -389,6 +389,37 @@ case "$out" in "policy line 74: the condition {parent_id is null or (true} doesn
 [ "$(PSQL -c "SELECT to_regnamespace('authz_int') IS NULL")" = t ] && ok "... and nothing of it stays" || bad "a failed apply left something"
 dropdb "$DB"
 
+echo "-- conditions only a function reads"
+# Postgres reads a PL/pgSQL function's queries when they first run: the where of a type that signs in (authz.uid(),
+# authz_int."<type>__me"()) and a `shared ... if` (authz.share) are read when applying all the same, and one that
+# doesn't run is refused with its line, not left to fail the app's every query, or every share
+fresh "$DB"
+quiet -d "$DB" -f tests/multi_schema.sql >/dev/null || exit 1
+sed 's/^type user = mt.users (id uuid) where {this.active}/type user = mt.users (id uuid) where {this.activ}/' tests/multi.authz > "$T/bad_cond.authz"
+grep -q '{this.activ}' "$T/bad_cond.authz" || bad "multi.authz's user type has no where {this.active} to break"
+run apply "$T/bad_cond.authz"
+case "$out" in "policy line 5: the condition {this.activ} doesn't run: column u.activ does not exist [AZ613]"*'Perhaps you meant to reference the column "u.active"'*)
+  [ $rc -eq 1 ] && [ "$(PSQL -c "SELECT to_regnamespace('authz_int') IS NULL")" = t ] &&
+  ok "the user type's where that doesn't run (authz.uid() alone reads it): refused with its line, nothing applied" ||
+  bad "a user type's where that doesn't run: exit or state" "$rc";;
+  *) bad "a user type's where that doesn't run" "$out";; esac
+sed "s/or subject_id = '\*'/or subject_idd = '*'/" tests/multi.authz > "$T/bad_cond.authz"
+grep -q "subject_idd = '\*'" "$T/bad_cond.authz" || bad "multi.authz has no shared if with subject_id = '*' to break"
+run apply "$T/bad_cond.authz"
+case "$out" in "policy line 33: the condition {subject_type <> 'user' or subject_idd = '*' or exists "*"} doesn't run: column \"subject_idd\" does not exist [AZ613]"*)
+  ok "... a shared if that doesn't run (authz.share alone reads it), named by its relation's line";;
+  *) bad "a shared if that doesn't run" "$out";; esac
+fresh "$DB"
+quiet -d "$DB" -f example/app_schema.sql -c "CREATE TABLE app.bots (id bigint PRIMARY KEY, active boolean)" >/dev/null || exit 1
+{ cat example/docs.authz; printf '\ntype bot = app.bots principal where {activ}\n'; } > "$T/bad_cond.authz"
+run apply "$T/bad_cond.authz"
+case "$out" in "policy line $(grep -c '' "$T/bad_cond.authz"): the condition {activ} doesn't run: column \"activ\" does not exist [AZ613]"*)
+  ok "... and the where of another type that signs in";; *) bad "a bot type's where that doesn't run" "$out";; esac
+sed -i 's/{activ}/{active}/' "$T/bad_cond.authz"
+run apply "$T/bad_cond.authz"
+[ $rc -eq 0 ] && ok "... which once right applies" || bad "a bot type's where" "$out"
+dropdb "$DB"
+
 echo "-- conditions naming a function without its schema"
 # resolved on the search path in effect when applying, by the rules and by authz.can, list, perms, who, explain
 fresh "$DB"

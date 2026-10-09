@@ -385,6 +385,12 @@ Each release upgrades from the one before it. How releases are numbered and made
   app.visible`) passed `rowstile check`, and `rowstile apply`, `push` and `migrate` stopped with a Python traceback
   (`ValueError: view "app"."visible" is made twice`). It is refused when the policy is compiled, naming both lines
   (AZ109).
+- Conditions that only a function reads were not read when applying: the `where` of the user type, or of another
+  type that signs in (who is signed in reads it), and a relation's `shared if {...}` (`authz.share` reads it). One
+  that doesn't run, a column that isn't there say, was applied without a word, and then failed every query of the
+  app (`authz.uid()`), or every share of the relation. Applying reads them now, and refuses one that doesn't run
+  with its line (AZ613), as it does the other conditions. **Upgrading**: for a policy with such a `where` or
+  `shared if`, `rowstile migrate` writes a migration: those functions made again, and read.
 
 ## 0.1.0 (alpha)
 
