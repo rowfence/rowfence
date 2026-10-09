@@ -319,6 +319,20 @@ class PointChecks(unittest.TestCase):
         )
 
 
+class Refusals(unittest.TestCase):
+    def test_a_relation_made_by_sharing_is_not_followed_from_the_row(self) -> None:
+        """A refused write says, of a missing rel.perm, what authz.explain says on each object the row points at
+        through a column or a link table, which the row reads; through shares, whose table the app role can't read,
+        the item's yes or no is all it says."""
+        text = replaced(
+            read(POLICIES["cross"]), "  update after : edit\n", "  update after : lead or inside.edit or host.edit\n"
+        )
+        sql = Compiler(parse_policy(text)).compile("x")
+        why = search(r'CREATE FUNCTION authz_gen\."cx\.projects:update_after:why".*?END \$f\$;', sql, re.S).group(0)
+        self.assertIn("|| 'host.edit';", why)
+        self.assertEqual(re.findall(r"authz\.explain\('(\w+)', v_t\.id, '(\w+)'\)", why), [("folder", "edit")])
+
+
 class ColumnRules(unittest.TestCase):
     def test_before_is_the_default(self) -> None:
         """`update cols before : ...` is `update cols : ...` spelt out; `after` checks the row after the change."""
@@ -1285,6 +1299,14 @@ class Statements(unittest.TestCase):
         self.assertEqual([c for c, _ in got], ["-- a comment; not a statement", "", "", "/* a; block */"])
         self.assertEqual(len(got), 4)
         self.assertTrue(got[2][1].endswith("SELECT 3;\nEND"))
+
+    def test_a_quote_left_open_runs_to_the_end(self) -> None:
+        # as psql reads it: the rest is one statement, and Postgres says what is wrong with it (a named test's SQL
+        # may leave one open, `{SELECT "name FROM app.files}`: the policy's braces know single quotes only)
+        from authzlib.statements import split
+
+        for sql in ("SELECT 'a; b", 'SELECT "a; b', "SELECT E'\\'; SELECT 1"):
+            self.assertEqual(split(sql), [("", sql)], sql)
 
     def test_what_each_makes(self) -> None:
         from authzlib.statements import made

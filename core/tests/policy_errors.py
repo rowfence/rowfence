@@ -863,6 +863,37 @@ APPLY_OK = [
     ),
 ]
 
+# shares of a relation inheritance follows (doc.shortcut), once applied: (what, statement, refused as a link that
+# would expire, start later or carry a caveat (AZ605)); `AS USER 1; ` signs in the owner of docs 1 and 2
+LINKS = [
+    (
+        "one that expires",
+        "AS USER 1; SELECT authz.share('doc', 1, 'shortcut', 'doc', 2, '', now() + interval '1 day')",
+        True,
+    ),
+    (
+        "one that starts later",
+        "AS USER 1; SELECT authz.share('doc', 1, 'shortcut', 'doc', 2, '', NULL, now() + interval '1 day')",
+        True,
+    ),
+    (
+        "one with a caveat",
+        "AS USER 1; SELECT authz.share('doc', 1, 'shortcut', 'doc', 2, '', NULL, NULL, 'business')",
+        True,
+    ),
+    ("one that doesn't is given", "AS USER 1; SELECT authz.share('doc', 1, 'shortcut', 'doc', 2)", False),
+    (
+        "... and an expiry put on it later is refused too",
+        "UPDATE authz.shares SET expires_at = now() + interval '1 day' WHERE relation = 'shortcut'",
+        True,
+    ),
+    (
+        "a share that is no link may expire",
+        "AS USER 1; SELECT authz.share('doc', 1, 'reader', 'user', 1, '', now() + interval '1 day')",
+        False,
+    ),
+]
+
 APPLY_SETUP = """
 CREATE VIEW alt.held AS SELECT target FROM alt.holds;
 CREATE FUNCTION alt.is_open(bigint) RETURNS boolean LANGUAGE sql STABLE AS 'SELECT true';
@@ -1170,9 +1201,36 @@ def main() -> None:
     print(
         f"{'ok  ' if ok else 'FAIL'}  turning expiring shares into inheritance links: {err.split('ERROR:', 1)[-1].strip()}"
     )
+    # ... and once they are links, giving one that would expire, start later or carry a caveat is refused (a
+    # trigger on authz.shares), at the share API and when a share that is there is changed; other shares may
+    v3 = compile_policy(
+        BASE
+        + "  shortcut : doc shared\n  can view = owner or shortcut.view\ncaveat business = {authz.ctx('mode') = 'b'}\n"
+    )
+    subprocess.run(
+        ["psql", "-X", "-q", "-v", "ON_ERROR_STOP=1", "-d", db],
+        input="DELETE FROM authz.shares WHERE relation = 'shortcut';\n" + v3,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    link = "23514: doc.shortcut links are used for inheritance, so they cannot expire, start later or have a caveat [AZ605]"
+    signed = "SET ROLE app_user; SET authz.user_id = '1'; "  # the owner of both docs
+    for what, sql, want in LINKS:
+        p = subprocess.run(
+            ["psql", "-X", "-q", "-v", "VERBOSITY=verbose", "-d", db, "-c", sql.replace("AS USER 1; ", signed)],
+            capture_output=True,
+            text=True,
+        )
+        err = next((ln.split("ERROR:", 1)[1].strip() for ln in p.stderr.splitlines() if "ERROR:" in ln), "")
+        ok = err == (link if want else "")
+        fails += not ok
+        print(f"{'ok  ' if ok else 'FAIL'}  inheritance links: {what}: {err or '(no error)'}")
 
     subprocess.run(["dropdb", db], capture_output=True)
-    total = len(COMPILE) + len(WHOLE) + 1 + len(TESTS) + 2 + len(INCLUDES) + 1 + len(APPLY) + len(APPLY_OK) + 1
+    total = (
+        len(COMPILE) + len(WHOLE) + 1 + len(TESTS) + 2 + len(INCLUDES) + 1 + len(APPLY) + len(APPLY_OK) + 1 + len(LINKS)
+    )
     print(f"policy errors: {total - fails} of {total} cases behave as expected")
     sys.exit(1 if fails else 0)
 

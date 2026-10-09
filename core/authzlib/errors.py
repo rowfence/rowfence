@@ -472,7 +472,8 @@ CODES = {
         "Links used for inheritance can't expire",
         "A shared relation that inheritance follows (`shortcut : folder shared`, `can view = ... or "
         "shortcut.view`) is part of a stored tree, so its shares can't expire, start later or carry a caveat. "
-        "Remove those shares' expiry (or the shares) before applying, and don't give new ones.",
+        "Remove those shares' expiry (or the shares) before applying. Once the policy is applied, such a share is "
+        "refused with this code too (SQLSTATE 23514): by `authz.share`, and by a change to a share that is there.",
         "",
         "",
         when="apply",
