@@ -1423,8 +1423,6 @@ def review_cmd(cfg: Config, args: list[str], opts: dict[str, str], flags: set[st
     except OSError as e:
         fail(f"{path}: {e.strerror}", 2)
     base_text, base_files = base_policy(ref, path)
-    if base_text is None:
-        base_text, base_files = "app role app_user\ntype user = app.users\n", {}
     lock = lock_path(cfg, path)
     base_lock = at_base(ref, lock)
     try:
@@ -1444,9 +1442,8 @@ def review_cmd(cfg: Config, args: list[str], opts: dict[str, str], flags: set[st
         conn.execute("BEGIN")
         db = Db(conn)
     try:
-        r = review.review(
-            (base_text, base_files, base_tests(cfg, ref)), (head_text, head_files, head_tests), base_lock, head_lock, db
-        )
+        base = None if base_text is None else (base_text, base_files, base_tests(cfg, ref))  # None: the policy is new
+        r = review.review(base, (head_text, head_files, head_tests), base_lock, head_lock, db)
     except database.Error as e:
         fail(str(e))
     except review.PolicyError as e:
