@@ -350,8 +350,9 @@ def with_db(folder: str, db: str) -> None:
     )
     r = c.tool("why", **{"as": "user:2", "type": "folder", "id": "3", "perm": "fly"})
     check(
-        "... a permission the type doesn't have: named",
-        not r["structuredContent"]["ok"] and "no permission fly" in r["content"][0]["text"],
+        "... a permission the type doesn't have: named, as authz.can names it",
+        not r["structuredContent"]["ok"]
+        and "no permission folder.fly in the policy\nHINT: rowstile help AZ707" in r["content"][0]["text"],
         r,
     )
     r = c.tool("lint")

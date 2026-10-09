@@ -6411,6 +6411,31 @@ class Why(unittest.TestCase):
         nothing = grant.describe(grant.Answer(False, [], "view = owner  (line 3)"), "user:2", "doc", "1", "view")
         self.assertTrue(nothing.endswith("no single change to shares or links grants it"))
 
+    def test_what_isnt_a_permission_is_refused_before_the_database_is_asked(self) -> None:
+        """A type the policy doesn't have, a permission it doesn't, a relation, or a permission the compiler made (a
+        deny's split): refused in authz.can's words, with its code, before the database is asked anything (here
+        there is none)."""
+        from authzlib import grant
+
+        c = database.policy_compiler(
+            errors_prelude() + "type doc = app.docs\n"
+            "  parent : doc  = parent_id\n"
+            "  owner  : user = owner_id\n"
+            "  can hidden = {hidden} or parent.hidden\n"
+            "  can view = (owner or parent.view) and not hidden\n"
+        )
+        self.assertIn("view__base", c.types["doc"].perms)  # what the compiler made of the deny
+        for type_name, perm, said in (
+            ("nothing", "view", "no type nothing in the policy"),
+            ("doc", "fly", "no permission doc.fly in the policy"),
+            ("doc", "owner", "no permission doc.owner in the policy"),
+            ("doc", "view__base", "no permission doc.view__base in the policy"),
+        ):
+            with self.subTest(perm=perm):
+                with self.assertRaises(database.Error) as e:
+                    grant.how_to_grant(c, cast("grant.Db", None), "user", "1", type_name, "1", perm)
+                self.assertEqual((str(e.exception), e.exception.hint), (said, "rowstile help AZ707"))
+
     def test_a_where_that_names_its_values(self) -> None:
         """A relation's `where` that only gives columns their values can be filled in; any other can't."""
         from authzlib import grant

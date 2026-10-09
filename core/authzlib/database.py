@@ -859,17 +859,24 @@ def policy_compiler(policy: str, files: Mapping[str, object] | str | None = None
     return compiled(policy, files, make)
 
 
-def why(db: Db, ptype: str, pid: str, type_name: str, oid: str, perm: str, compiler: Compiler | None = None) -> Answer:
+def why(
+    db: Db,
+    ptype: str,
+    pid: str,
+    type_name: str,
+    oid: str,
+    perm: str,
+    compiler: Compiler | None = None,
+    tried: bool = True,
+) -> Answer:
     """Whether someone holds a permission, why, and if not the smallest changes that would grant it
-    (grant.Answer). Each change is tried in a savepoint and undone: nothing stays."""
+    (grant.Answer). Each change is tried in a savepoint and undone: nothing stays. tried=False (a read-only
+    transaction): the changes that might grant it, none tried."""
     from . import grant
 
     assert pid, "the command and Studio ask for someone signed in first: nobody can be given access"
     c = compiler or policy_compiler(*applied(db))
-    try:
-        return grant.how_to_grant(c, db, ptype, pid, type_name, oid, perm)
-    except KeyError as e:
-        raise Error(str(e.args[0]), "22023") from None
+    return grant.how_to_grant(c, db, ptype, pid, type_name, oid, perm, tried)
 
 
 def graph(policy: str, files: Mapping[str, object] | str | None = None) -> str:

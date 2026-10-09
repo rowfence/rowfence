@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING
 from .conditions import Bool, Cmp, Col, Const, In, IsNull, Node, Scalar, simple
 from .connection import Db, Value, flag, number, text
 from .parse import And, Cols, Expr, Loc, Ref, Relation, Source, Type, cols
-from .sqlutil import lit, q, qt
+from .sqlutil import lit, q, qt, row_cond
 
 if TYPE_CHECKING:
     from . import Compiler
@@ -139,6 +139,8 @@ class Answer:
     ways: list[Way] = field(default_factory=list)  # Ways that grant it, best first
     untried: list[Way] = field(default_factory=list)  # Ways the database refused to try (their error says why)
     notes: list[str] = field(default_factory=list)  # what no change to the data would do (conditions, denies)
+    # why no change was tried: the person or the object isn't there, or the type's where leaves it out
+    stops: list[str] = field(default_factory=list)
 
 
 class Grants:
@@ -148,8 +150,9 @@ class Grants:
 
     # --- reading what is there now -------------------------------------------------------------------
     def probe(self, sql: str, args: Sequence[Value] = ()) -> list[dict[str, Value]]:
-        """Rows of a read that may fail, in a savepoint of its own: none when it does (an id its key's type can't
-        hold, as `folder Engineering` for a bigint key: the changes tried on it then say why)."""
+        """Rows of a read that may fail, in a savepoint of its own: none when it does. The ids asked about are
+        checked first (stop()), so a read fails here on a condition of the policy this session can't read: a
+        function on the search path the policy was applied with, and not on this one, say."""
         from .database import savepoint
 
         try:
@@ -183,6 +186,19 @@ class Grants:
             self.db.rows("SELECT authz.act_as($1, $2)", [self.ptype, self.pid])
         else:
             self.db.rows("SELECT authz.act_as(NULL, NULL)")
+
+    def stop(self, t: Type, oid: str) -> str | None:
+        """What no change to shares or links gets past, for the person or the object (t oid): an id its key can't
+        hold, or no row with it ("there is no doc 999", as authz.share says of a subject); a row the type's where
+        leaves out, which holds nothing and passes nothing on (a where that can't be read here is no stop: the
+        changes are tried). None when it counts."""
+        valid = flag(self.db.rows("SELECT pg_catalog.pg_input_is_valid($1, $2) AS ok", [oid, t.keytype])[0], "ok")
+        find = f"FROM {qt(t.table)} o WHERE {self.c.key_is(t, 'o', lit(oid))}"
+        if not valid or not self.db.rows(f"SELECT 1 AS x {find} LIMIT 1"):
+            return f"there is no {t.name} {oid}"
+        if t.where and self.probe(f"SELECT 1 AS x {find} AND NOT coalesce(({row_cond(t.where, 'o')}), false)"):
+            return f"{t.name} {oid} fails the type's where {{{t.where}}}: no share or link changes that"
+        return None
 
     # --- the candidate changes ----------------------------------------------------------------------
     def direct(
@@ -396,15 +412,22 @@ class Grants:
         return way
 
 
-def how_to_grant(c: Compiler, db: Db, ptype: str, pid: str, type_name: str, oid: str, perm: str) -> Answer:
+def how_to_grant(
+    c: Compiler, db: Db, ptype: str, pid: str, type_name: str, oid: str, perm: str, tried: bool = True
+) -> Answer:
     """Whether (ptype, pid) holds perm on type_name oid, why (authz.explain), and if not, the changes that would
     grant it, best first. c: the compiled policy in force; runs in the caller's transaction and leaves nothing
-    behind (each change is undone)."""
+    behind (each change is undone). tried=False (a transaction that can't write): the changes that might grant
+    it, none tried."""
+    from .database import Error
+
+    # what authz.can and authz.explain take, refused before anything is asked as they refuse it: a relation, or a
+    # permission the compiler made, is no permission of the type
     if type_name not in c.types:
-        raise KeyError(f"no type {type_name} in the policy")
+        raise Error(f"no type {type_name} in the policy", hint="rowstile help AZ707")
     t = c.types[type_name]
-    if perm not in t.perms and perm not in t.relations:
-        raise KeyError(f"{type_name} has no permission {perm}")
+    if perm not in c.public_perms(t):
+        raise Error(f"no permission {type_name}.{perm} in the policy", hint="rowstile help AZ707")
     g = Grants(c, db, ptype, pid)
     g.sign_in(False)
     who = pid if ptype == "user" else f"{ptype}:{pid}"
@@ -417,10 +440,14 @@ def how_to_grant(c: Compiler, db: Db, ptype: str, pid: str, type_name: str, oid:
     holds = flag(db.rows("SELECT coalesce(authz.can($1, $2, $3), false) AS ok", [type_name, oid, perm])[0], "ok")
     if ptype != "user":
         explain = [text(x, "l") for x in db.rows("SELECT l FROM authz.explain($1, $2, $3) l", [type_name, oid, perm])]
-    p = t.perms.get(perm)
-    needs = f"{perm} = {p.src}  ({p.loc})" if p else f"{perm}: a relation ({t.relations[perm].loc})"
-    answer = Answer(holds, explain, needs)
+    p = t.perms[perm]
+    answer = Answer(holds, explain, f"{perm} = {p.src}  ({p.loc})")
     if holds:
+        return answer
+    # someone who counts as nobody signed in (an id their table doesn't have, or a row their type's where leaves
+    # out), or an object that isn't there or holds nothing: no change to shares or links gives it, so none is tried
+    answer.stops = [x for x in (g.stop(c.types[ptype], pid), g.stop(t, oid)) if x]
+    if answer.stops:
         return answer
     candidates: list[Way] = []
     seen_sql: set[tuple[str, ...]] = set()
@@ -430,6 +457,9 @@ def how_to_grant(c: Compiler, db: Db, ptype: str, pid: str, type_name: str, oid:
             seen_sql.add(key)
             candidates.append(Way(changes))
     candidates.sort(key=lambda w: (len(w.changes), sum(ch.cost for ch in w.changes)))
+    if not tried:
+        answer.ways, answer.notes = candidates[:SHOWN], list(dict.fromkeys(g.notes))
+        return answer
     before = g.counts(t, oid, perm)
     for way in candidates[:TRIES]:
         g.attempt(way, t, oid, perm, before)
@@ -484,6 +514,8 @@ def describe(answer: Answer, who: str, type_name: str, oid: str, perm: str) -> s
                 + takes
                 + f"  [{', '.join(lines)}]"
             )
+    elif answer.stops:
+        out += answer.stops
     elif answer.untried:
         out.append("no single change that could be tried grants it")
     else:
