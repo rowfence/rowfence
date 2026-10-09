@@ -344,9 +344,8 @@ def written(node: Expr, top: bool = True) -> str:
             return next((w for w, s in KEYWORDS.items() if s == sql), "{" + sql + "}")
         case Ref(name=name):
             return name
-        case Arrow(rel=rel, perm=perm) | ArrowOn(rel=rel, perm=perm):
-            return f"{rel}.{perm}"
-    raise AssertionError(f"not an expression: {node!r}")
+        case _:  # an arrow, or one the compiler narrowed to some of its types
+            return f"{node.rel}.{node.perm}"
 
 
 class ExprParser:

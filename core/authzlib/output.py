@@ -10,7 +10,7 @@ from .governance import GovernanceMixin, trigger_if_partitioned
 from .hardening import LintMixin, path_writers_sql
 from .identity import SESSION_OK, IdentityMixin
 from .insight import InsightMixin
-from .parse import Expr, Ref, Rule, Type, fail
+from .parse import Expr, Not, Ref, Rule, Type, fail
 from .refusals import RefusalMixin
 from .sqlutil import (
     CHILD_TRIGGERS,
@@ -43,12 +43,10 @@ def subject_key(st: str, sr: str | None) -> str:
     return f"{st}#{sr}" if sr else st
 
 
-def denied(item: Expr) -> str | None:
+def denied(item: Expr) -> str:
     """The permission a deny (`not <permission>`) takes away."""
-    match item:
-        case ("not", ("ref", name)):
-            return name
-    return None
+    assert isinstance(item, Not) and isinstance(item.item, Ref), "split_denies refuses any other deny (AZ306)"
+    return item.item.name
 
 
 class OutputMixin(RefusalMixin, InsightMixin, GovernanceMixin, IdentityMixin, LintMixin, TreeMixin):
@@ -66,13 +64,7 @@ class OutputMixin(RefusalMixin, InsightMixin, GovernanceMixin, IdentityMixin, Li
         """Sharing a relation grants what it grants: the sharer must hold every
         permission the relation feeds into."""
         need = []
-        denies = {
-            name
-            for (tn, _), negs in self.denies.items()
-            if tn == t.name
-            for x in negs
-            if (name := denied(x)) is not None
-        }
+        denies = {denied(x) for (tn, _), negs in self.denies.items() if tn == t.name for x in negs}
         for p in t.perms.values():
             if p.hidden or p.name in denies:  # sharing into a deny takes away; it gives nothing to hold
                 continue
@@ -826,10 +818,12 @@ END $r$;"""
         """Views that show the rows 'select' allows, with masked columns NULL where their rule does not hold.
         The app role loses direct SELECT on masked columns of the table."""
         out = []
+        # each table's select rule: one (compile refuses two, AZ109), and a table with a view has it (AZ402)
+        selects = {r.table: r for r in self.rules if r.command == "select" and not r.columns}
         for table, view in self.pol.views.items():
-            t = next(t for t in self.types.values() if t.table == table)
+            t = self.governing(table)
             alias = q(table.split(".")[1])
-            sel = next(r for r in self.rules if r.table == table and r.command == "select" and not r.columns)
+            sel = selects[table]
             where = f"(SELECT authz_int.scope_cmd({lit(table)}, 'select')) AND {self.rule_sql(t, alias, sel)}"
             masks = [
                 (c, self.rule_sql(t, alias, r), r)
@@ -956,7 +950,7 @@ END $kv$;"""
                 fail(rule.loc, f"{rule.table} has two '{rule_name(rule)}' rules", "AZ109")
             by_table.setdefault(rule.table, []).append(rule)
         for table, rules in by_table.items():
-            t = next(t for t in self.types.values() if t.table == table)
+            t = self.governing(table)
             alias = q(table.split(".")[1])
             cmds = {r.command: r for r in rules if not r.columns}
             policies.append(

@@ -453,8 +453,8 @@ def draft(
             for base in (edit_base, view_base):
                 if not base[n] and any(base[p] for p in parent_of[n].values()):
                     base[n] = changed = True
-            if edit_base[n] and not view_base[n]:
-                view_base[n] = changed = True
+            # where edit starts, view does: a parent that gave n edit has view, which the line above gave n too
+            assert view_base[n] or not edit_base[n]
 
     def in_loop(n: str) -> bool:
         """Whether n's foreign keys lead back to it through other tables (a tree of its own type is no loop)."""

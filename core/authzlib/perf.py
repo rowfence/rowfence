@@ -228,9 +228,8 @@ def walk(plan: dict[str, Value], out: list[str], governed: str) -> None:
     if subplan and _num(plan, "Actual Loops", 0) >= 1000:
         out.append(f"{subplan} runs once per row ({int(loops)} times)")
     children = plan.get("Plans")
-    for child in children if isinstance(children, list) else []:
-        if isinstance(child, dict):
-            walk(child, out, governed)
+    for child in [x for x in children if isinstance(x, dict)] if isinstance(children, list) else []:
+        walk(child, out, governed)
 
 
 def plans(db: Db, c: Compiler, who: tuple[str, str] | None = None) -> Plans:
@@ -348,9 +347,9 @@ def bench(db: Db, c: Compiler, people: int = 10, rounds: int = 20, seed: int = 0
             if ids[t.name]:
                 timed(f"authz.can {t.name} {p}", "SELECT authz.can($1, $2, $3)", [t.name, rng.choice(ids[t.name]), p])
         for table in updates:
-            t = next((x for x in c.types.values() if x.table == table), None)
-            col = plain_column(db, c, t) if t else None
-            if t and ids[t.name] and col:
+            t = c.governing(table)
+            col = plain_column(db, c, t)
+            if ids[t.name] and col:
                 oid = rng.choice(ids[t.name])
                 timed(
                     f"update {table}",

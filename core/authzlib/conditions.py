@@ -274,15 +274,17 @@ def columns_of(node: Node) -> dict[str, list[tuple[str, Scalar]]]:
                 assert isinstance(col, Col)
                 if isinstance(other, Uid):
                     add(col.name, "uid")
-                elif isinstance(other, Const):
+                else:
+                    assert isinstance(other, Const)  # (simple() compares a column with a constant or authz.uid())
                     add(col.name, op, other.value)
             case IsNull(item=Col(name=c)):
                 add(c, "null")
             case In(item=Col(name=c), values=values):
                 for v in values:
                     add(c, "in", v)
-            case Bool(items=items):
-                for x in items:
+            case _:
+                assert isinstance(n, Bool), f"not a condition: {n!r}"  # (simple() gives nothing else)
+                for x in n.items:
                     walk(x)
 
     walk(node)
@@ -307,14 +309,15 @@ def compare(op: str, a: Scalar, b: Scalar) -> bool | None:
 
 
 def value(n: Node, row: Mapping[str, Scalar], uid: str | None) -> Scalar:
+    """An operand's value: a column's, a constant, or the user's id (simple() compares nothing else)."""
     match n:
         case Col(name=c):
             return row.get(c)
         case Const(value=v):
             return v
-        case Uid():
+        case _:
+            assert isinstance(n, Uid), f"not an operand: {n!r}"
             return uid
-    return truth(n, row, uid)
 
 
 def truth(n: Node, row: Mapping[str, Scalar], uid: str | None) -> bool | None:
@@ -341,10 +344,10 @@ def truth(n: Node, row: Mapping[str, Scalar], uid: str | None) -> bool | None:
         case Bool(op="and", items=items):
             got = [truth(x, row, uid) for x in items]
             return False if False in got else (None if None in got else True)
-        case Bool(op="or", items=items):
-            got = [truth(x, row, uid) for x in items]
+        case _:
+            assert isinstance(n, Bool) and n.op == "or", f"not a condition: {n!r}"  # (simple() gives nothing else)
+            got = [truth(x, row, uid) for x in n.items]
             return True if True in got else (None if None in got else False)
-    raise ValueError(f"not a condition: {n!r}")
 
 
 def uses_uid(node: Node) -> bool:

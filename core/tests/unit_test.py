@@ -5166,14 +5166,7 @@ class ErrorCodes(unittest.TestCase):
                 if not text:
                     continue
                 files = dict(c.files) if kind == "fix" or code != "AZ108" else {}
-                try:
-                    comp = Compiler(parse_policy(errors.example(text), None, files=files))
-                    comp.compile("x", transaction=False)
-                    if c.when == "tests":
-                        comp.compile_tests("x")
-                    got = None
-                except PolicyError as e:
-                    got = e
+                got = errors.said(text, files, c.when)
                 if kind == "fix" or c.when not in ("compile", "tests"):
                     self.assertIsNone(got, f"{code}'s {kind} should compile")
                 else:

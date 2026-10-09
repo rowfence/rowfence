@@ -119,6 +119,7 @@ def format_policy(text: str) -> str:
     items: list[Line] = []
     block: str | None = None
     open_braces = 0
+    code_before = False  # a line of code before this one (not a blank line, nor a comment)
     for raw in lines:
         if not raw.strip():
             items.append(Line("blank", "", "", 0))
@@ -130,9 +131,7 @@ def format_policy(text: str) -> str:
         code, comment = split_comment(raw)
         indent = len(raw) - len(raw.lstrip())
         s = squeeze(code) if open_braces == 0 else code.strip()
-        if open_braces > 0 or (
-            indent > 0 and CONT.match(code.strip()) and items and any(it[0] not in ("blank", "comment") for it in items)
-        ):
+        if open_braces > 0 or (indent > 0 and CONT.match(code.strip()) and code_before):
             items.append(Line("cont", code.strip() if open_braces else squeeze(code), comment, indent))
         elif indent == 0:  # an indented line is never a top-level one: `role : user = ...` is a relation
             m = TOP.match(stripped)
@@ -141,8 +140,10 @@ def format_policy(text: str) -> str:
         else:
             items.append(Line(kind_of(s, block), s, comment, 2))
         open_braces = max(0, open_braces + parse_open_braces(code))  # as the parser counts them: not in quotes
+        code_before = True
 
     # blank lines: one before each block that follows another (with its comments), none doubled, none at the ends
+    # (a blank line is kept only after another line)
     out_items: list[Line] = []
     for it in items:
         if it[0] == "blank":
@@ -150,8 +151,6 @@ def format_policy(text: str) -> str:
                 out_items.append(it)
             continue
         out_items.append(it)
-    while out_items and out_items[0][0] == "blank":
-        out_items.pop(0)
     while out_items and out_items[-1][0] == "blank":
         out_items.pop()
     final: list[Line] = []
@@ -199,12 +198,10 @@ def format_policy(text: str) -> str:
             comment = ""
         elif kind == "cont":
             text_line = hang(last_expr_col, code)
-        elif kind == "top":
+        else:  # a top-level line: the lines of a block are in a run, aligned above
+            assert kind == "top", kind
             text_line = code
             last_expr_col = _expr_col(code, 0)
-        else:
-            text_line = "  " + code
-            last_expr_col = _expr_col(code, 2)
         if comment and rendered[k] is None:
             text_line = (text_line + "  " + comment) if text_line else comment
         out.append(text_line.rstrip())
