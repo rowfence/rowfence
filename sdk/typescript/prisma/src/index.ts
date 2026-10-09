@@ -150,7 +150,10 @@ type Rest = (args: unknown, params?: InternalParams) => Promise<unknown>;
 async function transactionOf(tx: unknown): Promise<{ kind?: string }> {
   let found: { kind?: string } | undefined;
   const make = (tx as { _createPrismaPromise?: (cb: (t?: { kind?: string }) => Promise<void>) => PromiseLike<void> })._createPrismaPromise;
+  // (the two guards are for another version of Prisma than the one the checks run: left out of the measure)
+  /* v8 ignore else */
   if (typeof make === "function") await make(async (t) => { found = t; });
+  /* v8 ignore next */
   if (found?.kind !== "itx") {
     throw new Error("@rowstile/prisma: this version of Prisma starts its transactions another way; " +
       "report it at https://github.com/rowstile/rowstile/issues with the version of @prisma/client");
@@ -174,6 +177,8 @@ export interface ExtensionOptions {
 export function authz(options: ExtensionOptions = {}) {
   return Prisma.defineExtension((client) => {
     const raw = client as unknown as RawClient;
+    // (Prisma 7 always has the data model: without it, another version, left out of the measure)
+    /* v8 ignore next */
     const models = raw._runtimeDataModel?.models ?? {};
     const schemaOf = (table: string) => {
       for (const m of Object.values(models)) if (m.dbName === table && m.schema) return m.schema;
@@ -203,7 +208,11 @@ export function authz(options: ExtensionOptions = {}) {
       if (entries.length !== 1) return undefined;
       const [, v] = entries[0];
       if (isScalar(v)) return v as Id;
-      if (v && typeof v === "object" && Object.values(v).every(isScalar)) return Object.values(v) as Id;
+      // a compound key's fields, in a plain object: not a date (or bytes, a decimal), which isn't written as the
+      // database writes it
+      if (v && typeof v === "object" && Object.getPrototypeOf(v) === Object.prototype && Object.values(v).every(isScalar)) {
+        return Object.values(v) as Id;
+      }
       return undefined;
     };
     // through the client this returns (set below), whose last hook lets the query through

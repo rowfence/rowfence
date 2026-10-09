@@ -18,6 +18,7 @@ import { asUser, databasePerWorker, matchers, workerId } from "@rowstile/vitest"
 import { PrismaPg } from "@prisma/adapter-pg";
 import { authz, signedIn } from "@rowstile/prisma";
 import { PrismaClient } from "@/generated/prisma/client.ts";
+import { PrismaClient as PlainClient } from "@/generated/plain/client.ts";
 import { db, pool } from "@/db";
 import { APP, FEED, OWNER, seed } from "./data";
 
@@ -38,7 +39,9 @@ describe("@rowstile/client", () => {
     expect(principal({ id: "4" } as never)).toEqual({ type: "user", id: "4" });   // a type left out: a user
     expect(principal({ type: "service", id: null })).toEqual({ type: "service", id: null });
     expect(principal(["service", null])).toEqual({ type: "service", id: null });
-    expect([NOBODY, principal(42), principal(["service", 3])].map(describePrincipal)).toEqual(["nobody", "42", "service:3"]);
+    // only no id at all is nobody: an empty one is a user's all the same, as act_as takes it
+    expect([NOBODY, principal(42), principal(["service", 3]), principal("")].map(describePrincipal))
+      .toEqual(["nobody", "42", "service:3", ""]);
     expect(actAsSql(NOBODY)).toBe("SELECT authz.act_as(NULL, NULL)");
     expect(actAsSql(principal("o'k"))).toBe("SELECT authz.act_as('user', 'o''k')");
     expect(literal(null)).toBe("NULL");
@@ -87,6 +90,9 @@ describe("the runtime's functions over pg", () => {
       expect(await actingAs("3", () => a.explainRule("app.notes", "update", 2))).toBeNull();   // bo's: hidden from cy
       const insert = await actingAs("2", () => a.explainRule("app.notes", "insert", undefined, { project_id: 3, author_id: 2, body: "hi" }));
       expect(insert?.[0]).toMatch(/^no   insert : project\.edit and author/);
+      // and a row the rule allows (bo's own project): the answer is about the row given
+      const own = await actingAs("2", () => a.explainRule("app.notes", "insert", undefined, { project_id: 2, author_id: 2, body: "hi" }));
+      expect(own?.[0]).toMatch(/^yes  insert : project\.edit and author/);
     } finally {
       await p.end();
     }
@@ -245,12 +251,18 @@ describe("@rowstile/pg's change feed", () => {
     expect([told, refused.released]).toEqual([0, ["permission denied to listen"]]);   // given back as broken
 
     const ended = new Client();
-    const leaveEnded = feed(ended)(tell);
+    const next = new Client();
+    const clients = [ended, next];
+    const leaveEnded = changes({ connect: async () => clients.shift() } as unknown as pg.Pool)(tell);
     await new Promise((r) => setTimeout(r, 10));
     expect(told).toBe(1);                                                    // listening: told once
     ended.emit("end");                                                       // closed, without an error
-    leaveEnded();
     expect(ended.released).toEqual(["the connection ended"]);
+    await until(() => told === 2);                                           // it listens again, 500 ms later,
+    expect([clients.length, told]).toEqual([0, 2]);                          // and tells what changed meanwhile
+    leaveEnded();
+    await new Promise((r) => setTimeout(r, 10));
+    expect([ended.released, next.released]).toEqual([["the connection ended"], [undefined]]);   // back in the pool
 
     const stuck = new Client();
     const unlisten = later();
@@ -303,6 +315,44 @@ describe("@rowstile/prisma", () => {
     const more = await actingAs("2", () =>
       db.member.findUniqueOrThrow({ where: { project_id_user_id: { project_id: 9, user_id: 9 }, user_id: 9 } })).catch(missing);
     expect(more).toBe("app.members not found");
+  });
+
+  test("an app on Prisma's defaults: tables named without their schema, a key not called id, one with a date", async () => {
+    const own = new pg.Pool({ connectionString: APP, max: 2 });
+    const plain = new PlainClient({ adapter: signedIn(new PrismaPg(own)) }).$extends(authz());
+    const missing = (e: unknown) => (e instanceof NotFound ? e.message : String(e));
+    try {
+      // no @@map, no @@schema: the model's name, found on the search_path; its key is the where's one field
+      expect(await actingAs("2", () => plain.holiday.findUniqueOrThrow({ where: { code: "xmas" } })).catch(missing))
+        .toBe("public.holiday xmas not found");
+      // a key that is a date, or has one among its fields, which the SDK can't write as the database does: the
+      // table alone
+      const day = new Date("2026-12-25");
+      for (const where of [{ day }, { country_day: { country: "fr", day } }]) {
+        expect(await actingAs("2", () => plain.holiday.findUniqueOrThrow({ where })).catch(missing)).toBe("public.holiday not found");
+      }
+      // a refusal on a table this app's schema doesn't model: as the database's words name it
+      const sent = await actingAs("1", () => plain.$queryRawUnsafe(
+        "INSERT INTO app.inbox (sender_id, recipient_id, body) VALUES (1, 2, 'hi') RETURNING id")).catch((e: unknown) => e);
+      expect(sent instanceof Refused && [sent.table, sent.command]).toEqual(["inbox", "select"]);
+    } finally {
+      await plain.$disconnect();
+      await own.end();
+    }
+  });
+
+  test("a table that can't be looked up is named as the model names it", async () => {
+    // a pool of one, which the transaction holds: the lookup gets no connection
+    const one = new pg.Pool({ connectionString: APP, max: 1, connectionTimeoutMillis: 200 });
+    const plain = new PlainClient({ adapter: signedIn(new PrismaPg(one)) }).$extends(authz());
+    try {
+      const e = await actingAs("2", () =>
+        plain.$transaction((tx) => tx.holiday.findUniqueOrThrow({ where: { code: "xmas" } }))).catch((err) => err);
+      expect([e instanceof NotFound, e.message]).toEqual([true, "holiday xmas not found"]);
+    } finally {
+      await plain.$disconnect();
+      await one.end();
+    }
   });
 
   test("the ids a user holds a permission on, as text or as the key's type", async () => {
