@@ -1449,12 +1449,23 @@ def base_policy(ref: str, path: str) -> tuple[str | None, dict[str, str]]:
     return text, collect_includes(text, lambda key: at_base(ref, os.path.join(base, *key.split("/"))))
 
 
+def found_by_glob(name: str, pattern: str) -> bool:
+    """Whether glob.glob finds a file for a pattern (both from the same folder, with /), as Config.tests finds the
+    pull request's test files: folder by folder (fnmatch alone lets a * cross a /), and a name that starts with a
+    dot only for a part of the pattern that does."""
+    import fnmatch
+
+    names, parts = name.split("/"), pattern.split("/")
+    return len(names) == len(parts) and all(
+        fnmatch.fnmatch(n, p) and (p.startswith(".") or not n.startswith("."))
+        for n, p in zip(names, parts, strict=True)
+    )
+
+
 def base_tests(cfg: Config, ref: str) -> dict[str, str]:
     """The test files rowstile.toml names, as they were at a commit. One git lists there and can't read, or a
     folder of the commit git can't list (a repository missing objects: a partial clone that can't fetch them),
     stops the review: the base's tests would be read without it."""
-    import fnmatch
-
     here = git("rev-parse", "--show-prefix")  # this folder, from the top one
     # review_cmd found the commit with git here: git answers this too, even inside .git or a bare repository
     assert here is not None
@@ -1466,7 +1477,7 @@ def base_tests(cfg: Config, ref: str) -> dict[str, str]:
     for pattern in cfg.test_globs():
         rel_pattern = in_repository(cfg.file(pattern))
         for name in listed.split("\0"):
-            if name and fnmatch.fnmatch(name, rel_pattern):
+            if name and found_by_glob(name, rel_pattern):
                 shown = posixpath.relpath(name, here.strip() or ".")  # named as read_tests names it
                 text = git("show", f"{ref}:{name}")
                 if text is None:  # listed, and its text can't be read
