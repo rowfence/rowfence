@@ -2,7 +2,7 @@
 """studio_test: rowstile why (the smallest changes that would grant a permission) and Studio's API, on the
 docs example: read-only by default (nothing it does stays, and it refuses to change shares), able to write
 with --write (shares and decisions made as the person it views as, so the database decides), and only for the
-page that has the token, on localhost.
+page that has the token, on localhost. And rowstile studio, the command: what it prints, and what stops it.
 
     PGHOST=... PGUSER=... python3 tests/studio_test.py [--db authz_studio]
 """
@@ -10,12 +10,15 @@ page that has the token, on localhost.
 import http.client
 import json
 import os
+import select
+import signal
+import socket
 import subprocess
 import sys
 import tempfile
 import urllib.error
 import urllib.request
-from typing import Any
+from typing import Any, NamedTuple
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -61,6 +64,45 @@ def command(dsn: str, *args: str) -> tuple[int, str]:
     return r.returncode, r.stdout + r.stderr
 
 
+def free_port() -> int:
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+class Served(NamedTuple):
+    """A Studio the command started: where it listens, and the token it printed."""
+
+    port: int
+    token: str
+
+
+def serving(db: str, *flags: str) -> tuple[subprocess.Popen[str], str, Served]:
+    """rowstile studio, started as in a terminal: the process, the line it printed first, and where it is."""
+    port = free_port()
+    p = subprocess.Popen(
+        [sys.executable, CLI, "--db", f"dbname={db}", "studio", "--port", str(port), *flags],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    assert p.stdout is not None
+    ready, _, _ = select.select([p.stdout], [], [], 60)
+    line = p.stdout.readline() if ready else ""
+    return p, line, Served(port, line.split("token=", 1)[1].split()[0] if "token=" in line else "")
+
+
+def stopped(p: subprocess.Popen[str]) -> int | None:
+    """Ctrl-C, as in a terminal: the exit code (None: still running after 20 seconds, so killed)."""
+    p.send_signal(signal.SIGINT)
+    try:
+        return p.wait(timeout=20)
+    except subprocess.TimeoutExpired:
+        p.kill()
+        p.wait()
+        return None
+
+
 def made_and_copied(db: str, named: str, var: str, table: str, where: str) -> tuple[str, str]:
     """The row a named test's `given <var>` makes (in a transaction rolled back), and the row it copies, each
     as JSON without its key: the same when the copy is faithful. Or what the database said of the given."""
@@ -83,7 +125,7 @@ def made_and_copied(db: str, named: str, var: str, table: str, where: str) -> tu
 
 
 class Client:
-    def __init__(self, s: studio.Studio, token: str | None = None) -> None:
+    def __init__(self, s: studio.Studio | Served, token: str | None = None) -> None:
         self.base, self.token = f"http://127.0.0.1:{s.port}", s.token if token is None else token
 
     def call(self, path: str, body: object = None, host: str | None = None) -> tuple[int, Answer]:
@@ -558,6 +600,85 @@ def main() -> None:
         )
     finally:
         rw.stop()
+
+    print("-- rowstile studio, the command")
+    p, line, at = serving(db)
+    check(
+        "it says where it is, with a token, and that it is read-only",
+        line == f"rowstile studio: http://localhost:{at.port}/?token={at.token}  (read-only; Ctrl-C stops it)\n"
+        and len(at.token) >= 20,
+        line,
+    )
+    status, o = Client(at).call("/api/overview")
+    check("... answers the page that has the token", status == 200 and o["writable"] is False, (status, o))
+    check("... and Ctrl-C stops it", stopped(p) == 0)
+    p, line, at = serving(db, "--write")
+    status, o = Client(at).call("/api/overview")
+    stopped(p)
+    check(
+        "with --write it says it can write, and does",
+        line.endswith(f"/?token={at.token}  (can write: shares and requests; Ctrl-C stops it)\n")
+        and status == 200
+        and o["writable"] is True,
+        (line, status, o),
+    )
+    with socket.socket() as held:
+        held.bind(("127.0.0.1", 0))
+        held.listen()
+        rc, out = cli(db, "studio", "--port", str(held.getsockname()[1]))
+    check(
+        "a port another program listens on: it didn't start, and how to pick another, exit 2",
+        rc == 2
+        and out.startswith("Studio didn't start (")
+        and out.endswith("): rowstile studio --port N for another port\n"),
+        (rc, out),
+    )
+    rc, out = cli(db, "studio", "--port", "99999")
+    check(
+        "... a port there can't be",
+        (rc, out)
+        == (2, "Studio didn't start (bind(): port must be 0-65535.): rowstile studio --port N for another port\n"),
+        (rc, out),
+    )
+    for label, target, said in (
+        ("a database that isn't there", f"dbname={db}_nowhere", f'3D000: database "{db}_nowhere" does not exist'),
+        ("a server that isn't there", "host=/nowhere dbname=x", "[Errno 2] No such file or directory"),
+        (
+            "an address it can't read",
+            "postgres://a@localhost:port/x",
+            "the URL's port isn't a number: a #, ? or / in the password must be written %23, %3F, %2F",
+        ),
+    ):
+        rc, out = command(target, "studio", "--port", str(free_port()))
+        check(
+            f"{label}: can't connect, as the other commands say it, exit 2",
+            (rc, out) == (2, f"can't connect: {said}\n"),
+            (rc, out),
+        )
+    # a role that may log in and read nothing of rowstile's (an app's own DATABASE_URL, say)
+    psql(db, "DROP ROLE IF EXISTS authz_studio_login; CREATE ROLE authz_studio_login LOGIN")
+    rc, out = command(f"dbname={db} user=authz_studio_login", "studio", "--port", str(free_port()))
+    psql(db, "DROP ROLE authz_studio_login")
+    check(
+        "connected as a role that can't read rowstile's tables: the database's words, exit 1",
+        (rc, out) == (1, "rowstile studio: permission denied for schema authz\n"),
+        (rc, out),
+    )
+
+    print("-- Studio when the database can't be reached")
+    gone = studio.Studio(
+        "host=/nowhere dbname=x", None, None, writable=False, port=0, read_policy=rowstile_cli.read_policy
+    )
+    gone.start(background=True)
+    try:
+        status, e = Client(gone).call("/api/overview")
+        check(
+            "the page is told it can't connect, as the command says it (503)",
+            status == 503 and e["detail"] == "can't connect: [Errno 2] No such file or directory",
+            (status, e),
+        )
+    finally:
+        gone.stop()
 
     print("-- Studio on a table with a masked column (tests/multi.authz: mask body : edit)")
     masks = f"{db}_masks"
