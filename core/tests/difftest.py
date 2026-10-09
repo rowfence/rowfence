@@ -34,6 +34,7 @@ import random
 import re
 import subprocess
 import sys
+import time
 from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, ClassVar
@@ -44,6 +45,7 @@ import compile_policy  # noqa: E402
 from authzlib import evaluate  # noqa: E402
 from authzlib.parse import Caveat, Cols, Policy, Rule, Type  # noqa: E402
 from authzlib.sqlutil import q, qt  # noqa: E402  (names as the policy writes them, quoted: capitals, reserved words)
+from decisions import Decisions  # noqa: E402
 
 # the database's answers, read back as JSON: their shape is what the checks compare
 Answer = Any
@@ -188,15 +190,82 @@ def notnull(a: str, columns: Cols | None) -> str:
     return " AND ".join(f"{a}.{q(c)} IS NOT NULL" for c in cols)
 
 
+NOT_EXPIRED = "(g.expires_at IS NULL OR g.expires_at > now())"
+STARTED = "(g.starts_at IS NULL OR g.starts_at <= now())"
+
+
 class Reference(evaluate.Reference):
     """The reference evaluator (authzlib/evaluate.py: relations and permissions as sets of ids, computed as a
     least fixpoint, straight from what the policy says), with the queries that read its data from a database."""
 
     def live(self) -> str:
+        return f"{NOT_EXPIRED} AND {STARTED} AND {caveat_case(self.pol.caveats)}"
+
+    def shares_sql(self, t: Type, rname: str, st: str, sr: str | None, when: str) -> str:
+        """The (object, subject) pairs of t's shares of rname with st#sr, for the shares g `when` holds of."""
+        srel = "" if sr in (None, "*") else sr
+        # a principal type's shares: to one (bot 2), or to every one signed in (bot:*)
+        one = sr is None and st in self.types and self.types[st].principal
+        sid = " AND g.subject_id = '*'" if sr == "*" else (" AND g.subject_id <> '*'" if one else "")
         return (
-            "(g.expires_at IS NULL OR g.expires_at > now()) AND (g.starts_at IS NULL OR g.starts_at <= now()) "
-            f"AND {caveat_case(self.pol.caveats)}"
+            "SELECT coalesce(json_agg(json_build_array(g.object_id, g.subject_id)), '[]') "
+            f"FROM authz.shares g WHERE g.object_type = {lit(t.name)} "
+            f"AND g.relation = {lit(rname)} AND g.subject_type = {lit(st)} "
+            f"AND g.subject_relation = {lit(srel)}{sid} AND {when}"
         )
+
+    def role_shares_sql(self, t: Type, p: str, st: str, sr: str | None, when: str) -> str:
+        """The custom roles given on t that include p to st#sr, for the shares g `when` holds of: (object, subject,
+        the role's owner when it is of the type `from rel` names, '' otherwise: it never counts)."""
+        owner = (
+            f"CASE WHEN ro.owner_type = {lit(self.role_owner_type(t))} THEN ro.owner_id ELSE '' END"
+            if t.roles_from
+            else "''"
+        )
+        return (
+            f"SELECT coalesce(json_agg(json_build_array(g.object_id, g.subject_id, {owner})), '[]') "
+            f"FROM authz.shares g JOIN authz.roles ro ON g.relation = 'role:' || ro.id "
+            f"JOIN authz.role_permissions rp ON rp.role_id = ro.id "
+            f"WHERE g.object_type = {lit(t.name)} AND ro.object_type = {lit(t.name)} "
+            f"AND rp.permission = {lit(p)} "
+            f"AND g.subject_type = {lit(st)} AND g.subject_relation = {lit(sr or '')} AND {when}"
+        )
+
+    def decisions_queries(self) -> list[tuple[tuple[str | int, ...], str]]:
+        """(key, sql) for tests/decisions.py: the shares that don't count, by why (expired, not started yet, a
+        caveat that doesn't hold), each live otherwise, and those that count by a caveat that holds. (A share to an
+        object is a link of an inheritance tree: it can't expire, start later or have a caveat.)"""
+        caveat = caveat_case(self.pol.caveats)
+        whens = {
+            "expired": f"NOT {NOT_EXPIRED} AND {STARTED} AND {caveat}",
+            "not started": f"{NOT_EXPIRED} AND NOT {STARTED} AND {caveat}",
+        }
+        if self.pol.caveats:
+            whens["caveat false"] = f"{NOT_EXPIRED} AND {STARTED} AND g.caveat IS NOT NULL AND NOT {caveat}"
+            whens["caveat true"] = f"{NOT_EXPIRED} AND {STARTED} AND g.caveat IS NOT NULL AND {caveat}"
+        out: list[tuple[tuple[str | int, ...], str]] = []
+        for t in self.types.values():
+            for r in t.relations.values():
+                for i, src in enumerate(r.sources):
+                    for st, sr in src.subjects:
+                        if src.kind == "shared" and not (
+                            sr is None and st in self.types and not self.types[st].principal
+                        ):
+                            out += [
+                                (
+                                    ("share", why, t.name, r.name, i, st, sr or ""),
+                                    self.shares_sql(t, r.name, st, sr, when),
+                                )
+                                for why, when in whens.items()
+                            ]
+            if t.roles:
+                for p in t.roles[1]:
+                    for st, sr in t.roles[0]:
+                        out += [
+                            (("role share", why, t.name, p, st, sr or ""), self.role_shares_sql(t, p, st, sr, when))
+                            for why, when in whens.items()
+                        ]
+        return out
 
     def data_queries(self) -> list[tuple[tuple[str | int, ...], str]]:
         """(key, sql returning a json array) for everything the evaluator reads."""
@@ -233,40 +302,14 @@ class Reference(evaluate.Reference):
                                 f"AND {notnull('this', src.subj_col)}{where}{poly}"
                             )
                         else:
-                            stype = st
-                            srel = "" if sr in (None, "*") else sr
-                            # a principal type's shares: to one (bot 2), or to every one signed in (bot:*)
-                            one = sr is None and st in self.types and self.types[st].principal
-                            sid = (
-                                " AND g.subject_id = '*'" if sr == "*" else (" AND g.subject_id <> '*'" if one else "")
-                            )
-                            sql = (
-                                "SELECT coalesce(json_agg(json_build_array(g.object_id, g.subject_id)), '[]') "
-                                f"FROM authz.shares g WHERE g.object_type = {lit(t.name)} "
-                                f"AND g.relation = {lit(r.name)} AND g.subject_type = {lit(stype)} "
-                                f"AND g.subject_relation = {lit(srel)}{sid} AND {self.live()}"
-                            )
+                            sql = self.shares_sql(t, r.name, st, sr, self.live())
                         out.append((key, sql))
             if t.roles:
                 subjects, perms, _ = t.roles
-                # the role's owner, when it is of the type `from rel` names ('' otherwise: it never counts)
-                owner = (
-                    f"CASE WHEN ro.owner_type = {lit(self.role_owner_type(t))} THEN ro.owner_id ELSE '' END"
-                    if t.roles_from
-                    else "''"
-                )
                 for p in perms:
                     for st, sr in subjects:
                         out.append(
-                            (
-                                ("rolepairs", t.name, p, st, sr or ""),
-                                f"SELECT coalesce(json_agg(json_build_array(g.object_id, g.subject_id, {owner})), '[]') "
-                                f"FROM authz.shares g JOIN authz.roles ro ON g.relation = 'role:' || ro.id "
-                                f"JOIN authz.role_permissions rp ON rp.role_id = ro.id "
-                                f"WHERE g.object_type = {lit(t.name)} AND ro.object_type = {lit(t.name)} "
-                                f"AND rp.permission = {lit(p)} "
-                                f"AND g.subject_type = {lit(st)} AND g.subject_relation = {lit(sr or '')} AND {self.live()}",
-                            )
+                            (("rolepairs", t.name, p, st, sr or ""), self.role_shares_sql(t, p, st, sr, self.live()))
                         )
         for tname, cond in self.conditions():
             t = self.types[tname]
@@ -283,7 +326,7 @@ class Reference(evaluate.Reference):
 # Comparing
 # ----------------------------------------------------------------------
 class Checker:
-    def __init__(self, db: DB, policy_path: str, gen: Gen) -> None:
+    def __init__(self, db: DB, policy_path: str, gen: Gen, decisions: bool = False) -> None:
         self.db, self.gen = db, gen
         # everyone who signs in, and nobody ('': signed out, what `anyone` and links are for)
         self.users, self.role = [*gen.users, ""], gen.role
@@ -291,6 +334,9 @@ class Checker:
         self.refuse = refusals_of(self.pol)
         self.types, self.rules = self.pol.types, self.pol.rules
         self.ref = Reference(self.pol)
+        # with decisions: which parts of the policy decided an answer, over every snapshot (tests/decisions.py)
+        self.decisions = Decisions(self.pol, read(policy_path)) if decisions else None
+        self.decisions_queries = self.ref.decisions_queries() if decisions else []
         self._nocontext: dict[tuple[str, str, str], set[str]] | None = None
         self._nocontext_all: dict[tuple[str, str, str], set[str]] | None = None
         self.policies: list[list[str]] = json.loads(
@@ -437,6 +483,8 @@ class Checker:
                 lines.append(f"SET authz_ctx.{k} = {lit(v)};")
             for key, sql in self.ref.data_queries():
                 emit([u, "data", *key], sql)
+            for key, sql in self.decisions_queries:
+                emit([u, "decisions", *key], sql)
             # a `shared if` on the shares the one whose turn it is tries: the rows on which it holds, for the share as
             # it would be made, evaluated as conditions are (by the database, as the policy's owner, them signed in)
             for (tname, rname), (_, _, cond) in self.shares_tried.items() if pid and u == sharer else ():
@@ -975,9 +1023,18 @@ class Checker:
             problems.append("authz.verify() is false: a closure table is stale")
         holders: dict[tuple[str, str, str], set[str]] = {}
         among: dict[tuple[str, str, str], set[str]] = {}  # every user id signed in, a row or not (who_among)
+        if self.decisions is not None:
+            self.decisions.snapshots += 1
         for u in self.users:
             data = evaluate.Data.of({tuple(k[2:]): v for k, v in snap.items() if k[0] == u and k[1] == "data"})
             state = self.ref.evaluate(data, u, self.links_of(u))
+            if self.decisions is not None:
+                # (the shares that don't count, by why: what --decisions asks besides)
+                shares: dict[tuple[str | int, ...], Answer] = {
+                    tuple(k[2:]): v for k, v in snap.items() if k[0] == u and k[1] == "decisions"
+                }
+                scope = self.scoped[1] if u == self.scoped[0] else ""
+                self.decisions.observe(data, u, self.links_of(u), shares, scope)
             for t in self.types.values():
                 for p in t.perms:
                     for i in state[(t.name, p)] & self.ref.ids(t):
@@ -2303,8 +2360,12 @@ def main() -> None:
     ap.add_argument("--steps", type=int, default=100)
     ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--quiet", action="store_true")
+    ap.add_argument(
+        "--decisions", action="store_true", help="and say which parts of the policy never decided an answer (a report)"
+    )
     args = ap.parse_args()
     os.chdir(os.path.dirname(HERE))
+    started = time.monotonic()
 
     rnd = random.Random(args.seed)
     gen = GENERATORS[args.gen](rnd)
@@ -2317,7 +2378,7 @@ def main() -> None:
     ).stdout
     db.run(compiled)
     db.run(gen.grants())
-    checker = Checker(db, gen.policy, gen)
+    checker = Checker(db, gen.policy, gen, decisions=args.decisions)
 
     failures, refused = 0, 0
     for step in range(args.steps + 1):
@@ -2349,6 +2410,8 @@ def main() -> None:
         f"{args.gen} seed {args.seed}: {args.steps} changes ({refused} refused as expected), "
         f"{'no mismatches' if not failures else f'{failures} failing step(s)'}"
     )
+    if checker.decisions is not None:
+        print("\n".join(checker.decisions.report(args.gen, of=time.monotonic() - started)))
     sys.exit(1 if failures else 0)
 
 

@@ -43,6 +43,9 @@ from authzlib.conditions import Scalar  # noqa: E402
 from authzlib.connection import Row, Value  # noqa: E402
 from authzlib.review import Review  # noqa: E402
 
+sys.path.insert(0, os.path.join(ROOT, "tests"))
+import decisions  # noqa: E402
+
 GOLDEN = os.path.join(ROOT, "tests", "golden")
 UPDATE = "--update" in sys.argv
 POLICIES = {
@@ -5050,6 +5053,212 @@ class HandAnswers(unittest.TestCase):
         for sql in ("size > " + "9" * 4301, "size in (1, " + "9" * 5000 + ")"):
             self.assertIsNone(simple(sql), sql[:20])
         self.assertIsNotNone(simple("size > " + "9" * 4300))
+
+
+class Decisions(unittest.TestCase):
+    """tests/decisions.py, which says which parts of a policy decided an answer in difftest's worlds, on worlds made by
+    hand (HandAnswers' facts): a part forced the other way that changes some answer decided it there; one that
+    changes none, held or not, never did (its SQL was never judged). Each by its name and the line it is on."""
+
+    DOCS = (
+        "type user = app.users\ntype doc = app.docs\n  owner : user = owner_id\n  viewer : user shared\n"
+        "  can share = owner\n  can edit = owner\n  can view = edit or viewer or (viewer and edit)\n"
+        "rules app.docs\n  select : view\n  insert : {draft}\n"
+    )
+    # ann edits doc 1 and is a viewer there too; bo is a viewer of doc 2 alone; {draft} holds on doc 2
+    DOC_WORLD = "user: ann, bo\ndoc: 1, 2\ndoc 1 owner user ann\ndoc 1 viewer user ann\ndoc 2 viewer user bo\n{draft} on doc 2\n"
+    VIEW = ("expr", "perm", "doc", "view")
+    FOLDERS = (
+        "type user = app.users\ntype folder = app.folders\n  owner : user = owner_id\n  parent : folder = parent_id\n"
+        "  can view = owner or parent.view\n"
+    )
+
+    def watch(
+        self,
+        policy: str,
+        worlds: Sequence[str],
+        asked: Sequence[str] = ("ann", "bo", ""),
+        shares: dict[str, decisions.Shares] | None = None,
+        scope: tuple[str, str] | None = None,
+    ) -> decisions.Decisions:
+        text = HandAnswers.HEAD + policy
+        Compiler(parse_policy(text, "hand.authz")).compile("hand.authz")  # (a policy the compiler takes)
+        pol = parse_policy(text, "hand.authz")
+        out = decisions.Decisions(pol, text)
+        for world in worlds:
+            data = HandAnswers().world(pol, world)
+            out.snapshots += 1
+            for who in asked:
+                out.observe(data, who, (), (shares or {}).get(who), scope[1] if scope and scope[0] == who else "")
+        return out
+
+    def test_a_part_that_decides_and_one_that_never_does(self) -> None:
+        t = self.watch(self.DOCS, [self.DOC_WORLD])
+        # (viewer and edit) holds only where edit does: neither of its parts ever decides, whichever way forced
+        self.assertEqual(t.parts[(*self.VIEW, 2, 0)].nevers(), ["never decisive"])
+        self.assertEqual(t.parts[(*self.VIEW, 2, 1)].nevers(), ["never decisive"])
+        # edit, and the whole (viewer and edit): forced true they give more, forced false nothing goes (viewer stays)
+        self.assertEqual(t.parts[(*self.VIEW, 0)].nevers(), ["decisive only forced true"])
+        self.assertEqual(t.parts[(*self.VIEW, 2)].nevers(), ["decisive only forced true"])
+        # viewer decides both ways: bo views doc 2 by it alone
+        self.assertEqual(t.parts[(*self.VIEW, 1)].nevers(), [])
+        self.assertEqual(t.parts[(*self.VIEW, 1)].down, "doc.view on 2 for bo")
+        self.assertEqual(t.parts[(*self.VIEW, 0)].up, "doc.view on 2 for ann")
+        # a condition nothing but a rule reads decides that rule's rows
+        self.assertEqual(t.parts[("expr", "rule", 1)].nevers(), [])
+        self.assertEqual(t.parts[("expr", "rule", 1)].down, "rules app.docs insert on 2 for ann")
+
+    def test_the_report_names_each_part_by_its_line(self) -> None:
+        t = self.watch(self.DOCS, [self.DOC_WORLD])
+        lines = t.report("hand")
+        self.assertRegex(
+            lines[0],
+            r"^decisions \(hand\): 7 of the policy's 17 parts never decided an answer, over 1 snapshot and 3 "
+            r"principals asking \(\d+\.\d s\)$",
+        )
+        self.assertIn("  doc.view: edit at line 8: decisive only forced true", lines)
+        self.assertIn("  doc.viewer: a share not started yet to user at line 5: never true, never decisive", lines)
+        self.assertIn("  subjects that decided an answer: a user", lines)
+        self.assertEqual(
+            t.report("hand", only_decisive=True)[1:],
+            [
+                "  doc.viewer: an expired share to user at line 5: never decisive",
+                "  doc.viewer: a share not started yet to user at line 5: never decisive",
+                "  doc.view: viewer at line 8: never decisive",
+                "  doc.view: edit at line 8: never decisive",
+                "  scope read: select (built in): never decisive",
+                "  scope read: every permission (built in): never decisive",
+                "  scope read: what it leaves out: never decisive",
+            ],
+        )
+
+    def test_a_part_on_a_line_that_goes_on(self) -> None:
+        t = self.watch(
+            "type user = app.users\ntype doc = app.docs\n  owner : user = owner_id\n  viewer : user shared\n"
+            "  can share = owner\n  can view = owner\n           or viewer  -- or one it is shared with\n",
+            ["user: ann\ndoc: 1\n"],
+            asked=["ann"],
+        )
+        self.assertEqual(str(t.parts[(*self.VIEW, 1)].loc), "line 8")
+        self.assertEqual(str(t.parts[self.VIEW].loc), "line 7")
+
+    def test_a_where_never_false_and_a_source_never_true(self) -> None:
+        t = self.watch(
+            "type user = app.users where {active}\ntype doc = app.docs where {not archived}\n  owner : user = owner_id\n"
+            "  editor : user = app.doc_editors(doc_id -> user_id)\n  can view = owner or editor\n",
+            ["user: ann, bo\ndoc: 1, 2, 3\ndoc 2 fails its where\ndoc 1 owner user ann\ndoc 3 owner user bo\n"],
+        )
+        # every user passes: never false, and false it takes everything away
+        self.assertEqual(t.parts[("where", "user")].nevers(), ["never false"])
+        self.assertEqual(t.parts[("where", "user")].down, "doc.view on 1 for ann")
+        # doc 2 fails it, and nobody holds anything there: letting it through changes nothing
+        self.assertEqual(t.parts[("where", "doc")].nevers(), ["decisive only forced false"])
+        # no editor anywhere: never true, yet one everywhere would show
+        editor = t.parts[("source", "doc", "editor", 0, "user", "")]
+        self.assertEqual((editor.nevers(), editor.up), (["never true"], "doc.view on 3 for ann"))
+
+    def test_a_share_that_does_not_count_had_it_counted(self) -> None:
+        expired = ("share", "expired", "doc", "viewer", 0, "user", "")
+        later = ("share", "not started", "doc", "viewer", 0, "user", "")
+        t = self.watch(
+            "type user = app.users\ntype doc = app.docs\n  owner : user = owner_id\n  viewer : user shared\n"
+            "  can share = owner\n  can view = owner or viewer\n",
+            ["user: ann, bo\ndoc: 1, 2\ndoc 1 owner user ann\n"],
+            shares={"ann": {expired: [["2", "ann"]], later: [["1", "ann"]]}},
+        )
+        # expired on doc 2: counted, ann would view it; not started on doc 1, which she owns: nothing would change
+        self.assertEqual((t.parts[expired].nevers(), t.parts[expired].up), ([], "doc.view on 2 for ann"))
+        self.assertEqual(t.parts[later].nevers(), ["never decisive"])
+
+    def test_how_deep_inheritance_decided_and_a_loop(self) -> None:
+        depths = [("depth", 0, d) for d in (1, 2, 3)]
+        two = self.watch(
+            self.FOLDERS, ["user: ann\nfolder: 1, 2\nfolder 2 parent folder 1\nfolder 1 owner user ann\n"], ["ann"]
+        )
+        self.assertEqual([two.parts[k].nevers() for k in depths], [[], ["never decisive"], ["never decisive"]])
+        self.assertEqual(two.parts[("loop", 0)].nevers(), ["never true", "never decisive"])
+        four = self.watch(
+            self.FOLDERS,
+            [
+                "user: ann\nfolder: 1, 2, 3, 4\nfolder 2 parent folder 1\nfolder 3 parent folder 2\n"
+                "folder 4 parent folder 3\nfolder 1 owner user ann\n"
+            ],
+            ["ann"],
+        )
+        self.assertEqual(
+            [four.parts[k].down for k in depths],
+            ["folder.view on 2 for ann", "folder.view on 3 for ann", "folder.view on 4 for ann"],
+        )
+        self.assertIn(
+            "  folder.view: inheritance round a loop in the data (through parent.view) at line 6: never true, "
+            "never decisive",
+            four.report("hand"),
+        )
+        # folders 1 and 2 inside each other: 2 holds view through the loop alone
+        loop = self.watch(
+            self.FOLDERS,
+            [
+                "user: ann\nfolder: 1, 2, 3\nfolder 1 parent folder 2\nfolder 2 parent folder 1\n"
+                "folder 3 parent folder 2\nfolder 1 owner user ann\n"
+            ],
+            ["ann"],
+        )
+        self.assertEqual(loop.parts[("loop", 0)].down, "folder.view on 2 for ann")
+
+    def test_how_deep_groups_inside_groups_decided(self) -> None:
+        t = self.watch(
+            "type user = app.users\ntype team = app.teams\n  member : user = app.team_members(team_id -> user_id)\n"
+            "  member : team#member = app.teams(parent_id -> id)\ntype folder = app.folders\n  owner : user = owner_id\n"
+            "  viewer : team#member shared\n  can share = owner\n  can view = viewer\n",
+            [
+                "user: ann\nteam: 1, 2, 3\nteam 3 member user ann\nteam 2 member team#member 3\n"
+                "team 1 member team#member 2\nfolder: 1, 2\nfolder 1 viewer team#member 2\nfolder 2 viewer team#member 1\n"
+            ],
+            ["ann"],
+        )
+        # ann is in team 3, so in 2 (one group inside another) and in 1 (two)
+        self.assertEqual(
+            [t.parts[("depth", 0, d)].down for d in (1, 2, 3)],
+            ["folder.view on 1 for ann", "folder.view on 2 for ann", ""],
+        )
+
+    def test_what_a_scope_let_through_and_left_out(self) -> None:
+        t = self.watch(
+            "type user = app.users\ntype doc = app.docs\n  owner : user = owner_id\n  can view = owner\n"
+            "  can edit = owner\nscope files = doc.view\nrules app.docs\n  select : view\n",
+            ["user: ann\ndoc: 1\ndoc 1 owner user ann\n"],
+            ["ann"],
+            scope=("ann", "files"),
+        )
+        self.assertEqual(t.parts[("scope", "files", 0)].down, "doc.view for ann")
+        self.assertEqual(t.parts[("scope refuses", "files")].up, "doc.edit for ann")
+        self.assertEqual(t.parts[("scope", "read", 1)].nevers(), ["never true", "never decisive"])
+
+    def test_whose_roles_count(self) -> None:
+        t = self.watch(
+            HandAnswers.ROLES.format(**{"from": " from org"}),
+            [
+                "user: ann\norg: 1, 2\nfolder: 1, 2\nfolder 1 org org 1\nfolder 2 org org 2\n"
+                "role view on folder 1 for user ann from org 2\nrole view on folder 2 for user ann from org 2\n"
+            ],
+            ["ann"],
+        )
+        # org 2's role counts on its folder 2, not on org 1's folder 1: checked or not, view changes
+        part = t.parts[("roles from", "folder")]
+        self.assertEqual((part.up, part.down), ("folder.view on 1 for ann", "folder.view on 2 for ann"))
+
+    def test_unforced_it_answers_as_the_evaluator(self) -> None:
+        # what it watches with is the evaluator overridden only where told: otherwise the very same answers
+        for name, path in POLICIES.items():
+            pol = parse_policy(read(path), path)
+            ref, forcing = evaluate.Reference(pol), decisions.Decisions(pol).ref
+            forcing.seen = {}
+            for k in range(3):
+                world = evaluate.World(f"{name}/{k}", 5, pols=[pol], density=0.5 if k else None)
+                data = world.data(pol)
+                for who in world.principals([pol]):
+                    self.assertEqual(forcing.evaluate(data, who, ["tok1"]), ref.evaluate(data, who, ["tok1"]), name)
+            self.assertTrue(forcing.seen)
 
 
 class Encodings(unittest.TestCase):

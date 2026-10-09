@@ -80,13 +80,13 @@ if [ "$MODE" = soak ]; then
     # two parts, about as long as each other
     case "$gen" in docs|multi) part changes-1;; *) part changes-2;; esac || continue
     step "random changes, compared with the reference evaluator ($gen, 500 changes, seed $SEED)"
-    python3 tests/difftest.py --gen "$gen" --steps 500 --seed "$SEED" --quiet --db "authz_diff_$gen"
+    python3 tests/difftest.py --gen "$gen" --steps 500 --seed "$SEED" --quiet --db "authz_diff_$gen" --decisions
     record $? "difftest $gen"
     dropdb --if-exists "authz_diff_$gen" >/dev/null 2>&1
   done
   if part policies; then
   step "random policies, compared with the reference evaluator (100 policies, seeds from $((SEED * 1000)))"
-  python3 tests/genpolicy.py --policies 100 --steps 10 --seed "$((SEED * 1000))" --db authz_genpolicy
+  python3 tests/genpolicy.py --policies 100 --steps 10 --seed "$((SEED * 1000))" --db authz_genpolicy --decisions
   record $? "genpolicy"
   dropdb --if-exists authz_genpolicy >/dev/null 2>&1
   fi
@@ -241,17 +241,18 @@ fi
 GENS="docs alt multi composite loop cross"; every_version || GENS=docs
 for gen in $GENS; do
   # six policies: four in the random part, one with each of the two others, which are shorter, so that the
-  # three parts are about as long as each other
+  # three parts are about as long as each other. --decisions says too which parts of the policy never decided an
+  # answer there (tests/decisions.py: whose SQL the run never judged), a report that fails nothing
   case "$gen" in composite) part policy;; multi) part command;; *) part random;; esac || continue
   step "random changes, compared with the reference evaluator ($gen, $STEPS changes)"
-  python3 tests/difftest.py --gen "$gen" --steps "$STEPS" --seed 7 --quiet --db "authz_diff_$gen"
+  python3 tests/difftest.py --gen "$gen" --steps "$STEPS" --seed 7 --quiet --db "authz_diff_$gen" --decisions
   record $? "difftest $gen"
   dropdb --if-exists "authz_diff_$gen" >/dev/null 2>&1
 done
 if part random; then
 if [ "$MODE" = full ]; then
   step "random policies, compared with the reference evaluator (12 policies)"
-  python3 tests/genpolicy.py --policies 12 --steps 8 --seed 1 --db authz_genpolicy
+  python3 tests/genpolicy.py --policies 12 --steps 8 --seed 1 --db authz_genpolicy --decisions
   record $? "genpolicy"
   dropdb --if-exists authz_genpolicy >/dev/null 2>&1
 fi
