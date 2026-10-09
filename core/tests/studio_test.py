@@ -606,27 +606,33 @@ def main() -> None:
     print("-- a test's copy of a row: each value as the column holds it")
     psql(
         db,
-        "ALTER TABLE app.folders ADD COLUMN tags text[], ADD COLUMN meta jsonb, ADD COLUMN size numeric; "
-        "ALTER TABLE app.folders ALTER COLUMN inherit DROP DEFAULT; "
+        "ALTER TABLE app.folders ADD COLUMN tags text[], ADD COLUMN meta jsonb, ADD COLUMN size numeric, "
+        "ADD COLUMN label text GENERATED ALWAYS AS (upper(name)) STORED; "
         'UPDATE app.folders SET tags = \'{plans,"q3 review"}\', meta = \'{"color": "red"}\', '
-        "size = 12345678901234567.89 WHERE id = 4",
+        "size = 12345678901234567.89 WHERE id = 5",
     )
     s = studio.Studio(dsn, None, policy, writable=False, port=0, read_policy=rowstile_cli.read_policy)
     s.start(background=True)
     try:
-        status, t = Client(s).call("/api/test?as=user:3&type=folder&id=4&perm=edit&expect=cannot")
-        made, row = made_and_copied(db, t.get("named", ""), "it", "app.folders", "id = 4")
+        # Secrets doesn't inherit, where the column's default does: the policy reads the row's value
+        status, t = Client(s).call("/api/test?as=user:3&type=folder&id=5&perm=edit&expect=cannot")
+        made, row = made_and_copied(db, t.get("named", ""), "it", "app.folders", "id = 5")
         check(
-            "an array, json, a number with a fraction, a boolean the table doesn't fill: the copy is the row",
-            status == 200 and made == row and '"tags": ["plans", "q3 review"]' in row,
+            "a column with a default, an array, json, a number with a fraction, a column the table makes: the copy "
+            "is the row",
+            status == 200 and made == row and '"inherit": false' in row and '"tags": ["plans", "q3 review"]' in row,
             (made, row),
         )
         with tempfile.TemporaryDirectory() as tmp:
             with open(os.path.join(tmp, "made.authz"), "w", encoding="utf-8") as fh:
                 fh.write(t.get("named", ""))
             _, out = cli(db, "test", os.path.join(tmp, "made.authz"))
-        ran = out.split("user 3 cannot edit folder 4", 1)[-1].split("invariants", 1)[0]
-        check("... and the test runs as it is", "ok    " in ran and "FAIL" not in ran, out[-800:])
+        ran = out.split("user 3 cannot edit folder 5", 1)[-1].split("invariants", 1)[0]
+        check(
+            "... and the test runs as it is",
+            "user 3 cannot edit folder 5" in out and "ok    " in ran and "FAIL" not in ran,
+            out[-800:],
+        )
     finally:
         s.stop()
 
@@ -891,6 +897,49 @@ def main() -> None:
     finally:
         ks.stop()
     subprocess.run(["dropdb", "--if-exists", keys], capture_output=True)
+
+    print("-- a test on tables named with capitals, as Prisma names them (tests/prisma.authz)")
+    caps = f"{db}_caps"
+    subprocess.run(["dropdb", "--if-exists", caps], capture_output=True)
+    subprocess.run(["createdb", caps], check=True)
+    subprocess.run(
+        ["psql", "-X", "-q", "-v", "ON_ERROR_STOP=1", "-d", caps, "-f", os.path.join(HERE, "prisma_schema.sql")],
+        check=True,
+        capture_output=True,
+    )
+    psql(caps, 'UPDATE "Note" SET locked = true WHERE id = 2')  # its managers' only: the policy reads it
+    rc, out = cli(caps, "apply", os.path.join(HERE, "prisma.authz"))
+    if rc:
+        raise SystemExit(out)
+    s = studio.Studio(
+        f"dbname={caps}", None, os.path.join(HERE, "prisma.authz"), port=0, read_policy=rowstile_cli.read_policy
+    )
+    s.start(background=True)
+    try:
+        status, t = Client(s).call("/api/test?as=user:2&type=note&id=2&perm=edit&expect=cannot")
+    finally:
+        s.stop()
+    named = t.get("named", "") if status == 200 else ""
+    made, row = made_and_copied(caps, named, "it", 'public."Note"', "id = 2")
+    check(
+        "a test on tables named with capitals: the person's key left to its sequence, the locked note's copy is the row",
+        status == 200
+        and 'given who = {INSERT INTO "public"."User" ("name") VALUES (\'bo\') RETURNING "id"}' in named
+        and made == row
+        and '"locked": true' in row,
+        (status, t, made, row),
+    )
+    with tempfile.TemporaryDirectory() as tmp:
+        with open(os.path.join(tmp, "made.authz"), "w", encoding="utf-8") as fh:
+            fh.write(named)
+        _, out = cli(caps, "test", os.path.join(tmp, "made.authz"))
+    ran = out.split("user 2 cannot edit note 2", 1)[-1].split("invariants", 1)[0]
+    check(
+        "... and the test runs as it is",
+        "user 2 cannot edit note 2" in out and "ok    " in ran and "FAIL" not in ran,
+        out[-800:],
+    )
+    subprocess.run(["dropdb", "--if-exists", caps], capture_output=True)
 
     print("-- Studio through an app role the owner may not take, with no rules, and users keyed by text")
     # since PostgreSQL 16 a role that makes another gets ADMIN on it, not SET (the suites' owner has
