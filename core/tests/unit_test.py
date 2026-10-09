@@ -2385,6 +2385,25 @@ class Wire(unittest.TestCase):
         threading.Thread(target=serve, daemon=True).start()
         return listener.getsockname()[1], seen
 
+    @staticmethod
+    def started_with(seen: dict[str, object], name: bytes) -> bytes | None:
+        """A start-up parameter's value as the made-up server read it (None: not sent)."""
+        start = seen["start"]
+        assert isinstance(start, list)
+        fields = [x for x in start if isinstance(x, bytes)]
+        return fields[fields.index(name) + 1] if name in fields else None
+
+    def test_options_reach_the_server(self) -> None:
+        # a connection string's options (`-c search_path=app`, or what a managed service routes by) go in the
+        # start-up message as written, from a URL (encoded) or a keyword string
+        for dsn in (
+            "postgresql://ann@127.0.0.1:{port}/app?options=-c%20search_path%3Dapp&sslmode=disable",
+            "host=127.0.0.1 port={port} user=ann dbname=app options='-c search_path=app' sslmode=disable",
+        ):
+            port, seen = self.server(tls=False)
+            self.pgwire.connect(**self.pgwire.parse_dsn(dsn.format(port=port))).close()
+            self.assertEqual(self.started_with(seen, b"options"), b"-c search_path=app", dsn)
+
     def test_tls_as_sslmode_says(self) -> None:
         connect = self.pgwire.connect
         crt = os.path.join(ROOT, "tests", "fixtures", "wire_test.crt")
