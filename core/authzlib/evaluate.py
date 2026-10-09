@@ -417,10 +417,25 @@ class World:
     """Made-up data for one or more policies, the same for what they share: ids per type, the links each
     column, link table and share holds, the column values simple conditions read (conditions.py: `{archived}`
     and `{not archived}` read one column), and which rows pass each other {condition} (any yes or no per row,
-    so policies that use the same condition text see the same answers)."""
+    so policies that use the same condition text see the same answers).
+
+    A drawn world has 1 to size rows of each type, a column names something on COLUMN of its rows, and a link
+    table, a share or a role holds LINK (ROLE) of the links it could. Two kinds of world a draw rarely makes have
+    size rows of each type: a dense one (density: a link table, share or role holds that much of what it could, and
+    a column names something on nearly every row: a long `and` of links holds for someone), and one of chains
+    (chained: each link the policies follow from an object to another, with a dot or to a group's members, goes
+    from row i to row i + 1, so that it reaches as deep as the world is large)."""
+
+    COLUMN, LINK, ROLE = 0.6, 0.3, 0.2
 
     def __init__(
-        self, seed: str, size: int, conds: Mapping[str, bool] | None = None, pols: Sequence[Policy] = ()
+        self,
+        seed: str,
+        size: int,
+        conds: Mapping[str, bool] | None = None,
+        pols: Sequence[Policy] = (),
+        density: float | None = None,
+        chained: bool = False,
     ) -> None:
         self.rng_seed, self.size = seed, size
         self.made: dict[tuple[object, ...], object] = {}
@@ -428,20 +443,71 @@ class World:
         self.conds = conds or {}
         # the policies that share the world: their simple conditions say which values each column takes
         self.pols = list(pols)
+        self.density, self.chained = density, chained
+        self._followed: dict[int, tuple[Policy, set[tuple[str, str]]]] = {}
 
-    def linked(self, pol: Policy) -> dict[tuple[str, str], str]:
-        """{(type, column): the type it names}: the columns a relation of one of the world's policies reads (`owner :
-        user = owner_id`). A condition on one (`{owner_id = authz.uid()}`, `{parent_id is null}`) reads the
-        relation's links: they are the same facts."""
-        out: dict[tuple[str, str], str] = {}
+    def fill(self) -> float:
+        """How many rows a column names something on."""
+        return self.COLUMN if self.density is None else 0.95
+
+    def followed(self, pol: Policy) -> set[tuple[str, str]]:
+        """(type, relation) the world's policies follow from an object to another: with a dot (`parent.view`), or
+        to the members of a group (`team#member`)."""
+        if id(pol) not in self._followed or self._followed[id(pol)][0] is not pol:
+            out: set[tuple[str, str]] = set()
+
+            def walk(t: Type, node: Expr) -> None:
+                match node:
+                    case ("arrow", rel, _) | ("arrow_on", rel, _, _):
+                        out.add((t.name, rel))
+                    case ("not", item):
+                        walk(t, item)
+                    case ("and", items) | ("or", items):
+                        for x in items:
+                            walk(t, x)
+
+            for p in [*self.pols, pol]:
+                for t in p.types.values():
+                    for perm in t.perms.values():
+                        walk(t, perm.expr)
+                    for r in t.relations.values():
+                        if any(sr and sr != "*" and st in p.types for st, sr in r.subjects()):
+                            out.add((t.name, r.name))
+                for rule in p.rules:
+                    walk(next(t for t in p.types.values() if t.table == rule.table), rule.expr)
+                for inv in p.invariants:
+                    walk(p.types[inv.type], inv.expr)
+            self._followed[id(pol)] = (pol, out)
+        return self._followed[id(pol)][1]
+
+    def chain(self, ids: list[str], targets: list[str]) -> list[Pair]:
+        """Row i linked to row i + 1 of the type it names (the last one to none)."""
+        return [(o, str(int(o) + 1)) for o in ids if str(int(o) + 1) in targets]
+
+    def linked(self, pol: Policy) -> dict[tuple[str, str], tuple[str, str]]:
+        """{(type, column): (the type it names, the relation)}: the columns a relation of one of the world's policies
+        reads (`owner : user = owner_id`). A condition on one (`{owner_id = authz.uid()}`, `{parent_id is null}`)
+        reads the relation's links: they are the same facts."""
+        out: dict[tuple[str, str], tuple[str, str]] = {}
         for p in [*self.pols, pol]:
             for t in p.types.values():
                 for r in t.relations.values():
                     for src in r.sources:
                         col = linked_column(src)
                         if col is not None:
-                            out.setdefault((t.name, col), src.subjects[0][0])
+                            out.setdefault((t.name, col), (src.subjects[0][0], r.name))
         return out
+
+    def column_links(self, pol: Policy, tname: str, col: str, st: str, rname: str, ids: list[str]) -> list[Pair]:
+        """The links a column holds, one per row at most: the same whatever reads them (its relation, or a simple
+        condition on the column)."""
+        targets = self.ids(st) if st in pol.types else ["1"]
+        if self.chained and (tname, rname) in self.followed(pol):
+            return self.chain(ids, targets)
+        return self.pick(
+            ("pairs", tname, "column", col, None, st, None),
+            lambda rng: [(o, rng.choice(targets)) for o in ids if rng.random() < self.fill()],
+        )
 
     def domains(self, pol: Policy) -> dict[tuple[str, str], list[Scalar]]:
         """{(type, column): the values it takes}: those the simple conditions of the world's policies compare it
@@ -489,12 +555,8 @@ class World:
                 continue
             ids = self.ids(tname)
             if (tname, col) in linked:
-                st = linked[(tname, col)]
-                subject_ids = self.ids(st) if st in pol.types else ["1"]
-                pairs = self.pick(
-                    ("pairs", tname, "column", col, None, st, None),
-                    lambda rng, ids=ids, s=subject_ids: [(o, rng.choice(s)) for o in ids if rng.random() < 0.6],
-                )
+                st, rname = linked[(tname, col)]
+                pairs = self.column_links(pol, tname, col, st, rname, ids)
                 drawn: dict[str, Scalar] = {**dict.fromkeys(ids), **dict(pairs)}
             else:
                 drawn = self.pick(
@@ -556,6 +618,8 @@ class World:
         return cast(V, self.made[key])  # what make gave for this key
 
     def ids(self, tname: str) -> list[str]:
+        if self.density is not None or self.chained:  # as many rows as the world is large
+            return [str(i) for i in range(1, self.size + 1)]
         return self.pick(("ids", tname), lambda rng: [str(i) for i in range(1, rng.randint(1, self.size) + 1)])
 
     def subset(self, key: tuple[object, ...], ids: list[str], p: float = 0.5) -> list[str]:
@@ -589,13 +653,14 @@ class World:
                 # with `from rel`, each assignment's role belongs to an object of rel's type (maybe not this one's)
                 owner_type = role_owner_type(t)
                 owner_ids = self.ids(owner_type) if owner_type in pol.types else [""]
+                rate = self.ROLE if self.density is None else self.density
                 for p in perms:
                     for st, sr in subjects:
                         sids = self.ids(st) if st in pol.types else ["1"]
                         out.rolepairs[(t.name, p, st, sr or "")] = self.pick(
                             ("roles", t.name, p, st, sr, owner_type),
-                            lambda rng, ids=ids, s=sids, w=owner_ids: [
-                                (o, x, rng.choice(w)) for o in ids for x in s if rng.random() < 0.2
+                            lambda rng, ids=ids, s=sids, w=owner_ids, rate=rate: [
+                                (o, x, rng.choice(w)) for o in ids for x in s if rng.random() < rate
                             ],
                         )
         ref = Reference(pol)
@@ -622,19 +687,34 @@ class World:
             else ["1"]
         )
         key = ("pairs", *source_key(t, r.name, src, st, sr))
+        chained = self.chained and st in pol.types and (t.name, r.name) in self.followed(pol)
         if src.kind == "column" and src.type_col:
             # (type_col, id_col): a row names one object of one type at most, whatever the types
             types = [x for x, _ in src.subjects if x in pol.types]
             rows = self.pick(
                 ("poly", t.name, src.column, src.type_col),
-                lambda rng: [
-                    (o, x, rng.choice(self.ids(x))) for o in ids if rng.random() < 0.6 for x in [rng.choice(types)]
-                ],
+                lambda rng: (
+                    # in a chain, every row names the next one of one type: the world's choice
+                    [(o, x, str(int(o) + 1)) for x in [rng.choice(types)] for o in ids]
+                    if chained
+                    else [
+                        (o, x, rng.choice(self.ids(x)))
+                        for o in ids
+                        if rng.random() < self.fill()
+                        for x in [rng.choice(types)]
+                    ]
+                ),
             )
-            return [(o, s) for o, x, s in rows if x == st]
+            return [(o, s) for o, x, s in rows if x == st and s in subject_ids]
+        col = linked_column(src)
+        if col is not None:
+            return self.column_links(pol, t.name, col, st, r.name, ids)
+        if chained:
+            return self.chain(ids, subject_ids)
         if src.kind == "column":
-            return self.pick(key, lambda rng: [(o, rng.choice(subject_ids)) for o in ids if rng.random() < 0.6])
-        return self.pick(key, lambda rng: [(o, x) for o in ids for x in subject_ids if rng.random() < 0.3])
+            return self.pick(key, lambda rng: [(o, rng.choice(subject_ids)) for o in ids if rng.random() < self.fill()])
+        rate = self.LINK if self.density is None else self.density
+        return self.pick(key, lambda rng: [(o, x) for o in ids for x in subject_ids if rng.random() < rate])
 
     def principals(self, pols: Iterable[Policy]) -> list[str]:
         """Who to ask as: every id of every type that signs in, in any of the policies, and nobody."""
@@ -768,8 +848,82 @@ def corners(pols: Iterable[Policy]) -> list[dict[str, bool]]:
     return [most, least, dict.fromkeys(every, True)]
 
 
+def reach(pols: Iterable[Policy]) -> int:
+    """How deep the policies read: the most links from an object to another (a dot, or a group's members) that one
+    of their permissions, rules or invariants follows one after the other, a loop gone round once."""
+
+    out = 0
+    for pol in pols:
+        known: dict[Name, int] = {}  # each name's depth, once worked out
+        walking: set[Name] = set()  # the names being worked out: one met again closes a loop, which counts 0 more
+
+        def deep(
+            t: Type, name: str, pol: Policy = pol, known: dict[Name, int] = known, walking: set[Name] = walking
+        ) -> int:
+            key = (t.name, name)
+            if key not in known and key not in walking:
+                walking.add(key)
+                if name in t.perms:
+                    known[key] = depth(t, t.perms[name].expr)
+                elif name in t.relations:  # a group's members: the group's own relation, one link further
+                    subjects = t.relations[name].subjects()
+                    groups = [(st, sr) for st, sr in subjects if sr and sr != "*" and st in pol.types]
+                    known[key] = max((1 + deep(pol.types[st], sr) for st, sr in groups), default=0)
+                else:
+                    known[key] = 0
+                walking.discard(key)
+            return known.get(key, 0)
+
+        def depth(t: Type, node: Expr, pol: Policy = pol) -> int:
+            match node:
+                case ("ref", name):
+                    return deep(t, name)
+                case ("arrow", rel, perm) | ("arrow_on", rel, perm, _) if rel in t.relations:
+                    targets = [st for st, sr in t.relations[rel].subjects() if sr is None and st in pol.types]
+                    return max((1 + deep(pol.types[st], perm) for st in targets), default=1)
+                case ("not", item):
+                    return depth(t, item)
+                case ("and", items) | ("or", items):
+                    return max(depth(t, x) for x in items)
+            return 0
+
+        for t in pol.types.values():
+            out = max([out, *(deep(t, p) for p in t.perms)])
+        for rule in pol.rules:
+            out = max(out, depth(next(x for x in pol.types.values() if x.table == rule.table), rule.expr))
+        for inv in pol.invariants:
+            out = max(out, depth(pol.types[inv.type], inv.expr))
+    return out
+
+
+# a dense world holds half of the links it could, three quarters or nearly all: a long `and` of links (with a `not` or
+# an `or` among them) holds for someone in a few of them, where a drawn world (LINK) has it one time in hundreds
+DENSITIES = (0.5, 0.75, 0.9)
+LONGEST = 10  # the longest chain of objects a world of chains has
+
+
+def dense_worlds(worlds: int) -> int:
+    """How many dense worlds go with this many drawn ones."""
+    return max(8, worlds // 5)
+
+
+def rare_worlds(pols: Sequence[Policy], worlds: int, seed: str) -> Iterable[World]:
+    """Worlds a draw rarely makes, tried after the drawn ones and the corners: dense ones, of 3 and 4 rows of each
+    type, and, when the policies read 2 links deep or more (reach), a dozen chains one link longer than the deepest
+    they read (half of them dense too): a permission that follows 3 links and one that follows 4 differ only at the
+    end of a chain of 5."""
+    for k in range(dense_worlds(worlds)):
+        yield World(f"{seed}/dense/{k}", 3 + k % 2, pols=pols, density=DENSITIES[k // 2 % len(DENSITIES)])
+    deep = reach(pols)
+    if deep >= 2:
+        for k in range(12):
+            density = None if k % 2 == 0 else DENSITIES[0]
+            yield World(f"{seed}/chain/{k}", min(deep + 2, LONGEST), pols=pols, density=density, chained=True)
+
+
 def worlds_to_try(pols: Sequence[Policy], worlds: int, seed: str, max_size: int = 4) -> Iterable[World]:
-    """The worlds a comparison of policies goes through: drawn ones, smallest first, then the corners."""
+    """The worlds a comparison of policies goes through: drawn ones, smallest first, then the corners, then the
+    rare ones (rare_worlds)."""
     for size in range(1, max_size + 1):
         for k in range(max(1, worlds // max_size)):
             yield World(f"{seed}/{size}/{k}", size, pols=pols)
@@ -778,6 +932,7 @@ def worlds_to_try(pols: Sequence[Policy], worlds: int, seed: str, max_size: int 
         for size in range(1, max_size + 1):
             for k in range(3):
                 yield World(f"{seed}/corner{n}/{size}/{k}", size, corner, pols=pols)
+    yield from rare_worlds(pols, worlds, seed)
 
 
 def compare(pol_a: Policy, pol_b: Policy, worlds: int = 200, seed: int = 0, max_size: int = 4) -> Difference | None:

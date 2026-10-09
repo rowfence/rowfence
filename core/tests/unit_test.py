@@ -4037,8 +4037,12 @@ class Confidence(unittest.TestCase):
         pol = parse_policy(text, "docs.authz")
         [r] = prove.prove(pol, worlds=80)
         self.assertTrue(r["holds"])
-        # the 80 drawn, and each corner 3 times at each of the 4 sizes
-        self.assertEqual(r["worlds"], 80 + 3 * 4 * len(evaluate.corners([pol])))
+        # the 80 drawn, each corner 3 times at each of the 4 sizes, and the worlds a draw rarely makes
+        rare = list(evaluate.rare_worlds([pol], 80, "0"))
+        self.assertEqual(r["worlds"], 80 + 3 * 4 * len(evaluate.corners([pol])) + len(rare))
+        # the docs read 3 links deep (a file's folder's org's admins, a team's): a dozen chains of 5
+        self.assertEqual(len(rare), evaluate.dense_worlds(80) + 12)
+        self.assertEqual((evaluate.reach([pol]), r.get("size")), (3, 5))
 
     def test_prove_finds_a_counterexample_that_needs_conditions_at_once(self) -> None:
         # a t3 holds p3 through its t1, where {b1 and b2} must hold, and the invariant asks {b1} on the t3 too: a
@@ -4282,6 +4286,80 @@ class Confidence(unittest.TestCase):
             )
         )
         self.assertFalse(self.same(head + "  select : view or {public}\n", head + "  select : view\n"))
+
+    # five link tables in one `and`, then an editor as good as the owner: a drawn world holds all five for one person
+    # one time in hundreds, and 200 of them said the review's refactor check and Risk found nothing, 400 that
+    # `never doc: approve and not owner` held
+    SIGNOFFS = ("legal", "finance", "security", "privacy")
+
+    def approve(self, also: tuple[str, ...] = (), lines: str = "") -> str:
+        rels = ("editor", *self.SIGNOFFS, *also)
+        return (
+            "type doc = app.docs\n  owner : user = app.doc_owners(doc_id -> user_id)\n"
+            + "".join(f"  {n} : user = app.doc_{n}(doc_id -> user_id)\n" for n in rels)
+            + lines
+            + "  can edit = owner or editor\n"
+        )
+
+    def test_a_long_and_of_links_widened_is_found(self) -> None:
+        from authzlib import evaluate
+
+        # a dense world has as many rows of each type as it is large: every pair of them may hold the links
+        self.assertEqual(evaluate.World("s", 4, density=0.75).ids("doc"), ["1", "2", "3", "4"])
+        folder = (
+            "type folder = app.folders\n  head : user = app.folder_heads(folder_id -> user_id)\n  can sign = head\n"
+        )
+        signoffs = " and ".join(self.SIGNOFFS)
+        for also, lines, rest in (
+            ((), "", ""),
+            (("audit",), "", " and audit"),  # six links
+            (("audit", "board"), "", " and audit and board"),  # eight: no drawn world, nor one only as dense as them
+            ((), "  folder : folder = folder_id\n", " and folder.sign"),  # an arrow among them
+            (("blocked",), "", " and not blocked"),  # a deny
+        ):
+            policy = (folder if "folder" in lines else "") + self.approve(also, lines)
+            before = policy + f"  can approve = owner and {signoffs}{rest}\n"
+            after = policy + f"  can approve = (owner or editor) and {signoffs}{rest}\n"
+            self.assertFalse(self.same(before, after), rest)
+            invariant = "invariants\n  never doc: approve and not owner\n"
+            self.assertEqual(self.proofs(after + invariant), [False], rest)
+            self.assertEqual(self.proofs(before + invariant), [True], rest)
+        # an `and` written in another order is the same
+        policy = self.approve()
+        self.assertTrue(
+            self.same(
+                policy + f"  can approve = owner and {signoffs}\n",
+                policy + f"  can approve = {' and '.join(reversed(self.SIGNOFFS))} and owner\n",
+            )
+        )
+
+    def test_a_chain_deeper_than_the_drawn_worlds_is_found(self) -> None:
+        # a share that reaches three folders down, widened to four: only five folders in a row show it, and a drawn
+        # world has four at most; the worlds have chains one link longer than the policies read
+        from authzlib import evaluate, prove
+
+        levels = "".join(f"  can v{i} = v{i - 1} or parent.v{i - 1}\n" for i in (1, 2, 3))
+        # a project a folder may sit in, as its parent, holds nothing of its own
+        project = "type project = app.projects\n" + "".join(f"  can v{i} = nobody\n" for i in range(4))
+        for parent, other in (
+            ("folder = parent_id", ""),  # a column
+            ("folder = app.folder_links(folder_id -> parent_id)", ""),  # a link table
+            ("folder, project = (parent_type, parent_id)", project),  # a pair of columns, folders or projects
+        ):
+            policy = (
+                other + f"type folder = app.folders\n  parent : {parent}\n  owner : user = owner_id\n"
+                "  viewer : user shared\n  can share = owner\n  can v0 = viewer\n" + levels
+            )
+            before, after = policy + "  can view = v3\n", policy + "  can view = v3 or parent.v3\n"
+            pols = [parse_policy(self.HEAD + x, "p.authz") for x in (before, after)]
+            self.assertEqual((evaluate.reach(pols[:1]), evaluate.reach(pols)), (3, 4))
+            self.assertFalse(self.same(before, after), parent)
+            invariant = "invariants\n  never folder: view and not v3\n"
+            [r] = prove.prove(parse_policy(self.HEAD + after + invariant, "p.authz"))
+            self.assertEqual((r["holds"], r.get("size")), (False, 6), parent)
+            self.assertEqual(self.proofs(before + invariant), [True], parent)
+            # the same three levels, written out one more step, are the same
+            self.assertTrue(self.same(before, policy + "  can view = v2 or parent.v2\n"), parent)
 
     def test_a_type_one_side_has_alone_may_read_columns(self) -> None:
         # the worlds draw the columns both sides' simple conditions read: the side without the type has no rows of it
