@@ -1673,7 +1673,7 @@ class MultiGen(Gen):
     folders and projects nested in each other (inheritance across types),
     documents in either, user:*, anyone, link tokens, shares that start later or
     carry a caveat, and custom roles: a folder's from its org's column, a doc's
-    from the orgs a table lists (mt.doc_orgs, while active)."""
+    from the orgs a table lists (mt.doc_orgs, while active), a project's of any owner."""
 
     policy = "tests/multi.authz"
     schema = "tests/multi_schema.sql"
@@ -1746,11 +1746,19 @@ class MultiGen(Gen):
             # insert or a folder moved to another org makes it, it must give nothing
             "INSERT INTO authz.roles (id, owner_type, owner_id, object_type, name) VALUES "
             "(1, 'org', '1', 'folder', 'reader'), (2, 'org', '1', 'folder', 'writer'), (3, 'org', '2', 'folder', 'editor3');",
-            "INSERT INTO authz.role_permissions VALUES (1, 'view'), (2, 'view'), (2, 'edit'), (3, 'edit');",
+            # (the writer may archive: a role gives what an owner does there)
+            "INSERT INTO authz.role_permissions VALUES (1, 'view'), (2, 'view'), (2, 'edit'), (2, 'archive'), (3, 'edit');",
             # a doc's roles, one per org; view gives nothing on a doc, whose view doesn't name its roles
             "INSERT INTO authz.roles (id, owner_type, owner_id, object_type, name) VALUES "
             "(4, 'org', '1', 'doc', 'doc writer'), (5, 'org', '2', 'doc', 'doc writer');",
             "INSERT INTO authz.role_permissions VALUES (4, 'edit'), (5, 'edit'), (5, 'view');",
+            # a project's role, a team's (any owner's counts there), given on three projects to a user or a team
+            "INSERT INTO authz.roles (id, owner_type, owner_id, object_type, name) VALUES "
+            "(6, 'team', '1', 'project', 'project reader');",
+            "INSERT INTO authz.role_permissions VALUES (6, 'view');",
+            "INSERT INTO authz.shares (object_type, object_id, relation, subject_type, subject_id, subject_relation) "
+            f"VALUES ('project', '1', 'role:6', 'user', {lit(uid(3))}, ''), ('project', '2', 'role:6', 'team', '2', "
+            f"'member'), ('project', '4', 'role:6', 'user', {lit(uid(5))}, '');",
             "SELECT setval(pg_get_serial_sequence('authz.roles', 'id'), 10);",
         ]
         # ... and a few such from the start: folders 3, 6, 9 are org 1's, 1 and 4 org 2's, 2 nobody's (initial)
@@ -1759,6 +1767,12 @@ class MultiGen(Gen):
             f"VALUES ('folder', '{f}', 'role:{role}', 'user', {self.u()}, '') ON CONFLICT DO NOTHING;"
             for f, role in ((3, 3), (6, 3), (9, 3), (1, 1), (4, 2), (2, 2))
         ]
+        # and org 1's writer on its folder 12, where it counts (and gives archive), written out: no draw. To user 1,
+        # who doesn't own folder 12 in the first data of the seed the suites run: there the role alone gives archive
+        cross.append(
+            "INSERT INTO authz.shares (object_type, object_id, relation, subject_type, subject_id, subject_relation) "
+            f"VALUES ('folder', '12', 'role:2', 'user', {lit(uid(1))}, '') ON CONFLICT DO NOTHING;"
+        )
         # a doc's roles from the start, on docs whose orgs may be listed, not listed, or listed but not active
         docs = [
             "INSERT INTO authz.shares (object_type, object_id, relation, subject_type, subject_id, subject_relation) "
@@ -2211,6 +2225,11 @@ class CrossGen(Gen):
         s.append(f"INSERT INTO cx.closed VALUES ({r.randint(1, 4)});")
         s += [f"INSERT INTO cx.notes (id, author_id) VALUES ({i}, {self.maybe_user()});" for i in range(1, 5)]
         s += [f"{self.backing()} ON CONFLICT DO NOTHING;" for _ in range(6)]
+        # whatever the draws give: a note nobody wrote (one the changes never touch), and a folder among the backers
+        s += [
+            "INSERT INTO cx.notes (id, author_id) VALUES (100, NULL);",
+            "INSERT INTO cx.backings VALUES (1, 'folder', 2) ON CONFLICT DO NOTHING;",
+        ]
         for _ in range(4):
             for table in ("site_links", "site_regions"):
                 s.append(
