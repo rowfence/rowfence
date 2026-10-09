@@ -355,6 +355,17 @@ admin "lint finds a move by a pair of columns, and says the rule to add" "1" \
   "SELECT count(*) FROM authz.lint() WHERE object = 'app.gov_boxes.org_id, parent_id' AND problem LIKE '%add a rule such as \"update org_id, parent_id after : parent.edit\"'"
 PGOPTIONS="-c client_min_messages=error" psql -X -q -v ON_ERROR_STOP=1 -d "$DB" -f /tmp/authz_governance.sql >/dev/null
 PSQL -c "DROP TABLE app.gov_boxes" >/dev/null
+# the lookups are joins, which an index with a condition doesn't serve, nor one a failed CREATE INDEX CONCURRENTLY
+# left unfinished: lint names the lookup there, as rowstile indexes does
+PSQL -c "DROP INDEX app.team_members_user_id_idx" -c "CREATE INDEX team_members_some ON app.team_members (user_id) WHERE user_id > 0" >/dev/null
+admin "lint finds a lookup an index with a condition doesn't serve" "1" \
+  "SELECT count(*) FROM authz.lint() WHERE object = 'app.team_members.user_id' AND problem LIKE 'no index starts with this column%'"
+PSQL -c "DROP INDEX app.team_members_some" -c "INSERT INTO app.team_members VALUES (11, 1)" >/dev/null
+psql -X -q -d "$DB" -c "CREATE UNIQUE INDEX CONCURRENTLY team_members_user_id_idx ON app.team_members (user_id)" >/dev/null 2>&1
+admin "... and one a failed build left unfinished doesn't" "1" \
+  "SELECT count(*) FROM authz.lint() WHERE object = 'app.team_members.user_id' AND problem LIKE 'no index starts with this column%'"
+PSQL -c "DROP INDEX app.team_members_user_id_idx" -c "DELETE FROM app.team_members WHERE (team_id, user_id) = (11, 1)" \
+     -c "CREATE INDEX team_members_user_id_idx ON app.team_members (user_id)" >/dev/null
 
 echo "-- retention"
 POS=$(PSQL -c "SELECT max(pos) FROM authz.changes")

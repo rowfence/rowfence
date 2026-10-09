@@ -6469,9 +6469,10 @@ WHERE w.who IS NOT NULL AND n.nspname !~ '^pg_(toast_)?temp_' LOOP
     CONTINUE WHEN to_regclass(r.tbl) IS NULL;
     -- a plain view can't have an index: the tables under it answer the lookups
     CONTINUE WHEN (SELECT c.relkind FROM pg_class c WHERE c.oid = to_regclass(r.tbl)) = 'v';
-    -- an index whose first columns are these (one, or a composite key's, in any order)
+    -- an index whose first columns are these (one, or a composite key's, in any order): a finished one, with no
+    -- condition (the lookups are joins, which a partial index doesn't serve), as rowstile indexes counts them
     IF NOT EXISTS (SELECT 1 FROM pg_index i
-                   WHERE i.indrelid = to_regclass(r.tbl)
+                   WHERE i.indrelid = to_regclass(r.tbl) AND i.indisvalid AND i.indpred IS NULL
                      AND (SELECT array_agg(a.attname::text ORDER BY a.attname)
                           FROM unnest((i.indkey::int2[])[0:cardinality(string_to_array(r.col, ', ')) - 1]) k
                           JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = k)
