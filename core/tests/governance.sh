@@ -342,6 +342,19 @@ admin "lint finds a move nothing checks the destination of" "1" \
 PGOPTIONS="-c client_min_messages=error" psql -X -q -v ON_ERROR_STOP=1 -d "$DB" -f /tmp/authz_governance.sql >/dev/null
 admin "...and none with the rule back" "0" \
   "SELECT count(*) FROM authz.lint() WHERE problem LIKE 'moves a row under another%'"
+# a row keyed by two columns, moved by the pair: lint names the pair and the rule to add (it failed on the pair as
+# one column's name, and so did applying such a policy)
+PSQL -c "CREATE TABLE app.gov_boxes (org_id bigint, id bigint, parent_id bigint, owner_id bigint, PRIMARY KEY (org_id, id))" \
+     -c "GRANT SELECT, UPDATE ON app.gov_boxes TO app_user" >/dev/null
+{ sed '/^test$/,$d' example/docs.authz
+  printf 'type box = app.gov_boxes (org_id, id)\n  parent : box  = [org_id, parent_id]\n  owner  : user = owner_id\n  can edit = owner or parent.edit\n'
+  printf 'rules app.gov_boxes\n  select : edit\n  update : edit\n'; } > /tmp/authz_boxes.authz
+python3 compile_policy.py /tmp/authz_boxes.authz > /tmp/authz_boxes.sql &&
+PGOPTIONS="-c client_min_messages=error" psql -X -q -v ON_ERROR_STOP=1 -d "$DB" -f /tmp/authz_boxes.sql >/dev/null
+admin "lint finds a move by a pair of columns, and says the rule to add" "1" \
+  "SELECT count(*) FROM authz.lint() WHERE object = 'app.gov_boxes.org_id, parent_id' AND problem LIKE '%add a rule such as \"update org_id, parent_id after : parent.edit\"'"
+PGOPTIONS="-c client_min_messages=error" psql -X -q -v ON_ERROR_STOP=1 -d "$DB" -f /tmp/authz_governance.sql >/dev/null
+PSQL -c "DROP TABLE app.gov_boxes" >/dev/null
 
 echo "-- retention"
 POS=$(PSQL -c "SELECT max(pos) FROM authz.changes")
