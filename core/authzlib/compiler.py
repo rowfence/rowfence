@@ -612,6 +612,7 @@ class Core:
                 if (rule.table, c) in masked:
                     fail(rule.loc, f"{rule.table}.{c} is masked twice (also on {masked[rule.table, c]})", "AZ109")
                 masked[rule.table, c] = rule.loc
+        shows: dict[str, str] = {}  # each view, as the SQL names it -> the table it shows
         for table, view in self.pol.views.items():
             view_loc = self.pol.view_locs[table]
             if not any(r.table == table and r.command == "select" and not r.columns for r in self.rules):
@@ -620,6 +621,14 @@ class Core:
                 )
             if view == table or any(t.table == view for t in self.types.values()):
                 fail(view_loc, f"{view} is a table of the policy; name a new view", "AZ402")
+            other = shows.setdefault(qt(view), table)
+            if other != table:
+                fail(
+                    view_loc,
+                    f"{view} is already the view of {other} ({self.pol.view_locs[other]}): give {table} a view of "
+                    f"its own",
+                    "AZ109",
+                )
         for sc in self.pol.scopes.values():
             for kind, qual, word in sc.items:
                 if kind == "cmd" and qual and not any(t.table == qual for t in self.types.values()):
