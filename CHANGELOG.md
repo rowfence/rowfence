@@ -125,6 +125,10 @@ Each release upgrades from the one before it. How releases are numbered and made
   the second invariant, and so on): `authz.check_invariants()` and the policy's tests said it held. Where only a
   mask named such a relation, applying failed instead. Each invariant has a view of its own now. **Upgrading**:
   apply the policy again (or the next migration).
+- `authz.explain_rule` for an update, on a table with an `update after` rule for the whole row, gave the
+  `update` rule after the change too, which Postgres doesn't check there: it could say "no" of an update that
+  goes through. After the change it gives the `update after` rule alone. **Upgrading**: apply the policy again
+  (or the next migration).
 - Ctrl-C while `rowstile sql` (or `can`, `explain`, `perms`, `list`, `who`, `explain-rule`) waited on a statement,
   or while `rowstile review --db` worked on its database, stopped only once the statement had run its course. It
   stops at once now and ends the statement on the server, as the other commands did.
