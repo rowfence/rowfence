@@ -55,6 +55,11 @@ for args in "migrate --check" "migrate"; do
     *) bad "$args on a newer lock" "$out";; esac
 done
 out=$(CLI migrate --check --downgrade 2>&1); rc=$?; [ $rc -eq 0 ] && ok "... unless asked: --downgrade" || bad "--downgrade" "$out"
+# a newer version may write words this one doesn't know on an object's line: they are left aside
+sed -i '/^function /s/$/ someday=1/' "$P/db/policy.lock"
+out=$(CLI migrate --check --downgrade 2>&1); rc=$?
+[ $rc -eq 0 ] && grep -q ' someday=1$' "$P/db/policy.lock" && ok "... which leaves aside the words it doesn't know on the lock's lines" ||
+  bad "words a newer lock has" "$out"
 cp "$T/lock" "$P/db/policy.lock"
 grep -q '^> type folder: can edit = share or editor or (parent.edit and {inherit})$' "$P/db/policy.lock" &&
   ok "the lock file starts with the policy's lines" || bad "lock meaning" "$(head -12 "$P/db/policy.lock")"
@@ -101,6 +106,14 @@ out=$(migrate_db "${DB}_2" "$P/db/migrations") && [ "$(PSQL -d "${DB}_2" -c "SEL
   ok "the migration for what was pushed applies to a database that took the migrations" || bad "migration after push" "$out $(ls "$P/db/migrations")"
 out=$(PGOPTIONS="-c client_min_messages=error" psql -X -q -1 -v ON_ERROR_STOP=1 -d "$DB" -f "$(ls "$P"/db/migrations/*.sql | sort | tail -n 1)" 2>&1)
 case "$out" in *"this database already holds what this migration brings"*"prisma migrate resolve --applied"*"alembic stamp head"*) ok "... but not to the pushed one, which holds it already: it says so, and what to tell the migration tool";; *) bad "guard after push" "$out";; esac
+# something the policy in force made is gone (a rule's policy dropped by hand): push applies the whole policy, which
+# makes it again, where the migration from what the record says would leave it out
+PSQL -c "DROP POLICY authz_select ON app.files" >/dev/null
+out=$(CLI push 2>&1)
+case "$out" in *"policy.authz: applied (the whole policy)")
+  [ "$(PSQL -c "SELECT count(*) FROM pg_policy WHERE polrelid = 'app.files'::regclass AND polname = 'authz_select'")" = 1 ] &&
+  ok "push where a rule's policy was dropped by hand: the whole policy, which makes it again" || bad "push after a dropped policy: it is still gone";;
+  *) bad "push after a dropped policy" "$out";; esac
 # removing the policy doesn't make a database a development one: what it took is still on record
 fresh "${DB}_4"
 PGOPTIONS="-c client_min_messages=error" psql -X -q -1 -v ON_ERROR_STOP=1 -d "${DB}_4" -f "$first" >/dev/null 2>&1
@@ -144,6 +157,16 @@ case "$out" in *"must run in one transaction"*"[AZ615]"*)
 out=$(migrate_db "${DB}_2" "$P/db/migrations") && [ "$(PSQL -d "${DB}_2" -c "SELECT authz.verify()")" = t ] &&
   [ "$(PSQL -d "${DB}_2" -c "SELECT count(*) FROM authz_int.folder__linked_into_parent__tree WHERE descendant = 6 AND ancestor = 20")" = 1 ] &&
   ok "the second swaps it in, with what the app wrote meanwhile" || bad "swap" "$out"
+# a development database that took the first of the two, then a push: it holds the build's lock, not the one the
+# policy in force was recorded with, so push applies the whole policy, and the tree built beside goes
+PGOPTIONS="-c client_min_messages=error" psql -X -q -1 -v ON_ERROR_STOP=1 -d "$DB" -f "$build" >/dev/null 2>&1 ||
+  bad "the first of the two on the development database"
+out=$(CLI push 2>&1)
+case "$out" in *"policy.authz: applied (the whole policy)")
+  [ "$(PSQL -c "SELECT authz.verify(), to_regclass('authz_int.next_trees') IS NULL")" = "t|t" ] &&
+  ok "push after the first of two migrations: the whole policy, and the tree built beside is gone" ||
+  bad "push after the first of two: state" "$(PSQL -c "SELECT authz.verify(), to_regclass('authz_int.next_trees')")";;
+  *) bad "push after the first of two migrations" "$out";; esac
 out=$(CLI migrate --one-phase --check 2>&1); [ $? -eq 0 ] && ok "and the lock file is where both left it" || bad "lock after two" "$out"
 
 echo "-- rowstile dev writes the migration once you stop editing"
@@ -226,6 +249,16 @@ PY
       ;;
   esac
 done
+
+echo "-- a policy that holds the quote its migration records it in"
+Q="$T/q"; mkdir -p "$Q"
+{ printf -- '-- not a quote: $authz_policy$ (nor $authz_files$)\n'; cat "$P/db/policy.authz"; } > "$Q/policy.authz"
+out=$( cd "$Q" && python3 "$OLDPWD/cli/rowstile_cli.py" migrate policy.authz --tool sql --dir m 2>&1 ) || bad "migrate a policy that holds the quote" "$out"
+fresh "${DB}_3"
+out=$(migrate_db "${DB}_3" "$Q/m") &&
+  [ "$(PSQL -d "${DB}_3" -c "SELECT policy FROM authz.policy_versions ORDER BY id DESC LIMIT 1")" = "$(cat "$Q/policy.authz")" ] &&
+  ok "a policy that holds the quote its migration records it in: the migration applies, and records it as it is" ||
+  bad "a policy that holds the quote" "$out"
 
 echo "-- tree writes that wait while a migration adds a tree for another type"
 # The migration gives boxes a tree and never touches folders. Two folder moves that together make a loop start

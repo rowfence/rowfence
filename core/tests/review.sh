@@ -124,6 +124,38 @@ case "$out" in "Base     The policy at the base is written in the language befor
   [ $rc -eq 0 ] && ok "a base in the language before: read as that version meant it, and said" || bad "base before: exit" "$rc";;
   *) bad "a base in the language before" "$out";; esac
 
+echo "-- the review database"
+G checkout -q -- db && G clean -q -fd db
+# the tests alone change: nothing to migrate, and they run on the review data
+sed -i 's/user $bo cannot view file $f/user $bo can view file $f/' "$P/db/tests/docs.authz"
+out=$(CLI --db "dbname=$DB" review --base main 2>&1)
+case "$out" in *"Tests    "*" checks pass, 1 fail. 1 check changed what it expects."*"Deploy   no migration: nothing the database holds changes."*)
+  ok "a pull request that changes the tests alone: nothing to migrate, and they run on the review data";; *) bad "the tests alone" "$out";; esac
+G checkout -q -- db
+# a project that keeps no migrations (rowstile apply): the pull request's policy is applied whole on the review data
+N="$T/nolock"; mkdir -p "$N/db/tests"
+sed '/^test$/,$d' example/docs.authz > "$N/db/policy.authz"; cp example/docs.test.authz "$N/db/tests/docs.authz"
+printf 'policy = "db/policy.authz"\ntests = ["db/tests/*.authz"]\n' > "$N/rowstile.toml"
+{ git -C "$N" init -q -b main && git -C "$N" config user.email t@example.com && git -C "$N" config user.name t &&
+  git -C "$N" add -A && git -C "$N" commit -q -m base; } || bad "setting up a repository without migrations"
+sed -i 's/can view  = edit or viewer or (parent.view and {inherit})/can view  = edit or viewer or parent.view/' "$N/db/policy.authz"
+out=$( (cd "$N" && python3 "$OLDPWD/cli/rowstile_cli.py" --db "dbname=$DB" review --base main) 2>&1)
+case "$out" in *"Tests    9 checks pass, 1 fail."*"Deploy   no lock file, so no migrations"*)
+  [ "$(PSQL -c "SELECT count(*) || '/' || max(lock) FROM authz.policy_versions")" = "$before" ] &&
+  ok "a project without migrations: the policy applied whole on the review data, its tests run there, all undone" ||
+  bad "a project without migrations: the database changed";; *) bad "a project without migrations" "$out";; esac
+# a review database a policy was pushed to since: the migrations from the base's lock refuse to run there
+sed -e '/^test$/,$d' -e 's/^  can share = owner or folder.share$/  can share = owner or folder.share\n  can print = view/' \
+  example/docs.authz > "$T/pushed.authz"
+CLI --db "dbname=$DB" push --development "$T/pushed.authz" >/dev/null 2>&1 || bad "a push to the review database"
+sed -i 's/can view  = edit or viewer or (parent.view and {inherit})/can view  = edit or viewer or parent.view/' "$P/db/policy.authz"
+sleep 1; CLI migrate >/dev/null
+out=$(CLI --db "dbname=$DB" review --base main 2>&1)
+case "$out" in *"Tests    not run: the migration fails: rowstile: this migration changes the policy the migration before it left"*"It fails on the review database: rowstile: this migration changes"*"[AZ607]"*)
+  ok "a review database not where the base's lock says: the migrations refuse it, and Tests and Deploy say so";;
+  *) bad "a review database not where the base's lock says" "$out";; esac
+G checkout -q -- db && G clean -q -fd db
+
 echo "-- the pull request that adds the policy: none at the base"
 F="$T/first"; mkdir -p "$F/db"
 { git -C "$F" init -q -b main && git -C "$F" config user.email t@example.com && git -C "$F" config user.name t &&

@@ -210,6 +210,16 @@ def main() -> None:
         lines and all(": " in x for x in lines) and any(x.startswith("folder 1 view: ") for x in lines),
         lines[:5],
     )
+    try:
+        work(lambda d: database.snapshot(d, limit=3))
+        refused = ""
+    except database.Error as e:
+        refused = str(e)
+    check(
+        "more people in the data than a snapshot is for: refused, saying how many",
+        re.fullmatch(r"\d+ people and principals: a snapshot is for small review data \(at most 3\)", refused),
+        refused,
+    )
     with tempfile.TemporaryDirectory() as tmp:
         snap = os.path.join(tmp, "access.snapshot")
         rc, out = cli(db, "snapshot", "--out", snap)
