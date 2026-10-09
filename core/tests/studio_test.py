@@ -707,6 +707,41 @@ def main() -> None:
     finally:
         gone.stop()
 
+    print("-- the policy taken out while Studio runs (rowstile remove)")
+    rc, out = cli(db, "remove", "--yes")
+    if rc:
+        raise SystemExit(out)
+    ro = studio.Studio(dsn, None, policy, writable=False, port=0, read_policy=rowstile_cli.read_policy)
+    rw = studio.Studio(dsn, None, policy, writable=True, port=0, read_policy=rowstile_cli.read_policy)
+    ro.start(background=True)
+    rw.start(background=True)
+    try:
+        for label, s, path in (
+            ("the overview", ro, "/api/overview"),
+            ("the graph", ro, "/api/graph"),
+            ("the rows", ro, "/api/rows?table=app.folders&as=user:2"),
+            ("the shares and requests", ro, "/api/shares"),
+            ("why", ro, "/api/why?as=user:3&type=folder&id=3&perm=edit"),
+            ("why, trying changes", rw, "/api/why?as=user:3&type=folder&id=3&perm=edit"),
+            ("the access diff", rw, "/api/diff"),
+            ("a test", ro, "/api/test?as=user:3&type=folder&id=3&perm=edit"),
+        ):
+            status, e = Client(s).call(path)
+            check(
+                f"{label}: no policy is applied, and how to apply one",
+                status == 400 and e.get("detail") == "no policy is applied [AZ609] (rowstile apply db/policy.authz)",
+                (status, e),
+            )
+    finally:
+        ro.stop()
+        rw.stop()
+    rc, out = cli(db, "studio", "--port", str(free_port()))
+    check(
+        "rowstile studio on a database with no policy in force: says so, and how to apply one, exit 1",
+        (rc, out) == (1, "rowstile studio: no policy is applied [AZ609]\nHINT: rowstile apply db/policy.authz\n"),
+        (rc, out),
+    )
+
     print("-- Studio on a table with a masked column (tests/multi.authz: mask body : edit)")
     masks = f"{db}_masks"
     subprocess.run(["dropdb", "--if-exists", masks], capture_output=True)
@@ -854,6 +889,71 @@ def main() -> None:
     finally:
         ks.stop()
     subprocess.run(["dropdb", "--if-exists", keys], capture_output=True)
+
+    print("-- Studio through an app role the owner may not take, and with no rules")
+    # since PostgreSQL 16 a role that makes another gets ADMIN on it, not SET (the suites' owner has
+    # createrole_self_grant, which would hide it): as on managed Postgres until the owner grants itself the role
+    plain, app = f"{db}_plain", "authz_studio_plain_app"
+    subprocess.run(["dropdb", "--if-exists", plain], capture_output=True)
+    psql("postgres", f"DROP ROLE IF EXISTS {app}")
+    subprocess.run(["createdb", plain], check=True)
+    subprocess.run(
+        [
+            "psql",
+            "-X",
+            "-q",
+            "-v",
+            "ON_ERROR_STOP=1",
+            "-d",
+            plain,
+            "-c",
+            f"CREATE ROLE {app}",
+            "-c",
+            "CREATE SCHEMA app; CREATE TABLE app.users (id bigint PRIMARY KEY); "
+            "CREATE TABLE app.notes (id bigint PRIMARY KEY, owner_id bigint NOT NULL REFERENCES app.users, body text); "
+            f"GRANT USAGE ON SCHEMA app TO {app}; GRANT SELECT ON app.users TO {app}; "
+            f"GRANT SELECT, UPDATE ON app.notes TO {app}; "
+            "INSERT INTO app.users VALUES (1), (2); INSERT INTO app.notes VALUES (1, 1, 'mine')",
+        ],
+        env=dict(os.environ, PGOPTIONS="-c createrole_self_grant= -c client_min_messages=error"),
+        check=True,
+        capture_output=True,
+    )
+    me = psql(plain, "SELECT current_user")
+    types = (
+        f"app role {app}\ntype user = app.users\ntype note = app.notes\n  owner : user = owner_id\n  can edit = owner\n"
+    )
+    with tempfile.TemporaryDirectory() as tmp:
+        for label, text, want, said in (
+            (
+                "the rows, through an app role the owner may not take: what to grant, as the other commands say it",
+                types + "rules app.notes\n  select : edit\n  update : edit\n",
+                400,
+                f"{me} may not switch to the app role {app} (SET ROLE), and this looks at the data as the app does "
+                f'[AZ618] (once, as {me} if it made {app}, else as the role that did or a superuser: GRANT "{app}" TO "{me}")',
+            ),
+            (
+                "a policy with no rules: no app role to look through, and says so",
+                types,
+                409,
+                "no policy with rules is applied, so there is no app role to look through",
+            ),
+        ):
+            path = os.path.join(tmp, "plain.authz")
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write(text)
+            rc, out = cli(plain, "apply", path)
+            if rc:
+                raise SystemExit(out)
+            s = studio.Studio(f"dbname={plain}", None, path, port=0, read_policy=rowstile_cli.read_policy)
+            s.start(background=True)
+            try:
+                status, e = Client(s).call("/api/rows?table=app.notes&as=user:1")
+                check(f"{label} ({want})", status == want and e.get("detail") == said, (status, e))
+            finally:
+                s.stop()
+    subprocess.run(["dropdb", "--if-exists", plain], capture_output=True)
+    psql("postgres", f"DROP ROLE IF EXISTS {app}")
 
     print("-- rowstile why through a table that names its rows' type (tests/cross.authz: a project's backers)")
     cross = db + "_cross"

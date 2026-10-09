@@ -223,18 +223,11 @@ class Studio:
             )
             more, data = len(data) > ROWS, data[:ROWS]
             total = db.rows(f"SELECT count(*) AS n FROM {qt(table)}")[0]["n"]
-            # as the app role, signed in as them: which of these rows they see
+            # as the app role, signed in as them: which of these rows they see (the owner may take it: AZ618)
             role = self.app_role(db)
+            database.may_take(db, role)
             self.act_as(db, who)
-            try:
-                with database.savepoint(db, "authz_studio_role"):
-                    db.rows(f'SET LOCAL ROLE "{role}"')
-            except db.errors:
-                raise Problem(
-                    f"Studio looks at the rows through the app role, {role}, and this connection can't take it: "
-                    f"GRANT {role} TO the role Studio connects as (the tables' owner)",
-                    409,
-                ) from None
+            db.rows(f"SET LOCAL ROLE {quoted(role)}")
             ids = [str(r["authz_id"]) for r in data]
             theirs: dict[str, Message] = {}
             if view and t:
@@ -335,10 +328,7 @@ class Studio:
                 ],
             }
 
-        try:
-            return self.work(run, write=True)  # each change is undone in its savepoint either way
-        except database.Error as e:
-            raise Problem(str(e)) from e
+        return self.work(run, write=True)  # each change is undone in its savepoint either way
 
     def graph(self, q: Query) -> Message:
         return self.work(lambda db: {"mermaid": database.graph(*database.applied(db))})
@@ -377,13 +367,11 @@ class Studio:
             shown: list[Json] = [dict(r) for r in rows[:500]]
             return {"same_text": in_force == text, "summary": summary, "rows": shown, "truncated": len(rows) > 500}
 
-        try:
-            return self.work(run, write=True)  # the diff undoes itself (a savepoint)
-        except database.Error as e:
-            raise Problem(str(e)) from e
+        return self.work(run, write=True)  # the diff undoes itself (a savepoint)
 
     def shares(self, q: Query) -> Message:
         def run(db: Db) -> Message:
+            database.applied(db)  # a policy taken out since Studio started is said, as the other tabs say it
             db.rows("SELECT authz.act_as(NULL, NULL)")
             shares: list[Json] = []
             if q.get("type") and q.get("id"):
