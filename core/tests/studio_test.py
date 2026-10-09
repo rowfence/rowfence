@@ -263,6 +263,10 @@ def main() -> None:
             "... and a request for localhost (not a DNS name pointed here)",
             c.call("/api/overview", host="evil.example:4983")[0] == 403,
         )
+        check(
+            "... a page opened at localhost by hand is answered too",
+            c.call("/api/overview", host=f"localhost:{ro.port}")[0] == 200,
+        )
         check("no file outside the page's folder", c.call("/..%2fstudio.py")[0] == 404 and c.call("/.hidden")[0] == 404)
         # a path as no browser sends it: backslashes, a drive letter (on Windows these named any file on the disk)
         for raw in ("/x\\..\\..\\studio.py", "/C:\\Windows\\win.ini", "/\\Windows\\win.ini", "/studio.py"):
@@ -639,8 +643,8 @@ def main() -> None:
     print("-- rowstile studio, the command")
     p, line, at = serving(db)
     check(
-        "it says where it is, with a token, and that it is read-only",
-        line == f"rowstile studio: http://localhost:{at.port}/?token={at.token}  (read-only; Ctrl-C stops it)\n"
+        "it says where it is (the address it listens on), with a token, and that it is read-only",
+        line == f"rowstile studio: http://127.0.0.1:{at.port}/?token={at.token}  (read-only; Ctrl-C stops it)\n"
         and len(at.token) >= 20,
         line,
     )

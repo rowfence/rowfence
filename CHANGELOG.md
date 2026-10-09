@@ -102,6 +102,9 @@ Each release upgrades from the one before it. How releases are numbered and made
   as it does on Linux. On a port another program listens on, it says it didn't start and how to choose another
   port, where Windows let it start beside the other program; and no other program can bind its port while it
   runs.
+- Studio's URL names 127.0.0.1, where it listens: `http://127.0.0.1:4983/?token=...`, where it said
+  `localhost`. To a browser that is another address, so the page's remembered "view as" choice starts fresh
+  once. A page opened at `localhost` by hand is still answered.
 - `rowstile studio` printed a Python traceback when it couldn't start: on a database it can't reach (a server
   that isn't running, a database that isn't there), connected as a role that can't read rowstile's tables (an
   app's own `DATABASE_URL`, say), and on a port another program listens on. It says "can't connect: ..." as the
