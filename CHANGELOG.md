@@ -451,6 +451,10 @@ Each release upgrades from the one before it. How releases are numbered and made
   folders or of the files in them; making someone an org's admin didn't say they could then impersonate its
   members. It says every permission the change gives them, on every object, and the change that gives the least
   comes first.
+- Where a group inside a group is said by the group's own row (`member : team#member = app.teams(parent_id ->
+  id)`), `rowstile why` tried to add a row for a team that is there, which can't be done: "could not be tried:
+  add team 10 to app.teams for team 11 (null value in column "org_id" ...)". It doesn't try that: putting a team
+  inside another moves it out of where it is.
 
 ## 0.1.0 (alpha)
 
