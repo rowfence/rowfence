@@ -6395,7 +6395,17 @@ class Why(unittest.TestCase):
         from authzlib.parse import Loc
 
         way = grant.Way(
-            [grant.Change("link", "add user 2 to app.team_members for team 10", "INSERT ...", Loc(None, 4), 2)],
+            [
+                grant.Change(
+                    "link",
+                    "add user 2 to app.team_members for team 10",
+                    "INSERT ...",
+                    Loc(None, 4),
+                    2,
+                    ("table", "app.team_members"),
+                    ("user", "2", ""),
+                )
+            ],
             error='null value in column "added_by" of relation "team_members" violates not-null constraint\nDETAIL: ...',
         )
         answer = grant.Answer(False, ["no   team.member"], "view = team.member  (line 7)", untried=[way])
@@ -6483,6 +6493,84 @@ class Why(unittest.TestCase):
             ],
         )
 
+    def test_what_a_change_can_reach_is_read_from_the_policy(self) -> None:
+        """What each permission reads, through relations, arrows and groups: a change is counted only for the
+        permissions that read what it writes (never fewer: a condition that reads more than its row, a caveat or a
+        where calling a function reads anything), and what is read through a `not` is marked so."""
+        from authzlib import grant
+        from authzlib.parse import Loc
+
+        c = database.policy_compiler(
+            errors_prelude() + "type team = app.teams\n"
+            "  member : user = app.team_members(team_id -> user_id)\n"
+            "type org = app.orgs\n"
+            "  member : user = app.org_members(org_id -> user_id) where {app.active(user_id)}\n"
+            "  can manage_roles = member\n"
+            "type folder = app.folders where {not deleted}\n"
+            "  org     : org    = app.folder_orgs(folder_id -> org_id)\n"
+            "  parent  : folder = parent_id\n"
+            "  owner   : user   = owner_id\n"
+            "  viewer  : user, team#member shared by view\n"
+            "  blocked : user   = app.blocks(folder_id -> user_id)\n"
+            "  roles   : user from org\n"
+            "  can barred = blocked or parent.barred\n"
+            "  can view   = (owner or viewer or roles or parent.view) and not barred\n"
+            "  can audit  = {exists (select 1 from app.audits)}\n"
+            "type file = app.files\n"
+            "  folder : folder = folder_id\n"
+            "  can view = folder.view\n"
+        )
+        r = grant.reads(c)
+        view = r[("folder", "view")]
+        self.assertEqual(
+            view,
+            {
+                (("share", "folder", "viewer"), False),  # a share of the relation
+                (("column", "app.team_members", "team_id"), False),  # a group shared with: who is in it
+                (("column", "app.team_members", "user_id"), False),
+                (("column", "app.folders", "owner_id"), False),  # a column
+                (("table", "app.folders"), False),  # the type's where
+                (("column", "app.blocks", "folder_id"), True),  # through the deny
+                (("column", "app.blocks", "user_id"), True),
+                (("column", "app.folders", "parent_id"), True),  # ... which inherits
+                (("column", "app.folders", "parent_id"), False),  # (as view does)
+                (("table", "app.folders"), True),
+                # custom roles count only where the org they belong to is the object's: they read the folder's org
+                (("column", "app.folder_orgs", "folder_id"), False),
+                (("column", "app.folder_orgs", "org_id"), False),
+            },
+        )
+        self.assertEqual(r[("file", "view")] - view, {(("column", "app.files", "folder_id"), False)})
+        self.assertEqual(r[("org", "member")], {(grant.ANY, False)})  # a where that calls a function
+        self.assertIn((grant.ANY, False), r[("folder", "audit")])  # a condition with a subquery
+        g = grant.Grants(c, cast("grant.Db", None), "user", "4")
+
+        def change(writes: grant.Fact) -> grant.Change:
+            return grant.Change("link", "", "", Loc(None, 1), 2, writes, ("user", "4", ""))
+
+        anything = {("org", "manage_roles"), ("folder", "audit")}
+        for writes, reached in (
+            # a new row of a link table: what reads it, and what reads anything
+            (("rows", "app.blocks"), {("folder", "barred"), ("folder", "view"), ("file", "view")}),
+            # a column: what reads it, or the whole row (the type's where)
+            (("columns", "app.files", "folder_id"), {("file", "view")}),
+            (("columns", "app.folders", "owner_id"), {("folder", "barred"), ("folder", "view"), ("file", "view")}),
+            # a column no relation reads
+            (("columns", "app.blocks", "note"), set()),
+            (("columns", "app.files", "name"), set()),
+            (("share", "folder", "viewer"), {("folder", "view"), ("file", "view")}),
+        ):
+            with self.subTest(writes=writes):
+                self.assertEqual(set(g.reach([change(writes)])), reached | anything)
+        # a caveat on a share is a condition: what is shared may read anything
+        c = database.policy_compiler(
+            errors_prelude() + "caveat business = {authz.ctx('mode') = 'business'}\n"
+            "type doc = app.docs\n"
+            "  viewer : user shared by view\n"
+            "  can view = viewer\n"
+        )
+        self.assertEqual(grant.reads(c)[("doc", "view")], {(("share", "doc", "viewer"), False), (grant.ANY, False)})
+
     def test_a_loop_of_links_is_followed_once(self) -> None:
         """Folders shown inside each other (links may loop): the search comes back to the folder it started from
         and stops there, so each way is found and each link looked up once (not again until the depth runs out)."""
@@ -6502,6 +6590,8 @@ class Why(unittest.TestCase):
 
         class Loop(grant.Grants):
             def linked(self, t: Type, r: Relation, src: Source, st: str, sr: str | None, oid: str) -> list[str]:
+                if r.name == "owner":
+                    return []  # (the folders' owners, read to see whether a change would change anything)
                 looked.append(oid)
                 return ["2" if oid == "1" else "1"]  # folder 1 is shown in folder 2, and 2 in 1
 

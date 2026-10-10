@@ -501,6 +501,23 @@ Each release upgrades from the one before it. How releases are numbered and made
 - Studio, where it may not write, gave a service no explanation of why not, where the command gives the
   database's, and listed changes for an object that isn't there. It answers as the command does, the changes
   listed and none tried.
+- `rowstile why` judged a relation's `shared if` with nobody signed in. A condition that reads who shares
+  (`shared if {subject_id <> authz.uid()::text}`) then refused every share, and `why` offered none, where
+  `authz.share` run by the object's owner makes it. It judges it as `authz.share` does, as someone who may share
+  the object. Where nobody may share the object, or nobody who may passes the condition, it offers no share
+  there and says why in a note.
+- What a change takes from other people covered only the permission asked about, on the object asked about:
+  making someone else the owner of a doc said nothing of the share, edit and archive its owner loses. `rowstile
+  why` (and Studio, where it may write) says every permission they lose, on the object and on others: "(takes
+  archive, edit, share on it from 1 person)". The people counted are those in what the change replaces (the
+  owner a column names now) and, where a deny reads what it gives, those in the group it gives it to.
+- `rowstile why` and Studio offered changes that change nothing: setting the owner an object already has, beside
+  the change that grants it ("set owner_id of room 1 to 1 and ..."), or on its own where Studio may not write;
+  adding a link's row that is there ("could not be tried: ... duplicate key"); a share that is there. They offer
+  only changes that change something.
+- To say all a change gives, `rowstile why` (and Studio, where it may write) counted every permission of every
+  type before and after each change. It counts only the permissions a change can reach: those that read what it
+  writes, worked out from the policy.
 
 ## 0.1.0 (alpha)
 
