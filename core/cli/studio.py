@@ -134,8 +134,10 @@ class Studio:
             raise Problem(cant_connect(e, self.dsn), 503) from None
 
     def work(self, fn: Callable[[Db], T], write: bool = False) -> T:
-        """fn(db) in one transaction: READ ONLY and rolled back, unless this is a write Studio may make."""
-        from rowstile_cli import Db
+        """fn(db) in one transaction: READ ONLY and rolled back, unless this is a write Studio may make. A session
+        the server ends, or a connection that closes under it, is said as the command says it (503); each request
+        connects again."""
+        from rowstile_cli import Db, abandon
 
         conn = self.connect()
         try:
@@ -143,10 +145,16 @@ class Studio:
             try:
                 out = fn(Db(conn))
             except BaseException:
-                conn.execute("ROLLBACK")
+                abandon(conn)  # on a connection that is gone, nothing more: what ended the request is what is said
                 raise
             conn.execute("COMMIT" if (self.writable and write) else "ROLLBACK")
             return out
+        except pgwire.PgError as e:
+            if e.fields.get("S") not in ("FATAL", "PANIC"):
+                raise  # the session goes on: the database's answer
+            raise Problem(f"lost the database: {e.message}", 503) from None
+        except (pgwire.ProtocolError, OSError) as e:  # the files Studio reads, it reads before it connects
+            raise Problem(f"lost the database: {e}", 503) from None
         finally:
             conn.close()
 
