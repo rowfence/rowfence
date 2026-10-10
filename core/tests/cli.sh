@@ -314,7 +314,9 @@ for _ in $(seq 40); do [ "$(PSQL -c "SELECT count(*) FROM pg_locks WHERE relatio
 differ=$!
 for _ in $(seq 40); do w=$(PSQL -c "SELECT pid FROM pg_stat_activity WHERE datname = '$DB' AND application_name = 'rowstile' AND wait_event_type = 'Lock' LIMIT 1"); [ -n "$w" ] && break; sleep 0.25; done
 [ -n "$w" ] && PSQL -c "SELECT pg_terminate_backend($w)" >/dev/null
-wait "$differ"; wait "$locker"; out=$(cat "$T/diff.out")
+wait "$differ"
+PSQL -c "SELECT pg_cancel_backend(pid) FROM pg_stat_activity WHERE datname = '$DB' AND query = 'SELECT pg_sleep(6)'" >/dev/null
+wait "$locker"; out=$(cat "$T/diff.out")
 case "$out" in *Traceback*) bad "a connection lost inside a savepoint gives a traceback" "${out: -300}";;
   "lost the database: "*) [ "$(cat "$T/diff.rc")" = 2 ] && ok "... and while the command waits inside a savepoint: lost the database, exit 2" || bad "lost in a savepoint: exit" "$(cat "$T/diff.rc")";;
   *) bad "lost in a savepoint" "$out";; esac

@@ -136,6 +136,8 @@ psql -X -q -d postgres -c "DROP ROLE authz_apply_web" >/dev/null || bad "droppin
 psql -X -q -d "$DB" -c "BEGIN" -c "LOCK app.files IN ACCESS SHARE MODE" -c "SELECT pg_sleep(20)" -c "COMMIT" >/dev/null 2>&1 &
 sleep 1; t=$SECONDS
 run apply "$T/docs.authz" --force
+# (the holder outlasts apply's 10 s; once apply has given up, it lets go)
+PSQL -c "SELECT pg_cancel_backend(pid) FROM pg_stat_activity WHERE datname = '$DB' AND query = 'SELECT pg_sleep(20)'" >/dev/null
 case "$out" in *"lock timeout"*) [ $((SECONDS - t)) -lt 18 ] && [ $rc -eq 1 ] && ok "a table in use makes applying give up after 10 s instead of queueing everyone" ||
   bad "lock_timeout" "took $((SECONDS - t)) s, exit $rc";; *) bad "applying while a table is in use" "$out";; esac
 wait
