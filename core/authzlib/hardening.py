@@ -185,6 +185,10 @@ SELECT p.oid::regprocedure::text, gw.who, a.privilege_type,
                             move_cols.append((t.table, column, r.name, src.loc))
                         shown = ", ".join(column)
                         index_cols.append((t.table, shown, f"{t.name}.{r.name}: find objects by {shown}"))
+            # each check on one object (authz.can, a write rule) finds its row by the key, as rowstile indexes says
+            index_cols.append(
+                (t.table, ", ".join(k for k, _ in t.key), f"{t.name}: find one by its key, for checks and write rules")
+            )
         # columns that grant something, on tables whose updates only need the plain 'update' rule
         guarded = {(r.table, c) for r in self.rules if r.columns and r.command != "mask" for c in r.columns}
         has_update = {r.table for r in self.rules if r.command == "update" and not r.columns}

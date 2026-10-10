@@ -3978,7 +3978,7 @@ WHERE w.who IS NOT NULL AND n.nspname !~ '^pg_(toast_)?temp_' LOOP
     RETURN NEXT;
   END LOOP;
   -- lookups the permission views make
-  FOR r IN SELECT * FROM (VALUES ('"lp"."orgs"', 'owner_id', 'org.owner: find objects by owner_id'), ('"lp"."orgs"', 'settings_id', 'org.settings: find objects by settings_id'), ('"lp"."settings"', 'email_id', 'setting.email: find objects by email_id'), ('"lp"."emails"', 'domain_id', 'email.domain: find objects by domain_id'), ('"lp"."domains"', 'org_id', 'domain.org: find objects by org_id')) v(tbl, col, why) WHERE tbl IS NOT NULL LOOP
+  FOR r IN SELECT * FROM (VALUES ('"lp"."users"', 'id', 'user: find one by its key, for checks and write rules'), ('"lp"."orgs"', 'owner_id', 'org.owner: find objects by owner_id'), ('"lp"."orgs"', 'settings_id', 'org.settings: find objects by settings_id'), ('"lp"."orgs"', 'id', 'org: find one by its key, for checks and write rules'), ('"lp"."settings"', 'email_id', 'setting.email: find objects by email_id'), ('"lp"."settings"', 'id', 'setting: find one by its key, for checks and write rules'), ('"lp"."emails"', 'domain_id', 'email.domain: find objects by domain_id'), ('"lp"."emails"', 'id', 'email: find one by its key, for checks and write rules'), ('"lp"."domains"', 'org_id', 'domain.org: find objects by org_id'), ('"lp"."domains"', 'id', 'domain: find one by its key, for checks and write rules')) v(tbl, col, why) WHERE tbl IS NOT NULL LOOP
     CONTINUE WHEN to_regclass(r.tbl) IS NULL;
     -- a plain view can't have an index: the tables under it answer the lookups
     CONTINUE WHEN (SELECT c.relkind FROM pg_class c WHERE c.oid = to_regclass(r.tbl)) = 'v';

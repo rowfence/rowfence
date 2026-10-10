@@ -386,7 +386,8 @@ def main() -> None:
         # a governed table may be partitioned: Postgres makes no index on it concurrently, so the line to add says
         # CREATE INDEX alone there; made, it serves the lookup
         d.script(
-            "CREATE TABLE app.events (id bigint, owner_id bigint, at date NOT NULL) PARTITION BY RANGE (at); "
+            "CREATE TABLE app.events (id bigint, owner_id bigint, at date NOT NULL, PRIMARY KEY (id, at)) "
+            "PARTITION BY RANGE (at); "
             "CREATE TABLE app.events_2026 PARTITION OF app.events FOR VALUES FROM ('2026-01-01') TO ('2027-01-01')"
         )
         text, files = database.applied(d)
@@ -434,6 +435,39 @@ def main() -> None:
         and no_key[0][2] == "finding the profiles by their profile.owner (lists, select rules)"
         and with_key == [],
         (no_key, with_key),
+    )
+
+    def keyed_without_an_index(d: Db) -> tuple[str, list[perf.Missing], list[perf.Missing]]:
+        # each check on one object (authz.can, a write rule) finds its row by the type's key: on a table with no
+        # primary key, nor any index on the key, each check scans the table. Named like any other lookup, with the
+        # line to add; an index whose first columns are the key's, in any order (a unique one here), serves it
+        d.script(
+            "CREATE TABLE app.labels (org_id bigint NOT NULL, name text NOT NULL, owner_id bigint); "
+            "CREATE INDEX ON app.labels (owner_id)"
+        )
+        text, files = database.applied(d)
+        c = database.policy_compiler(
+            text + "\ntype label = app.labels (org_id, name text)\n  owner : user = owner_id\n  can edit = owner\n",
+            files,
+        )
+        said = perf.describe_missing(perf.missing_indexes(d, c), "sql")
+        found = perf.missing_indexes(d, c)
+        d.script("CREATE UNIQUE INDEX ON app.labels (name, org_id)")
+        return said, found, perf.missing_indexes(d, c)
+
+    said, key_only, unique = work(keyed_without_an_index)
+    check(
+        "a type's key no index serves (a composite one): named, why, and the index to add; a unique index serves it",
+        re.fullmatch(
+            r"app\.labels has no index on \(org_id, name\): finding one label by its key \(checks, write rules\) "
+            r'\(line \d+\)\n  add: CREATE INDEX CONCURRENTLY "labels_org_id_name_idx" ON "app"\."labels" '
+            r'\("org_id", "name"\);',
+            said,
+        )
+        is not None
+        and len(key_only) == 1
+        and unique == [],
+        (said, key_only, unique),
     )
     # the line to add in the words of the tool rowstile.toml names, and --check exits 1 while a lookup has no index
     subprocess.run(["psql", "-X", "-q", "-d", db, "-c", "DROP INDEX app.team_members_user_id_idx"], check=True)

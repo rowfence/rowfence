@@ -377,6 +377,16 @@ python3 compile_policy.py /tmp/authz_boxes.authz > /tmp/authz_boxes.sql &&
 PGOPTIONS="-c client_min_messages=error" psql -X -q -v ON_ERROR_STOP=1 -d "$DB" -f /tmp/authz_boxes.sql >/dev/null
 admin "lint finds a move by a pair of columns, and says the rule to add" "1" \
   "SELECT count(*) FROM authz.lint() WHERE object = 'app.gov_boxes.org_id, parent_id' AND problem LIKE '%add a rule such as \"update org_id, parent_id after : parent.edit\"'"
+# each check on one box finds its row by the type's key (org_id, id): its primary key serves it; without one lint
+# names it, with the index to add; an index whose first columns are the key's, in another order, serves it too
+admin "lint: a type's key that its primary key serves is no finding" "0" \
+  "SELECT count(*) FROM authz.lint() WHERE object = 'app.gov_boxes.org_id, id'"
+PSQL -c "ALTER TABLE app.gov_boxes DROP CONSTRAINT gov_boxes_pkey" >/dev/null
+admin "... without it, lint names the lookup by the key, and the index to add" "1" \
+  "SELECT count(*) FROM authz.lint() WHERE object = 'app.gov_boxes.org_id, id' AND severity = 'performance' AND problem = 'no index starts with these columns (box: find one by its key, for checks and write rules): CREATE INDEX ON app.gov_boxes (org_id, id)'"
+PSQL -c "CREATE INDEX ON app.gov_boxes (id, org_id, owner_id)" >/dev/null
+admin "... and an index that starts with the key's columns, in another order, serves it" "0" \
+  "SELECT count(*) FROM authz.lint() WHERE object = 'app.gov_boxes.org_id, id'"
 PGOPTIONS="-c client_min_messages=error" psql -X -q -v ON_ERROR_STOP=1 -d "$DB" -f /tmp/authz_governance.sql >/dev/null
 PSQL -c "DROP TABLE app.gov_boxes" >/dev/null
 # the lookups are joins, which an index with a condition doesn't serve, nor one a failed CREATE INDEX CONCURRENTLY

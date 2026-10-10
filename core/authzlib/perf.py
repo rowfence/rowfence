@@ -106,6 +106,9 @@ def needed_indexes(c: Compiler) -> list[Lookup]:
                         f"finding the {r.name}s of {an(t.name)} (checks, explanations)",
                         r.loc,
                     )
+        # every check on one object (authz.can, a write rule) finds its row by the type's key: a primary key serves
+        # it, and on a table without one (or a unique index) each check scans the table
+        add(t.table, tuple(k for k, _ in t.key), f"finding one {t.name} by its key (checks, write rules)", t.loc)
     return out
 
 
