@@ -10,11 +10,11 @@ shares, to users, the service, `user:*`, `anyone` and other types' members; perm
 across two types or not) and a deny that inherits; rules, the write rules sometimes with a condition that reads
 another governed table (a subquery, a function called by a quoted name, an operator the app made); invariants.
 Some also say what no draw above does, drawn apart so that the rest stays as it was (also(), shared_if(),
-across()): a starting point with a `not` in a permission that inherits, a relation declared again for an earlier
-type through a link table (a `parent`, or a relation to users), a condition on the shares made of a relation
-(`shared by p1 if {...}`, which around.py's calls of authz.share() judge), and a recursion through two types (an
-earlier type's rows inside a later one's too, through a link table, inheriting back what the later type inherits
-from it: one tree across both). Then the tables it reads and their data. A third of the
+across(), perm_groups()): a starting point with a `not` in a permission that inherits, a relation declared again
+for an earlier type through a link table (a `parent`, or a relation to users), a condition on the shares made of a
+relation (`shared by p1 if {...}`, which around.py's calls of authz.share() judge), a recursion through two types
+(an earlier type's rows inside a later one's too, through a link table, inheriting back what the later type
+inherits from it: one tree across both), and a group named by a permission (`t1#p2`). Then the tables it reads and their data. A third of the
 seeds name those tables and columns as an app's own may be (AWKWARD: capitals, words SQL reserves, 63 bytes), the
 policy otherwise the same; and nearly half give every key another type than bigint (KEYS: int, text or uuid), said
 on each type line, also drawn apart.
@@ -258,14 +258,18 @@ def without_permissions(spec: Spec, x: random.Random) -> Spec:
     kept: dict[str, list[Rel]] = {}
     for o in spec.objs:
         # shares need a permission to share them, and links to rows of a type are followed by one: they go, and so
-        # does a group whose members were shared
+        # does a group whose members were shared, and one named by a permission (perm_groups())
         kept[o.name] = [
             rel
             for rel in o.rels
             if rel.kind in ("column", "table")
             and rel.name not in ("up", "parent")
             and not any(s in names for s in rel.subjects)
-            and all(any(m.name == "member" for m in kept.get(s.split("#")[0], [])) for s in rel.subjects if "#" in s)
+            and all(
+                s.endswith("#member") and any(m.name == "member" for m in kept.get(s.split("#")[0], []))
+                for s in rel.subjects
+                if "#" in s
+            )
         ]
     groups = {s for rels in kept.values() for rel in rels for s in rel.subjects if "#" in s}
     objs: list[Obj] = []
@@ -364,6 +368,7 @@ def make_plain(seed: int) -> Spec:
     also(spec, random.Random(f"genpolicy/{seed}/also"))
     shared_if(spec, random.Random(f"genpolicy/{seed}/shared-if"))
     across(spec, random.Random(f"genpolicy/{seed}/across"))
+    perm_groups(spec, random.Random(f"genpolicy/{seed}/perm-groups"))
     return spec
 
 
@@ -422,6 +427,17 @@ def across(spec: Spec, x: random.Random) -> None:
         p = x.choice(inherits)
         e.rels.append(Rel("inside", "table", [o.name], x.random() < 0.5))
         e.perms[p] = ("or", [e.perms[p], f"inside.{p}"])
+
+
+def perm_groups(spec: Spec, x: random.Random) -> None:
+    """A group named by a permission of another type instead of its members (`t1#p2`: whoever holds p2 on the
+    linked row), now and then, drawn apart from the rest (x)."""
+    for o in spec.objs:
+        for rel in o.rels:
+            for i, subject in enumerate(rel.subjects):
+                st = subject.split("#")[0]
+                if "#" in subject and st != o.name and x.random() < 0.4:
+                    rel.subjects[i] = f"{st}#{x.choice(list(spec.obj(st).perms))}"
 
 
 def denies(o: Obj) -> bool:
