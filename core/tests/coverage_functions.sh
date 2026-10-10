@@ -14,7 +14,7 @@ for db in "$@"; do
   # the step that made it (tests/coverage-bin/createdb wrote it down), else the one running now
   step=$(awk -F '\t' -v db="$db" '$1 == db {s = $2} END {print s}' "$ROWSTILE_COVERAGE/databases.tsv" 2>/dev/null)
   [ -n "$step" ] || step=${ROWSTILE_COVERAGE_CONTEXT:-}
-  psql -X -q -At -F $'\t' -d "$db" -c "
+  rows=$(psql -X -q -At -F $'\t' -d "$db" -c "
     SELECT n.nspname, p.proname, pg_catalog.pg_get_function_identity_arguments(p.oid), coalesce(s.calls, 0),
       l.lanname || CASE WHEN p.prosecdef THEN ' definer' ELSE '' END
         || CASE WHEN p.proconfig IS NOT NULL THEN ' set' ELSE '' END,
@@ -23,6 +23,8 @@ for db in "$@"; do
     JOIN pg_catalog.pg_language l ON l.oid = p.prolang
     LEFT JOIN pg_catalog.pg_stat_user_functions s ON s.funcid = p.oid
     WHERE n.nspname IN ('authz', 'authz_gen', 'authz_int')" 2>/dev/null |
-    awk -F '\t' -v step="$step" -v db="$db" 'BEGIN {OFS = "\t"} {print step, db, $0}' >> "$ROWSTILE_COVERAGE/functions.tsv"
+    awk -F '\t' -v step="$step" -v db="$db" 'BEGIN {OFS = "\t"} {print step, db, $0}')
+  # in whole, under a lock: run_tests.sh's lanes drop databases at the same time, and a long write may be cut
+  [ -z "$rows" ] || { flock 9 && printf '%s\n' "$rows" >&9; } 9>> "$ROWSTILE_COVERAGE/functions.tsv"
 done
 exit 0

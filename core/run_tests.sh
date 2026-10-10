@@ -8,6 +8,7 @@
 #   SOAK_SEED=N ./run_tests.sh --soak                              # the random checks (random policies too), long, with a new seed
 #                         (about 110 minutes; a random seed if SOAK_SEED is empty; the log says which)
 #   ROWSTILE_PART=command ./run_tests.sh --quick                   # one part of a run (below: the parts of each)
+#   ROWSTILE_LANES=1 ./run_tests.sh --quick                        # each step after the other (below: lanes)
 #   ROWSTILE_COVERAGE=/abs/dir ./run_tests.sh --quick              # also measure what the suites run (below)
 # Needs psql, createdb, dropdb and python3. Creates and drops databases named authz_*, as a non-superuser.
 # Each step's result line says how long it took.
@@ -59,7 +60,16 @@ step() { echo; echo "=== $1"; STEP_START=$SECONDS; STEPS_RUN=$((STEPS_RUN + 1));
 record() {
   local took="($((SECONDS - STEP_START))s)"
   if [ "$1" -eq 0 ]; then echo "--- passed: $2 $took"; else echo "--- FAILED: $2 $took"; failed+=("$2"); fi
+  [ -z "${LANE_OUT:-}" ] || lane_next "$1" "$2"
 }
+# the steps of a part run in lanes side by side (tests/lanes.sh: ROWSTILE_LANES, 3 unless it says; 1: each step
+# after the other, as written here)
+. tests/lanes.sh
+# app_user: the suites' schemas make it when it isn't there, and two doing so at once collide. tests/make_owner.sh
+# makes it; here too when started as the owner
+[ "$LANES" -eq 1 ] || psql -X -q -v ON_ERROR_STOP=1 -d postgres -c "DO \$o\$ BEGIN
+    IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'app_user') THEN CREATE ROLE app_user NOLOGIN; END IF;
+  END \$o\$" >/dev/null || exit 1
 apply() { PGOPTIONS="-c client_min_messages=error" psql -X -q -v ON_ERROR_STOP=1 -d "$DB" -f "$1"; }
 # a suite's output without a line for each check it passed, but how many it passed: the log stays short, and
 # tests/check_counts.py (which core/ci.sh runs on the log) still sees how many each suite passed
@@ -100,19 +110,29 @@ if [ "$MODE" = soak ]; then
 fi
 
 if [ "$MODE" != proofs ] && [ "$MODE" != soak ]; then
+# Each unit below is a function, then `unit PART SECONDS FUNCTION`: its seconds, one unit after the other with
+# coverage on (as CI runs), only balance the lanes
 if every_version && part unit; then
+unit_tests() {
 step "fast checks without a database: golden SQL, included files, the command's SQL, rowstile command"
 python3 tests/unit_test.py 2>&1 | tail -n 3
 record "${PIPESTATUS[0]}" "unit"
+}
+unit unit 80 unit_tests
 fi
 if part policy; then
 if every_version; then
+fuzz_parser() {
 step "broken policies are refused with a line number, never a crash (mutated example policies)"
 FUZZ=5000; [ "$MODE" = quick ] && FUZZ=1500
 python3 tests/fuzz_parser.py --cases "$FUZZ"
 record $? "fuzz parser"
+}
+unit policy 11 fuzz_parser
 fi
 
+# one unit: they share the database authz_tests and the files /tmp/authz_docs*.sql
+scenarios() {
 step "compile the example policy"
 python3 compile_policy.py example/docs.authz > /tmp/authz_docs.sql &&
 python3 compile_policy.py example/docs.authz --tests > /tmp/authz_docs_tests.sql
@@ -144,13 +164,19 @@ psql -X -q -v ON_ERROR_STOP=1 -d "$DB" -f tests/multi_scenario.sql > /tmp/authz_
 rc=$?; echo "$(grep -c 'ok  ' /tmp/authz_multi_scenario.log) checks passed"; grep "FAIL\|ERROR" /tmp/authz_multi_scenario.log
 record $rc "multi scenario"
 dropdb "$DB"
+}
+unit policy 9 scenarios
 
 if every_version; then
+policy_errors() {
 step "policy mistakes are reported with line numbers"
 python3 tests/policy_errors.py | tail -n 1
 record "${PIPESTATUS[0]}" "policy errors"
+}
+unit policy 7 policy_errors
 fi
 
+identities() {
 step "identities: scopes, API keys, JWT, view as, group sync, signed sessions"
 tests/identity.sh
 record $? "identity"
@@ -158,15 +184,24 @@ tests/principals.sh
 record $? "principals"
 tests/sessions.sh
 record $? "signed sessions"
+}
+unit policy 32 identities
 
+governance() {
 step "governance: audit trail, change feed, requests, break glass, reviews, invariants, policy diff"
 tests/governance.sh
 record $? "governance"
+}
+unit policy 22 governance
 
+masks() {
 step "masked columns: applying, lint, --diff"
 tests/masks.sh
 record $? "masks"
+}
+unit policy 7 masks
 
+tools() {
 step "developer tools: diagram, Python and TypeScript clients, editor grammar"
 python3 tests/tools_test.py
 record $? "tools"
@@ -174,100 +209,173 @@ if every_version; then
   python3 tests/lsp_test.py | quiet_ok
   record "${PIPESTATUS[0]}" "language server"
 fi
+}
+unit policy 13 tools
 
 fi
 if part command; then
+apply_() {
 step "applying with the rowstile command: no extension, no superuser, includes, diff, backup and restore, remove"
 tests/apply.sh
 record $? "apply"
+}
+unit command 76 apply_
+cli() {
 step "the rowstile command"
 tests/cli.sh
 record $? "cli"
+}
+unit command 48 cli
+capitals() {
 step "the command over tables named as Prisma names them: capital letters, in public"
 tests/capitals.sh
 record $? "capitals"
+}
+unit command 14 capitals
+children() {
 step "tables under a governed one: partitions, and tables that inherit"
 tests/children.sh
 record $? "children"
+}
+unit command 8 children
+migrations() {
 step "policy changes as migrations: each tool's files, in order, out of order, push, trees built beside"
 tests/migrations.sh
 record $? "migrations"
+}
+unit command 47 migrations
+upgrade() {
 step "upgrading: databases the release before made (from PyPI), pushed to, applied and migrated by this version"
 tests/upgrade.sh
 record $? "upgrade"
+}
+unit command 16 upgrade
+review() {
 step "rowstile review and fmt: a pull request in a git repository, with a review database"
 tests/review.sh
 record $? "review"
+}
+unit command 48 review
 if every_version; then
+migrate_vs_apply() {
 step "a migration leaves what applying the new policy whole leaves (each kind of change, both ways)"
 python3 tests/migrate_test.py | quiet_ok
 record "${PIPESTATUS[0]}" "migrate vs apply"
+}
+unit command 95 migrate_vs_apply
 fi
 fi
 if part policy; then
+confidence() {
 step "prove, coverage, snapshots, indexes, plans and bench"
 python3 tests/confidence_test.py | quiet_ok
 record "${PIPESTATUS[0]}" "confidence"
+}
+unit policy 12 confidence
+studio() {
 step "why, and how to grant; Studio (read-only, and able to write)"
 python3 tests/studio_test.py | quiet_ok
 record "${PIPESTATUS[0]}" "studio"
+}
+unit policy 52 studio
+mcp() {
 step "the MCP server, for coding agents: check, prove, push, test, why, lint"
 python3 tests/mcp_test.py | quiet_ok
 record "${PIPESTATUS[0]}" "mcp"
+}
+unit policy 8 mcp
+devx() {
 step "day to day: named tests, refusals that say why, who_among, init, dev, --as"
 tests/devx.sh
 record $? "devx"
+}
+unit policy 108 devx
 
+concurrency() {
 step "concurrent changes to the tree"
 tests/concurrency.sh
 record $? "concurrency"
+}
+unit policy 10 concurrency
 
+moves() {
 step "moves and links of folders with many below them"
 tests/moves.sh
 record $? "moves"
+}
+unit policy 8 moves
 
+adversarial() {
 step "the app role trying every way around the policy"
 tests/adversarial.sh
 record $? "adversarial"
+}
+unit policy 11 adversarial
 
+docs() {
 step "docs/getting-started.md runs as written"
 tests/docs_test.sh
 record $? "docs"
+}
+unit policy 2 docs
+cookbook() {
 step "the cookbook's recipes: each one's policy applies, its tests pass, and its page shows only what is tested"
 tests/cookbook.sh
 record $? "cookbook"
+}
+unit policy 23 cookbook
+reference() {
 step "the reference runs as written: its policies compile, its SQL and its commands run, each block or why not"
 tests/reference.sh
 record $? "reference"
+}
+unit policy 12 reference
 
 fi
+difftest() {
+  step "random changes, compared with the reference evaluator ($1, $STEPS changes)"
+  python3 tests/difftest.py --gen "$1" --steps "$STEPS" --seed 7 --quiet --db "authz_diff_$1" --decisions
+  record $? "difftest $1"
+  dropdb --if-exists "authz_diff_$1" >/dev/null 2>&1
+}
 GENS="docs alt multi composite loop cross"; every_version || GENS=docs
 for gen in $GENS; do
   # six policies: four in the random part, one with each of the two others, which are shorter, so that the
   # three parts are about as long as each other. --decisions says too which parts of the policy never decided an
   # answer there (tests/decisions.py: whose SQL the run never judged), a report that fails nothing
   case "$gen" in composite) part policy;; multi) part command;; *) part random;; esac || continue
-  step "random changes, compared with the reference evaluator ($gen, $STEPS changes)"
-  python3 tests/difftest.py --gen "$gen" --steps "$STEPS" --seed 7 --quiet --db "authz_diff_$gen" --decisions
-  record $? "difftest $gen"
-  dropdb --if-exists "authz_diff_$gen" >/dev/null 2>&1
+  # the part it runs in, and how long it takes with 15 changes
+  case "$gen" in composite) p=policy secs=45;; multi) p=command secs=86;; docs) p=random secs=61;;
+    alt) p=random secs=59;; loop) p=random secs=14;; cross) p=random secs=38;; esac
+  unit "$p" $((secs*STEPS/15)) difftest "$gen"
 done
 if part random; then
 if [ "$MODE" = full ]; then
+  genpolicy() {
   step "random policies, compared with the reference evaluator (12 policies)"
   python3 tests/genpolicy.py --policies 12 --steps 8 --seed 1 --db authz_genpolicy --decisions
   record $? "genpolicy"
   dropdb --if-exists authz_genpolicy >/dev/null 2>&1
+  }
+  unit random 300 genpolicy   # not measured
 fi
 # what is around the policy depends on the version of Postgres more than the policy does: a few on every run
 AROUND=4; [ "$MODE" = full ] && AROUND=16
+around() {
 step "random policies in random worlds: the catalog, the session and the role around them ($AROUND policies)"
 python3 tests/around.py --policies "$AROUND" --steps 6 --seed 1 --db authz_around
 record $? "around"
+}
+unit random $((37*AROUND)) around
+conditions() {
 step "simple conditions read as Postgres reads them (3000 made up)"
 python3 tests/conditions_test.py --cases 3000 --seed 1
 record $? "conditions"
+}
+unit random 14 conditions
 fi
+# with more than one lane, the units run now: each part's in its lanes, one part after the other
+for p in $PARTS; do run_lanes "$p"; done
 fi
 
 # Tree writes under concurrency: every pair raced at each isolation level, and a concurrent stress run;

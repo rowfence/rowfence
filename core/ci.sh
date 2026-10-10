@@ -6,6 +6,7 @@
 #   core/ci.sh --short 17 18   # what depends on the version (run_tests.sh --short), on 17 and 18
 #   SOAK_SEED=N core/ci.sh --soak 16   # the random checks, long, with a new seed (run_tests.sh --soak)
 #   ROWSTILE_PART=command core/ci.sh 16   # one part of a run (run_tests.sh names them): CI runs the parts side by side
+#   ROWSTILE_LANES=1 core/ci.sh 16      # each step after the other (run_tests.sh runs a part's steps in lanes)
 #   core/ci.sh --coverage 16   # (before the others) and measure what the suites run, in the image built with
 #                              # COVERAGE=1: .ci/coverage-16 holds the data, and the report (tests/coverage_report.py)
 # Needs Docker and bash (Git Bash works on Windows). Builds rowstile:<version> from Dockerfile,
@@ -58,7 +59,7 @@ for v in $VERSIONS; do
   # of Python processes starts sooner. The image keeps it off: anything that rewrites authzlib's files (a mutation
   # tried on them) must run without it, as Python knows a stale file by its size and its time to the second
   retry docker exec -d -e PYTHONPYCACHEPREFIX=/tmp/pycache -e PYTHONDONTWRITEBYTECODE= -e SOAK_SEED="${SOAK_SEED:-}" -e ROWSTILE_PART="${ROWSTILE_PART:-}" -e ROWSTILE_COVERAGE="$cov" -e PGHOST=/var/run/postgresql -e PGUSER=postgres -w /src/core "$name" \
-    bash -c "${cov:+rm -rf $cov; }bash run_tests.sh $MODE > /src/$out.log 2>&1; echo \$? > /src/$out.rc" || { failed+=("$v (start)"); continue; }
+    bash -c "${cov:+rm -rf $cov; }ROWSTILE_LANES='${ROWSTILE_LANES:-}' bash run_tests.sh $MODE > /src/$out.log 2>&1; echo \$? > /src/$out.rc" || { failed+=("$v (start)"); continue; }
   # the exit code appears when the suites end; a container that stopped or went first ends the wait too, and so
   # does the limit
   started=$SECONDS; why=""

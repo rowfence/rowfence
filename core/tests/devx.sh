@@ -455,7 +455,7 @@ if seen "watching 2 file(s)" && seen "check(s) pass"; then
   # apply and push take)
   ( PSQL -c "SELECT pg_advisory_lock(1919905638, 0)" -c "SELECT pg_sleep(4)" >/dev/null 2>&1 ) &
   locker=$!
-  for _ in $(seq 40); do [ "$(PSQL -c "SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND classid = 1919905638 AND objid = 0 AND granted")" = 1 ] && break; sleep 0.25; done
+  for _ in $(seq 40); do [ "$(PSQL -c "SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND classid = 1919905638 AND objid = 0 AND granted AND database = (SELECT oid FROM pg_database WHERE datname = current_database())")" = 1 ] && break; sleep 0.25; done
   n=$(passes); sed -i 's/^  can share = owner or folder.share$/&\n  can comment = view/' "$T/p/policy.authz"
   for _ in $(seq 40); do pid=$(PSQL -c "SELECT pid FROM pg_stat_activity WHERE datname = '$DB' AND application_name = 'rowstile' AND wait_event_type = 'Lock' LIMIT 1"); [ -n "$pid" ] && break; sleep 0.25; done
   [ -n "$pid" ] && PSQL -c "SELECT pg_terminate_backend($pid)" >/dev/null

@@ -7428,6 +7428,130 @@ class CheckCounts(unittest.TestCase):
         self.assertNotIn(0, written.values())
 
 
+@unittest.skipIf(sys.platform == "win32", "run_tests.sh runs on Linux")
+class Lanes(unittest.TestCase):
+    """tests/lanes.sh, which run_tests.sh's steps run in: a part's units side by side, each step's output printed
+    whole in the order written, every result taken (a unit that stops before its end, a failure); with one lane,
+    each unit where it is written, as one step after the other."""
+
+    SCRIPT = r"""
+set -u
+failed=() STEPS_RUN=0
+step() { echo "=== $1"; STEPS_RUN=$((STEPS_RUN + 1)); }
+record() {
+  if [ "$1" -eq 0 ]; then echo "--- passed: $2 (0s)"; else echo "--- FAILED: $2 (0s)"; failed+=("$2"); fi
+  [ -z "${LANE_OUT:-}" ] || lane_next "$1" "$2"
+}
+. tests/lanes.sh
+# with lanes, slow waits for quick 1, which a lane beside it runs; its first result is printed before it goes on
+slow() {
+  step slow
+  if [ "$LANES" -gt 1 ]; then
+    for _ in $(seq 100); do [ -e "$MARK" ] && break; sleep 0.1; done; [ -e "$MARK" ] && echo "beside quick 1"
+  fi
+  echo "slow's output"; record 0 slow; sleep 1; echo after; false; record $? "slow again"
+}
+quick() { step "quick $1"; echo "quick $1's output"; [ "$1" != 1 ] || : > "$MARK"; record 0 "quick $1"; }
+gone() { step gone; echo "gone's output"; exit 3; }
+unit a 10 slow
+unit a 1 quick 1
+[ "$LANES" -eq 1 ] || unit a 1 gone
+unit a 1 quick 2
+unit b 1 quick 3
+echo written
+for p in a b; do run_lanes "$p"; done
+echo "failed: ${failed[*]}"
+[ "$STEPS_RUN" -gt 0 ] && echo "results taken"
+"""
+
+    def run_lanes(self, lanes: str) -> tuple[int, str]:
+        with tempfile.TemporaryDirectory() as d:
+            env = {**os.environ, "ROWSTILE_LANES": lanes, "MARK": os.path.join(d, "mark")}
+            p = subprocess.run(
+                ["bash", "-c", self.SCRIPT], cwd=ROOT, env=env, capture_output=True, text=True, timeout=60
+            )
+        return p.returncode, p.stdout + p.stderr
+
+    def test_side_by_side(self) -> None:
+        rc, out = self.run_lanes("2")
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(
+            out.splitlines(),
+            [
+                "written",
+                # slow alone in a lane, the three short ones in the other
+                "part a in 2 lanes, about 10 3 seconds each (ROWSTILE_LANES=1: one step after the other)",
+                "=== slow",
+                "beside quick 1",
+                "slow's output",
+                "--- passed: slow (0s)",
+                "after",
+                "--- FAILED: slow again (0s)",
+                "=== quick 1",
+                "quick 1's output",
+                "--- passed: quick 1 (0s)",
+                "=== gone",
+                "gone's output",
+                "--- FAILED: gone stopped before its end",
+                "=== quick 2",
+                "quick 2's output",
+                "--- passed: quick 2 (0s)",
+                "part b in 2 lanes, about 1 0 seconds each (ROWSTILE_LANES=1: one step after the other)",
+                "=== quick 3",
+                "quick 3's output",
+                "--- passed: quick 3 (0s)",
+                "failed: slow again gone (stopped)",
+                "results taken",
+            ],
+        )
+
+    def test_one_lane_runs_each_where_it_is_written(self) -> None:
+        rc, out = self.run_lanes("1")
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(
+            out.splitlines(),
+            [
+                "=== slow",
+                "slow's output",
+                "--- passed: slow (0s)",
+                "after",
+                "--- FAILED: slow again (0s)",
+                "=== quick 1",
+                "quick 1's output",
+                "--- passed: quick 1 (0s)",
+                "=== quick 2",
+                "quick 2's output",
+                "--- passed: quick 2 (0s)",
+                "=== quick 3",
+                "quick 3's output",
+                "--- passed: quick 3 (0s)",
+                "written",
+                "failed: slow again",
+                "results taken",
+            ],
+        )
+
+    def test_a_number_of_lanes(self) -> None:
+        for lanes in ("0", "two", "-1"):
+            self.assertEqual(
+                self.run_lanes(lanes), (2, f"ROWSTILE_LANES is a number of lanes, 1 or more, not '{lanes}'\n")
+            )
+
+    def test_each_step_of_the_parts_is_in_a_unit(self) -> None:
+        # run_tests.sh's lanes run units: a step written outside one would run alone, before the lanes start
+        runner = read("run_tests.sh")
+        self.assertIn(". tests/lanes.sh\n", runner)
+        parts = search(
+            r'^if \[ "\$MODE" != proofs \].*?^for p in \$PARTS; do run_lanes "\$p"; done$', runner, re.S | re.M
+        )
+        functions = dict(re.findall(r"^ *([a-z_]+)\(\) \{\n(.*?)^ *\}$", parts.group(0), re.S | re.M))
+        units = re.findall(r"^ *unit \S+ \S+ ([a-z_]+)", parts.group(0), re.M)
+        self.assertEqual(sorted({f for f, body in functions.items() if 'step "' in body}), sorted(set(units)))
+        self.assertGreater(len(units), 20)
+        outside = re.sub(r"^ *[a-z_]+\(\) \{\n.*?^ *\}$", "", parts.group(0), flags=re.S | re.M)
+        self.assertNotIn('step "', outside)
+
+
 class PreviousRelease(unittest.TestCase):
     """tests/previous_release.py, which tests/upgrade.sh starts from: the release before a version is the newest
     PyPI has that is older, in the order RELEASING.md gives (a version's alphas, its candidates, then it), with a

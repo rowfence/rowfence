@@ -20,13 +20,16 @@ From this folder:
     ./run_tests.sh                                           # every test, from scratch (needs Postgres)
     ./ci.sh                                                  # ... on 16, 17 and 18, each in Docker
     ROWSTILE_PART=command ./ci.sh 16                         # one part of the run (unit, policy, command, random)
+    ROWSTILE_LANES=1 ./run_tests.sh --quick                  # a part's steps one after the other, not in lanes
 
 ## Tested
 
 `./run_tests.sh` runs everything against fresh databases, in about 15 minutes (a few
 with `--quick`), as a non-superuser owner of the tables (started as a superuser, it makes one), on
 the stock Postgres image. CI runs it in parts, each on a machine of its own, side by side
-(`run_tests.sh` names them), so a push waits for the longest part and not for their sum:
+(`run_tests.sh` names them), so a push waits for the longest part and not for their sum. Within a part, the
+steps run in three lanes side by side against the same server (`tests/lanes.sh`; `ROWSTILE_LANES` says how many),
+each step's output printed whole once it ends, in the order `run_tests.sh` writes them:
 
 | suite | what it checks |
 |---|---|
