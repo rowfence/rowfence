@@ -90,7 +90,7 @@ DECLARE r record;
 BEGIN
   IF to_regclass('authz_int.trees') IS NULL THEN RETURN; END IF;          -- the first apply
   FOR r IN SELECT t.name FROM authz_int.trees t
-           JOIN (VALUES ('folder_project__host_inside_parent__tree2', '451679d942cb5341fd11d508f6832553', ARRAY[to_regclass('authz.shares')::oid, to_regclass('"cx"."folders"')::oid, to_regclass('"cx"."placements"')::oid, to_regclass('"cx"."projects"')::oid]::oid[]), ('folder__parent__tree', 'b29f83ef277e0efa617e40d9ea6b9e88', ARRAY[to_regclass('"cx"."folders"')::oid]::oid[]), ('folder_project__backer_parent__tree', 'b28dde82c6faebff46e763a178547fec', ARRAY[to_regclass('"cx"."backings"')::oid, to_regclass('"cx"."folders"')::oid, to_regclass('"cx"."projects"')::oid]::oid[])) n(name, hash, oids)
+           JOIN (VALUES ('folder_project__host_inside_parent__tree2', '451679d942cb5341fd11d508f6832553', ARRAY[to_regclass('authz.shares')::oid, to_regclass('"cx"."folders"')::oid, to_regclass('"cx"."placements"')::oid, to_regclass('"cx"."projects"')::oid]::oid[]), ('folder__parent__tree', '181698d3213f487749ca17ca87133c33', ARRAY[to_regclass('"cx"."folders"')::oid]::oid[]), ('folder_project__backer_parent__tree', 'b28dde82c6faebff46e763a178547fec', ARRAY[to_regclass('"cx"."backings"')::oid, to_regclass('"cx"."folders"')::oid, to_regclass('"cx"."projects"')::oid]::oid[])) n(name, hash, oids)
              ON n.name = t.name AND n.hash = t.hash AND n.oids = t.oids
            WHERE to_regclass(format('authz_int.%I', t.name)) IS NOT NULL LOOP
     EXECUTE format('ALTER TABLE authz_int.%I SET SCHEMA authz_keep', r.name);
@@ -626,7 +626,7 @@ CREATE TABLE authz_int.trees (name text PRIMARY KEY, hash text NOT NULL, oids oi
 
 INSERT INTO authz_int.trees VALUES
   ('folder_project__host_inside_parent__tree2', '451679d942cb5341fd11d508f6832553', ARRAY[to_regclass('authz.shares')::oid, to_regclass('"cx"."folders"')::oid, to_regclass('"cx"."placements"')::oid, to_regclass('"cx"."projects"')::oid]::oid[]),
-  ('folder__parent__tree', 'b29f83ef277e0efa617e40d9ea6b9e88', ARRAY[to_regclass('"cx"."folders"')::oid]::oid[]),
+  ('folder__parent__tree', '181698d3213f487749ca17ca87133c33', ARRAY[to_regclass('"cx"."folders"')::oid]::oid[]),
   ('folder_project__backer_parent__tree', 'b28dde82c6faebff46e763a178547fec', ARRAY[to_regclass('"cx"."backings"')::oid, to_regclass('"cx"."folders"')::oid, to_regclass('"cx"."projects"')::oid]::oid[]);
 
 CREATE TABLE authz_int.shared_relations (object_type text, relation text, subject text, shared_by text, required text[], loc text, PRIMARY KEY (object_type, relation, subject));
@@ -946,7 +946,7 @@ END $f$;
 CREATE TRIGGER authz_role_gone AFTER DELETE ON authz.roles
   REFERENCING OLD TABLE AS old_rows FOR EACH STATEMENT EXECUTE FUNCTION authz_int.role_gone();
 
--- folder, project: each node with every ancestor it inherits from, through folder.parent -> folder while {not exists (select 1 from cx.frozen z where z.folder_id = this.id)}, folder.parent -> project while {not exists (select 1 from cx.frozen z where z.folder_id = this.id)}, project.host -> folder, project.inside -> folder
+-- folder, project: each node with every ancestor it inherits from, through folder.parent -> folder while {not exists (select 1 from cx.frozen "z""s" where "z""s".folder_id = this.id)}, folder.parent -> project while {not exists (select 1 from cx.frozen "z""s" where "z""s".folder_id = this.id)}, project.host -> folder, project.inside -> folder
 CREATE TABLE authz_int."folder_project__host_inside_parent__tree" (dtype text NOT NULL, did text NOT NULL, atype text NOT NULL, aid text NOT NULL,
   PRIMARY KEY (dtype, did, atype, aid));
 CREATE INDEX ON authz_int."folder_project__host_inside_parent__tree" (atype, aid);
@@ -974,14 +974,14 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path FROM CURRENT AS $f$
     SELECT up._dt, up._d, e.pt, e.p
     FROM up CROSS JOIN LATERAL (
       
-SELECT 'folder'::text AS pt, ((CASE WHEN r."parent_type" = 'folder' THEN r."parent_id" END)::bigint)::text AS p FROM "cx"."folders" r WHERE r."id" = (CASE WHEN up._at = 'folder' THEN up._a END)::bigint AND (CASE WHEN r."parent_type" = 'folder' THEN r."parent_id" END)::bigint IS NOT NULL AND coalesce((not exists (select 1 from cx.frozen z where z.folder_id = r.id)), false) AND EXISTS (SELECT 1 FROM "cx"."folders" pp WHERE pp."id" = (CASE WHEN r."parent_type" = 'folder' THEN r."parent_id" END)::bigint AND coalesce((not archived), false))      UNION ALL SELECT 'project'::text AS pt, ((CASE WHEN r."parent_type" = 'project' THEN r."parent_id" END)::bigint)::text AS p FROM "cx"."folders" r WHERE r."id" = (CASE WHEN up._at = 'folder' THEN up._a END)::bigint AND (CASE WHEN r."parent_type" = 'project' THEN r."parent_id" END)::bigint IS NOT NULL AND coalesce((not exists (select 1 from cx.frozen z where z.folder_id = r.id)), false) AND EXISTS (SELECT 1 FROM "cx"."projects" pp WHERE pp."id" = (CASE WHEN r."parent_type" = 'project' THEN r."parent_id" END)::bigint)      UNION ALL SELECT 'folder'::text AS pt, g.subject_id AS p FROM authz.shares g WHERE up._at = 'project' AND g.object_id = up._a AND g.object_type = 'project' AND g.relation = 'host' AND g.subject_type = 'folder' AND g.subject_relation = '' AND true AND EXISTS (SELECT 1 FROM "cx"."folders" pp WHERE pp."id" = g.subject_id::bigint AND coalesce((not archived), false))      UNION ALL SELECT 'folder'::text AS pt, (s."folder_id")::text AS p FROM "cx"."placements" s WHERE s."project_id" = (CASE WHEN up._at = 'project' THEN up._a END)::bigint AND s."folder_id" IS NOT NULL AND coalesce((active), false) AND true AND EXISTS (SELECT 1 FROM "cx"."folders" pp WHERE pp."id" = s."folder_id" AND coalesce((not archived), false))) e)
+SELECT 'folder'::text AS pt, ((CASE WHEN r."parent_type" = 'folder' THEN r."parent_id" END)::bigint)::text AS p FROM "cx"."folders" r WHERE r."id" = (CASE WHEN up._at = 'folder' THEN up._a END)::bigint AND (CASE WHEN r."parent_type" = 'folder' THEN r."parent_id" END)::bigint IS NOT NULL AND coalesce((not exists (select 1 from cx.frozen "z""s" where "z""s".folder_id = r.id)), false) AND EXISTS (SELECT 1 FROM "cx"."folders" pp WHERE pp."id" = (CASE WHEN r."parent_type" = 'folder' THEN r."parent_id" END)::bigint AND coalesce((not archived), false))      UNION ALL SELECT 'project'::text AS pt, ((CASE WHEN r."parent_type" = 'project' THEN r."parent_id" END)::bigint)::text AS p FROM "cx"."folders" r WHERE r."id" = (CASE WHEN up._at = 'folder' THEN up._a END)::bigint AND (CASE WHEN r."parent_type" = 'project' THEN r."parent_id" END)::bigint IS NOT NULL AND coalesce((not exists (select 1 from cx.frozen "z""s" where "z""s".folder_id = r.id)), false) AND EXISTS (SELECT 1 FROM "cx"."projects" pp WHERE pp."id" = (CASE WHEN r."parent_type" = 'project' THEN r."parent_id" END)::bigint)      UNION ALL SELECT 'folder'::text AS pt, g.subject_id AS p FROM authz.shares g WHERE up._at = 'project' AND g.object_id = up._a AND g.object_type = 'project' AND g.relation = 'host' AND g.subject_type = 'folder' AND g.subject_relation = '' AND true AND EXISTS (SELECT 1 FROM "cx"."folders" pp WHERE pp."id" = g.subject_id::bigint AND coalesce((not archived), false))      UNION ALL SELECT 'folder'::text AS pt, (s."folder_id")::text AS p FROM "cx"."placements" s WHERE s."project_id" = (CASE WHEN up._at = 'project' THEN up._a END)::bigint AND s."folder_id" IS NOT NULL AND coalesce((active), false) AND true AND EXISTS (SELECT 1 FROM "cx"."folders" pp WHERE pp."id" = s."folder_id" AND coalesce((not archived), false))) e)
   SELECT _dt, _d, _at, _a FROM up
 $f$;
 
 -- the conditions on each node (and its type's where)
 CREATE VIEW authz_int."folder_project__host_inside_parent__tree_conds" AS
   
-SELECT 'folder'::text AS t, r."id"::text AS id, ARRAY[coalesce((not exists (select 1 from cx.frozen z where z.folder_id = r.id)), false), coalesce((not exists (select 1 from cx.frozen z where z.folder_id = r.id)), false), coalesce((not archived), false)] AS v FROM "cx"."folders" r;
+SELECT 'folder'::text AS t, r."id"::text AS id, ARRAY[coalesce((not exists (select 1 from cx.frozen "z""s" where "z""s".folder_id = r.id)), false), coalesce((not exists (select 1 from cx.frozen "z""s" where "z""s".folder_id = r.id)), false), coalesce((not archived), false)] AS v FROM "cx"."folders" r;
 
 -- what decides inheritance must be IMMUTABLE
 DO $imm$
@@ -1147,7 +1147,7 @@ BEGIN
       SELECT n."id"::text FROM new_rows n JOIN old_rows o ON o."id" = n."id"
       WHERE n."parent_id" IS DISTINCT FROM o."parent_id"
          OR n."parent_type" IS DISTINCT FROM o."parent_type"
-         OR (SELECT coalesce((not exists (select 1 from cx.frozen z where z.folder_id = r.id)), false) FROM (SELECT n.*) r) IS DISTINCT FROM (SELECT coalesce((not exists (select 1 from cx.frozen z where z.folder_id = r.id)), false) FROM (SELECT o.*) r)
+         OR (SELECT coalesce((not exists (select 1 from cx.frozen "z""s" where "z""s".folder_id = r.id)), false) FROM (SELECT n.*) r) IS DISTINCT FROM (SELECT coalesce((not exists (select 1 from cx.frozen "z""s" where "z""s".folder_id = r.id)), false) FROM (SELECT o.*) r)
          OR (SELECT coalesce((not archived), false) FROM (SELECT n.*) r) IS DISTINCT FROM (SELECT coalesce((not archived), false) FROM (SELECT o.*) r)
       UNION SELECT o."id"::text FROM old_rows o WHERE NOT EXISTS (SELECT 1 FROM new_rows n WHERE n."id" = o."id")
       UNION SELECT n."id"::text FROM new_rows n WHERE NOT EXISTS (SELECT 1 FROM old_rows o WHERE o."id" = n."id"));
@@ -1561,7 +1561,7 @@ DO $b$ BEGIN
   END IF;
 END $b$;
 
--- folder: each row with every ancestor it inherits from, through parent while {owner_id is null /* this.owner_id: nobody's */ and parent_type <> $$this.id$$ and parent_type <> e'it\'s' and id <>-1}
+-- folder: each row with every ancestor it inherits from, through parent while {owner_id is null /* this.owner_id: nobody's */ and parent_type <> $$this.id$$ and parent_type <> e'it\'s' and parent_type <> 'this.id''s' and id <>-1}
 CREATE TABLE authz_int."folder__parent__tree" (descendant bigint NOT NULL, ancestor bigint NOT NULL,
   PRIMARY KEY (descendant, ancestor));
 CREATE INDEX ON authz_int."folder__parent__tree" (ancestor);
@@ -1593,14 +1593,14 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path FROM CURRENT AS $f$
     CROSS JOIN LATERAL (SELECT c.* FROM "cx"."folders" c WHERE c."id" = up._a OFFSET 0) c
     CROSS JOIN LATERAL (
       (SELECT x.* FROM (SELECT 0 AS _link, r."id" AS _child, (CASE WHEN r."parent_type" = 'folder' THEN r."parent_id" END)::bigint AS _parent FROM "cx"."folders" r WHERE (CASE WHEN r."parent_type" = 'folder' THEN r."parent_id" END)::bigint IS NOT NULL) x WHERE x._child = up._a OFFSET 0)) e
-    WHERE ((e._link = 0 AND coalesce((owner_id is null /* this.owner_id: nobody's */ and parent_type <> $$this.id$$ and parent_type <> e'it\'s' and id <>-1), false)))
+    WHERE ((e._link = 0 AND coalesce((owner_id is null /* this.owner_id: nobody's */ and parent_type <> $$this.id$$ and parent_type <> e'it\'s' and parent_type <> 'this.id''s' and id <>-1), false)))
       AND EXISTS (SELECT 1 FROM "cx"."folders" p WHERE p."id" = e._parent AND coalesce((not archived), false)))
   SELECT _d, _a FROM up
 $f$;
 
 -- the conditions on each row (and the type's where)
 CREATE VIEW authz_int."folder__parent__tree_conds" AS
-  SELECT r."id" AS id, ARRAY[coalesce((owner_id is null /* this.owner_id: nobody's */ and parent_type <> $$this.id$$ and parent_type <> e'it\'s' and id <>-1), false), coalesce((not archived), false)] AS v FROM "cx"."folders" r;
+  SELECT r."id" AS id, ARRAY[coalesce((owner_id is null /* this.owner_id: nobody's */ and parent_type <> $$this.id$$ and parent_type <> e'it\'s' and parent_type <> 'this.id''s' and id <>-1), false), coalesce((not archived), false)] AS v FROM "cx"."folders" r;
 
 -- what decides inheritance must be IMMUTABLE
 DO $imm$
@@ -1608,7 +1608,7 @@ DECLARE d record;
 BEGIN
   CREATE TEMP TABLE authz_probe (LIKE "cx"."folders");
   BEGIN
-    CREATE INDEX ON authz_probe ((coalesce((owner_id is null /* this.owner_id: nobody's */ and parent_type <> $$this.id$$ and parent_type <> e'it\'s' and id <>-1), false)));
+    CREATE INDEX ON authz_probe ((coalesce((owner_id is null /* this.owner_id: nobody's */ and parent_type <> $$this.id$$ and parent_type <> e'it\'s' and parent_type <> 'this.id''s' and id <>-1), false)));
   EXCEPTION WHEN others THEN
     RAISE EXCEPTION 'line 23: a condition that limits inheritance must give the same answer for every user at any time (%) [AZ603]', SQLERRM;
   END;
@@ -1722,7 +1722,7 @@ BEGIN
       SELECT n."id" FROM new_rows n JOIN old_rows o ON o."id" = n."id"
       WHERE n."parent_id" IS DISTINCT FROM o."parent_id"
          OR n."parent_type" IS DISTINCT FROM o."parent_type"
-         OR (SELECT coalesce((owner_id is null /* this.owner_id: nobody's */ and parent_type <> $$this.id$$ and parent_type <> e'it\'s' and id <>-1), false) FROM (SELECT n.*) r) IS DISTINCT FROM (SELECT coalesce((owner_id is null /* this.owner_id: nobody's */ and parent_type <> $$this.id$$ and parent_type <> e'it\'s' and id <>-1), false) FROM (SELECT o.*) r)
+         OR (SELECT coalesce((owner_id is null /* this.owner_id: nobody's */ and parent_type <> $$this.id$$ and parent_type <> e'it\'s' and parent_type <> 'this.id''s' and id <>-1), false) FROM (SELECT n.*) r) IS DISTINCT FROM (SELECT coalesce((owner_id is null /* this.owner_id: nobody's */ and parent_type <> $$this.id$$ and parent_type <> e'it\'s' and parent_type <> 'this.id''s' and id <>-1), false) FROM (SELECT o.*) r)
          OR (SELECT coalesce((not archived), false) FROM (SELECT n.*) r) IS DISTINCT FROM (SELECT coalesce((not archived), false) FROM (SELECT o.*) r)
       UNION SELECT unnest(ids));
   ELSE
@@ -3370,7 +3370,7 @@ BEGIN
   SELECT id FROM authz_int."project__lead";
 END $f$;
 
--- folder.edit (line 19): owner or (parent.edit and {not exists (select 1 from cx.frozen z where z.folder_id = this.id)})
+-- folder.edit (line 19): owner or (parent.edit and {not exists (select 1 from cx.frozen "z""s" where "z""s".folder_id = this.id)})
 CREATE VIEW authz_int."folder__edit" AS
   SELECT x.id FROM (
   SELECT c.did::bigint AS id FROM authz_int."folder_project__host_inside_parent__tree" c
@@ -3450,11 +3450,11 @@ BEGIN
   UNION ALL
   (SELECT r."id" AS id FROM "cx"."folders" r
   WHERE r."id" IN (SELECT id FROM authz_int."folder__parent__file__on_project")
-    AND coalesce((owner_id is null /* this.owner_id: nobody's */ and parent_type <> $$this.id$$ and parent_type <> e'it\'s' and id <>-1), false))) x
+    AND coalesce((owner_id is null /* this.owner_id: nobody's */ and parent_type <> $$this.id$$ and parent_type <> e'it\'s' and parent_type <> 'this.id''s' and id <>-1), false))) x
   WHERE EXISTS (SELECT 1 FROM "cx"."folders" w WHERE w."id" = x.id AND coalesce((not archived), false));
 END $f$;
 
--- folder.file (line 23): owner or (parent.file and {owner_id is null /* this.owner_id: nobody's */ and parent_type <> $$this.id$$ and parent_type <> e'it\'s' and id <>-1})
+-- folder.file (line 23): owner or (parent.file and {owner_id is null /* this.owner_id: nobody's */ and parent_type <> $$this.id$$ and parent_type <> e'it\'s' and parent_type <> 'this.id''s' and id <>-1})
 CREATE VIEW authz_int."folder__file" AS
   SELECT x.id FROM (
   SELECT c.descendant AS id FROM authz_int."folder__parent__tree" c
@@ -3474,7 +3474,7 @@ BEGIN
   UNION ALL
   (SELECT r."id" AS id FROM "cx"."folders" r
   WHERE r."id" IN (SELECT id FROM authz_int."folder__parent__file__on_project")
-    AND coalesce((owner_id is null /* this.owner_id: nobody's */ and parent_type <> $$this.id$$ and parent_type <> e'it\'s' and id <>-1), false))) x
+    AND coalesce((owner_id is null /* this.owner_id: nobody's */ and parent_type <> $$this.id$$ and parent_type <> e'it\'s' and parent_type <> 'this.id''s' and id <>-1), false))) x
   WHERE EXISTS (SELECT 1 FROM "cx"."folders" w WHERE w."id" = x.id AND coalesce((not archived), false))) s WHERE s.id = c.ancestor))
     AND EXISTS (SELECT 1 FROM "cx"."folders" w WHERE w."id" = p_id AND coalesce((not archived), false));
 END $f$;
@@ -3486,7 +3486,7 @@ CREATE VIEW authz_int."folder__file__direct" AS
   UNION ALL
   (SELECT r."id" AS id FROM "cx"."folders" r
   WHERE r."id" IN (SELECT id FROM authz_int."folder__parent__file__on_project")
-    AND coalesce((owner_id is null /* this.owner_id: nobody's */ and parent_type <> $$this.id$$ and parent_type <> e'it\'s' and id <>-1), false))) x
+    AND coalesce((owner_id is null /* this.owner_id: nobody's */ and parent_type <> $$this.id$$ and parent_type <> e'it\'s' and parent_type <> 'this.id''s' and id <>-1), false))) x
   WHERE EXISTS (SELECT 1 FROM "cx"."folders" w WHERE w."id" = x.id AND coalesce((not archived), false));
 CREATE VIEW authz_gen."folder__file__direct" WITH (security_barrier) AS SELECT id FROM authz_int."folder__file__direct";
 
@@ -3652,9 +3652,9 @@ CREATE VIEW authz_int."note__open" AS
 CREATE VIEW authz_gen."note__open" WITH (security_barrier) AS SELECT id FROM authz_int."note__open";
 
 -- folder: a condition that reads other rows, run with the policy's rights wherever it is checked
-CREATE FUNCTION authz_gen."folder__check_46a73ef441"(p_row "cx"."folders") RETURNS boolean
+CREATE FUNCTION authz_gen."folder__check_383ac878f2"(p_row "cx"."folders") RETURNS boolean
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path FROM CURRENT AS $f$
-  SELECT coalesce((not exists (select 1 from cx.frozen z where z.folder_id = "folders".id)), false) FROM (SELECT (p_row).*) AS "folders"
+  SELECT coalesce((not exists (select 1 from cx.frozen "z""s" where "z""s".folder_id = "folders".id)), false) FROM (SELECT (p_row).*) AS "folders"
 $f$;
 
 -- region.chief (sources other than columns) (line 39)
@@ -3842,14 +3842,14 @@ LANGUAGE sql STABLE
 BEGIN ATOMIC
   SELECT ARRAY[
     coalesce(((coalesce("folders"."owner_id" = (SELECT authz.uid()), false)
-    OR (authz_gen."folder__check_46a73ef441"(ROW("folders".*)::"cx"."folders")
+    OR (authz_gen."folder__check_383ac878f2"(ROW("folders".*)::"cx"."folders")
     AND (EXISTS (SELECT 1 FROM authz_gen."folder__edit" v WHERE v.id = (CASE WHEN "folders"."parent_type" = 'folder' THEN "folders"."parent_id" END)::bigint)
     OR EXISTS (SELECT 1 FROM authz_gen."project__edit" v WHERE v.id = (CASE WHEN "folders"."parent_type" = 'project' THEN "folders"."parent_id" END)::bigint))))
     AND coalesce((not archived), false)), false),
     coalesce((SELECT authz_int.scope_cmd('cx.folders', 'update')), false),
     coalesce(coalesce((not archived), false), false),
     coalesce((coalesce("folders"."owner_id" = (SELECT authz.uid()), false)
-    OR (authz_gen."folder__check_46a73ef441"(ROW("folders".*)::"cx"."folders")
+    OR (authz_gen."folder__check_383ac878f2"(ROW("folders".*)::"cx"."folders")
     AND (EXISTS (SELECT 1 FROM authz_gen."folder__edit" v WHERE v.id = (CASE WHEN "folders"."parent_type" = 'folder' THEN "folders"."parent_id" END)::bigint)
     OR EXISTS (SELECT 1 FROM authz_gen."project__edit" v WHERE v.id = (CASE WHEN "folders"."parent_type" = 'project' THEN "folders"."parent_id" END)::bigint)))), false)]
   FROM (SELECT (p_row).*) AS "folders";
@@ -3889,14 +3889,14 @@ LANGUAGE sql STABLE
 BEGIN ATOMIC
   SELECT ARRAY[
     coalesce(((coalesce("folders"."owner_id" = (SELECT authz.uid()), false)
-    OR (coalesce((owner_id is null /* this.owner_id: nobody's */ and parent_type <> $$this.id$$ and parent_type <> e'it\'s' and id <>-1), false)
+    OR (coalesce((owner_id is null /* this.owner_id: nobody's */ and parent_type <> $$this.id$$ and parent_type <> e'it\'s' and parent_type <> 'this.id''s' and id <>-1), false)
     AND (authz_gen."folder__file__has"((CASE WHEN "folders"."parent_type" = 'folder' THEN "folders"."parent_id" END)::bigint)
     OR EXISTS (SELECT 1 FROM authz_gen."project__file" v WHERE v.id = (CASE WHEN "folders"."parent_type" = 'project' THEN "folders"."parent_id" END)::bigint))))
     AND coalesce((not archived), false)), false),
     coalesce((SELECT authz_int.scope_cmd('cx.folders', 'delete')), false),
     coalesce(coalesce((not archived), false), false),
     coalesce((coalesce("folders"."owner_id" = (SELECT authz.uid()), false)
-    OR (coalesce((owner_id is null /* this.owner_id: nobody's */ and parent_type <> $$this.id$$ and parent_type <> e'it\'s' and id <>-1), false)
+    OR (coalesce((owner_id is null /* this.owner_id: nobody's */ and parent_type <> $$this.id$$ and parent_type <> e'it\'s' and parent_type <> 'this.id''s' and id <>-1), false)
     AND (authz_gen."folder__file__has"((CASE WHEN "folders"."parent_type" = 'folder' THEN "folders"."parent_id" END)::bigint)
     OR EXISTS (SELECT 1 FROM authz_gen."project__file" v WHERE v.id = (CASE WHEN "folders"."parent_type" = 'project' THEN "folders"."parent_id" END)::bigint)))), false)]
   FROM (SELECT (p_row).*) AS "folders";
@@ -3941,7 +3941,7 @@ END $f$;
 CREATE POLICY "authz_select" ON "cx"."folders" FOR SELECT TO app_user
   USING (((SELECT authz_int.scope_cmd('cx.folders', 'select')) AND ((coalesce("folders"."owner_id" = (SELECT authz.uid()), false)
     OR EXISTS (SELECT 1 FROM authz_gen."folder__viewer" v WHERE v.id = "folders"."id")
-    OR (authz_gen."folder__check_46a73ef441"(ROW("folders".*)::"cx"."folders")
+    OR (authz_gen."folder__check_383ac878f2"(ROW("folders".*)::"cx"."folders")
     AND (EXISTS (SELECT 1 FROM authz_gen."folder__edit" v WHERE v.id = (CASE WHEN "folders"."parent_type" = 'folder' THEN "folders"."parent_id" END)::bigint)
     OR EXISTS (SELECT 1 FROM authz_gen."project__edit" v WHERE v.id = (CASE WHEN "folders"."parent_type" = 'project' THEN "folders"."parent_id" END)::bigint)))
     OR (EXISTS (SELECT 1 FROM authz_gen."folder__view" v WHERE v.id = (CASE WHEN "folders"."parent_type" = 'folder' THEN "folders"."parent_id" END)::bigint)
@@ -3953,12 +3953,12 @@ COMMENT ON POLICY "authz_select" ON "cx"."folders" IS 'rowstile';
 -- cx.folders update (line 64): edit
 CREATE POLICY "authz_update" ON "cx"."folders" FOR UPDATE TO app_user
   USING (((SELECT authz_int.scope_cmd('cx.folders', 'update')) AND ((coalesce("folders"."owner_id" = (SELECT authz.uid()), false)
-    OR (authz_gen."folder__check_46a73ef441"(ROW("folders".*)::"cx"."folders")
+    OR (authz_gen."folder__check_383ac878f2"(ROW("folders".*)::"cx"."folders")
     AND (EXISTS (SELECT 1 FROM authz_gen."folder__edit" v WHERE v.id = (CASE WHEN "folders"."parent_type" = 'folder' THEN "folders"."parent_id" END)::bigint)
     OR EXISTS (SELECT 1 FROM authz_gen."project__edit" v WHERE v.id = (CASE WHEN "folders"."parent_type" = 'project' THEN "folders"."parent_id" END)::bigint))))
     AND coalesce((not archived), false))))
   WITH CHECK (((SELECT authz_int.scope_cmd('cx.folders', 'update')) AND ((coalesce("folders"."owner_id" = (SELECT authz.uid()), false)
-    OR (authz_gen."folder__check_46a73ef441"(ROW("folders".*)::"cx"."folders")
+    OR (authz_gen."folder__check_383ac878f2"(ROW("folders".*)::"cx"."folders")
     AND (EXISTS (SELECT 1 FROM authz_gen."folder__edit" v WHERE v.id = (CASE WHEN "folders"."parent_type" = 'folder' THEN "folders"."parent_id" END)::bigint)
     OR EXISTS (SELECT 1 FROM authz_gen."project__edit" v WHERE v.id = (CASE WHEN "folders"."parent_type" = 'project' THEN "folders"."parent_id" END)::bigint))))
     AND coalesce((not archived), false)))
@@ -3969,7 +3969,7 @@ COMMENT ON POLICY "authz_update" ON "cx"."folders" IS 'rowstile';
 -- cx.folders delete (line 65): file
 CREATE POLICY "authz_delete" ON "cx"."folders" FOR DELETE TO app_user
   USING (((SELECT authz_int.scope_cmd('cx.folders', 'delete')) AND ((coalesce("folders"."owner_id" = (SELECT authz.uid()), false)
-    OR (coalesce((owner_id is null /* this.owner_id: nobody's */ and parent_type <> $$this.id$$ and parent_type <> e'it\'s' and id <>-1), false)
+    OR (coalesce((owner_id is null /* this.owner_id: nobody's */ and parent_type <> $$this.id$$ and parent_type <> e'it\'s' and parent_type <> 'this.id''s' and id <>-1), false)
     AND (authz_gen."folder__file__has"((CASE WHEN "folders"."parent_type" = 'folder' THEN "folders"."parent_id" END)::bigint)
     OR EXISTS (SELECT 1 FROM authz_gen."project__file" v WHERE v.id = (CASE WHEN "folders"."parent_type" = 'project' THEN "folders"."parent_id" END)::bigint))))
     AND coalesce((not archived), false))));
@@ -4428,20 +4428,20 @@ BEGIN
       v_bigint := p_id::bigint;
       CASE p_perm
         WHEN 'edit' THEN RETURN EXISTS (SELECT 1 FROM "cx"."folders" o WHERE o."id" = v_bigint AND (((coalesce(o."owner_id" = (SELECT authz.uid()), false)
-    OR (coalesce((not exists (select 1 from cx.frozen z where z.folder_id = o.id)), false)
+    OR (coalesce((not exists (select 1 from cx.frozen "z""s" where "z""s".folder_id = o.id)), false)
     AND (EXISTS (SELECT 1 FROM authz_gen."folder__edit" v WHERE v.id = (CASE WHEN o."parent_type" = 'folder' THEN o."parent_id" END)::bigint)
     OR EXISTS (SELECT 1 FROM authz_gen."project__edit" v WHERE v.id = (CASE WHEN o."parent_type" = 'project' THEN o."parent_id" END)::bigint))))
     AND coalesce((not archived), false))));
         WHEN 'view' THEN RETURN EXISTS (SELECT 1 FROM "cx"."folders" o WHERE o."id" = v_bigint AND (((coalesce(o."owner_id" = (SELECT authz.uid()), false)
     OR EXISTS (SELECT 1 FROM authz_gen."folder__viewer" v WHERE v.id = o."id")
-    OR (coalesce((not exists (select 1 from cx.frozen z where z.folder_id = o.id)), false)
+    OR (coalesce((not exists (select 1 from cx.frozen "z""s" where "z""s".folder_id = o.id)), false)
     AND (EXISTS (SELECT 1 FROM authz_gen."folder__edit" v WHERE v.id = (CASE WHEN o."parent_type" = 'folder' THEN o."parent_id" END)::bigint)
     OR EXISTS (SELECT 1 FROM authz_gen."project__edit" v WHERE v.id = (CASE WHEN o."parent_type" = 'project' THEN o."parent_id" END)::bigint)))
     OR (EXISTS (SELECT 1 FROM authz_gen."folder__view" v WHERE v.id = (CASE WHEN o."parent_type" = 'folder' THEN o."parent_id" END)::bigint)
     OR EXISTS (SELECT 1 FROM authz_gen."project__view" v WHERE v.id = (CASE WHEN o."parent_type" = 'project' THEN o."parent_id" END)::bigint)))
     AND coalesce((not archived), false))));
         WHEN 'file' THEN RETURN EXISTS (SELECT 1 FROM "cx"."folders" o WHERE o."id" = v_bigint AND (((coalesce(o."owner_id" = (SELECT authz.uid()), false)
-    OR (coalesce((owner_id is null /* this.owner_id: nobody's */ and parent_type <> $$this.id$$ and parent_type <> e'it\'s' and id <>-1), false)
+    OR (coalesce((owner_id is null /* this.owner_id: nobody's */ and parent_type <> $$this.id$$ and parent_type <> e'it\'s' and parent_type <> 'this.id''s' and id <>-1), false)
     AND (authz_gen."folder__file__has"((CASE WHEN o."parent_type" = 'folder' THEN o."parent_id" END)::bigint)
     OR EXISTS (SELECT 1 FROM authz_gen."project__file" v WHERE v.id = (CASE WHEN o."parent_type" = 'project' THEN o."parent_id" END)::bigint))))
     AND coalesce((not archived), false))));
@@ -4533,14 +4533,14 @@ BEGIN
       IF p_limit IS NULL AND p_after IS NULL THEN
         RETURN QUERY SELECT o."id"::text FROM "cx"."folders" o
         WHERE ((coalesce(o."owner_id" = (SELECT authz.uid()), false)
-    OR (coalesce((not exists (select 1 from cx.frozen z where z.folder_id = o.id)), false)
+    OR (coalesce((not exists (select 1 from cx.frozen "z""s" where "z""s".folder_id = o.id)), false)
     AND (EXISTS (SELECT 1 FROM authz_gen."folder__edit" v WHERE v.id = (CASE WHEN o."parent_type" = 'folder' THEN o."parent_id" END)::bigint)
     OR EXISTS (SELECT 1 FROM authz_gen."project__edit" v WHERE v.id = (CASE WHEN o."parent_type" = 'project' THEN o."parent_id" END)::bigint))))
     AND coalesce((not archived), false));
       ELSIF p_after IS NULL THEN
         RETURN QUERY SELECT o."id"::text FROM "cx"."folders" o
         WHERE ((coalesce(o."owner_id" = (SELECT authz.uid()), false)
-    OR (coalesce((not exists (select 1 from cx.frozen z where z.folder_id = o.id)), false)
+    OR (coalesce((not exists (select 1 from cx.frozen "z""s" where "z""s".folder_id = o.id)), false)
     AND (EXISTS (SELECT 1 FROM authz_gen."folder__edit" v WHERE v.id = (CASE WHEN o."parent_type" = 'folder' THEN o."parent_id" END)::bigint)
     OR EXISTS (SELECT 1 FROM authz_gen."project__edit" v WHERE v.id = (CASE WHEN o."parent_type" = 'project' THEN o."parent_id" END)::bigint))))
     AND coalesce((not archived), false))
@@ -4548,7 +4548,7 @@ BEGIN
       ELSE
         RETURN QUERY SELECT o."id"::text FROM "cx"."folders" o
         WHERE o."id" > p_after::bigint AND ((coalesce(o."owner_id" = (SELECT authz.uid()), false)
-    OR (coalesce((not exists (select 1 from cx.frozen z where z.folder_id = o.id)), false)
+    OR (coalesce((not exists (select 1 from cx.frozen "z""s" where "z""s".folder_id = o.id)), false)
     AND (EXISTS (SELECT 1 FROM authz_gen."folder__edit" v WHERE v.id = (CASE WHEN o."parent_type" = 'folder' THEN o."parent_id" END)::bigint)
     OR EXISTS (SELECT 1 FROM authz_gen."project__edit" v WHERE v.id = (CASE WHEN o."parent_type" = 'project' THEN o."parent_id" END)::bigint))))
     AND coalesce((not archived), false))
@@ -4559,7 +4559,7 @@ BEGIN
         RETURN QUERY SELECT o."id"::text FROM "cx"."folders" o
         WHERE ((coalesce(o."owner_id" = (SELECT authz.uid()), false)
     OR EXISTS (SELECT 1 FROM authz_gen."folder__viewer" v WHERE v.id = o."id")
-    OR (coalesce((not exists (select 1 from cx.frozen z where z.folder_id = o.id)), false)
+    OR (coalesce((not exists (select 1 from cx.frozen "z""s" where "z""s".folder_id = o.id)), false)
     AND (EXISTS (SELECT 1 FROM authz_gen."folder__edit" v WHERE v.id = (CASE WHEN o."parent_type" = 'folder' THEN o."parent_id" END)::bigint)
     OR EXISTS (SELECT 1 FROM authz_gen."project__edit" v WHERE v.id = (CASE WHEN o."parent_type" = 'project' THEN o."parent_id" END)::bigint)))
     OR (EXISTS (SELECT 1 FROM authz_gen."folder__view" v WHERE v.id = (CASE WHEN o."parent_type" = 'folder' THEN o."parent_id" END)::bigint)
@@ -4569,7 +4569,7 @@ BEGIN
         RETURN QUERY SELECT o."id"::text FROM "cx"."folders" o
         WHERE ((coalesce(o."owner_id" = (SELECT authz.uid()), false)
     OR EXISTS (SELECT 1 FROM authz_gen."folder__viewer" v WHERE v.id = o."id")
-    OR (coalesce((not exists (select 1 from cx.frozen z where z.folder_id = o.id)), false)
+    OR (coalesce((not exists (select 1 from cx.frozen "z""s" where "z""s".folder_id = o.id)), false)
     AND (EXISTS (SELECT 1 FROM authz_gen."folder__edit" v WHERE v.id = (CASE WHEN o."parent_type" = 'folder' THEN o."parent_id" END)::bigint)
     OR EXISTS (SELECT 1 FROM authz_gen."project__edit" v WHERE v.id = (CASE WHEN o."parent_type" = 'project' THEN o."parent_id" END)::bigint)))
     OR (EXISTS (SELECT 1 FROM authz_gen."folder__view" v WHERE v.id = (CASE WHEN o."parent_type" = 'folder' THEN o."parent_id" END)::bigint)
@@ -4580,7 +4580,7 @@ BEGIN
         RETURN QUERY SELECT o."id"::text FROM "cx"."folders" o
         WHERE o."id" > p_after::bigint AND ((coalesce(o."owner_id" = (SELECT authz.uid()), false)
     OR EXISTS (SELECT 1 FROM authz_gen."folder__viewer" v WHERE v.id = o."id")
-    OR (coalesce((not exists (select 1 from cx.frozen z where z.folder_id = o.id)), false)
+    OR (coalesce((not exists (select 1 from cx.frozen "z""s" where "z""s".folder_id = o.id)), false)
     AND (EXISTS (SELECT 1 FROM authz_gen."folder__edit" v WHERE v.id = (CASE WHEN o."parent_type" = 'folder' THEN o."parent_id" END)::bigint)
     OR EXISTS (SELECT 1 FROM authz_gen."project__edit" v WHERE v.id = (CASE WHEN o."parent_type" = 'project' THEN o."parent_id" END)::bigint)))
     OR (EXISTS (SELECT 1 FROM authz_gen."folder__view" v WHERE v.id = (CASE WHEN o."parent_type" = 'folder' THEN o."parent_id" END)::bigint)
@@ -4592,7 +4592,7 @@ BEGIN
       IF p_limit IS NULL AND p_after IS NULL THEN
         RETURN QUERY SELECT o."id"::text FROM "cx"."folders" o
         WHERE ((coalesce(o."owner_id" = (SELECT authz.uid()), false)
-    OR (coalesce((owner_id is null /* this.owner_id: nobody's */ and parent_type <> $$this.id$$ and parent_type <> e'it\'s' and id <>-1), false)
+    OR (coalesce((owner_id is null /* this.owner_id: nobody's */ and parent_type <> $$this.id$$ and parent_type <> e'it\'s' and parent_type <> 'this.id''s' and id <>-1), false)
     AND ((EXISTS (SELECT 1 FROM authz_gen."folder__file__direct" v WHERE v.id = (CASE WHEN o."parent_type" = 'folder' THEN o."parent_id" END)::bigint)
     OR EXISTS (SELECT 1 FROM authz_gen."folder__file" v WHERE v.id = (CASE WHEN o."parent_type" = 'folder' THEN o."parent_id" END)::bigint))
     OR EXISTS (SELECT 1 FROM authz_gen."project__file" v WHERE v.id = (CASE WHEN o."parent_type" = 'project' THEN o."parent_id" END)::bigint))))
@@ -4600,7 +4600,7 @@ BEGIN
       ELSIF p_after IS NULL THEN
         RETURN QUERY SELECT o."id"::text FROM "cx"."folders" o
         WHERE ((coalesce(o."owner_id" = (SELECT authz.uid()), false)
-    OR (coalesce((owner_id is null /* this.owner_id: nobody's */ and parent_type <> $$this.id$$ and parent_type <> e'it\'s' and id <>-1), false)
+    OR (coalesce((owner_id is null /* this.owner_id: nobody's */ and parent_type <> $$this.id$$ and parent_type <> e'it\'s' and parent_type <> 'this.id''s' and id <>-1), false)
     AND ((EXISTS (SELECT 1 FROM authz_gen."folder__file__direct" v WHERE v.id = (CASE WHEN o."parent_type" = 'folder' THEN o."parent_id" END)::bigint)
     OR EXISTS (SELECT 1 FROM authz_gen."folder__file" v WHERE v.id = (CASE WHEN o."parent_type" = 'folder' THEN o."parent_id" END)::bigint))
     OR EXISTS (SELECT 1 FROM authz_gen."project__file" v WHERE v.id = (CASE WHEN o."parent_type" = 'project' THEN o."parent_id" END)::bigint))))
@@ -4609,7 +4609,7 @@ BEGIN
       ELSE
         RETURN QUERY SELECT o."id"::text FROM "cx"."folders" o
         WHERE o."id" > p_after::bigint AND ((coalesce(o."owner_id" = (SELECT authz.uid()), false)
-    OR (coalesce((owner_id is null /* this.owner_id: nobody's */ and parent_type <> $$this.id$$ and parent_type <> e'it\'s' and id <>-1), false)
+    OR (coalesce((owner_id is null /* this.owner_id: nobody's */ and parent_type <> $$this.id$$ and parent_type <> e'it\'s' and parent_type <> 'this.id''s' and id <>-1), false)
     AND ((EXISTS (SELECT 1 FROM authz_gen."folder__file__direct" v WHERE v.id = (CASE WHEN o."parent_type" = 'folder' THEN o."parent_id" END)::bigint)
     OR EXISTS (SELECT 1 FROM authz_gen."folder__file" v WHERE v.id = (CASE WHEN o."parent_type" = 'folder' THEN o."parent_id" END)::bigint))
     OR EXISTS (SELECT 1 FROM authz_gen."project__file" v WHERE v.id = (CASE WHEN o."parent_type" = 'project' THEN o."parent_id" END)::bigint))))
@@ -5487,15 +5487,15 @@ BEGIN
     RETURN NEXT pad || 'no   folder ' || p_id || ' fails the type''s where {' || 'not archived' || '}';
     RETURN;
   END IF;
-  RETURN NEXT pad || 'folder.edit = owner or (parent.edit and {not exists (select 1 from cx.frozen z where z.folder_id = this.id)})';
+  RETURN NEXT pad || 'folder.edit = owner or (parent.edit and {not exists (select 1 from cx.frozen "z""s" where "z""s".folder_id = this.id)})';
   BEGIN
     v_ok := (p_id) IN (SELECT id FROM authz_int."folder__owner");
     RETURN NEXT pad || CASE WHEN v_ok THEN 'yes  ' ELSE 'no   ' END || 'owner';
     IF v_ok AND NOT v_done THEN v_done := true; RETURN QUERY SELECT * FROM authz_int."folder__owner__why"(p_id, p_depth + 1, p_seen); END IF;
     v_ok := (p_id) IN (SELECT r."id" AS id FROM "cx"."folders" r
   WHERE r."id" IN (SELECT id FROM authz_int."folder__parent__edit")
-    AND coalesce((not exists (select 1 from cx.frozen z where z.folder_id = r.id)), false));
-    RETURN NEXT pad || CASE WHEN v_ok THEN 'yes  ' ELSE 'no   ' END || '(parent.edit and {not exists (select 1 from cx.frozen z where z.folder_id = this.id)})';
+    AND coalesce((not exists (select 1 from cx.frozen "z""s" where "z""s".folder_id = r.id)), false));
+    RETURN NEXT pad || CASE WHEN v_ok THEN 'yes  ' ELSE 'no   ' END || '(parent.edit and {not exists (select 1 from cx.frozen "z""s" where "z""s".folder_id = this.id)})';
     v_ok := (p_id) IN (SELECT id FROM authz_int."folder__parent__edit");
     RETURN NEXT pad || '  ' || CASE WHEN v_ok THEN 'yes  ' ELSE 'no   ' END || 'parent.edit';
     FOR v_t IN SELECT tg.id::text AS id, EXISTS (SELECT 1 FROM authz_int."folder__edit" v WHERE v.id = tg.id) AS ok
@@ -5524,8 +5524,8 @@ BEGIN
         RETURN QUERY SELECT * FROM authz_int."project__edit__why"(v_t.id::bigint, p_depth + 2 + 1, p_seen || ('project:edit:' || v_t.id));
       END IF;
     END LOOP;
-    v_ok := (p_id) IN (SELECT r."id" AS id FROM "cx"."folders" r WHERE coalesce((not exists (select 1 from cx.frozen z where z.folder_id = r.id)), false));
-    RETURN NEXT pad || '  ' || CASE WHEN v_ok THEN 'yes  ' ELSE 'no   ' END || '{not exists (select 1 from cx.frozen z where z.folder_id = this.id)}';
+    v_ok := (p_id) IN (SELECT r."id" AS id FROM "cx"."folders" r WHERE coalesce((not exists (select 1 from cx.frozen "z""s" where "z""s".folder_id = r.id)), false));
+    RETURN NEXT pad || '  ' || CASE WHEN v_ok THEN 'yes  ' ELSE 'no   ' END || '{not exists (select 1 from cx.frozen "z""s" where "z""s".folder_id = this.id)}';
   END;
 END $f$;
 
@@ -5588,15 +5588,15 @@ BEGIN
     RETURN NEXT pad || 'no   folder ' || p_id || ' fails the type''s where {' || 'not archived' || '}';
     RETURN;
   END IF;
-  RETURN NEXT pad || 'folder.file = owner or (parent.file and {owner_id is null /* this.owner_id: nobody''s */ and parent_type <> $$this.id$$ and parent_type <> e''it\''s'' and id <>-1})';
+  RETURN NEXT pad || 'folder.file = owner or (parent.file and {owner_id is null /* this.owner_id: nobody''s */ and parent_type <> $$this.id$$ and parent_type <> e''it\''s'' and parent_type <> ''this.id''''s'' and id <>-1})';
   BEGIN
     v_ok := (p_id) IN (SELECT id FROM authz_int."folder__owner");
     RETURN NEXT pad || CASE WHEN v_ok THEN 'yes  ' ELSE 'no   ' END || 'owner';
     IF v_ok AND NOT v_done THEN v_done := true; RETURN QUERY SELECT * FROM authz_int."folder__owner__why"(p_id, p_depth + 1, p_seen); END IF;
     v_ok := (p_id) IN (SELECT r."id" AS id FROM "cx"."folders" r
   WHERE r."id" IN (SELECT id FROM authz_int."folder__parent__file")
-    AND coalesce((owner_id is null /* this.owner_id: nobody's */ and parent_type <> $$this.id$$ and parent_type <> e'it\'s' and id <>-1), false));
-    RETURN NEXT pad || CASE WHEN v_ok THEN 'yes  ' ELSE 'no   ' END || '(parent.file and {owner_id is null /* this.owner_id: nobody''s */ and parent_type <> $$this.id$$ and parent_type <> e''it\''s'' and id <>-1})';
+    AND coalesce((owner_id is null /* this.owner_id: nobody's */ and parent_type <> $$this.id$$ and parent_type <> e'it\'s' and parent_type <> 'this.id''s' and id <>-1), false));
+    RETURN NEXT pad || CASE WHEN v_ok THEN 'yes  ' ELSE 'no   ' END || '(parent.file and {owner_id is null /* this.owner_id: nobody''s */ and parent_type <> $$this.id$$ and parent_type <> e''it\''s'' and parent_type <> ''this.id''''s'' and id <>-1})';
     v_ok := (p_id) IN (SELECT id FROM authz_int."folder__parent__file");
     RETURN NEXT pad || '  ' || CASE WHEN v_ok THEN 'yes  ' ELSE 'no   ' END || 'parent.file';
     FOR v_t IN SELECT tg.id::text AS id, EXISTS (SELECT 1 FROM authz_int."folder__file" v WHERE v.id = tg.id) AS ok
@@ -5625,8 +5625,8 @@ BEGIN
         RETURN QUERY SELECT * FROM authz_int."project__file__why"(v_t.id::bigint, p_depth + 2 + 1, p_seen || ('project:file:' || v_t.id));
       END IF;
     END LOOP;
-    v_ok := (p_id) IN (SELECT r."id" AS id FROM "cx"."folders" r WHERE coalesce((owner_id is null /* this.owner_id: nobody's */ and parent_type <> $$this.id$$ and parent_type <> e'it\'s' and id <>-1), false));
-    RETURN NEXT pad || '  ' || CASE WHEN v_ok THEN 'yes  ' ELSE 'no   ' END || '{owner_id is null /* this.owner_id: nobody''s */ and parent_type <> $$this.id$$ and parent_type <> e''it\''s'' and id <>-1}';
+    v_ok := (p_id) IN (SELECT r."id" AS id FROM "cx"."folders" r WHERE coalesce((owner_id is null /* this.owner_id: nobody's */ and parent_type <> $$this.id$$ and parent_type <> e'it\'s' and parent_type <> 'this.id''s' and id <>-1), false));
+    RETURN NEXT pad || '  ' || CASE WHEN v_ok THEN 'yes  ' ELSE 'no   ' END || '{owner_id is null /* this.owner_id: nobody''s */ and parent_type <> $$this.id$$ and parent_type <> e''it\''s'' and parent_type <> ''this.id''''s'' and id <>-1}';
   END;
 END $f$;
 
@@ -6134,7 +6134,7 @@ BEGIN
       RETURN EXISTS (SELECT 1 FROM "cx"."folders" "folders" WHERE "folders"."id" = p_id::bigint
         AND (SELECT authz_int.scope_cmd('cx.folders', 'select')) AND ((coalesce("folders"."owner_id" = (SELECT authz.uid()), false)
     OR EXISTS (SELECT 1 FROM authz_gen."folder__viewer" v WHERE v.id = "folders"."id")
-    OR (coalesce((not exists (select 1 from cx.frozen z where z.folder_id = "folders".id)), false)
+    OR (coalesce((not exists (select 1 from cx.frozen "z""s" where "z""s".folder_id = "folders".id)), false)
     AND (EXISTS (SELECT 1 FROM authz_gen."folder__edit" v WHERE v.id = (CASE WHEN "folders"."parent_type" = 'folder' THEN "folders"."parent_id" END)::bigint)
     OR EXISTS (SELECT 1 FROM authz_gen."project__edit" v WHERE v.id = (CASE WHEN "folders"."parent_type" = 'project' THEN "folders"."parent_id" END)::bigint)))
     OR (EXISTS (SELECT 1 FROM authz_gen."folder__view" v WHERE v.id = (CASE WHEN "folders"."parent_type" = 'folder' THEN "folders"."parent_id" END)::bigint)

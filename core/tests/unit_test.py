@@ -7325,7 +7325,8 @@ class Respelling(unittest.TestCase):
         sql = self.g.schema_text(spec)
         for name in ("Gp", "user", "select", "Id", "order", "parentId"):
             self.assertIn(f'"{name}"', sql)
-        self.assertNotRegex(sql, r"(?<![\"\w])(Gp|parentId|Archived)(?![\"\w])", "a name unquoted")
+        self.assertNotRegex(sql, r"(?<![\"\w])(Gp|parentId)(?![\"\w])", "a name unquoted")
+        self.assertIn('"Arch""ived"', sql)  # a quote in a name, doubled
 
 
 class GeneratedShapes(unittest.TestCase):
