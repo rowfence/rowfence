@@ -17,6 +17,10 @@ RUN if [ -n "$COVERAGE" ]; then \
       echo "import coverage; coverage.process_startup()" > /usr/lib/python3/dist-packages/rowstile-coverage.pth; fi
 # the suites run the mounted repository as root: no __pycache__ left in it that its owner can't remove
 ENV PYTHONDONTWRITEBYTECODE=1
+# psql, createdb and the others straight from this version's folder, not through Debian's wrapper in /usr/bin (a
+# Perl script that picks the version on each call: 50 ms a call against 17, and the suites make thousands).
+# PG_MAJOR is the stock image's
+ENV PATH=/usr/lib/postgresql/$PG_MAJOR/bin:$PATH
 COPY core/authzlib /opt/rowstile/authzlib
 COPY core/cli /opt/rowstile/cli
 RUN printf '#!/bin/sh\nexec python3 /opt/rowstile/cli/rowstile_cli.py "$@"\n' > /usr/local/bin/rowstile \
