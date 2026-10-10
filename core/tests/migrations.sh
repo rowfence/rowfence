@@ -147,23 +147,35 @@ case "$out" in *"policy line $(grep -n '^type user = ' "$P/db/policy.authz" | cu
   ok "push of a user type's where that doesn't run: refused with its line, authz.uid() as it was" || bad "push of a bad where: exit or state" "$rc";;
   *) bad "push of a user type's where that doesn't run" "$out";; esac
 # one that runs when pushed, on a column only authz.uid() reads (no view holds it, so the app may drop it), which the
-# app then drops: the push of another change goes on (its migration doesn't make authz.uid() again, and the column is
-# the app's to put back), and applying the whole policy refuses it with its line
+# app then drops (every query of the app fails): push of another change, apply and push of the same policy each read
+# it again and refuse it with its line, where they said pushed or unchanged; the policy in force stays as it was
 PSQL -c "ALTER TABLE app.users ADD COLUMN active boolean NOT NULL DEFAULT true" >/dev/null
 sed -i -e 's/^type user = app.users where {this.nme is not null}$/type user = app.users where {active}/' "$P/db/policy.authz"
 out=$(CLI push 2>&1) || bad "push of a user type's where on a column of its own" "$out"
 PSQL -c "ALTER TABLE app.users DROP COLUMN active" >/dev/null
+said="policy line $(grep -n '^type user = ' "$P/db/policy.authz" | cut -d: -f1): the condition {active} doesn't run: column \"active\" does not exist [AZ613]"
+out=$(CLI push 2>&1); rc=$?
+case "$out" in *"$said"*) [ $rc -eq 1 ] && [ "$(PSQL -c "SELECT policy FROM authz.policy_versions ORDER BY id DESC LIMIT 1")" = "$(cat "$P/db/policy.authz")" ] &&
+  ok "a where on a column the app dropped since, push of the same policy: refused with its line, not unchanged" ||
+  bad "push after a dropped column: exit or record" "$rc";;
+  *) bad "push of the same policy after the app dropped a column a where reads" "$out";; esac
+out=$(CLI apply 2>&1); rc=$?
+case "$out" in *"$said"*) [ $rc -eq 1 ] && ok "... apply too: refused with its line, not unchanged" || bad "apply after a dropped column: exit" "$rc";;
+  *) bad "apply after the app dropped a column a where reads" "$out";; esac
 sed -i 's/^  can print = edit$/  can print = view/' "$P/db/policy.authz"
 out=$(CLI push 2>&1); rc=$?
-case "$out" in *"policy.authz: pushed") [ $rc -eq 0 ] &&
-  ok "a where on a column the app dropped since: the push of another change goes on" || bad "push after a dropped column: exit" "$rc";;
-  *) bad "push after the app dropped a column a where reads" "$out";; esac
+case "$out" in *"$said"*) [ $rc -eq 1 ] && [ "$(PSQL -c "SELECT policy LIKE '%can print = edit%' FROM authz.policy_versions ORDER BY id DESC LIMIT 1")" = t ] &&
+  ok "... and the push of another change: refused with its line, nothing pushed" || bad "push of a change after a dropped column: exit or record" "$rc";;
+  *) bad "push of another change after the app dropped a column a where reads" "$out";; esac
 out=$(CLI apply --force 2>&1); rc=$?
-case "$out" in *"policy line $(grep -n '^type user = ' "$P/db/policy.authz" | cut -d: -f1): the condition {active} doesn't run: column \"active\" does not exist [AZ613]"*)
-  [ $rc -eq 1 ] && ok "... and applying the whole policy refuses it with its line" || bad "apply after a dropped column: exit" "$rc";;
-  *) bad "apply after the app dropped a column a where reads" "$out";; esac
+case "$out" in *"$said"*) [ $rc -eq 1 ] && ok "... as applying the whole policy does" || bad "apply --force after a dropped column: exit" "$rc";;
+  *) bad "apply --force after the app dropped a column a where reads" "$out";; esac
+# the policy without that where: push applies it whole (the one in force isn't as it was), and the app's queries run
 cp "$T/keep.authz" "$P/db/policy.authz"
-out=$(CLI push 2>&1); case "$out" in *"policy.authz: pushed") ;; *) bad "push back to the policy without a where" "$out";; esac
+out=$(CLI push 2>&1)
+case "$out" in *"policy.authz: applied (the whole policy)") [ "$(PSQL -c "SELECT authz.uid() IS NULL")" = t ] &&
+  ok "... until the policy reads it no more: applied whole, and authz.uid() runs" || bad "authz.uid() after the where went" "$out";;
+  *) bad "push back to the policy without a where" "$out";; esac
 # removing the policy doesn't make a database a development one: what it took is still on record
 fresh "${DB}_4"
 PGOPTIONS="-c client_min_messages=error" psql -X -q -1 -v ON_ERROR_STOP=1 -d "${DB}_4" -f "$first" >/dev/null 2>&1

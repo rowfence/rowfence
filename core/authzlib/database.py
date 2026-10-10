@@ -533,7 +533,9 @@ def unchanged(db: Db, policy: str, files: Files) -> bool:
     """The policy in force is this one (text and files), applied by this version of rowstile, and what it
     made is still there: its schemas, each row-level security policy its rules make, row-level security on
     each table with rules and on what is under it (partitions, tables that inherit), each trigger it makes
-    (enabled; on the tables that inherit too), and no privilege on its schemas that the policy doesn't give."""
+    (enabled; on the tables that inherit too), no privilege on its schemas that the policy doesn't give, and each
+    condition only a PL/pgSQL function holds still runs (a signing-in type's where on a column the app dropped
+    since: applying again refuses it, AZ613, where the app's every query fails)."""
     if not there(db, "authz.policy_versions"):
         return False
     rows = db.rows(
@@ -556,6 +558,8 @@ def unchanged(db: Db, policy: str, files: Files) -> bool:
         compiler = Compiler(parse_policy(policy, None, files=files))
         sql = compiler.compile("the policy", transaction=False)
     except PolicyError:
+        return False
+    if not all(reads(db, rows) for rows, _, _ in compiler.late_conditions()):
         return False
     # (table, name, only where the table is partitioned)
     triggers = [
@@ -603,6 +607,16 @@ def unchanged(db: Db, policy: str, files: Files) -> bool:
         )[0],
         "closed",
     )
+
+
+def reads(db: Db, rows: str) -> bool:
+    """Whether Postgres reads `SELECT 1 FROM <rows>` (read_now's query: nothing runs), in a savepoint."""
+    try:
+        with savepoint(db, "authz_probe"):
+            db.rows(f"SELECT 1 FROM {rows} LIMIT 0")
+    except db.errors:
+        return False
+    return True
 
 
 def text_array(items: Iterable[str]) -> str:

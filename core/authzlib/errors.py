@@ -564,7 +564,11 @@ CODES = {
         "message names the condition's line and gives Postgres's reason (and its hint, such as the column it "
         "meant). Fix the condition. Conditions on a relation's table (`where {...}`) name that table's columns; "
         "a `shared if {...}`, the share's (`object_id`, `subject_type`, `subject_id`, `subject_relation`); the "
-        "others, the columns of the type's own table.",
+        "others, the columns of the type's own table. A signing-in type's `where` and a `shared if` are read by "
+        "a function, which nothing in the catalog ties to the columns they read: the app may drop one after "
+        "applying, and then its queries fail. Apply and push read those conditions again each time, and refuse "
+        "one that no longer runs even when the policy didn't change: put the column back, or change the "
+        "condition.",
         "",
         "",
         when="apply",
