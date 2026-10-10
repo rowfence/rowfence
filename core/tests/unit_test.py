@@ -1851,6 +1851,21 @@ class Migrations(unittest.TestCase):
             with self.assertRaisesRegex(migrations.Error, re.escape(said)):
                 migrations.journal_of(journal)
 
+    def test_migrations_written_the_same_second_come_one_after_the_other(self) -> None:
+        # (the suites write migrations a moment apart, with no pause for the clock): one written in the same second
+        # as the last, or before it, is named a second after it
+        import migrations
+
+        with tempfile.TemporaryDirectory() as d:
+            now = 1767225600  # 2026-01-01 00:00:00
+            names = [
+                os.path.basename(migrations.write_migration("goose", d, name, "SELECT 1;\n", now=at)[0])
+                for name, at in (("a", now), ("b", now), ("c", now - 60))
+            ]
+        self.assertEqual(
+            names, ["20260101000000_authz_a.sql", "20260101000001_authz_b.sql", "20260101000002_authz_c.sql"]
+        )
+
     def test_what_the_tools_folders_may_hold(self) -> None:
         import migrations
 

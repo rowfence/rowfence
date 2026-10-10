@@ -112,7 +112,6 @@ out=$(NEW --db "dbname=${DB}_apply" apply 2>&1)
 out=$(NEW --db "dbname=${DB}_reapply" reapply 2>&1)
 [ "$out" = "applied again" ] && ok "reapply: the policy a database the release before applied holds, applied again by this version" ||
   bad "reapply over the release before's database" "$out"
-sleep 1   # the next migration's file is named after the second it is written in
 out=$(NEW migrate --check 2>&1); rc=$?
 case "$out" in *"policy.authz has changes no migration has"*"rowstile $OLD_VERSION -> $NEW_VERSION: what the new version makes differently"*)
   [ $rc -eq 1 ] && ok "migrate --check, on the lock file the release before wrote: exit 1, the new version makes something differently" ||

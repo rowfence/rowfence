@@ -35,7 +35,6 @@ before=$(PSQL -c "SELECT count(*) || '/' || max(lock) FROM authz.policy_versions
 echo "-- a pull request that changes inheritance"
 sed -i 's/can view  = edit or viewer or (parent.view and {inherit})/can view  = edit or viewer or parent.view/' "$P/db/policy.authz"
 sed -i 's/user $bo cannot view file $f/user $bo can view file $f/' "$P/db/tests/docs.authz"
-sleep 1
 CLI migrate >/dev/null
 out=$(CLI --db "dbname=$DB" review --base main 2>&1); rc=$?
 [ $rc -eq 0 ] && ok "rowstile review runs, and exits 0 whatever it found (it reports, the tests gate)" || bad "review" "$out"
@@ -111,14 +110,16 @@ for _ in $(seq 40); do [ "$(PSQL -c "SELECT count(*) FROM pg_locks WHERE relatio
 reviewer=$!
 for _ in $(seq 40); do w=$(PSQL -c "SELECT pid FROM pg_stat_activity WHERE datname = '$DB' AND application_name = 'rowstile' AND wait_event_type = 'Lock' LIMIT 1"); [ -n "$w" ] && break; sleep 0.25; done
 [ -n "$w" ] && PSQL -c "SELECT pg_terminate_backend($w)" >/dev/null
-wait "$reviewer"; wait "$locker"
+wait "$reviewer"
+PSQL -c "SELECT pg_cancel_backend(pid) FROM pg_stat_activity WHERE datname = '$DB' AND query = 'SELECT pg_sleep(6)'" >/dev/null
+wait "$locker"
 case "$(cat "$T/review.out")" in "lost the database: "*) [ "$(cat "$T/review.rc")" = 2 ] && ok "the server ending the review's session: lost the database, exit 2" ||
   bad "review losing its database: exit" "$(cat "$T/review.rc")";; *) bad "review losing its database" "$(cat "$T/review.out")";; esac
 
 echo "-- a pull request whose policy doesn't run on the review data"
 G checkout -q -- db && rm -f "$P"/db/migrations/*_authz_build_policy.sql && G clean -q -fd db
 sed -i 's/not {confidential}/not {confidentail}/' "$P/db/policy.authz"
-sleep 1; CLI migrate >/dev/null
+CLI migrate >/dev/null
 out=$(CLI --db "dbname=$DB" review --base main 2>&1); rc=$?
 said="policy line 63: the condition {confidentail} doesn't run: column \"confidentail\" does not exist [AZ613]"
 case "$out" in *Traceback*) bad "a condition Postgres refuses gives a traceback" "$out";;
@@ -129,7 +130,7 @@ case "$out" in *Traceback*) bad "a condition Postgres refuses gives a traceback"
   *) bad "a condition Postgres refuses" "$out";; esac
 G checkout -q -- db && G clean -q -fd db
 sed -i 's/not {confidential}/not {confidential or name::int > 0}/' "$P/db/policy.authz"
-sleep 1; CLI migrate >/dev/null
+CLI migrate >/dev/null
 out=$(CLI --db "dbname=$DB" review --base main 2>&1); rc=$?
 case "$out" in *Traceback*) bad "a condition that fails on a row gives a traceback" "$out";;
   *"Access   not computed: invalid input syntax for type integer: "*) [ $rc -eq 0 ] &&
@@ -229,7 +230,7 @@ sed -e '/^test$/,$d' -e 's/^  can share = owner or folder.share$/  can share = o
   example/docs.authz > "$T/pushed.authz"
 CLI --db "dbname=$DB" push --development "$T/pushed.authz" >/dev/null 2>&1 || bad "a push to the review database"
 sed -i 's/can view  = edit or viewer or (parent.view and {inherit})/can view  = edit or viewer or parent.view/' "$P/db/policy.authz"
-sleep 1; CLI migrate >/dev/null
+CLI migrate >/dev/null
 out=$(CLI --db "dbname=$DB" review --base main 2>&1)
 case "$out" in *"Tests    not run: the migration fails: rowstile: this migration changes the policy the migration before it left"*"It fails on the review database: rowstile: this migration changes"*"[AZ607]"*)
   ok "a review database not where the base's lock says: the migrations refuse it, and Tests and Deploy say so";;

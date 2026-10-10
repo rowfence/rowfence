@@ -80,7 +80,6 @@ sed -i 's/^  can share = owner or folder.share$/  can share = owner or folder.sh
 out=$(CLI migrate --check 2>&1); rc=$?
 case "$out" in *"has changes no migration has"*"+ type file: can comment = folder.view"*) [ $rc -eq 1 ] && ok "--check: exit 1, and what changed" || bad "--check exit" "$rc";;
   *) bad "--check" "$out";; esac
-sleep 1
 out=$(CLI migrate 2>&1); rc=$?
 second=$(ls "$P"/db/migrations/*.sql | sort | tail -n 1)
 [ $rc -eq 0 ] && [ "$second" != "$first" ] && case "$second" in *_file_comment_folder_view.sql) true;; *) false;; esac &&
@@ -111,7 +110,6 @@ sed -i 's/^  can print = view$/  can print = edit/' "$P/db/policy.authz"
 out=$(CLI push 2>&1); case "$out" in *"policy.authz: pushed") ok "a second change is pushed too";; *) bad "second push" "$out";; esac
 PSQL -c "UPDATE authz.policy_versions SET version = '0.0.1' WHERE id = (SELECT max(id) FROM authz.policy_versions)" >/dev/null
 out=$(CLI push 2>&1); case "$out" in *"policy.authz: applied (the whole policy)") ok "a policy another version applied: the whole policy";; *) bad "push after upgrade" "$out";; esac
-sleep 1
 CLI migrate >/dev/null 2>&1
 out=$(migrate_db "${DB}_2" "$P/db/migrations") && [ "$(PSQL -d "${DB}_2" -c "SELECT count(*) FROM authz_int.perms WHERE type = 'file' AND perm = 'print'")" = 1 ] &&
   ok "the migration for what was pushed applies to a database that took the migrations" || bad "migration after push" "$out $(ls "$P/db/migrations")"
@@ -193,7 +191,6 @@ case "$out" in *"policy.authz: applied (the whole policy)") ok "... and a marked
 echo "-- an inheritance tree that changes: built beside the one in use, then swapped in"
 sed -i 's/can view  = edit or viewer or (parent.view and {inherit})/can view  = edit or viewer or parent.view/' "$P/db/policy.authz"
 before=$(ls "$P"/db/migrations/*.sql | wc -l)
-sleep 1
 out=$(CLI migrate 2>&1)
 build=$(ls "$P"/db/migrations/*.sql | sort | tail -n 2 | head -n 1); swap=$(ls "$P"/db/migrations/*.sql | sort | tail -n 1)
 case "$out" in *"beside the ones in use"*"two migrations"*) [ "$(ls "$P"/db/migrations/*.sql | wc -l)" = $((before + 2)) ] &&
@@ -253,7 +250,6 @@ for tool in sql goose dbmate flyway prisma drizzle alembic; do
   rm -f "$W/policy.lock"
   out=$( cd "$W" && python3 "$OLDPWD/cli/rowstile_cli.py" migrate policy.authz --tool $tool --dir "m_$tool" --name first 2>&1) || { bad "$tool" "$out"; continue; }
   sed -i 's/^  can print = edit$/  can print = share/' "$W/policy.authz"
-  sleep 1
   out=$( cd "$W" && python3 "$OLDPWD/cli/rowstile_cli.py" migrate policy.authz --tool $tool --dir "m_$tool" 2>&1) || { bad "$tool second" "$out"; continue; }
   sed -i 's/^  can print = share$/  can print = edit/' "$W/policy.authz"
   case $tool in
