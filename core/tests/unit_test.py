@@ -7319,6 +7319,9 @@ class Respelling(unittest.TestCase):
         self.assertEqual((uuids.number(uuids.ident(7)), text.literal("7"), s.literal("7")), (7, "'7'", "7"))
         self.assertEqual(uuids.cond("{=!= (this.id + 1)}"), "{=!= (gp.nxt(this.id))}")
         self.assertEqual(text.cond("{=!= (this.id + 1)}"), '{=!= ("Gp".nxt(this."Id"))}')
+        # object types keyed by (org_id, id), and what points at them, in the row's org
+        orgs = self.g.Spelling(True, "bigint", composite=True)
+        self.assertEqual((orgs.key(obj=True), orgs.key(), orgs.ref("c_up")), (" (OrgId, Id)", " (Id)", "[OrgId, C_up]"))
 
     def test_sql_quotes_every_awkward_name(self) -> None:
         spec = next(s for s in map(self.g.make, range(1, 50)) if s.spelling.awkward)
@@ -7331,7 +7334,7 @@ class Respelling(unittest.TestCase):
 
 class GeneratedShapes(unittest.TestCase):
     """genpolicy's policies say now and then what no other draw does (also(), across(), perm_groups(), keys other
-    than bigint, and the twins of variants()), drawn apart from the rest: a seed's policy keeps all it drew before,
+    than bigint, composite keys, and the twins of variants()), drawn apart from the rest: a seed's policy keeps all it drew before,
     the twelve seeds of the full run draw each of them (but across()), and their twins compile (one that didn't would
     only be counted as refused)."""
 
@@ -7384,6 +7387,7 @@ class GeneratedShapes(unittest.TestCase):
                     if not isinstance(e, str) and e[0] == "or" and not isinstance(e[1][0], str):
                         drawn |= {"a not first" for item in [e[1][0]] if item[1][1:] == [self.NOT_FIRST]}
             drawn.add(f"{variants[0][1].spelling.keytype} keys")
+            drawn |= {"composite keys"} if variants[0][1].spelling.composite else set()
         self.assertLessEqual(
             {
                 "without rules",
@@ -7395,7 +7399,7 @@ class GeneratedShapes(unittest.TestCase):
             },
             drawn,
         )
-        self.assertLessEqual({f"{k} keys" for k in self.g.KEYS}, drawn)
+        self.assertLessEqual({f"{k} keys" for k in self.g.KEYS} | {"composite keys"}, drawn)
 
     def test_a_recursion_through_two_types(self) -> None:
         """across(): about one seed in seven (the nightly soak's hundred meet it, the full run's twelve may not),
