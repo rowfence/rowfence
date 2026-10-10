@@ -908,7 +908,7 @@ def main() -> None:
 
         for seed in seeds:
             # plain names: the worlds rebuild genpolicy's tables from its schema's text, as it writes them plainly
-            spec = with_write_rules(genpolicy.make(seed, respell=False), seed)
+            spec = with_write_rules(genpolicy.make(seed, respell=False, keytype="bigint"), seed)
             w = draw(seed, spec)
             if args.only is not None:
                 print(f"world: {w.describe()}\n\n{policy_text(spec, w)}")

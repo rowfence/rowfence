@@ -7294,6 +7294,8 @@ class Respelling(unittest.TestCase):
             self.assertEqual((plain.objs, plain.invariants), (awkward.objs, awkward.invariants), seed)
             self.assertNotEqual(self.g.policy_text(plain), self.g.policy_text(awkward))
             parse_policy(self.g.policy_text(awkward), "gen.authz")  # the parser takes it
+            for keytype in self.g.KEYS:  # and the same policy whatever its keys' type
+                self.assertEqual(self.g.make(seed, respell=False, keytype=keytype).objs, plain.objs, seed)
         drawn = [self.g.make(seed).spelling.awkward for seed in range(1, 301)]
         self.assertTrue(60 < sum(drawn) < 140, sum(drawn))  # about a third, drawn apart from the policy
 
@@ -7308,6 +7310,15 @@ class Respelling(unittest.TestCase):
             '{exists (select 1 from "Gp"."select" x where x."Id" = this."Id" + 1 and x."order")}',
         )
         self.assertEqual(self.g.Spelling().cond("{not b3}"), "{not b3}")  # plain: as before
+        # keys other than bigint: said on the type line, written as SQL, and the next row's key
+        uuids, text = self.g.Spelling(False, "uuid"), self.g.Spelling(True, "text")
+        self.assertEqual(
+            (uuids.key(), text.key(), s.key(), self.g.Spelling().key()), (" (id uuid)", " (Id text)", " (Id)", "")
+        )
+        self.assertEqual(uuids.literal(uuids.ident(7)), "'00000000-0000-4000-8000-000000000007'")
+        self.assertEqual((uuids.number(uuids.ident(7)), text.literal("7"), s.literal("7")), (7, "'7'", "7"))
+        self.assertEqual(uuids.cond("{=!= (this.id + 1)}"), "{=!= (gp.nxt(this.id))}")
+        self.assertEqual(text.cond("{=!= (this.id + 1)}"), '{=!= ("Gp".nxt(this."Id"))}')
 
     def test_sql_quotes_every_awkward_name(self) -> None:
         spec = next(s for s in map(self.g.make, range(1, 50)) if s.spelling.awkward)
@@ -7318,9 +7329,9 @@ class Respelling(unittest.TestCase):
 
 
 class GeneratedShapes(unittest.TestCase):
-    """genpolicy's policies say now and then what no other draw does (also(), and the twins of variants()), drawn
-    apart from the rest: a seed's policy keeps all it drew before, the twelve seeds of the full run draw each of
-    them, and their twins compile (one that didn't would only be counted as refused)."""
+    """genpolicy's policies say now and then what no other draw does (also(), keys other than bigint, and the twins
+    of variants()), drawn apart from the rest: a seed's policy keeps all it drew before, the twelve seeds of the full
+    run draw each of them, and their twins compile (one that didn't would only be counted as refused)."""
 
     def setUp(self) -> None:
         sys.path.insert(0, os.path.join(ROOT, "tests"))
@@ -7363,9 +7374,11 @@ class GeneratedShapes(unittest.TestCase):
                 for e in o.perms.values():
                     if not isinstance(e, str) and e[0] == "or" and not isinstance(e[1][0], str):
                         drawn |= {"a not first" for item in [e[1][0]] if item[1][1:] == [self.NOT_FIRST]}
+            drawn.add(f"{variants[0][1].spelling.keytype} keys")
         self.assertLessEqual(
             {"without rules", "without permissions", "parent again", "a relation to users again", "a not first"}, drawn
         )
+        self.assertLessEqual({f"{k} keys" for k in self.g.KEYS}, drawn)
 
     def test_arounds_seeds_draw_each_shared_if(self) -> None:
         """around.py judges `shared if` by its calls of authz.share() to users: its four seeds on each push draw
