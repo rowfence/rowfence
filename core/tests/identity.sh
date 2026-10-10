@@ -53,6 +53,9 @@ expect_code "a session limited to a scope cannot make a key with another" "42501
 expect_code "... nor one with every scope (none named)" "42501: a key cannot have more scopes than the session creating it" \
   -c "BEGIN" -c "SELECT authz.login_key('$FILES')" -c "SELECT authz.create_api_key('wider')"
 expect_code "nobody signed in makes no key" "42501: sign in to create an API key" -c "SELECT authz.create_api_key('k', 'read')"
+said=$(psql -X -q -At -d "$DB" -c "SET ROLE app_user;" -c "SELECT authz.create_api_key('k', 'read')" 2>&1 | grep '^HINT:  ')
+[ "$said" = "HINT:  rowstile help AZ714" ] && echo "ok    ... and its code is sign in first (AZ714, a 401), not a refusal" ||
+  { echo "FAIL  sign in first's code: $said"; fails=$((fails + 1)); }
 check "files key: may edit files, and update them" "updated" \
   "BEGIN; SELECT authz.login_key('$FILES'); SELECT authz.can('file', 11, 'edit'); UPDATE app.files SET body = 'y' WHERE id = 11 RETURNING 'updated'; ROLLBACK;"
 check "files key: sees no folders (not in its scope)" "0|false" \
@@ -67,7 +70,7 @@ check "... and requests with one key don't wait for each other" "1"   "SET state
 wait
 check "... last_used_at is kept, to the minute" "t"   "RESET ROLE; SELECT last_used_at > now() - interval '1 minute' FROM authz.api_keys WHERE name = 'script';"
 KEYID=$(state -c "SET authz.user_id = 1" -c "SELECT id FROM authz.list_api_keys() WHERE name = 'laptop'")
-expect_code "bob cannot revoke alice's key" "42501: no API key $KEYID of yours" -c "SET authz.user_id = 2" -c "SELECT authz.revoke_api_key($KEYID)"
+expect_code "bob cannot revoke alice's key" "P0001: no API key $KEYID of yours" -c "SET authz.user_id = 2" -c "SELECT authz.revoke_api_key($KEYID)"
 PSQL -c "SET ROLE app_user; SET authz.user_id = 1; SELECT authz.revoke_api_key($KEYID)" >/dev/null
 expect_code "a revoked key no longer signs in" "28000: invalid API key" -c "BEGIN" -c "SELECT authz.login_key('$READ')"
 check "the audit trail has the keys made and the one revoked, with whose they are" \
@@ -82,7 +85,7 @@ PSQL -c "UPDATE authz.api_keys SET expires_at = now() - interval '1 hour' WHERE 
 expect_code "... and no longer after it" "28000: invalid API key" -c "BEGIN" -c "SELECT authz.login_key('$SHORT')"
 
 echo "-- JWT (HS256)"
-expect_code "no secret, no JWT login" "P0001: JWT login is not configured (authz.settings jwt_secret)" -c "BEGIN" -c "SELECT authz.login_jwt('a.b.c')"
+expect_code "no secret, no JWT login" "28000: JWT login is not configured (authz.settings jwt_secret)" -c "BEGIN" -c "SELECT authz.login_jwt('a.b.c')"
 PSQL -c "INSERT INTO authz.settings VALUES ('jwt_secret', 's3cret-for-tests'), ('jwt_issuer', 'https://id.example')" >/dev/null
 jwt() { python3 - "$@" <<'PY'
 import base64, hashlib, hmac, json, sys, time
@@ -148,7 +151,7 @@ done
 check "the audit trail has the reason" "ticket 42" \
   "RESET ROLE; SELECT reason FROM authz.audit WHERE action = 'view_as' ORDER BY id DESC LIMIT 1;"
 expect_code "carol cannot view as erin" "42501: you cannot view as user 5" -c "SET authz.user_id = 3" -c "SELECT authz.view_as('5', 'curious')"
-expect_code "a reason is required" "P0001: say why (the reason is kept in the audit trail)" -c "SET authz.user_id = 5" -c "SELECT authz.view_as('3', '')"
+expect_code "a reason is required" "22023: say why (the reason is kept in the audit trail)" -c "SET authz.user_id = 5" -c "SELECT authz.view_as('3', '')"
 expect_code "one view-as at a time" "42501: already viewing as someone" -c "BEGIN" -c "SET LOCAL authz.user_id = 5" \
   -c "SELECT authz.view_as('3', 'ticket 42')" -c "SELECT authz.view_as('4', 'ticket 43')"
 expect_code "an administrator views as a user the database doesn't have" "P0001: there is no active user 999" -c "RESET ROLE" \

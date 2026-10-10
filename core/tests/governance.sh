@@ -119,12 +119,12 @@ expect_code "the app role cannot read the feed" "42501: permission denied for fu
 
 echo "-- emergency access (break glass)"
 check "carol cannot see the prod keys" "f" "SET authz.user_id = 3; SELECT authz.can('file', 12, 'view')"
-expect_code "a reason is required" "P0001: say why (it is kept in the audit trail)" -c "SET authz.user_id = 3" -c "SELECT authz.break_glass('folder', '6', 'viewer', '')"
-expect_code "it lasts one day at most" "P0001: emergency access lasts more than nothing and one day at most" -c "SET authz.user_id = 3" \
+expect_code "a reason is required" "22023: say why (it is kept in the audit trail)" -c "SET authz.user_id = 3" -c "SELECT authz.break_glass('folder', '6', 'viewer', '')"
+expect_code "it lasts one day at most" "22023: emergency access lasts more than nothing and one day at most" -c "SET authz.user_id = 3" \
   -c "SELECT authz.break_glass('folder', '6', 'viewer', 'outage', '2 days')"
-expect_code "... and a duration must be given" "P0001: emergency access lasts more than nothing and one day at most" -c "SET authz.user_id = 3" \
+expect_code "... and a duration must be given" "22023: emergency access lasts more than nothing and one day at most" -c "SET authz.user_id = 3" \
   -c "SELECT authz.break_glass('folder', '6', 'viewer', 'outage', NULL)"
-expect_code "... a positive one" "P0001: emergency access lasts more than nothing and one day at most" -c "SET authz.user_id = 3" \
+expect_code "... a positive one" "22023: emergency access lasts more than nothing and one day at most" -c "SET authz.user_id = 3" \
   -c "SELECT authz.break_glass('folder', '6', 'viewer', 'outage', '-1 hour')"
 expect_code "frank (Globex) cannot break the glass on an Acme folder" "42501: you cannot break the glass on folder 6" -c "SET authz.user_id = 6" \
   -c "SELECT authz.break_glass('folder', '6', 'viewer', 'outage')"
@@ -154,13 +154,17 @@ check "alice (who may not) does not" "0" "SET authz.user_id = 1; SELECT count(*)
 expect_code "alice cannot decide it" "42501: you cannot decide request 1" -c "SET authz.user_id = 1" -c "SELECT authz.decide_request($REQ, true)"
 expect_code "alice cannot deny it either" "42501: you cannot decide request 1" -c "SET authz.user_id = 1" -c "SELECT authz.decide_request($REQ, false)"
 expect_code "carol cannot approve her own request" "42501: you cannot decide your own request" -c "SET authz.user_id = 3" -c "SELECT authz.decide_request($REQ, true)"
-expect_code "an answer is yes or no" "P0001: approve (true) or deny (false)" -c "SET authz.user_id = 5" -c "SELECT authz.decide_request($REQ, NULL)"
+expect_code "an answer is yes or no" "22023: approve (true) or deny (false)" -c "SET authz.user_id = 5" -c "SELECT authz.decide_request($REQ, NULL)"
 expect_code "... for a request still pending" "P0001: no pending request 999" -c "SET authz.user_id = 5" -c "SELECT authz.decide_request(999, true)"
 expect_code "dave cannot withdraw carol's request" "P0001: no pending request $REQ of yours" -c "SET authz.user_id = 4" -c "SELECT authz.cancel_request($REQ)"
-expect_code "a request says why" "P0001: say why you need it" -c "SET authz.user_id = 4" \
+expect_code "a request says why" "22023: say why you need it" -c "SET authz.user_id = 4" \
   -c "SELECT authz.request_access('folder', 6, 'viewer', '  ')"
-expect_code "... and how long it may last is more than nothing" "P0001: the duration must be positive" -c "SET authz.user_id = 4" \
+expect_code "... and how long it may last is more than nothing" "22023: the duration must be positive" -c "SET authz.user_id = 4" \
   -c "SELECT authz.request_access('folder', 6, 'viewer', 'please', '-1 day')"
+expect_code "nobody signed in asks for nothing" "42501: sign in first" -c "SELECT authz.request_access('folder', 6, 'viewer', 'please')"
+said=$(psql -X -q -At -d "$DB" -c "SET ROLE app_user" -c "SELECT authz.request_access('folder', 6, 'viewer', 'please')" 2>&1 | grep '^HINT:  ')
+[ "$said" = "HINT:  rowstile help AZ714" ] && echo "ok    ... and its code is sign in first (AZ714, a 401), not a refusal" ||
+  { echo "FAIL  sign in first's code: $said"; fails=$((fails + 1)); }
 check "before approval carol cannot view the offer letter" "f" "SET authz.user_id = 3; SELECT authz.can('file', 13, 'view')"
 as 5 -c "SELECT authz.decide_request($REQ, true, 'ok for a week')" >/dev/null
 check "after erin approves, she can" "t" "SET authz.user_id = 3; SELECT authz.can('file', 13, 'view')"
@@ -424,7 +428,7 @@ expect_code "a reader behind the trimmed part is told to read everything again" 
 admin "... a reader past it goes on" "t" "SELECT count(*) > 0 FROM authz.changes_since($POS)"
 PSQL -c "INSERT INTO authz.settings VALUES ('changes_keep', '1 hour')" >/dev/null
 admin "how long the feed keeps entries is a setting" "0" "SELECT authz.trim_changes()"
-expect_code "trimming the audit trail needs a period" "P0001: say how long to keep the audit trail, e.g. authz.trim_audit(interval '2 years')" -c "RESET ROLE" -c "SELECT authz.trim_audit(NULL)"
+expect_code "trimming the audit trail needs a period" "22023: say how long to keep the audit trail, e.g. authz.trim_audit(interval '2 years')" -c "RESET ROLE" -c "SELECT authz.trim_audit(NULL)"
 admin "entries younger than the period stay" "0" "SELECT authz.trim_audit(interval '1 day')"
 N=$(PSQL -c "SELECT count(*) FROM authz.audit")
 admin "... older ones go" "$N" "SELECT authz.trim_audit(interval '0')"

@@ -7,6 +7,13 @@ Each release upgrades from the one before it. How releases are numbered and made
 
 ## Unreleased
 
+### Upgrading
+
+- The next `rowstile migrate` (or `apply`) brings the errors' new SQLSTATEs and codes: a migration with no
+  change to the policy. Code that read an SQLSTATE these errors had before (23503 for a share with someone who
+  doesn't exist, 42501 for "sign in first") reads the code in the HINT instead (`rowstile help AZ714`). Until
+  then, through `@rowstile/prisma`, a share with someone who doesn't exist answers 500.
+
 ### Added
 
 - Two starters, as template repositories: [FastAPI, SQLAlchemy and
@@ -74,6 +81,25 @@ Each release upgrades from the one before it. How releases are numbered and made
 - While only alphas are published, each release moves npm's `latest` to the alpha it publishes: a plain
   `npm i rowstile` gets the newest, and a package's page on npmjs.com shows it. `next` names it too, as
   before. From the first final release on, `latest` is a release's only.
+- Each error the runtime raises comes with one SQLSTATE, the one its code's page names, and the SDKs answer
+  each code as its page says; every page now names both (`rowstile help AZ713`). What changes for apps:
+  - A call that needs someone signed in, made by a visitor who isn't (`authz.request_access`,
+    `authz.create_api_key` for oneself), has a code of its own, AZ714, "sign in first", and answers 401
+    (`https://rowstile.dev/problems/not-signed-in`). It was AZ701, and answered 403 as if a rule had refused
+    it. A login with an API key or a token the database refuses (AZ703) answers 401 too: `rowstile.fastapi`
+    raised `NotSignedIn`, a 500 saying nobody had signed in.
+  - A move that would put an object inside itself (AZ713) answers 409
+    (`https://rowstile.dev/problems/conflict`), where it answered 500.
+  - `authz.create_api_key` for a type whose keys the policy lets nobody manage (AZ707) is the app's mistake,
+    a 500, as AZ707's other errors are: it said 42501, and answered 403 as a refusal.
+  - A share that the relation's `shared if` doesn't allow is AZ705, a refusal (403, as before), where its
+    code said AZ706.
+  - The SQLSTATEs that differed: AZ708 is P0001 (a share with someone who doesn't exist said 23503,
+    revoking an API key that isn't yours 42501), AZ710 is 22023 (a missing reason, approve or deny, a
+    duration said P0001), AZ707 is P0001 (`authz.act_as` with a type that doesn't sign in said 22023,
+    `authz.explain_rule` for a table without rules 42P01), and JWT login that isn't set up (AZ703) is 28000.
+  - `not_signed_in(e)` and `notSignedIn(e)` are true for strict sign-in's error (AZ701) only: a login refused
+    (AZ703) and settings changed by hand (AZ702) have its SQLSTATE, 28000, but are no such thing.
 
 ### Fixed
 

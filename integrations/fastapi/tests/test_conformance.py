@@ -10,6 +10,7 @@ import subprocess
 import sys
 from collections.abc import AsyncIterator
 from pathlib import Path
+from typing import Any
 
 import asyncpg
 import httpx
@@ -27,6 +28,7 @@ from rowstile.testing import (
     database_per_worker,
     worker_id,
 )
+from sqlalchemy.exc import DBAPIError
 
 from .conftest import OWNER, libpq
 
@@ -177,6 +179,80 @@ async def test_16_not_there_is_404_and_a_wrong_argument_400(app: FastAPI) -> Non
             "code": "AZ708",
         }, r.text
         assert r.status_code == 404
+
+
+Answer = Any
+
+
+def problem(kind: str, title: str, status: int, detail: str, code: str) -> Answer:
+    return {
+        "type": f"https://rowstile.dev/problems/{kind}",
+        "title": title,
+        "status": status,
+        "detail": detail,
+        "code": code,
+    }
+
+
+# 16: and the other codes the runtime raises, each as its page says (rowstile help AZ703 and the like): a login refused
+# or a call that needs someone signed in 401, a move inside itself 409, a refusal by the database's own code 403;
+# a share the policy doesn't declare, a name not in the policy and who is signed in changed by hand are the app's
+# mistakes, which stay errors (a 500)
+async def test_16_each_code_answers_as_its_page_says(app: FastAPI) -> None:
+    with psycopg.connect(libpq(OWNER)) as conn:  # a key of ann's that may only read
+        conn.execute("SELECT authz.act_as('user', '1')")
+        read_only = conn.execute("SELECT authz.create_api_key('ro', 'read')").fetchone()
+    assert read_only is not None
+    async with client(app) as c:
+        nobody = await c.post("/keys", json={"name": "k"})
+        asks = await c.post("/projects/1/requests", json={"relation": "member", "reason": "the review"})
+        bad_key = await c.post("/keys", json={"name": "k"}, headers={**as_("1"), "x-api-key": "ak_nope"})
+        scoped = await c.post("/keys", json={"name": "k"}, headers={**as_("1"), "x-api-key": read_only[0]})
+        made = await c.post("/keys", json={"name": "k"}, headers=as_("1"))
+        not_shared = await c.get("/projects/1/shares", headers=as_("2"))
+        inside = await c.patch("/folders/1", json={"parent_id": 2}, headers=as_("1"))
+        stays = await c.patch("/folders/2", json={"parent_id": 1}, headers=as_("1"))
+        errors = []
+        for call in (
+            c.post("/projects/1/requests", json={"relation": "member", "reason": "the review"}, headers=as_("2")),
+            c.post("/keys", json={"name": "k", "principal_type": "service", "principal_id": "1"}, headers=as_("1")),
+            c.get("/notes/as/2", headers=as_("1")),
+        ):
+            with pytest.raises(DBAPIError) as e:  # the database's own error, not NotSignedIn nor a problem
+                await call
+            errors.append(e.value)
+    assert made.status_code == 201 and made.json()["key"].startswith("ak_"), made.text
+    assert stays.status_code == 200, stays.text
+    for r, body in [
+        (nobody, problem("not-signed-in", "Unauthorized", 401, "sign in to create an API key", "AZ714")),
+        (asks, problem("not-signed-in", "Unauthorized", 401, "sign in first", "AZ714")),
+        (bad_key, problem("not-signed-in", "Unauthorized", 401, "invalid API key", "AZ703")),
+        (inside, problem("conflict", "Conflict", 409, "folder 1 cannot be moved inside itself", "AZ713")),
+    ]:
+        assert r.headers["content-type"] == "application/problem+json", r.text
+        assert r.json() == body, r.text
+        assert r.status_code == body["status"]
+    # refusals, by the database's own code: 403, naming no rule
+    for r, detail, code in [
+        (scoped, "this session is read-only", "AZ704"),
+        (not_shared, "you cannot see the shares of project 1", "AZ705"),
+    ]:
+        assert r.status_code == 403, r.text
+        got = r.json()
+        assert got["type"] == "https://rowstile.dev/problems/refused" and got["code"] == code, got
+        assert got["detail"].startswith(detail) and got["table"] is None and got["command"] is None, got
+    said = [(rowstile.error_code(e), rowstile.sqlstate(e)) for e in errors]
+    assert said == [("AZ706", "P0001"), ("AZ707", "P0001"), ("AZ702", "28000")], said
+    for e, words in zip(
+        errors,
+        [
+            "the policy does not allow sharing project.member with a user",
+            "the policy gives service no manage_keys permission, so nobody manages its keys",
+            "who is signed in was changed after signing in",
+        ],
+        strict=True,
+    ):
+        assert words in str(e), str(e)
 
 
 # 9: the generated names type-check, and a wrong permission name doesn't

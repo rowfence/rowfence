@@ -875,7 +875,7 @@ class Checker:
         if not signed_in or not any(holds(p) for p in self.share_perms.get(t.name, {"share"})):
             return "42501: you cannot share"
         if to_user and self.share_target not in self.ref.ids(self.types["user"]):
-            return "23503: there is no"
+            return "P0001: there is no"
         if not holds(by):
             return f"42501: you cannot share {t.name} {i} (needs {by})"
         if not all(holds(p) for p in required):

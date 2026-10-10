@@ -46,8 +46,9 @@ export async function checkAtStart(calls: { check(): Promise<void> }): Promise<v
 }
 
 /** A route handler whose refusals answer 403 with the reason, and hidden rows 404 (RFC 9457 problem bodies); a call
- *  the database says names something that isn't there 404 too (AZ708), and one it says lacks an argument or has
- *  a wrong one 400 (AZ710), with its words. */
+ *  the database turns down that is no refusal answers as its code's page says, with its words: 401 for a login
+ *  refused or a call that needs someone signed in (AZ703, AZ714), 404 for something it names that isn't there
+ *  (AZ708), 400 for an argument missing or wrong (AZ710), 409 for a move inside itself (AZ713). */
 export function route<A extends unknown[]>(handler: (...args: A) => Response | Promise<Response>): (...args: A) => Promise<Response> {
   return async (...args: A) => {
     try {
@@ -65,7 +66,7 @@ export function route<A extends unknown[]>(handler: (...args: A) => Response | P
 export type ActionResult<R> = { ok: true; value: R } | { ok: false; problem: Problem };
 
 /** A server action whose refusals and hidden rows come back as { ok: false, problem } instead of an error, and
- *  so does what route() answers 404 or 400 for (AZ708, AZ710). */
+ *  so does what route() answers 401, 404, 400 or 409 for (AZ703, AZ714, AZ708, AZ710, AZ713). */
 export function action<A extends unknown[], R>(fn: (...args: A) => Promise<R>): (...args: A) => Promise<ActionResult<R>> {
   return async (...args: A) => {
     try {
@@ -96,7 +97,8 @@ const json = (body: unknown, status = 200) =>
  *  GET events (server-sent events), POST share, POST unshare, POST request. Each answers as the signed-in
  *  user, and only what they may see. The POST routes take application/json only: a form on another site
  *  can't send that without the browser asking this one first. They answer as route() does: a share with
- *  someone who doesn't exist 404, a request for access without a reason 400, with the database's words. */
+ *  someone who doesn't exist 404, a request for access without a reason 400, and one from someone not signed in
+ *  401, with the database's words. */
 export function authzRoutes(options: RoutesOptions) {
   const { calls } = options;
   const streams = { open: 0, most: options.maxStreams ?? 1000 };

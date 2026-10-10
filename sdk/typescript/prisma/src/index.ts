@@ -21,7 +21,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { Prisma } from "@prisma/client/extension";
 import {
-  actAs, calls, dbError, errorCode, idShown, idText, NotFound, signingIn, translate,
+  actAs, calls, idShown, idText, NotFound, signingIn, translate,
   type AuthzCalls, type Id, type ObjectType, type Permission, type Queryable, type UserResolver,
 } from "@rowstile/client";
 
@@ -238,13 +238,6 @@ export function authz(options: ExtensionOptions = {}) {
         const out = await c.list(type, perm);
         return (as ? out.map(as) : out) as any[];
       },
-      // Prisma's adapter keeps no hint, so no code, for the SQLSTATEs it has a kind of its own for; authz.share's
-      // one foreign_key_violation is a subject that isn't there (rowstile help AZ708), which problemOf answers 404
-      share: (...args) => c.share(...args).catch((e: unknown) => {
-        const err = dbError(e);
-        if (err?.code !== "23503" || errorCode(e) !== undefined) throw e;
-        throw Object.assign(new Error(err.message, { cause: e }), { code: err.code, hint: "rowstile help AZ708" });
-      }),
     };
     const hooks = client.$extends({
       name: "rowstile",

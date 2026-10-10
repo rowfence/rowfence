@@ -143,7 +143,7 @@ echo "-- who may sign in whom"
 expect "the key is out of the app role's reach" "42501: permission denied for table settings" -c "SELECT value FROM authz.settings WHERE key = 'session_key'"
 expect "... and so is the signing" "42501: permission denied for schema authz_int" -c "SELECT authz_int.session_sig()"
 ROLE=$OTHER expect "a role that isn't the app role can't act_as" "42501: permission denied for function act_as" -c "$(ACT "'user', '1'")"
-expect "act_as names only types that sign in" "22023: folder is not a type that signs in" -c "$(ACT "'folder', '1'")"
+expect "act_as names only types that sign in" "P0001: folder is not a type that signs in" -c "$(ACT "'folder', '1'")"
 
 PSQL -c "REVOKE ALL ON SCHEMA app, authz FROM $OTHER" -c "REVOKE ALL ON FUNCTION authz.connection_check() FROM $OTHER" >/dev/null 2>&1
 dropdb "$DB"

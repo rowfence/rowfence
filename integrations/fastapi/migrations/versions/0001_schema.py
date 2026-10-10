@@ -27,6 +27,7 @@ def upgrade() -> None:
     op.execute("GRANT USAGE ON SCHEMA app TO conf_app")
     op.execute("GRANT SELECT ON ALL TABLES IN SCHEMA app TO conf_app")
     op.execute("GRANT INSERT, UPDATE, DELETE ON app.notes, app.inbox TO conf_app")
+    op.execute("GRANT UPDATE ON app.folders TO conf_app")
     op.execute("GRANT USAGE ON ALL SEQUENCES IN SCHEMA app TO conf_app")
 
 

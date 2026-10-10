@@ -162,6 +162,10 @@ with the database's words (a negative page size: "the page size must not be nega
             return list((await s.scalars(listed, {"after": after, "limit": limit})).all())
 ```
 
+A call that needs someone signed in, from a visitor who isn't (an access request, an API key), answers 401, and
+so does a login with a key or a token the database refuses; a folder moved into one of its own subfolders
+answers 409. Each code's page says what its answer is (`rowstile help AZ714`).
+
 ## Lists by permission
 
 `ids(type, perm)` filters a query to the objects the user holds a permission on; `perms_of` answers a list's

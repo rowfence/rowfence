@@ -104,7 +104,7 @@ LANGUAGE plpgsql {DEF} AS $f$
 DECLARE v_before timestamptz; n bigint;
 BEGIN
   IF p_keep IS NULL OR p_keep < interval '0' THEN
-    RAISE EXCEPTION 'say how long to keep the audit trail, e.g. authz.trim_audit(interval ''2 years'')' USING HINT = 'rowstile help AZ710';
+    RAISE EXCEPTION 'say how long to keep the audit trail, e.g. authz.trim_audit(interval ''2 years'')' USING ERRCODE = 'invalid_parameter_value', HINT = 'rowstile help AZ710';
   END IF;
   v_before := now() - p_keep;
   -- the one way past the trigger is DDL, as the owner, here: nothing a session can set lets a DELETE through
@@ -397,9 +397,9 @@ DECLARE v_id bigint; v_tbl text;
 BEGIN
   p_id := authz_int.canon(p_type, p_id);
   PERFORM authz_int.check_writable();
-  IF authz.uid() IS NULL THEN RAISE EXCEPTION 'sign in first' USING ERRCODE = 'insufficient_privilege', HINT = 'rowstile help AZ701'; END IF;
-  IF coalesce(btrim(p_reason), '') = '' THEN RAISE EXCEPTION 'say why you need it' USING HINT = 'rowstile help AZ710'; END IF;
-  IF p_duration IS NOT NULL AND p_duration <= interval '0' THEN RAISE EXCEPTION 'the duration must be positive' USING HINT = 'rowstile help AZ710'; END IF;
+  IF authz.uid() IS NULL THEN RAISE EXCEPTION 'sign in first' USING ERRCODE = 'insufficient_privilege', HINT = 'rowstile help AZ714'; END IF;
+  IF coalesce(btrim(p_reason), '') = '' THEN RAISE EXCEPTION 'say why you need it' USING ERRCODE = 'invalid_parameter_value', HINT = 'rowstile help AZ710'; END IF;
+  IF p_duration IS NOT NULL AND p_duration <= interval '0' THEN RAISE EXCEPTION 'the duration must be positive' USING ERRCODE = 'invalid_parameter_value', HINT = 'rowstile help AZ710'; END IF;
   SELECT tbl INTO v_tbl FROM authz_int.types WHERE name = p_type;
   IF v_tbl IS NULL THEN RAISE EXCEPTION 'no type % in the policy', p_type USING HINT = 'rowstile help AZ707'; END IF;
   IF authz_int.manage_perm(p_type, p_relation, CASE WHEN p_relation LIKE 'role:%' THEN NULL ELSE 'user' END) IS NULL
@@ -441,7 +441,7 @@ LANGUAGE plpgsql {DEF} AS $f$
 DECLARE r authz.requests;
 BEGIN
   PERFORM authz_int.check_writable();
-  IF p_approve IS NULL THEN RAISE EXCEPTION 'approve (true) or deny (false)' USING HINT = 'rowstile help AZ710'; END IF;
+  IF p_approve IS NULL THEN RAISE EXCEPTION 'approve (true) or deny (false)' USING ERRCODE = 'invalid_parameter_value', HINT = 'rowstile help AZ710'; END IF;
   SELECT * INTO r FROM authz.requests WHERE id = p_id AND status = 'pending' FOR UPDATE;
   IF r.id IS NULL THEN RAISE EXCEPTION 'no pending request %', p_id USING HINT = 'rowstile help AZ708'; END IF;
   IF authz.uid() IS NULL OR r.requester = authz.uid()::text THEN
@@ -480,9 +480,9 @@ DECLARE g authz.shares; v_until timestamptz; v_audit bigint;
 BEGIN
   p_id := authz_int.canon(p_type, p_id);
   PERFORM authz_int.check_writable();
-  IF coalesce(btrim(p_reason), '') = '' THEN RAISE EXCEPTION 'say why (it is kept in the audit trail)' USING HINT = 'rowstile help AZ710'; END IF;
+  IF coalesce(btrim(p_reason), '') = '' THEN RAISE EXCEPTION 'say why (it is kept in the audit trail)' USING ERRCODE = 'invalid_parameter_value', HINT = 'rowstile help AZ710'; END IF;
   IF p_duration IS NULL OR p_duration <= interval '0' OR p_duration > interval '1 day' THEN
-    RAISE EXCEPTION 'emergency access lasts more than nothing and one day at most' USING HINT = 'rowstile help AZ710';
+    RAISE EXCEPTION 'emergency access lasts more than nothing and one day at most' USING ERRCODE = 'invalid_parameter_value', HINT = 'rowstile help AZ710';
   END IF;
   IF authz.uid() IS NULL
      OR NOT EXISTS (SELECT 1 FROM authz_int.perms WHERE type = p_type AND perm = 'break_glass')

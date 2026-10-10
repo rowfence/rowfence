@@ -13,7 +13,7 @@ from sqlalchemy import delete, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from .authz_client import ObjectType, Permission
-from .models import Message, Note, Project
+from .models import Folder, Message, Note, Project
 
 # the queries by permission, taking only the policy's names: a misspelled one doesn't type-check
 queries = authz_sa.Queries[ObjectType, Permission]()
@@ -68,6 +68,60 @@ def make_app(url: str | None = None, check_connection: bool = True, pool_size: i
         # one of the user's API keys: someone else's, or one that isn't there, is 404
         async with Session.begin() as s:
             await s.execute(text("SELECT 1 FROM authz.revoke_api_key(:id)"), {"id": key_id})
+
+    class NewKey(BaseModel):
+        name: str
+        principal_type: str | None = None
+        principal_id: str | None = None
+
+    @app.post("/keys", status_code=201)
+    async def create_key(k: NewKey, request: Request) -> dict[str, str]:
+        # an API key, for the user or a principal whose keys they manage; a request that brings a key (x-api-key)
+        # signs in with it first, in the same transaction: the database says who may make which
+        async with Session.begin() as s:
+            key = request.headers.get("x-api-key")
+            if key is not None:
+                await s.execute(text("SELECT authz.login_key(:key)"), {"key": key})
+            made = text("SELECT authz.create_api_key(:name, '', NULL, CAST(:type AS text), CAST(:id AS text))")
+            return {"key": str(await s.scalar(made, {"name": k.name, "type": k.principal_type, "id": k.principal_id}))}
+
+    @app.get("/projects/{project_id}/shares")
+    async def shares(project_id: int) -> list[str]:
+        async with Session() as s:
+            listed = text("SELECT subject_id FROM authz.list_shares('project', CAST(:id AS text))")
+            return list((await s.scalars(listed, {"id": str(project_id)})).all())
+
+    class Ask(BaseModel):
+        relation: str
+        reason: str
+
+    @app.post("/projects/{project_id}/requests", status_code=201)
+    async def ask(project_id: int, a: Ask) -> dict[str, int]:
+        # access asked for: the policy shares no relation of a project, so this is the app's mistake (a 500), once
+        # the database knows who asks
+        async with Session.begin() as s:
+            asked = text("SELECT authz.request_access('project', CAST(:p AS text), :relation, :reason)")
+            params = {"p": str(project_id), "relation": a.relation, "reason": a.reason}
+            return {"id": int((await s.execute(asked, params)).scalar_one())}
+
+    @app.get("/notes/as/{user_id}")
+    async def notes_as(user_id: int) -> list[int]:
+        # who is signed in, changed by hand: the database doesn't believe it (the app's bug, a 500)
+        async with Session() as s:
+            await s.execute(text("SELECT set_config('authz.user_id', CAST(:u AS text), true)"), {"u": str(user_id)})
+            return sorted((await s.scalars(select(Note.id))).all())
+
+    class Move(BaseModel):
+        parent_id: int | None
+
+    @app.patch("/folders/{folder_id}")
+    async def move_folder(folder_id: int, m: Move) -> dict[str, int]:
+        async with Session.begin() as s:
+            folder = await s.get(Folder, folder_id)
+            if folder is None:
+                raise NotFound("app.folders", folder_id)
+            folder.parent_id = m.parent_id  # inside one of its own subfolders: 409, the database's words
+        return {"id": folder_id}
 
     @app.get("/notes")
     async def notes() -> list[int]:

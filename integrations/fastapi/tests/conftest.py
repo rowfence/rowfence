@@ -32,13 +32,13 @@ def worker_database() -> WorkerDatabase:
 @pytest.fixture(scope="session", autouse=True)
 def data() -> Iterator[None]:
     """The same few rows for every test: ann (1) owns project 1 (cy is a member, service 1 reads it) and the
-    public project 3; bo (2) owns project 2."""
+    public project 3; bo (2) owns project 2. Ann's folder 1 has folder 2 inside it."""
     if not OWNER:
         pytest.skip("ROWSTILE_OWNER_URL is not set (test.sh sets it)")
     with psycopg.connect(libpq(OWNER), autocommit=True) as conn:
         conn.execute(
-            "TRUNCATE app.inbox, app.notes, app.members, app.project_services, app.projects, app.services, "
-            "app.users CASCADE"
+            "TRUNCATE app.folders, app.inbox, app.notes, app.members, app.project_services, app.projects, "
+            "app.services, app.users CASCADE"
         )
         conn.execute("INSERT INTO app.users VALUES (1, 'ann'), (2, 'bo'), (3, 'cy')")
         conn.execute("INSERT INTO app.services VALUES (1, 'digest')")
@@ -52,4 +52,5 @@ def data() -> Iterator[None]:
             "(1, 1, 1, 'plan'), (2, 2, 2, 'mine'), (3, 3, 1, 'hello'), (4, 1, 3, 'idea')"
         )
         conn.execute("SELECT setval(pg_get_serial_sequence('app.notes', 'id'), 100)")
+        conn.execute("INSERT INTO app.folders VALUES (1, NULL, 1, 'top'), (2, 1, 1, 'inside')")
     yield

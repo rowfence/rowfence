@@ -1,5 +1,5 @@
 // The same few rows for every test: ann (1) owns project 1 (cy is a member, service 1 reads it) and the public
-// project 3; bo (2) owns project 2. The servers test.sh started, and what they answer.
+// project 3; bo (2) owns project 2. Ann's folder 1 has folder 2 inside it. The servers test.sh started, and what they answer.
 import pg from "pg";
 
 export const OWNER = process.env.ROWSTILE_OWNER_DSN ?? "";
@@ -16,7 +16,7 @@ export async function seed(): Promise<void> {
   await c.connect();
   try {
     await c.query(`
-      TRUNCATE app.feedback, app.inbox, app.notes, app.members, app.project_services, app.projects, app.services, app.users;
+      TRUNCATE app.folders, app.feedback, app.inbox, app.notes, app.members, app.project_services, app.projects, app.services, app.users;
       DELETE FROM authz.shares WHERE object_type = 'project';
       DELETE FROM authz.requests;
       INSERT INTO app.users VALUES (1, 'ann'), (2, 'bo'), (3, 'cy');
@@ -25,7 +25,8 @@ export async function seed(): Promise<void> {
       INSERT INTO app.members VALUES (1, 3);
       INSERT INTO app.project_services VALUES (1, 1);
       INSERT INTO app.notes (id, project_id, author_id, body) VALUES (1, 1, 1, 'plan'), (2, 2, 2, 'mine'), (3, 3, 1, 'hello'), (4, 1, 3, 'idea');
-      SELECT setval(pg_get_serial_sequence('app.notes', 'id'), 100);`);
+      SELECT setval(pg_get_serial_sequence('app.notes', 'id'), 100);
+      INSERT INTO app.folders VALUES (1, NULL, 1, 'top'), (2, 1, 1, 'inside');`);
   } finally {
     await c.end();
   }

@@ -19,6 +19,11 @@ BEGIN EXECUTE stmt; RETURN 'ok'; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE; END
 -- refused, where two answer with the same one
 CREATE FUNCTION test.error(stmt text) RETURNS text LANGUAGE plpgsql AS $$
 BEGIN EXECUTE stmt; RETURN 'ok'; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ': ' || SQLERRM; END $$;
+-- the code an error's HINT names, 'SQLSTATE: rowstile help AZ705': what the SDKs read to answer it
+CREATE FUNCTION test.hint(stmt text) RETURNS text LANGUAGE plpgsql AS $$
+DECLARE h text;
+BEGIN EXECUTE stmt; RETURN 'ok';
+EXCEPTION WHEN OTHERS THEN GET STACKED DIAGNOSTICS h = PG_EXCEPTION_HINT; RETURN SQLSTATE || ': ' || h; END $$;
 CREATE FUNCTION test.rows(stmt text) RETURNS bigint LANGUAGE plpgsql AS $$
 DECLARE n bigint; BEGIN EXECUTE stmt; GET DIAGNOSTICS n = ROW_COUNT; RETURN n; END $$;
 CREATE FUNCTION test.docs() RETURNS text LANGUAGE sql AS $$
@@ -120,9 +125,12 @@ SELECT test.as(1);
 SELECT test.ok('shared if: no sharing with inactive users',
   test.error($$SELECT authz.share('folder', '1', 'viewer', 'user', '00000000-0000-4000-8000-000000000006')$$)
     LIKE '42501: the policy does not allow this share (line %)');
+SELECT test.ok('... a refusal of this share (AZ705, a 403), not a share the policy lacks (AZ706)',
+  test.hint($$SELECT authz.share('folder', '1', 'viewer', 'user', '00000000-0000-4000-8000-000000000006')$$)
+    = '42501: rowstile help AZ705');
 SELECT test.ok('sharing with someone who does not exist is refused',
   test.error($$SELECT authz.share('folder', '1', 'viewer', 'user', '00000000-0000-4000-8000-000000000099')$$)
-    = '23503: there is no user 00000000-0000-4000-8000-000000000099');
+    = 'P0001: there is no user 00000000-0000-4000-8000-000000000099');
 SELECT test.ok('a share names a caveat the policy has',
   test.error($$SELECT authz.share('folder', '1', 'viewer', 'user', '00000000-0000-4000-8000-000000000004', '', NULL, NULL,
                                   'nosuch', '{}')$$) = 'P0001: no caveat nosuch in the policy');

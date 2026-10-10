@@ -307,7 +307,7 @@ async def test_queries_by_permission_sync_and_async(app: FastAPI) -> None:
 
 async def test_the_connection_check_over_each_driver() -> None:
     owners = "owners skip row-level security"
-    for url, expected in ((SYNC, []), (OWNER, [owners] * 3)):  # the owner owns the three tables with rules
+    for url, expected in ((SYNC, []), (OWNER, [owners] * 4)):  # the owner owns the four tables with rules
         engine = create_engine(url)
         try:
             found = sorted(rowstile.check_problems(await authz_sa.connection_check(engine)))

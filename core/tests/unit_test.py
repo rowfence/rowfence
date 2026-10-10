@@ -5597,6 +5597,103 @@ class ErrorCodes(unittest.TestCase):
         self.assertEqual(errors.split("no code here"), ("no code here", None))
 
 
+class RuntimeAnswers(unittest.TestCase):
+    """Each code the runtime raises (rowstile help AZ7xx) comes with one SQLSTATE and one HTTP answer, both named on
+    its page, and the SDKs answer it so: the same mistake looks the same whichever check found it, and an app
+    answers it as the page says."""
+
+    # the ERRCODE names the runtime raises with, and their SQLSTATEs (no ERRCODE: P0001, raise_exception)
+    STATES: ClassVar[dict[str, str]] = {
+        "": "P0001",
+        "insufficient_privilege": "42501",
+        "invalid_authorization_specification": "28000",
+        "invalid_parameter_value": "22023",
+        "check_violation": "23514",
+        "object_not_in_prerequisite_state": "55000",
+    }
+
+    def raised(self) -> dict[str, set[str]]:
+        """Each runtime code, and the SQLSTATEs the generated SQL raises it with."""
+        out: dict[str, set[str]] = {}
+        for name in sorted(os.listdir(os.path.join(ROOT, "authzlib"))):
+            if not name.endswith(".py"):
+                continue
+            src = read(f"authzlib/{name}")
+            for m in re.finditer(r"RAISE EXCEPTION", src):
+                end = re.compile(r";(?=\n|\"|')").search(src, m.start())  # the statement's end, in SQL or a string
+                stmt = src[m.start() : end.end() if end else len(src)]
+                code = re.search(r"rowstile help (AZ7\d\d)", stmt)
+                if not code:
+                    continue
+                state = re.search(r"ERRCODE = '(\w+)'", stmt)
+                where = f"authzlib/{name} line {src.count(chr(10), 0, m.start()) + 1}"
+                self.assertIn(state.group(1) if state else "", self.STATES, f"{where}: an ERRCODE this test can't name")
+                out.setdefault(code.group(1), set()).add(self.STATES[state.group(1) if state else ""])
+        return out
+
+    def page(self, code: str) -> tuple[str, str]:
+        """The SQLSTATE and the HTTP status the code's page names, one of each."""
+        from authzlib.errors import CODES
+
+        text = CODES[code].text
+        states = set(re.findall(r"SQLSTATE ([0-9A-Z]{5})\b", text))
+        answers = set(re.findall(r"\b([45]\d\d)\b", text))
+        self.assertEqual(len(states), 1, f"{code}'s page names one SQLSTATE: {sorted(states)}")
+        self.assertEqual(len(answers), 1, f"{code}'s page names one answer (an HTTP status): {sorted(answers)}")
+        return states.pop(), answers.pop()
+
+    def sdks(self) -> tuple[dict[str, tuple[str, str, int]], dict[str, tuple[str, str, int]]]:
+        """The codes each SDK answers as a problem that is no refusal: (type, title, status), Python's and
+        TypeScript's."""
+        repo = os.path.dirname(ROOT)
+        with open(os.path.join(repo, "sdk", "python", "rowstile", "__init__.py"), encoding="utf-8") as fh:
+            py = fh.read()
+        with open(os.path.join(repo, "sdk", "typescript", "client", "src", "index.ts"), encoding="utf-8") as fh:
+            ts = fh.read()
+        py_map = py[py.index("_CALL_PROBLEMS: dict") : py.index("}", py.index("_CALL_PROBLEMS: dict"))]
+        ts_map = ts[ts.index("const CALL_PROBLEMS") : ts.index("]);", ts.index("const CALL_PROBLEMS"))]
+        python = {
+            c: (t, ti, int(s)) for c, t, ti, s in re.findall(r'"(AZ\d{3})": \("([^"]+)", "([^"]+)", (\d{3})\)', py_map)
+        }
+        typescript = {
+            c: (t, ti, int(s))
+            for c, t, ti, s in re.findall(
+                r'\["(AZ\d{3})", \{ type: "([^"]+)", title: "([^"]+)", status: (\d{3}) \}\]', ts_map
+            )
+        }
+        return python, typescript
+
+    def test_each_code_is_raised_with_its_pages_sqlstate(self) -> None:
+        from authzlib.errors import CODES
+
+        raised = self.raised()
+        runtime = sorted(c for c, v in CODES.items() if v.when == "runtime")
+        self.assertEqual(sorted(raised), runtime, "every runtime code is raised, and only those")
+        for code in runtime:
+            self.assertEqual(raised[code], {self.page(code)[0]}, f"{code}: the SQLSTATEs it is raised with")
+
+    def test_the_sdks_answer_each_code_as_its_page_says(self) -> None:
+        from authzlib.errors import CODES
+
+        python, typescript = self.sdks()
+        self.assertEqual(python, typescript, "the two SDKs answer the same codes the same way")
+        self.assertIn("AZ713", python)  # the reading found the entries
+        site = os.path.join(os.path.dirname(ROOT), "site", "problems")
+        for code in sorted(c for c, v in CODES.items() if v.when == "runtime"):
+            state, answer = self.page(code)
+            if answer == "403":  # a refusal: SQLSTATE 42501, which the SDKs read as Refused (a 403)
+                self.assertEqual((state, code in python), ("42501", False), code)
+            elif answer == "500":  # the app's mistake: no problem body, and not a refusal's SQLSTATE
+                self.assertNotEqual(state, "42501", code)
+                self.assertNotIn(code, python, code)
+            else:
+                self.assertEqual(python.get(code, ("", "", 0))[2], int(answer), f"{code}: the SDKs answer {answer}")
+                page = os.path.join(site, python[code][0].rsplit("/", 1)[1] + ".md")
+                self.assertTrue(os.path.exists(page), f"{code}: its problem type has a page, {page}")
+                with open(page, encoding="utf-8") as fh:
+                    self.assertIn(code, fh.read(), f"{code}: its problem page names it")
+
+
 class StackPages(unittest.TestCase):
     """docs/stacks/: every line of code a page shows is in the tested app it comes from, so it can't drift."""
 

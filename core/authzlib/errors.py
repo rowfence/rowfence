@@ -651,43 +651,49 @@ CODES = {
         "A query needed to know who is asking, and nobody signed in in this transaction. Every transaction starts "
         "with `SELECT authz.act_as('user', '42')` (or `authz.act_as(NULL, NULL)` for nobody, or a login); the SDKs "
         "do it for you, so a query outside them (a raw connection, a transaction begun elsewhere) is the usual "
-        "cause. It is a bug in the app, not the user's doing. SQLSTATE 28000; the SDKs raise `NotSignedIn`.",
+        "cause. It is a bug in the app, not the user's doing. SQLSTATE 28000; the SDKs raise `NotSignedIn`, which "
+        "their frameworks leave a 500. A transaction signed in as nobody on purpose is signed in: a call there that "
+        "needs someone says AZ714.",
         when="runtime",
     ),
     "AZ702": Code(
         "Who is signed in was changed",
         "Who is signed in is signed by `authz.act_as()` for the transaction. Setting `authz.user_id` (or the other "
         "`authz.*` settings) directly, or changing them after signing in, isn't believed: the app role can't choose "
-        "its own user. Sign in with `authz.act_as()`, `authz.login_key()` or `authz.login_jwt()` instead.",
+        "its own user. Sign in with `authz.act_as()`, `authz.login_key()` or `authz.login_jwt()` instead. SQLSTATE "
+        "28000. It is a bug in the app: the SDKs leave it an error, a 500.",
         when="runtime",
     ),
     "AZ703": Code(
         "Login refused",
         "`authz.login_key()` or `authz.login_jwt()` didn't sign anyone in: the API key is unknown or revoked, the "
         "token's signature, time, issuer or audience is wrong, it names nobody who is active or a type that doesn't "
-        "sign in, or JWT login isn't set up (`jwt_secret` in `authz.settings`). Answer 401.",
+        "sign in, or JWT login isn't set up (`jwt_secret` in `authz.settings`). SQLSTATE 28000; answer 401, as the "
+        "SDKs do, with the database's words.",
         when="runtime",
     ),
     "AZ704": Code(
         "A read-only session",
         "The session views as someone else (`authz.view_as`) or signed in with a token limited by scopes, so it may "
         "read but not change anything, sign other people in, view as someone again, or make a key with more scopes "
-        "than it has.",
+        "than it has. SQLSTATE 42501; answer 403, as the SDKs do (`Refused`, with this code).",
         when="runtime",
     ),
     "AZ705": Code(
         "Not allowed",
         "The signed-in person asked an `authz.*` function for something the policy doesn't let them do: share or "
-        "unshare this object, give a role, manage roles or keys, see who has access, the shares or the links, turn "
-        "a link off, decide a request or a review, break the glass. The message says what; "
-        "`authz.explain(type, id, perm)` says why. Answer 403.",
+        "unshare this object, share it with this subject (the relation's `shared if`), give a role, manage roles or "
+        "keys, see who has access, the shares or the links, turn a link off, decide a request or a review, break "
+        "the glass. The message says what; `authz.explain(type, id, perm)` says why. SQLSTATE 42501; answer 403, "
+        "as the SDKs do (`Refused`, with this code).",
         when="runtime",
     ),
     "AZ706": Code(
         "The policy doesn't allow this share",
         "The share asked for isn't one the policy declares: the relation isn't `shared` with that kind of subject "
         "(say, a team where only users may be given it), the role isn't one of the object's, or a role would grant "
-        "a permission roles can't grant. Change the call, or the policy's relation.",
+        "a permission roles can't grant. Change the call, or the policy's relation. SQLSTATE P0001. It is the "
+        "app's mistake, not the user's: the SDKs leave it an error, a 500.",
         when="runtime",
     ),
     "AZ707": Code(
@@ -695,13 +701,14 @@ CODES = {
         "An `authz.*` function was called with a name the policy in force doesn't have: a type, a permission, a "
         "scope, a caveat, a table with rules, a type that signs in, custom roles on a type, or the `manage_roles` "
         "/ `manage_keys` permission it needs. Often the app and the database disagree on the policy: apply the "
-        "migrations.",
+        "migrations. SQLSTATE P0001. It is the app's mistake, not the user's: the SDKs leave it an error, a 500.",
         when="runtime",
     ),
     "AZ708": Code(
         "No such thing",
         "The call names something that isn't there: the subject to share with, an active user to view as, a "
-        "pending request, an item of a review, an API key of yours, a link on the object. Answer 404.",
+        "pending request, an item of a review, an API key of yours, a link on the object. SQLSTATE P0001; answer "
+        "404, as the SDKs do, with the database's words.",
         when="runtime",
     ),
     "AZ709": Code(
@@ -717,25 +724,36 @@ CODES = {
         "A call is missing something it needs (a reason, kept in the audit trail; approve or deny) or has a value "
         "out of range (a duration that isn't positive, emergency access longer than a day, a command "
         "`authz.explain_rule` doesn't explain, a row it can't find without an id, a page cursor for `authz.list` "
-        "that isn't an id of the type, a negative page size). SQLSTATE 22023 for a malformed value; answer 400.",
+        "that isn't an id of the type, a negative page size). SQLSTATE 22023; answer 400, as the SDKs do, with the "
+        "database's words.",
         when="runtime",
     ),
     "AZ711": Code(
         "The audit trail can't be changed",
         "`authz.audit` only grows: rows can't be updated or deleted, even by the owner, except by "
-        "`authz.trim_audit(interval)`, which removes what is older than the interval.",
+        "`authz.trim_audit(interval)`, which removes what is older than the interval. SQLSTATE 42501: a refusal, "
+        "which the SDKs would answer 403. Apps don't meet it: the app role may not write to `authz.audit` at all.",
         when="runtime",
     ),
     "AZ712": Code(
         "The change feed was trimmed",
         "A consumer asked for changes from a position older than what the feed still keeps. Read everything again "
-        "(rebuild the cache or index), then follow the feed from its current position.",
+        "(rebuild the cache or index), then follow the feed from its current position. SQLSTATE 55000. It is for "
+        "the reader of the feed, not an answer to a request: the SDKs leave it an error, a 500.",
         when="runtime",
     ),
     "AZ713": Code(
         "Moved inside itself",
         "A move or a link would put an object inside itself (a folder into one of its own subfolders), which would "
-        "make the tree a loop. SQLSTATE 23514; answer 409 or 422.",
+        "make the tree a loop. SQLSTATE 23514; answer 409 (a conflict with where things are now), as the SDKs do, "
+        "with the database's words.",
+        when="runtime",
+    ),
+    "AZ714": Code(
+        "Sign in first",
+        "A call that needs someone signed in ran in a transaction signed in as nobody (`authz.act_as(NULL, NULL)`, "
+        "a visitor who hasn't signed in): an access request, or an API key made for oneself. SQLSTATE 42501; "
+        "answer 401, as the SDKs do, with the database's words. A transaction that never signed in says AZ701.",
         when="runtime",
     ),
 }

@@ -1,7 +1,7 @@
 -- The conformance app's policy (integrations/fastapi's, over integer keys, with viewers people share projects with,
 -- and feedback): projects with an owner and members, public ones anyone may read, a service that reads the
--- projects it is added to, notes in projects, an inbox only its recipient reads, and feedback on a project only its
--- owner reads.
+-- projects it is added to, notes in projects, an inbox only its recipient reads, feedback on a project only its
+-- owner reads, and folders inside folders, which their owner and the owners of the folders above edit.
 
 app role conf_app
 
@@ -37,6 +37,12 @@ type feedback = app.feedback(id integer)
 
   can read = project.owner
 
+type folder = app.folders(id integer)
+  parent : folder = parent_id
+  owner  : user   = owner_id
+
+  can edit = owner or parent.edit
+
 rules app.projects
   select : view
 
@@ -53,3 +59,7 @@ rules app.inbox
 rules app.feedback
   select : read
   insert : project.view and author
+
+rules app.folders
+  select : edit
+  update : edit

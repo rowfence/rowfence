@@ -25,7 +25,10 @@ this list.
 15. Next.js only: a signed-in page is never served from a cache to another user, and a signed-in read inside
     `unstable_cache` or `"use cache"` fails instead of being cached.
 16. A call the database turns down that is no refusal answers as its code's page says, with the database's
-    words: what it names isn't there (AZ708) 404, a missing or wrong argument (AZ710) 400. In every
-    integration that answers HTTP (Next.js: `route()`, `action()`, `authzRoutes()`).
+    words: what it names isn't there (AZ708) 404, a missing or wrong argument (AZ710) 400, a call that needs
+    someone signed in (AZ714) or a login refused (AZ703) 401, a move inside itself (AZ713) 409. A refusal by the
+    database's own code (AZ704, AZ705) is 403. The app's mistakes stay errors, a 500: a share the policy
+    doesn't declare (AZ706), a name not in the policy (AZ707), who is signed in changed by hand (AZ702). In
+    every integration that answers HTTP (Next.js: `route()`, `action()`, `authzRoutes()`).
 
 A new stack gets its own folder here, with every check that applies to it.

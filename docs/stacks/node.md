@@ -95,7 +95,8 @@ A query outside a signed-in transaction fails with strict sign-in's error; `tran
 In your framework's error handler, `problemOf(e)` (in `@rowstile/client`) gives the status and the problem body
 for any driver's error that is a refusal (403, with the rule and the reason) or a hidden row (404), a call the
 database says names something that isn't there (404, AZ708) or lacks an argument or has a wrong one (400,
-AZ710), and `null` for anything else. `problemResponse(e)` is the same as a Fetch `Response`, for Hono and other frameworks built
+AZ710), a call that needs someone signed in or a login refused (401, AZ714 and AZ703), a move inside itself
+(409, AZ713), and `null` for anything else. `problemResponse(e)` is the same as a Fetch `Response`, for Hono and other frameworks built
 on it.
 
 ## Migrations

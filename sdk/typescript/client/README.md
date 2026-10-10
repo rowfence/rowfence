@@ -33,7 +33,8 @@ export const digest = job(["service", 1], async () => ({ count: await db.project
 - `Refused` (403, with the rule and the reason), `NotFound` (404), `NotSignedIn`, `ConnectionProblem`.
 - `translate(e)`: any driver's error as one of those, or `null`. `problemOf(e)` and `problemResponse(e)`: the
   status and an RFC 9457 body for an HTTP answer (and 404 for what a call names that isn't there, AZ708; 400
-  for a missing or wrong argument, AZ710).
+  for a missing or wrong argument, AZ710; 401 for a call that needs someone signed in or a login refused,
+  AZ714 and AZ703; 409 for a move inside itself, AZ713).
 - `errorCode(e)`: rowstile's code for an error (`AZ709`; `rowstile help AZ709` explains it).
 - `calls(queryable)`: the runtime's functions over anything with `query(text, values)`.
 - `Register`: the interface the generated names fill in (`rowstile client`), so a wrong permission name
