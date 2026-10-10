@@ -31,10 +31,12 @@ failed=()
 # The parts of a run: CI runs them side by side, each on a runner and in a container of its own, and the run
 # is as long as its longest part. ROWSTILE_PART names the one to run (none: the whole run, one part after the
 # other). The workflows list them, and tests/unit_test.py checks they leave none out.
-PARTS_SUITES="policy command random"                      # --quick, --short and the full run
+# (unit: the checks without a database, alone, so that the longest part doesn't wait for them; --short has none)
+PARTS_SUITES="unit policy command random"                 # --quick, --short and the full run
 PARTS_SOAK="changes-1 changes-2 policies around races"    # --soak
 case "$MODE" in
-  soak) PARTS=$PARTS_SOAK;; proofs) PARTS=races;; full) PARTS="$PARTS_SUITES races";; *) PARTS=$PARTS_SUITES;;
+  soak) PARTS=$PARTS_SOAK;; proofs) PARTS=races;; full) PARTS="$PARTS_SUITES races";;
+  short) PARTS=${PARTS_SUITES#unit };; *) PARTS=$PARTS_SUITES;;
 esac
 PART=${ROWSTILE_PART:-}
 case " $PARTS " in *" ${PART:-${PARTS%% *}} "*) ;; *) echo "no part '$PART' in this run: its parts are $PARTS"; exit 2;; esac
@@ -98,12 +100,13 @@ if [ "$MODE" = soak ]; then
 fi
 
 if [ "$MODE" != proofs ] && [ "$MODE" != soak ]; then
-if part policy; then
-if every_version; then
+if every_version && part unit; then
 step "fast checks without a database: golden SQL, included files, the command's SQL, rowstile command"
 python3 tests/unit_test.py 2>&1 | tail -n 3
 record "${PIPESTATUS[0]}" "unit"
-
+fi
+if part policy; then
+if every_version; then
 step "broken policies are refused with a line number, never a crash (mutated example policies)"
 FUZZ=5000; [ "$MODE" = quick ] && FUZZ=1500
 python3 tests/fuzz_parser.py --cases "$FUZZ"

@@ -19,7 +19,7 @@ From this folder:
     cli/rowstile --db "dbname=mydb" push example/docs.authz  # a development database, straight away
     ./run_tests.sh                                           # every test, from scratch (needs Postgres)
     ./ci.sh                                                  # ... on 16, 17 and 18, each in Docker
-    ROWSTILE_PART=command ./ci.sh 16                         # one part of the run (policy, command, random)
+    ROWSTILE_PART=command ./ci.sh 16                         # one part of the run (unit, policy, command, random)
 
 ## Tested
 
