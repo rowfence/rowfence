@@ -9,7 +9,7 @@ cli 128
 concurrency 12
 confidence 43
 cookbook 79
-devx 97
+devx 100
 docs 11
 governance 155
 identity 54

@@ -505,24 +505,82 @@ case "$(cat "$T/s.log")" in *"Studio didn't start ("*"): rowstile dev --studio-p
 ( cd "$T/s" && python3 "$OLDPWD/cli/rowstile_cli.py" dev --once --no-studio >&- ) 2> "$T/s.log"; rc=$?
 [ $rc -eq 0 ] && [ ! -s "$T/s.log" ] && ok "dev --once with its output closed: exit 0, nothing on stderr" || bad "dev with its output closed" "$rc $(cat "$T/s.log")"
 # the database lost once the pass is through, as dev looks for the lookups no index serves: here a session waits to
-# lock rowstile's table of policies while a slow test runs, dev's look waits behind it, and is ended there. The pass
-# stands (exit 0), and no traceback
+# lock rowstile's table of policies while a slow test runs, dev's look waits behind it, and is ended there
 printf 'test "slow"\n  given s = {SELECT 1 FROM pg_sleep(2)}\n  anyone cannot view file 11\n' > "$T/s/slow.authz"
 printf 'tests = ["slow.authz"]\n' >> "$T/s/rowstile.toml"
-( cd "$T/s" && exec python3 "$OLDPWD/cli/rowstile_cli.py" dev --once --no-studio ) > "$T/s.log" 2>&1 &
-pass=$!
-pid=
-for _ in $(seq 80); do pid=$(PSQL -c "SELECT pid FROM pg_stat_activity WHERE datname = '$DB' AND application_name = 'rowstile' AND wait_event = 'PgSleep'"); [ -n "$pid" ] && break; sleep 0.25; done
-( PSQL -c "BEGIN" -c "LOCK TABLE authz.policy_versions" -c "SELECT pg_sleep(3)" -c "COMMIT" >/dev/null 2>&1 ) &
-locker=$!
-for _ in $(seq 80); do [ -n "$pid" ] && [ "$(PSQL -c "SELECT wait_event_type FROM pg_stat_activity WHERE pid = $pid")" = Lock ] && break; sleep 0.25; done
-[ -n "$pid" ] && PSQL -c "SELECT pg_terminate_backend($pid)" >/dev/null
+# starts dev in $T/s with these arguments (dev's pid: $pass), and once its look waits behind the lock, runs $1 with
+# its session's pid ($pid)
+behind() {
+  local then=$1; shift
+  set -m
+  ( cd "$T/s" && exec python3 "$OLDPWD/cli/rowstile_cli.py" dev --no-studio "$@" ) > "$T/s.log" 2>&1 &
+  pass=$!
+  set +m
+  pid=
+  for _ in $(seq 80); do pid=$(PSQL -c "SELECT pid FROM pg_stat_activity WHERE datname = '$DB' AND application_name = 'rowstile' AND wait_event = 'PgSleep'"); [ -n "$pid" ] && break; sleep 0.25; done
+  ( PSQL -c "BEGIN" -c "LOCK TABLE authz.policy_versions" -c "SELECT pg_sleep(3)" -c "COMMIT" >/dev/null 2>&1 ) &
+  locker=$!
+  for _ in $(seq 80); do [ -n "$pid" ] && [ "$(PSQL -c "SELECT wait_event_type FROM pg_stat_activity WHERE pid = $pid")" = Lock ] && break; sleep 0.25; done
+  [ -n "$pid" ] && $then
+  wait "$locker"
+}
+grows() { for _ in $(seq 120); do [ "$(grep -c -- "$1" "$T/s.log")" -ge "${2:-1}" ] && return 0; sleep 0.5; done; return 1; }
+# the server ends the session there (with --once): said, the pass stands (exit 0), and no traceback
+terminate() { PSQL -c "SELECT pg_terminate_backend($pid)" >/dev/null; }
+behind terminate --once
 wait "$pass"; rc=$?
-wait "$locker"
 case "$(cat "$T/s.log")" in *Traceback*) bad "dev on a database lost as it looks for missing indexes gives a traceback" "$(cat "$T/s.log")";;
-  *"check(s) pass"*) [ $rc -eq 0 ] && [ -n "$pid" ] && ok "... and the database lost after the pass, as it looks for missing indexes: the pass stands, exit 0" ||
+  *"check(s) pass"*"  x    lost the database: terminating connection due to administrator command"*) [ $rc -eq 0 ] && [ -n "$pid" ] &&
+    ok "... and the database lost after the pass, as it looks for missing indexes: said, the pass stands, exit 0" ||
     bad "dev losing the database as it looks for missing indexes: exit" "$rc ($pid)";;
   *) bad "dev losing the database as it looks for missing indexes" "$(cat "$T/s.log")";; esac
+# ... and left watching: the next save connects again and runs the pass, without saying it lost the database again
+behind terminate
+grows "lost the database: terminating connection" && grows "^watching" && printf -- '-- saved\n' >> "$T/s/slow.authz" && grows "check(s) pass" 2 &&
+  [ "$(grep -c "lost the database" "$T/s.log")" = 1 ] &&
+  ok "... and watching: it goes on watching, and the next save connects again and passes" || bad "dev watching, losing the database as it looks for missing indexes" "$(cat "$T/s.log")"
+kill -INT "$pass"; wait "$pass"
+# ... the connection closed under it without a word from the server (here by a go-between dev connects through,
+# which then closes the connections it holds, as a server that goes away or a network that drops does): the same
+python3 -c 'import os, signal, socket, sys, threading
+host, port = os.environ.get("PGHOST") or "/var/run/postgresql", int(os.environ.get("PGPORT") or 5432)
+held = []
+lis = socket.socket(); lis.bind(("127.0.0.1", 0)); lis.listen()
+with open(sys.argv[1], "w") as fh: fh.write(str(lis.getsockname()[1]))
+def pump(a, b):
+    try:
+        while data := a.recv(65536): b.sendall(data)
+    except OSError: pass
+def close(*_):
+    for s in held:
+        try: s.shutdown(socket.SHUT_RDWR)
+        except OSError: pass
+        s.close()
+    held.clear()
+signal.signal(signal.SIGUSR1, close)
+while True:
+    c, _ = lis.accept()
+    u = socket.socket(socket.AF_UNIX) if host.startswith("/") else socket.socket()
+    u.connect(f"{host}/.s.PGSQL.{port}" if host.startswith("/") else (host, port))
+    held += [c, u]
+    for a, b in ((c, u), (u, c)): threading.Thread(target=pump, args=(a, b), daemon=True).start()' "$T/between" &
+between=$!
+for _ in $(seq 40); do [ -s "$T/between" ] && break; sleep 0.25; done
+hang_up() { kill -USR1 "$between"; }
+behind hang_up --db "host=127.0.0.1 port=$(cat "$T/between") dbname=$DB"
+grows "lost the database: the server closed the connection" && grows "^watching" && printf -- '-- saved again\n' >> "$T/s/slow.authz" && grows "check(s) pass" 2 &&
+  [ "$(grep -c "lost the database" "$T/s.log")" = 1 ] &&
+  ok "... and when the connection closes without a word from the server: said, and the next save connects again" || bad "dev on a connection closed as it looks for missing indexes" "$(cat "$T/s.log")"
+kill -INT "$pass"; wait "$pass"
+kill "$between"; wait "$between" 2>/dev/null
+# a look that doesn't go through, its session still there (its statement cancelled): nothing said, the pass stands
+cancel() { PSQL -c "SELECT pg_cancel_backend($pid)" >/dev/null; }
+behind cancel --once
+wait "$pass"; rc=$?
+case "$(cat "$T/s.log")" in *Traceback*|*"  x    "*) bad "dev on a look for missing indexes cancelled" "$(cat "$T/s.log")";;
+  *"check(s) pass"*) [ $rc -eq 0 ] && [ -n "$pid" ] && ok "... and a look cancelled, the session still there: nothing said, exit 0" ||
+    bad "dev on a look for missing indexes cancelled: exit" "$rc ($pid)";;
+  *) bad "dev on a look for missing indexes cancelled" "$(cat "$T/s.log")";; esac
 run test example/docs.test.authz
 case "$out" in *"ok    user \$ann can edit file \$f"*"policy tests passed"*) [ $rc -eq 0 ] && ok "test runs named test files, exit 0" || bad "test exit" "$rc";;
   *) bad "test" "$out";; esac
