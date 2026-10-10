@@ -54,7 +54,10 @@ for v in $VERSIONS; do
   # with --coverage, where the suites measure: .ci/coverage-<version> in the checkout, emptied first (from inside:
   # on Linux the container's files are root's)
   cov=${COVERAGE:+/src/.ci/coverage-$v}
-  retry docker exec -d -e SOAK_SEED="${SOAK_SEED:-}" -e ROWSTILE_PART="${ROWSTILE_PART:-}" -e ROWSTILE_COVERAGE="$cov" -e PGHOST=/var/run/postgresql -e PGUSER=postgres -w /src/core "$name" \
+  # Python keeps the code it compiles, in the container (never the mounted checkout): each of the suites' hundreds
+  # of Python processes starts sooner. The image keeps it off: anything that rewrites authzlib's files (a mutation
+  # tried on them) must run without it, as Python knows a stale file by its size and its time to the second
+  retry docker exec -d -e PYTHONPYCACHEPREFIX=/tmp/pycache -e PYTHONDONTWRITEBYTECODE= -e SOAK_SEED="${SOAK_SEED:-}" -e ROWSTILE_PART="${ROWSTILE_PART:-}" -e ROWSTILE_COVERAGE="$cov" -e PGHOST=/var/run/postgresql -e PGUSER=postgres -w /src/core "$name" \
     bash -c "${cov:+rm -rf $cov; }bash run_tests.sh $MODE > /src/$out.log 2>&1; echo \$? > /src/$out.rc" || { failed+=("$v (start)"); continue; }
   # the exit code appears when the suites end; a container that stopped or went first ends the wait too, and so
   # does the limit
