@@ -16,8 +16,10 @@ relation (`shared by p1 if {...}`, which around.py's calls of authz.share() judg
 (an earlier type's rows inside a later one's too, through a link table, inheriting back what the later type
 inherits from it: one tree across both), and a group named by a permission (`t1#p2`). Then the tables it reads and their data. A third of the
 seeds name those tables and columns as an app's own may be (AWKWARD: capitals, words SQL reserves, 63 bytes), the
-policy otherwise the same; and nearly half give every key another type than bigint (KEYS: int, text or uuid), said
-on each type line, also drawn apart.
+policy otherwise the same; nearly half give every key another type than bigint (KEYS: int, text or uuid), said
+on each type line; and a quarter of the others key their object types by (org_id, id), every column that points
+at an object then naming one in its row's org (`[org_id, c_up]`, `(parent_type, [org_id, parent_id])`, link tables
+`([org_id, obj_id] -> [org_id, subj_id])`); each drawn apart too.
 Now and then a seed's policy has a twin, checked after it over fewer steps (variants()): the same with no rule at
 all, or with no permission at all, its rules naming relations.
 
@@ -64,8 +66,8 @@ GONE = str(USERS + 1)  # an id the user table doesn't have: links may name it, a
 ROWS = 7  # rows of each object type at the start
 
 # The database's names as a third of the policies spell them, as an app's own may be named: capitals, words SQL
-# reserves, a double quote, a name as long as Postgres allows (63 bytes). The policy writes a name as it is, and the compiler
-# quotes it in the SQL it writes; these policies' conditions, the data and the checks quote it themselves. A name
+# reserves, a double quote, a name as long as Postgres allows (63 bytes). The policy writes a name as it is, and the
+# compiler quotes it in the SQL it writes; these policies' conditions, the data and the checks quote it themselves. A name
 # quoted wrongly anywhere (a quoted function's name was one, an app's capitals another) is then met by the checks.
 AWKWARD = {
     SCHEMA: "Gp",
@@ -80,6 +82,7 @@ AWKWARD = {
     "b3": 'Arch"ived',  # a quote in a name: doubled wherever it is quoted
     "parent_type": "ParentType",
     "parent_id": "parentId",
+    "org_id": "OrgId",
     "obj_id": "Obj",
     "subj_id": "Subj",
     "active": "Active",
@@ -89,16 +92,19 @@ AWKWARD = {
 # The types a policy's keys may have (every type's the same), drawn apart: bigint for most, as before
 KEYS = ("bigint", "int", "text", "uuid")
 UUID = "00000000-0000-4000-8000-{:012d}"  # row n's key, where keys are uuids
+ORGS = 2  # where object types are keyed by (org_id, id): the orgs their rows are in
 
 
 @dataclass(frozen=True)
 class Spelling:
     """How a policy writes its database: its tables and columns named as genpolicy's plain names (gp.t1, b1), or
     AWKWARD's; and the type of its keys (KEYS), every type's the same. Row n's key is n, its text where keys are
-    text, UUID's where they are uuids."""
+    text, UUID's where they are uuids. composite: the object types are keyed by (org_id, id) instead, both bigint
+    (their ids are the row's text, '(1,3)'), and whatever points at an object names one in its own row's org."""
 
     awkward: bool = False
     keytype: str = "bigint"
+    composite: bool = False
 
     def name(self, plain: str) -> str:
         """The name, as the policy writes it."""
@@ -122,11 +128,17 @@ class Spelling:
         """A table, as the policy writes it."""
         return f"{self.name(SCHEMA)}.{self.name(plain)}"
 
-    def key(self) -> str:
-        """A type line's key, said when the key column isn't id or its type isn't bigint."""
+    def key(self, obj: bool = False) -> str:
+        """A type line's key, said when the key column isn't id or its type isn't bigint (obj: an object type's)."""
+        if obj and self.composite:
+            return f" ({self.name('org_id')}, {self.name('id')})"
         if not self.awkward and self.keytype == "bigint":
             return ""
         return f" ({self.name('id')}{'' if self.keytype == 'bigint' else ' ' + self.keytype})"
+
+    def ref(self, column: str) -> str:
+        """A column that points at an object, as the policy writes it: with the row's org, where keys are composite."""
+        return f"[{self.name('org_id')}, {self.name(column)}]" if self.composite else self.name(column)
 
     def ident(self, n: int | str) -> str:
         """Row n's key, as text (as the checks read ids)."""
@@ -211,7 +223,7 @@ READS = [
 # write shares as the owner, which no condition sees; around.py's calls of authz.share() judge it, by what each
 # says here: (the object's id, the subject's type, its id, the users whose row is active) -> may it be shared
 SHARED_IFS: dict[str, Callable[[str, str, str, set[str]], bool]] = {
-    "{object_id::text ~ '[02468]$'}": lambda obj, st, sid, active: obj[-1] in "02468",
+    "{object_id::text ~ '[02468][)]?$'}": lambda obj, st, sid, active: obj.rstrip(")")[-1] in "02468",
     "{subject_type <> 'user' or right(subject_id, 1) <> '2'}": lambda obj, st, sid, active: (
         st != "user" or sid[-1] != "2"
     ),
@@ -220,16 +232,19 @@ SHARED_IFS: dict[str, Callable[[str, str, str, set[str]], bool]] = {
 }
 
 
-def make(seed: int, respell: bool | None = None, keytype: str | None = None) -> Spec:
-    """The seed's policy. Its names are AWKWARD's for a third of the seeds (respell: for this one, or not), and its
-    keys are int, text or uuid for about one seed in seven each, bigint otherwise (keytype: these), each drawn apart
-    from the rest, so that a seed's policy is the same either way."""
+def make(seed: int, respell: bool | None = None, keytype: str | None = None, composite: bool | None = None) -> Spec:
+    """The seed's policy. Its names are AWKWARD's for a third of the seeds (respell: for this one, or not), its keys
+    are int, text or uuid for about one seed in seven each, bigint otherwise (keytype: these), and a quarter of
+    those with bigint keys key their object types by (org_id, id) (composite: these, or not), each drawn apart from
+    the rest, so that a seed's policy is the same either way."""
     awkward = random.Random(f"genpolicy/{seed}/spelling").random() < 1 / 3 if respell is None else respell
     if keytype is None:
         x = random.Random(f"genpolicy/{seed}/keys").random()
         keytype = KEYS[3 if x < 0.15 else 2 if x < 0.3 else 1 if x < 0.45 else 0]
+    if composite is None:
+        composite = keytype == "bigint" and random.Random(f"genpolicy/{seed}/composite").random() < 0.25
     spec = make_plain(seed)
-    return dataclasses.replace(spec, spelling=Spelling(awkward, keytype))
+    return dataclasses.replace(spec, spelling=Spelling(awkward, keytype, composite))
 
 
 def variants(seed: int) -> list[tuple[str, Spec]]:
@@ -499,17 +514,22 @@ def policy_text(spec: Spec) -> str:
     if spec.bot:
         out.append(f"type bot = {s.policy_table('bots')}{s.key()} principal where {active}")
     for o in spec.objs:
-        out.append(f"type {o.name} = {s.policy_table(o.name)}{s.key()}" + (f" where {archived}" if o.where else ""))
+        out.append(
+            f"type {o.name} = {s.policy_table(o.name)}{s.key(obj=True)}" + (f" where {archived}" if o.where else "")
+        )
+        names = {x.name for x in spec.objs}
         for rel in o.rels:
             subj = ", ".join(rel.subjects)
+            to_objects = rel.subjects[0].split("#")[0] in names
             if rel.kind == "column" and rel.name == "parent" and len(rel.subjects) == 2:
-                src = f"({s.name('parent_type')}, {s.name('parent_id')})"
+                src = f"({s.name('parent_type')}, {s.ref('parent_id')})"
             elif rel.kind == "column" and rel.name == "parent":
-                src = s.name("parent_id")
+                src = s.ref("parent_id")
             elif rel.kind == "column":
-                src = s.name(f"c_{rel.name}")
+                src = s.ref(f"c_{rel.name}") if to_objects else s.name(f"c_{rel.name}")
             elif rel.kind == "table":
-                src = f"{s.policy_table(f'{o.name}_{rel.name}')}({s.name('obj_id')} -> {s.name('subj_id')})" + (
+                subj_col = s.ref("subj_id") if to_objects else s.name("subj_id")
+                src = f"{s.policy_table(f'{o.name}_{rel.name}')}({s.ref('obj_id')} -> {subj_col})" + (
                     f" where {active}" if rel.where else ""
                 )
             else:
@@ -542,9 +562,10 @@ def schema_text(spec: Spec) -> str:
         f"CREATE TABLE {n.table('users')} ({i} {k} PRIMARY KEY, {active} boolean NOT NULL DEFAULT true);",
         f"CREATE TABLE {n.table('bots')} ({i} {k} PRIMARY KEY, {active} boolean NOT NULL DEFAULT true);",
     ]
+    org = n.sql("org_id")
     for o in spec.objs:
         cols = [
-            f"{i} {k} PRIMARY KEY",
+            f"{org} bigint, {i} bigint" if n.composite else f"{i} {k} PRIMARY KEY",
             f"{n.sql('b1')} boolean",
             f"{n.sql('b2')} boolean",
             f"{n.sql('b3')} boolean NOT NULL DEFAULT false",
@@ -552,6 +573,7 @@ def schema_text(spec: Spec) -> str:
             f"{n.sql('parent_id')} {k}",
         ]
         cols += [f"{n.sql(f'c_{rel.name}')} {k}" for rel in o.rels if rel.kind == "column" and rel.name != "parent"]
+        cols += [f"PRIMARY KEY ({org}, {i})"] if n.composite else []
         s.append(f"CREATE TABLE {n.table(o.name)} ({', '.join(cols)});")
         for rel in o.rels:
             if rel.kind == "table":
@@ -559,6 +581,16 @@ def schema_text(spec: Spec) -> str:
                 # (a leftover row would still count); a user they name may be no row at all (GONE)
                 follow = "ON DELETE CASCADE ON UPDATE CASCADE"
                 group = rel.subjects[0].split("#")[0] if "#" in rel.subjects[0] else ""
+                obj, subj = n.sql("obj_id"), n.sql("subj_id")
+                if n.composite:  # one org for the object and an object it names
+                    s.append(
+                        f"CREATE TABLE {n.table(f'{o.name}_{rel.name}')} ({org} bigint, {obj} bigint, {subj} {k}, "
+                        f"{active} boolean NOT NULL DEFAULT true, "
+                        f"FOREIGN KEY ({org}, {obj}) REFERENCES {n.table(o.name)} {follow}, "
+                        + (f"FOREIGN KEY ({org}, {subj}) REFERENCES {n.table(group)} {follow}, " if group else "")
+                        + f"UNIQUE ({org}, {obj}, {subj}));"
+                    )
+                    continue
                 s.append(
                     f"CREATE TABLE {n.table(f'{o.name}_{rel.name}')} ("
                     f"{n.sql('obj_id')} {k} REFERENCES {n.table(o.name)} {follow}, "
@@ -596,20 +628,50 @@ class GenPolicyGen(Gen):
     spec: ClassVar[Spec]
 
     def subject_ids(self, subject: str, ids: Ids | None) -> list[str]:
-        """The keys a subject may be, as text: their SQL is spelling.literal()'s."""
+        """The keys a subject may be, as text: their SQL is spelling.literal()'s (an object's, where keys are
+        composite, is '(org,id)': its parts are org() and part()'s)."""
         n = self.spec.spelling
         if subject in ("user", "user:*"):
             return [n.ident(i) for i in range(1, USERS + 1)] + [n.ident(GONE)]
         if subject == "bot":
             return [n.ident(1), n.ident(2)]
         name = subject.split("#")[0]
+        if n.composite:  # the first rows: row i in org 1 + i % 2
+            return (ids or {}).get(name) or [f"({1 + i % ORGS},{i})" for i in range(1, ROWS + 1)]
         return (ids or {}).get(name) or [n.ident(i) for i in range(1, ROWS + 1)]
+
+    @staticmethod
+    def org(ident: str) -> str:
+        """The org of an object keyed by (org_id, id)."""
+        return ident.strip("()").split(",")[0]
+
+    @staticmethod
+    def part(ident: str) -> str:
+        """The id of an object keyed by (org_id, id), within its org."""
+        return ident.strip("()").split(",")[1]
+
+    def pointer(self, subject: str, ids: Ids | None, org: str | None) -> str:
+        """What a column pointing at subject holds, in SQL: where keys are composite, the id of an object in org
+        (one of another org if it has none: a link to nothing)."""
+        if org is None or subject.split("#")[0] not in {o.name for o in self.spec.objs}:
+            return self.subject_id(subject, ids)
+        idents = self.subject_ids(subject, ids)
+        return self.part(self.r.choice([x for x in idents if self.org(x) == org] or idents))
 
     def subject_id(self, subject: str, ids: Ids | None) -> str:
         """One of them, in SQL."""
         return self.spec.spelling.literal(self.r.choice(self.subject_ids(subject, ids)))
 
-    def row(self, o: Obj, i: int, ids: Ids | None) -> str:
+    def pointers(self, subject: str, ids: Ids | None) -> list[str]:
+        """What a column pointing at subject may hold, in SQL (an object's id within its org, where keys are
+        composite)."""
+        idents = self.subject_ids(subject, ids)
+        if self.spec.spelling.composite and subject.split("#")[0] in {o.name for o in self.spec.objs}:
+            return [self.part(x) for x in idents]
+        return [self.spec.spelling.literal(x) for x in idents]
+
+    def row(self, o: Obj, i: int, ids: Ids | None, org: str | None = None) -> str:
+        """Row i of o (in org, where keys are composite)."""
         r, n = self.r, self.spec.spelling
         cols = ["id", "b1", "b2", "b3"]
         vals = [
@@ -618,20 +680,22 @@ class GenPolicyGen(Gen):
             r.choice(["true", "false"]),
             r.choice(["true", "false", "false"]),
         ]
+        if org is not None:
+            cols, vals = ["org_id", *cols], [org, *vals]
         for rel in o.rels:
             if rel.kind != "column":
                 continue
             if rel.name == "parent":
                 if len(rel.subjects) == 2 and r.random() < 0.4:
                     cols += ["parent_type", "parent_id"]
-                    vals += [lit(rel.subjects[1]), self.subject_id(rel.subjects[1], ids)]
+                    vals += [lit(rel.subjects[1]), self.pointer(rel.subjects[1], ids, org)]
                 elif r.random() < 0.7:
                     cols += ["parent_type", "parent_id"]
-                    vals += [lit(o.name), self.subject_id(o.name, ids)]
+                    vals += [lit(o.name), self.pointer(o.name, ids, org)]
                 continue
             if r.random() < 0.75:
                 cols.append(f"c_{rel.name}")
-                vals.append(self.subject_id(rel.subjects[0], ids))
+                vals.append(self.pointer(rel.subjects[0], ids, org))
         return (
             f"INSERT INTO {n.table(o.name)} ({', '.join(map(n.sql, cols))}) VALUES ({', '.join(vals)}) "
             "ON CONFLICT DO NOTHING;"
@@ -645,7 +709,7 @@ class GenPolicyGen(Gen):
             f"({n.literal(n.ident(2))}, {str(r.random() < 0.5).lower()});",
         ]
         for o in self.spec.objs:
-            s += [self.row(o, i, None) for i in range(1, ROWS + 1)]
+            s += [self.row(o, i, None, str(1 + i % ORGS) if n.composite else None) for i in range(1, ROWS + 1)]
             for rel in o.rels:
                 if rel.kind == "table":
                     s += [self.link(o, rel, None) for _ in range(4)]
@@ -653,6 +717,14 @@ class GenPolicyGen(Gen):
 
     def link(self, o: Obj, rel: Rel, ids: Ids | None) -> str:
         r = self.r
+        if self.spec.spelling.composite:  # the object's org, and an object of that org
+            ident = r.choice(self.subject_ids(o.name, ids))
+            org = self.org(ident)
+            subj = self.pointer(rel.subjects[0], ids, org)
+            return (
+                f"INSERT INTO {self.spec.spelling.table(f'{o.name}_{rel.name}')} VALUES ({org}, {self.part(ident)}, "
+                f"{subj}, {str(r.random() < 0.8).lower()}) ON CONFLICT DO NOTHING;"
+            )
         obj = self.subject_id(o.name, ids)
         subj = self.subject_id(rel.subjects[0], ids)
         return (
@@ -694,12 +766,21 @@ class GenPolicyGen(Gen):
     def change(self, ids: Ids) -> str:
         r, n = self.r, self.spec.spelling
         o = r.choice(self.spec.objs)
-        mine = ids.get(o.name) or [n.ident(1)]
-        xid = r.choice(mine)
-        x, top = n.literal(xid), max(n.number(k) for k in mine)
-        tbl = n.table(o.name)
         i, b1, b2, b3, active = (n.sql(c) for c in ("id", "b1", "b2", "b3", "active"))
-        ptype, pid, obj = n.sql("parent_type"), n.sql("parent_id"), n.sql("obj_id")
+        ptype, pid, obj, org = n.sql("parent_type"), n.sql("parent_id"), n.sql("obj_id"), n.sql("org_id")
+        tbl = n.table(o.name)
+        if n.composite:  # the row picked, by its two columns; a new one in either org
+            mine = ids.get(o.name) or ["(1,1)"]
+            xid = r.choice(mine)
+            top = max(int(self.part(k)) for k in mine)
+            is_x, is_obj_x = f"({org}, {i}) = {xid}", f"({org}, {obj}) = {xid}"
+            mine_ids, at = [self.part(k) for k in mine], str(r.randint(1, ORGS))
+        else:
+            mine = ids.get(o.name) or [n.ident(1)]
+            xid = r.choice(mine)
+            x, top = n.literal(xid), max(n.number(k) for k in mine)
+            is_x, is_obj_x = f"{i} = {x}", f"{obj} = {x}"
+            mine_ids, at = [n.literal(k) for k in mine], None
 
         def even(odd: int) -> str:  # the rows whose key is even (odd: odd)
             if n.keytype in ("bigint", "int"):
@@ -707,12 +788,12 @@ class GenPolicyGen(Gen):
             return f"{i}::text ~ '{'[13579]' if odd else '[02468]'}$'"
 
         ops: list[Callable[[], str]] = [
-            lambda: f"UPDATE {tbl} SET {b1} = {r.choice(['true', 'false', 'NULL'])} WHERE {i} = {x};",
-            lambda: f"UPDATE {tbl} SET {b2} = NOT {b2}, {b3} = {r.choice(['true', 'false'])} WHERE {i} = {x};",
+            lambda: f"UPDATE {tbl} SET {b1} = {r.choice(['true', 'false', 'NULL'])} WHERE {is_x};",
+            lambda: f"UPDATE {tbl} SET {b2} = NOT {b2}, {b3} = {r.choice(['true', 'false'])} WHERE {is_x};",
             lambda: f"UPDATE {tbl} SET {b1} = random() < 0.5 WHERE {even(r.randint(0, 1))};",
-            lambda: self.row(o, top + 1, ids),
-            lambda: f"DELETE FROM {tbl} WHERE {i} = {x};",
-            lambda: f"UPDATE {tbl} SET {i} = {n.literal(n.ident(top + r.randint(1, 9)))} WHERE {i} = {x};",
+            lambda: self.row(o, top + 1, ids, at),
+            lambda: f"DELETE FROM {tbl} WHERE {is_x};",
+            lambda: f"UPDATE {tbl} SET {i} = {n.literal(n.ident(top + r.randint(1, 9)))} WHERE {is_x};",
             lambda: self.grant(ids),
             lambda: self.grant(ids),
             lambda: f"DELETE FROM authz.shares WHERE object_id = {lit(xid)};",
@@ -728,31 +809,29 @@ class GenPolicyGen(Gen):
         for rel in o.rels:
             if rel.kind == "column" and rel.name == "parent":
                 ops.append(
-                    lambda: (
-                        f"UPDATE {tbl} SET {ptype} = {lit(o.name)}, {pid} = {n.literal(r.choice(mine))} WHERE {i} = {x};"
-                    )
+                    lambda: f"UPDATE {tbl} SET {ptype} = {lit(o.name)}, {pid} = {r.choice(mine_ids)} WHERE {is_x};"
                 )
-                ops.append(lambda: f"UPDATE {tbl} SET {ptype} = NULL, {pid} = NULL WHERE {i} = {x};")
+                ops.append(lambda: f"UPDATE {tbl} SET {ptype} = NULL, {pid} = NULL WHERE {is_x};")
                 if len(rel.subjects) == 2:
                     other = rel.subjects[1]
                     ops.append(
                         lambda other=other: (
                             f"UPDATE {tbl} SET {ptype} = {lit(other)}, {pid} = "
-                            f"{self.subject_id(other, ids)} WHERE {i} = {x};"
+                            f"{self.pointer(other, ids, self.org(xid) if n.composite else None)} WHERE {is_x};"
                         )
                     )
             elif rel.kind == "column":
                 ops.append(
                     lambda rel=rel: (
                         f"UPDATE {tbl} SET {n.sql(f'c_{rel.name}')} = "
-                        f"{r.choice([*map(n.literal, self.subject_ids(rel.subjects[0], ids)), 'NULL'])} WHERE {i} = {x};"
+                        f"{r.choice([*self.pointers(rel.subjects[0], ids), 'NULL'])} WHERE {is_x};"
                     )
                 )
             elif rel.kind == "table":
                 lt = n.table(f"{o.name}_{rel.name}")
                 ops.append(lambda rel=rel: self.link(o, rel, ids))
-                ops.append(lambda lt=lt: f"DELETE FROM {lt} WHERE {obj} = {x};")
-                ops.append(lambda lt=lt: f"UPDATE {lt} SET {active} = NOT {active} WHERE {obj} = {x};")
+                ops.append(lambda lt=lt: f"DELETE FROM {lt} WHERE {is_obj_x};")
+                ops.append(lambda lt=lt: f"UPDATE {lt} SET {active} = NOT {active} WHERE {is_obj_x};")
                 ops.append(lambda lt=lt: f"TRUNCATE {lt};")
         if r.random() < 0.15:
             return "BEGIN;\n" + "\n".join(r.choice(ops)() for _ in range(r.randint(2, 4))) + "\nCOMMIT;"
