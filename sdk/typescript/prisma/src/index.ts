@@ -21,7 +21,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { Prisma } from "@prisma/client/extension";
 import {
-  actAs, calls, idShown, idText, NotFound, signingIn, translate,
+  actAs, calls, dbError, errorCode, idShown, idText, NotFound, signingIn, translate,
   type AuthzCalls, type Id, type ObjectType, type Permission, type Queryable, type UserResolver,
 } from "@rowstile/client";
 
@@ -147,6 +147,7 @@ interface RawClient {
 // with a factory that hands the transaction to their callback.
 interface InternalParams { transaction?: { kind?: string } }
 type Rest = (args: unknown, params?: InternalParams) => Promise<unknown>;
+interface InTransaction { requestTransaction(transaction: unknown): Promise<any[]> }
 async function transactionOf(tx: unknown): Promise<{ kind?: string }> {
   let found: { kind?: string } | undefined;
   const make = (tx as { _createPrismaPromise?: (cb: (t?: { kind?: string }) => Promise<void>) => PromiseLike<void> })._createPrismaPromise;
@@ -180,8 +181,9 @@ export function authz(options: ExtensionOptions = {}) {
     // (Prisma 7 always has the data model: without it, another version, left out of the measure)
     /* v8 ignore next */
     const models = raw._runtimeDataModel?.models ?? {};
+    // the schema of a table the database's words name without one: a model's table is its @@map, else its name
     const schemaOf = (table: string) => {
-      for (const m of Object.values(models)) if (m.dbName === table && m.schema) return m.schema;
+      for (const [name, m] of Object.entries(models)) if ((m.dbName ?? name) === table && m.schema) return m.schema;
       return undefined;
     };
     const tableOf = (model: string) => {
@@ -221,12 +223,28 @@ export function authz(options: ExtensionOptions = {}) {
       query: async (text, values = []) => ({ rows: await self.$queryRawUnsafe(text, ...values) }),
     };
     const c = calls(q);
+    // The runtime's functions asked inside the app's interactive transaction, for a call made in one: an update or a
+    // read that found no row leaves it usable, and a question outside it would wait for a connection of its own,
+    // which on a pool of one the transaction holds until Prisma's timeout. A Prisma promise runs in the transaction
+    // it is handed (requestTransaction: how Prisma runs an array's queries in theirs).
+    const askingIn = (transaction: InternalParams["transaction"]) => transaction?.kind !== "itx" ? c : calls({
+      query: async (text, values = []) => ({
+        rows: await (self.$queryRawUnsafe(text, ...values) as unknown as InTransaction).requestTransaction(transaction),
+      }),
+    });
     const $authz: PrismaAuthz = {
       ...c,
       ids: async (type, perm, as) => {
         const out = await c.list(type, perm);
         return (as ? out.map(as) : out) as any[];
       },
+      // Prisma's adapter keeps no hint, so no code, for the SQLSTATEs it has a kind of its own for; authz.share's
+      // one foreign_key_violation is a subject that isn't there (rowstile help AZ708), which problemOf answers 404
+      share: (...args) => c.share(...args).catch((e: unknown) => {
+        const err = dbError(e);
+        if (err?.code !== "23503" || errorCode(e) !== undefined) throw e;
+        throw Object.assign(new Error(err.message, { cause: e }), { code: err.code, hint: "rowstile help AZ708" });
+      }),
     };
     const hooks = client.$extends({
       name: "rowstile",
@@ -254,7 +272,7 @@ export function authz(options: ExtensionOptions = {}) {
               const table = tableOf(model);
               const key = keyOf(model, (args as { where: Record<string, unknown> }).where);
               if (key !== undefined) {
-                const v = await c.verdict(table, operation, key).catch(() => undefined);
+                const v = await askingIn(internal?.transaction).verdict(table, operation, key).catch(() => undefined);
                 if (v !== undefined) {
                   (v as { cause?: unknown }).cause = e;
                   throw v;
@@ -268,7 +286,7 @@ export function authz(options: ExtensionOptions = {}) {
               const where = (args as { where?: Record<string, unknown> }).where;
               const key = operation === "findUniqueOrThrow" ? keyOf(model, where!)
                 : isScalar(where?.id) ? where?.id as Id : undefined;
-              const table = await c.tableName(tableOf(model)).catch(() => tableOf(model));
+              const table = await askingIn(internal?.transaction).tableName(tableOf(model)).catch(() => tableOf(model));
               throw new NotFound(table, key === undefined ? undefined : idShown(key), { cause: e });
             }
             throw translate(e, schemaOf) ?? e;

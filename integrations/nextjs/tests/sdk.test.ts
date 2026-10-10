@@ -341,17 +341,36 @@ describe("@rowstile/prisma", () => {
     }
   });
 
-  test("a table that can't be looked up is named as the model names it", async () => {
-    // a pool of one, which the transaction holds: the lookup gets no connection
+  test("inside a transaction, the table is looked up through it", async () => {
+    // a pool of one, which the transaction holds: a lookup outside it would get no connection
     const one = new pg.Pool({ connectionString: APP, max: 1, connectionTimeoutMillis: 200 });
     const plain = new PlainClient({ adapter: signedIn(new PrismaPg(one)) }).$extends(authz());
     try {
       const e = await actingAs("2", () =>
         plain.$transaction((tx) => tx.holiday.findUniqueOrThrow({ where: { code: "xmas" } }))).catch((err) => err);
-      expect([e instanceof NotFound, e.message]).toEqual([true, "holiday xmas not found"]);
+      expect([e instanceof NotFound, e.message]).toEqual([true, "public.holiday xmas not found"]);
     } finally {
       await plain.$disconnect();
       await one.end();
+    }
+  });
+
+  test("a table that can't be looked up is named as the model names it", async () => {
+    // who the request is can be told once only (the session ended): the lookup, in a transaction of its own after
+    // the read's, can't sign in
+    let asked = 0;
+    const user = () => {
+      if (asked++) throw new Error("the session ended");
+      return "2";
+    };
+    const own = new pg.Pool({ connectionString: APP, max: 2 });
+    const plain = new PlainClient({ adapter: signedIn(new PrismaPg(own), { user }) }).$extends(authz());
+    try {
+      const e = await plain.holiday.findUniqueOrThrow({ where: { code: "xmas" } }).catch((err) => err);
+      expect([e instanceof NotFound, e.message, asked]).toEqual([true, "holiday xmas not found", 2]);
+    } finally {
+      await plain.$disconnect();
+      await own.end();
     }
   });
 

@@ -5,7 +5,8 @@ row in one file, and it becomes row-level security: the database filters every r
 the rules don't allow, whatever the code asks.
 
 This package is rowstile for Next.js (App Router). Importing it keeps signed-in reads out of Next's caches.
-`route(handler)` answers a refusal with 403 and a hidden row with 404. `action(fn)` gives a server action's
+`route(handler)` answers a refusal with 403 and a hidden row with 404 (and what a call names that isn't there
+404, a missing or wrong argument 400). `action(fn)` gives a server action's
 refusal back as a value. `authzRoutes()` is what the React kit calls, and `checkAtStart()` stops a server
 whose connection skips row-level security. It goes with a driver package, most often `@rowstile/prisma`.
 

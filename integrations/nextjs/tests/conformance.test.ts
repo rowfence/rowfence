@@ -14,7 +14,7 @@ import { eq, sql as sqlTag } from "drizzle-orm";
 import { integer, numeric, pgSchema, serial, text, varchar } from "drizzle-orm/pg-core";
 import { afterAll, beforeEach, describe, expect, test } from "vitest";
 import { actingAs, beforeSignIn, ConnectionProblem, current, errorCode, NotSignedIn, sqlstate, translate } from "@rowstile/client";
-import { idShown, refusal, verdict } from "@rowstile/client";
+import { idShown, Refused, refusal, verdict } from "@rowstile/client";
 import { describe as describePrincipal, parsePrincipal, principal } from "@rowstile/client";
 import { authzRoutes } from "@rowstile/next";
 import { authz as rowstile } from "@rowstile/pg";
@@ -228,6 +228,12 @@ test("8: insert, then read back", async () => {
   expect(why.table).toBe("app.inbox");
   expect(why.detail).toContain("read the row back");
   expect(quiet.status).toBe(202);
+  // a model with no @@map, in the app schema (feedback, which only the project's owner reads): its table, as the
+  // policy names it, is its name with the schema
+  const feedback = await actingAs("3", () => db.feedback.create({ data: { project_id: 1, author_id: 3, body: "nice" } }))
+    .catch((e: unknown) => e);
+  expect(feedback instanceof Refused && [feedback.table, feedback.command]).toEqual(["app.feedback", "select"]);
+  expect((await actingAs("1", () => db.feedback.create({ data: { project_id: 1, author_id: 1, body: "mine" } }))).body).toBe("mine");
 });
 
 // 9: the generated names type-check, and a wrong permission name doesn't
@@ -327,6 +333,33 @@ test("a share made in the app's own code", async () => {
   expect((await share("3", 2)).status).toBe(204);       // cy, a member, edits it
   expect(await (await fetch(`${SERVER}/api/notes`, as("2"))).json()).toEqual([1, 2, 3, 4]);
   expect((await share("2", 2)).status).toBe(403);       // a viewer still may not share
+  // 16: with someone who isn't there: 404, in the database's words (rowstile help AZ708)
+  const nobody = await share("1", 99);
+  expect([nobody.status, nobody.headers.get("content-type"), await nobody.json()]).toEqual([404, "application/problem+json", {
+    type: "https://rowstile.dev/problems/not-found", title: "Not Found", status: 404, detail: "there is no user 99", code: "AZ708",
+  }]);
+});
+
+// a write refused inside an interactive transaction, on a pool of one: why is asked inside the transaction, which
+// holds the one connection, so the answer comes at once (asked outside, it waited for Prisma's timeout, 5 s)
+test("a refusal inside a transaction, on a pool of one, is explained at once", async () => {
+  const append = async (id: number, user: string) => {
+    const start = Date.now();
+    const r = await fetch(`${SERVER_ONE}/api/notes/${id}/append`, as(user, { method: "POST", body: JSON.stringify({ text: "!" }) }));
+    return { status: r.status, body: await r.json(), ms: Date.now() - start };
+  };
+  const refused = await append(1, "3");                // cy sees note 1, may not edit it
+  expect([refused.status, refused.body.detail]).toEqual([403, "permission denied: user 3 may not update row 1 of app.notes"]);
+  const hidden = await append(1, "2");                 // bo doesn't see it
+  expect([hidden.status, hidden.body.detail]).toEqual([404, "app.notes 1 not found"]);
+  expect([refused.ms, hidden.ms].every((ms) => ms < 2500), `${refused.ms} ms, ${hidden.ms} ms`).toBe(true);
+  expect((await append(4, "3")).status).toBe(200);     // cy's own
+  // the transaction is still usable after the refusal: what the app does next in it is kept
+  const kept = await actingAs("3", () => db.$transaction(async (tx) => {
+    await tx.note.update({ where: { id: 1 }, data: { body: "x" } }).catch((e: unknown) => e);
+    return tx.note.update({ where: { id: 4 }, data: { body: "kept" } });
+  }));
+  expect(kept.body).toBe("kept");
 });
 
 // 15: a signed-in page is never served from a cache to another user

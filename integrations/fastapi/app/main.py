@@ -56,6 +56,19 @@ def make_app(url: str | None = None, check_connection: bool = True, pool_size: i
             ids = (await s.scalars(select(Project.id))).all()
             return await queries.perms_of(s, "project", ids)
 
+    @app.get("/projects/page")
+    async def page(limit: int, after: str | None = None) -> list[str]:
+        # the projects the user may see, a page at a time: the database says when the size or the cursor is wrong
+        async with Session() as s:
+            listed = text("SELECT x FROM authz.list('project', 'view', :after, :limit) x")
+            return list((await s.scalars(listed, {"after": after, "limit": limit})).all())
+
+    @app.delete("/keys/{key_id}", status_code=204)
+    async def revoke_key(key_id: int) -> None:
+        # one of the user's API keys: someone else's, or one that isn't there, is 404
+        async with Session.begin() as s:
+            await s.execute(text("SELECT 1 FROM authz.revoke_api_key(:id)"), {"id": key_id})
+
     @app.get("/notes")
     async def notes() -> list[int]:
         async with Session() as s:

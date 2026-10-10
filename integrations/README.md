@@ -24,5 +24,8 @@ this list.
 14. After a policy change and a new migration, the app works with the new generated names.
 15. Next.js only: a signed-in page is never served from a cache to another user, and a signed-in read inside
     `unstable_cache` or `"use cache"` fails instead of being cached.
+16. A call the database turns down that is no refusal answers as its code's page says, with the database's
+    words: what it names isn't there (AZ708) 404, a missing or wrong argument (AZ710) 400. In every
+    integration that answers HTTP (Next.js: `route()`, `action()`, `authzRoutes()`).
 
 A new stack gets its own folder here, with every check that applies to it.

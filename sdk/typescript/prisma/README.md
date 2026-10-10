@@ -47,7 +47,8 @@ and a query by permission is one call:
 
 - Use the client `$extends(authz())` returns, and only that one.
 - `$transaction([...])` is refused: Prisma starts an array's transaction from whichever request came first.
-  Use `$transaction(async (tx) => ...)`.
+  Use `$transaction(async (tx) => ...)`. Inside it, why a write was refused is asked through the transaction:
+  it needs no second connection.
 - A `create` reads its row back, so it needs the select rule too. A refusal there is `Refused` naming it.
 - Policy changes ship as Prisma migrations: `tool = "prisma"` in `rowstile.toml`, then `npx rowstile migrate`.
 

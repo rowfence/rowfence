@@ -14,6 +14,9 @@ export const permissions = {
   ],
   "message": [
     "read"
+  ],
+  "feedback": [
+    "read"
   ]
 } as const;
 export type ObjectType = keyof typeof permissions;

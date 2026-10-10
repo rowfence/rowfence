@@ -102,6 +102,38 @@ describe("route handlers and server actions", () => {
     await expect(action(async () => { throw new Error("the app's"); })()).rejects.toThrow("the app's");
     await expect(action(async () => { throw notSignedIn; })()).rejects.toBeInstanceOf(NotSignedIn);
   });
+
+  // 16: what the call names isn't there (AZ708) is 404, a missing or wrong argument (AZ710) 400, each with the
+  // database's words, as their pages say
+  const calls = {
+    // a share with someone who doesn't exist (Prisma's adapter keeps no hint for its SQLSTATE: the SDK says it)
+    nobody: () => db.$authz.share("project", 1, "viewer", "user", 99),
+    // an API key of ann's that isn't there: a refusal's SQLSTATE (42501), but no refusal
+    noKey: () => db.$queryRaw`SELECT 1 AS ok FROM authz.revoke_api_key(${987654}::bigint)`,
+    negative: () => db.$authz.list("project", "view", { limit: -1 }),
+  };
+  const notThere = (detail: string) =>
+    ({ type: "https://rowstile.dev/problems/not-found", title: "Not Found", status: 404, detail, code: "AZ708" });
+  const expected = {
+    nobody: notThere("there is no user 99"),
+    noKey: notThere("no API key 987654 of yours"),
+    negative: { type: "https://rowstile.dev/problems/bad-argument", title: "Bad Request", status: 400,
+                detail: "the page size must not be negative (got -1)", code: "AZ710" },
+  };
+
+  test("16: route: not there is 404, a wrong argument 400, with the database's words", async () => {
+    for (const [name, call] of Object.entries(calls)) {
+      const r = await actingAs("1", () => route(async () => { await call(); return new Response(null, { status: 204 }); })());
+      expect([r.status, r.headers.get("content-type"), await r.json()], name)
+        .toEqual([expected[name as keyof typeof calls].status, "application/problem+json", expected[name as keyof typeof calls]]);
+    }
+  });
+
+  test("16: action: not there and a wrong argument come back as their problems", async () => {
+    for (const [name, call] of Object.entries(calls)) {
+      expect(await actingAs("1", () => action(call)()), name).toEqual({ ok: false, problem: expected[name as keyof typeof calls] });
+    }
+  });
 });
 
 describe("authzRoutes, for @rowstile/react", () => {
@@ -143,6 +175,12 @@ describe("authzRoutes, for @rowstile/react", () => {
     expect([why.status, why.headers.get("content-type"), await why.json()]).toEqual([400, "application/problem+json", {
       type: "https://rowstile.dev/problems/bad-argument", title: "Bad Request", status: 400, detail: "say why you need it",
       code: "AZ710",
+    }]);
+    // 16: a share with someone who isn't there: 404, in the database's words
+    const nobody = await post("1", "share", { ...share, subjectId: "99" });
+    expect([nobody.status, await nobody.json()]).toEqual([404, {
+      type: "https://rowstile.dev/problems/not-found", title: "Not Found", status: 404, detail: "there is no user 99",
+      code: "AZ708",
     }]);
     // a share the policy doesn't declare (AZ706) is the app's mistake, not the user's: it stays an error
     await expect(post("1", "share", { ...share, relation: "member" })).rejects.toThrow("does not allow sharing project.member");

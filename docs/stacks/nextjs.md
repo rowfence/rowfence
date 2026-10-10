@@ -137,7 +137,9 @@ export default async function Notes() {
 ```
 
 `route()` answers a refusal with a problem body: 404 for a row the user can't see, 403 with the rule and the
-reason for one they may not change (its fields: <https://rowstile.dev/problems/refused>).
+reason for one they may not change (its fields: <https://rowstile.dev/problems/refused>). A call the database
+says names something that isn't there (a share with someone who doesn't exist) is 404 too, and one it says
+lacks an argument or has a wrong one (a negative page size) 400, each with the database's words.
 
 ```ts
 import { route } from "@rowstile/next";
@@ -172,7 +174,8 @@ not read the row, the 403 names the select rule.
 
 Two Prisma habits are handled: each `findUnique` runs in a transaction of its own (Prisma answers the calls of
 one tick together, from the first caller's context), and array transactions, `$transaction([...])`, are
-refused for the same reason. Use `$transaction(async (tx) => ...)`. Those transactions wait for a connection
+refused for the same reason. Use `$transaction(async (tx) => ...)`; inside it, why a write was refused is asked
+through the transaction, so it needs no second connection. Those transactions wait for a connection
 as long as Prisma's `transactionOptions` say, 2 seconds by default: with the database far away and many
 `findUnique` calls at once, give the client a longer `maxWait` (or a bigger pool), or they fail with
 "Unable to start a transaction in the given time".
@@ -211,7 +214,8 @@ function Buttons() {
 
 `useShares` and a headless `<ShareDialog>` share and unshare as the database allows; `useAccessRequest` asks
 for access. They stay current over server-sent events. A request without a reason answers 400 with the
-database's words, "say why you need it" (its fields: <https://rowstile.dev/problems/bad-argument>).
+database's words, "say why you need it" (its fields: <https://rowstile.dev/problems/bad-argument>), and a
+share with someone who doesn't exist 404, "there is no user 99".
 
 Your own code shares with `db.$authz.share`: the object, the relation, then who it is shared with (a type and
 an id; for a team's members, `"team", 7, "member"`). Who may share is the policy's (`viewer : user shared by
