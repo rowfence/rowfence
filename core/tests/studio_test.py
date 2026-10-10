@@ -15,11 +15,15 @@ import os
 import select
 import signal
 import socket
+import struct
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 import urllib.error
 import urllib.request
+from collections.abc import Callable
 from typing import Any, NamedTuple
 from unittest import mock
 
@@ -28,6 +32,7 @@ ROOT = os.path.dirname(HERE)
 CLI = os.path.join(ROOT, "cli", "rowstile_cli.py")
 sys.path.insert(0, ROOT)
 sys.path.insert(0, os.path.join(ROOT, "cli"))
+import pgwire  # noqa: E402
 import rowstile_cli  # noqa: E402
 import studio  # noqa: E402
 
@@ -154,6 +159,93 @@ class Client:
                 return e.code, json.loads(raw)
             except ValueError:
                 return e.code, raw.decode()
+
+
+def waiting(db: str, s: studio.Studio, path: str, body: object, lock: str, then: Callable[[str], object]) -> Answer:
+    """(status, answer, what Studio printed meanwhile) for a request to Studio that waits behind a lock the test
+    holds (LOCK TABLE <lock>), once then(the waiting session's process id) has run. A request that never waits
+    goes through when the test lets the lock go."""
+    locker = pgwire.connect(**pgwire.parse_dsn(f"dbname={db}"))
+    locker.execute("BEGIN")
+    locker.execute(f"LOCK TABLE {lock}")
+    got: list[tuple[int, Answer]] = []
+    logged = io.StringIO()
+    with contextlib.redirect_stderr(logged):
+        asked = threading.Thread(target=lambda: got.append(Client(s).call(path, body)))
+        asked.start()
+        for _ in range(240):
+            pid = psql(
+                db,
+                "SELECT pid FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'",
+            )
+            if pid:
+                then(pid)
+                break
+            time.sleep(0.25)
+        asked.join(30)
+        locker.execute("ROLLBACK")
+        asked.join()
+    locker.close()
+    return (*got[0], logged.getvalue())
+
+
+def pump(a: socket.socket, b: socket.socket) -> None:
+    with contextlib.suppress(OSError):
+        while data := a.recv(65536):
+            b.sendall(data)
+
+
+class Between:
+    """A go-between Studio connects through, to the server the environment names (PGHOST, PGPORT). It closes the
+    connections it holds without a word from the server, as a server that goes away or a network that drops does
+    (hang_up); and stops answering, then answers again on the same port, as a server that restarts does."""
+
+    def __init__(self) -> None:
+        self.held: list[socket.socket] = []
+        self.port = 0
+        self.lis = self.listen()
+
+    def listen(self) -> socket.socket:
+        lis = socket.socket()
+        lis.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        lis.bind(("127.0.0.1", self.port))
+        lis.listen()
+        self.port = lis.getsockname()[1]
+        threading.Thread(target=self.serve, args=(lis,), daemon=True).start()
+        return lis
+
+    def serve(self, lis: socket.socket) -> None:
+        host, port = os.environ.get("PGHOST") or "/var/run/postgresql", int(os.environ.get("PGPORT") or 5432)
+        while True:
+            try:
+                c, _ = lis.accept()
+            except OSError:
+                return  # stopped
+            up = socket.socket(socket.AF_UNIX) if host.startswith("/") else socket.socket()
+            up.connect(f"{host}/.s.PGSQL.{port}" if host.startswith("/") else (host, port))
+            self.held += [c, up]
+            for a, b in ((c, up), (up, c)):
+                threading.Thread(target=pump, args=(a, b), daemon=True).start()
+
+    def hang_up(self, reset: bool = False) -> None:
+        """Closes the connections it holds without a word from the server: as a server that goes away does, or
+        (reset) as a dropped connection is, the other end told it was reset."""
+        for s in self.held:
+            with contextlib.suppress(OSError):
+                if reset:  # closed at once, with a reset: no lingering (and the pump reading it let go first)
+                    s.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
+                s.shutdown(socket.SHUT_RD if reset else socket.SHUT_RDWR)
+            s.close()
+        self.held.clear()
+
+    def stop(self) -> None:
+        self.hang_up()
+        with contextlib.suppress(OSError):
+            self.lis.shutdown(socket.SHUT_RDWR)  # wakes the accept that waits
+        self.lis.close()
+
+    def again(self) -> None:
+        self.lis = self.listen()
 
 
 def main() -> None:
@@ -828,6 +920,90 @@ def main() -> None:
         )
     finally:
         gone.stop()
+
+    print("-- Studio losing the database as a request waits")
+    terminate: Callable[[str], object] = lambda pid: psql(db, f"SELECT pg_terminate_backend({pid})")
+    lost = "lost the database: terminating connection due to administrator command"
+    ro = studio.Studio(dsn, None, policy, writable=False, port=0, read_policy=rowstile_cli.read_policy)
+    ro.start()
+    try:
+        status, e, logged = waiting(db, ro, "/api/overview", None, "authz.policy_versions", terminate)
+        check(
+            "the server ends Studio's session as a request waits: 503, lost the database in the server's words, and "
+            "no traceback",
+            (status, e, logged) == (503, {"title": "Problem", "status": 503, "detail": lost}, ""),
+            (status, e, logged[-600:]),
+        )
+        check("... and the next request connects again", Client(ro).call("/api/overview")[0] == 200)
+    finally:
+        ro.stop()
+    rw = studio.Studio(dsn, None, policy, writable=True, port=0, read_policy=rowstile_cli.read_policy)
+    rw.start()
+    try:
+        body = {"type": "folder", "id": "3", "relation": "editor", "subject_type": "user", "subject_id": "3"}
+        before = shares()
+        # the share waits to write (SHARE mode lets it read the table, not write it)
+        status, e, logged = waiting(
+            db, rw, "/api/share", {**body, "as": "user:1"}, "authz.shares IN SHARE MODE", terminate
+        )
+        check(
+            "... as it writes a share (--write): the same, and nothing written",
+            (status, e["detail"], logged) == (503, lost, "") and shares() == before,
+            (status, e, logged[-600:]),
+        )
+        status, _ = Client(rw).call("/api/share", {**body, "as": "user:1"})
+        check(
+            "... and the share asked again is made",
+            status == 200
+            and shares() == str(int(before) + 1)
+            and Client(rw).call("/api/unshare", {**body, "as": "user:1"})[0] == 200,
+            status,
+        )
+    finally:
+        rw.stop()
+    between = Between()
+    via = studio.Studio(
+        f"host=127.0.0.1 port={between.port} dbname={db}",
+        None,
+        policy,
+        writable=False,
+        port=0,
+        read_policy=rowstile_cli.read_policy,
+    )
+    via.start()
+    try:
+        status, e, logged = waiting(
+            db, via, "/api/overview", None, "authz.policy_versions", lambda _: between.hang_up()
+        )
+        check(
+            "the connection closed under a request without a word from the server: 503, lost the database, and no "
+            "traceback",
+            (status, e["detail"], logged) == (503, "lost the database: the server closed the connection", ""),
+            (status, e, logged[-600:]),
+        )
+        check("... and the next request connects again", Client(via).call("/api/overview")[0] == 200)
+        status, e, logged = waiting(
+            db, via, "/api/overview", None, "authz.policy_versions", lambda _: between.hang_up(reset=True)
+        )
+        check(
+            "the connection reset under a request: 503, lost the database, and no traceback",
+            (status, e["detail"], logged) == (503, "lost the database: [Errno 104] Connection reset by peer", ""),
+            (status, e, logged[-600:]),
+        )
+        check("... and the next request connects again", Client(via).call("/api/overview")[0] == 200)
+        # the server restarts between two requests: Studio holds no connection while none waits
+        between.stop()
+        status, e = Client(via).call("/api/overview")
+        check(
+            "the server gone between two requests: 503, can't connect",
+            (status, e["detail"]) == (503, "can't connect: [Errno 111] Connection refused"),
+            (status, e),
+        )
+        between.again()
+        check("... and back: the next request connects", Client(via).call("/api/overview")[0] == 200)
+    finally:
+        via.stop()
+        between.stop()
 
     print("-- the policy taken out while Studio runs (rowstile remove)")
     rc, out = cli(db, "remove", "--yes")
