@@ -22,7 +22,8 @@ fi
 unformatted=() broken=()
 for f in "${staged[@]}"; do
   # what `rowstile` generates is left out by ruff.toml's exclude, which --force-exclude applies to a named file too
-  git show ":$f" | uvx "$RUFF" format --check --quiet --force-exclude --stdin-filename "$f" >/dev/null 2>&1
+  # (named by its full path: ruff matches a relative --stdin-filename against no exclude)
+  git show ":$f" | uvx "$RUFF" format --check --quiet --force-exclude --stdin-filename "$PWD/$f" >/dev/null 2>&1
   case $? in
     0) ;;
     1) unformatted+=("$f") ;;
