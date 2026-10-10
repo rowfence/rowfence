@@ -20,7 +20,8 @@ policy otherwise the same; nearly half give every key another type than bigint (
 on each type line; and a quarter of the others key their object types by (org_id, id), every column that points
 at an object then naming one in its row's org (`[org_id, c_up]`, `(parent_type, [org_id, parent_id])`, link tables
 `([org_id, obj_id] -> [org_id, subj_id])`); each drawn apart too. And some have caveats (CAVEATS), which some of
-their shares carry, read in each user's context.
+their shares carry, read in each user's context; and some have scopes (draw_scopes()), with which the checks ask
+one user again each time.
 Now and then a seed's policy has a twin, checked after it over fewer steps (variants()): the same with no rule at
 all, or with no permission at all, its rules naming relations.
 
@@ -203,6 +204,9 @@ class Spec:
     invariants: list[tuple[str, Node]] = field(default_factory=list)
     spelling: Spelling = field(default_factory=Spelling)
     caveats: bool = False  # the policy says CAVEATS, and some shares carry one
+    # scopes, what a token limited to them may do: (name, [(kind, qualifier, word)]), kind cmd or perm, a command
+    # qualified by a type's table (named by the type) and a permission by a type
+    scopes: list[tuple[str, list[tuple[str, str, str]]]] = field(default_factory=list)
 
     def obj(self, name: str) -> Obj:
         return next(o for o in self.objs if o.name == name)
@@ -253,7 +257,24 @@ def make(seed: int, respell: bool | None = None, keytype: str | None = None, com
     spec = make_plain(seed)
     shared = any(rel.kind == "shared" for o in spec.objs for rel in o.rels)  # (caveats ride on shares)
     caveats = random.Random(f"genpolicy/{seed}/caveats").random() < 0.3 and shared
-    return dataclasses.replace(spec, spelling=Spelling(awkward, keytype, composite), caveats=caveats)
+    scopes = draw_scopes(spec, random.Random(f"genpolicy/{seed}/scopes"))
+    return dataclasses.replace(spec, spelling=Spelling(awkward, keytype, composite), caveats=caveats, scopes=scopes)
+
+
+def draw_scopes(spec: Spec, x: random.Random) -> list[tuple[str, list[tuple[str, str, str]]]]:
+    """For a third of the seeds, a scope or two, of commands and permissions, each plain or qualified (gp.t1.select,
+    t2.p1); the first, now and then, the built-in `read` said again."""
+    if x.random() >= 1 / 3:
+        return []
+    names = [o.name for o in spec.objs]
+    pool = [("cmd", "", c) for c in ("select", "insert", "update", "delete")]
+    pool += [("cmd", n, c) for n in names for c in ("select", "update")]
+    pool += [("perm", "", p) for p in ("p1", "p2", "p3")] + [("perm", n, p) for n in names for p in ("p1", "p2", "p3")]
+    out: list[tuple[str, list[tuple[str, str, str]]]] = []
+    for k in range(x.randint(1, 2)):
+        name = "read" if k == 0 and x.random() < 0.3 else f"s{k + 1}"
+        out.append((name, x.sample(pool, x.randint(1, 3))))
+    return out
 
 
 def variants(seed: int) -> list[tuple[str, Spec]]:
@@ -308,7 +329,9 @@ def without_permissions(spec: Spec, x: random.Random) -> Spec:
             if name not in named and f"{o.name}#{name}" not in groups and not name.startswith("{"):
                 rules = [(h, ("or", [e, name]) if h == "select" else e) for h, e in rules]
         objs.append(Obj(o.name, o.where, kept[o.name], {}, rules))
-    return dataclasses.replace(spec, objs=objs, invariants=[])
+    # a scope's permissions go with them; a scope left with nothing goes too
+    scopes = [(n, items) for n, s_items in spec.scopes if (items := [i for i in s_items if i[0] == "cmd"])]
+    return dataclasses.replace(spec, objs=objs, invariants=[], scopes=scopes)
 
 
 def make_plain(seed: int) -> Spec:
@@ -550,6 +573,12 @@ def policy_text(spec: Spec) -> str:
                 out.append(f"  {rel.name} : {subj} = {src}")
         for p, e in o.perms.items():
             out.append(f"  can {p} = {text(e, s=s)}")
+    for name, items in spec.scopes:
+        written = [
+            f"{s.policy_table(qual)}.{word}" if kind == "cmd" and qual else f"{qual}.{word}" if qual else word
+            for kind, qual, word in items
+        ]
+        out.append(f"scope {name} = {', '.join(written)}")
     if spec.caveats:
         out += [f"caveat {name} = {cond}" for name, cond in CAVEATS.items()]
     for o in spec.objs:
