@@ -413,16 +413,9 @@ def main() -> None:
             fresh(db_m, SCHEMAS[schema])
             apply_whole(db_m, a)
             psql(db_m, app)
-            if name == OLDER_BUILD:
-                psql(db_m, OLD_PATHS)
             lock = migrate.lock_of(database.migratable(a, {})[1])
             if name == OLDER_RLS:  # the lock the older build wrote, and its hash, which its migration recorded
                 lock = re.sub(r"(?m)^(rls .*) \| \w+$", r"\1 | 000000000000", lock)
-                psql(
-                    db_m,
-                    RLS_OFF + f"UPDATE authz.policy_versions SET lock = '{migrate.digest(lock, 16)}' "
-                    "WHERE id = (SELECT max(id) FROM authz.policy_versions);",
-                )
             ms = database.migrations(b, {}, lock, label)
             if name == OLDER_RLS and (all(m.empty for m in ms) or any(re.search(r"(?m)^DROP ", m.sql) for m in ms)):
                 failed += 1
@@ -433,6 +426,17 @@ def main() -> None:
             if len(ms) == 1 and ms[0].empty:
                 print(f"ok    {label}: no migration needed")
                 continue
+            # the database applied whole starts as this one is now: a copy (the same as building it again, sooner)
+            sh("dropdb", "--if-exists", db_w)
+            sh("createdb", "--template", db_m, db_w)
+            if name == OLDER_BUILD:
+                psql(db_m, OLD_PATHS)
+            if name == OLDER_RLS:
+                psql(
+                    db_m,
+                    RLS_OFF + f"UPDATE authz.policy_versions SET lock = '{migrate.digest(lock, 16)}' "
+                    "WHERE id = (SELECT max(id) FROM authz.policy_versions);",
+                )
             try:
                 if len(ms) == 1:
                     psql(db_m, changes)
@@ -445,9 +449,6 @@ def main() -> None:
                 failed += 1
                 print(f"FAIL  {label}: the migration fails\n{e}")
                 continue
-            fresh(db_w, SCHEMAS[schema])
-            apply_whole(db_w, a)
-            psql(db_w, app)
             psql(db_w, changes)
             try:
                 apply_whole(db_w, b)
