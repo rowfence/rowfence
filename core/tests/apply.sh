@@ -36,6 +36,13 @@ run apply example/docs.authz
 [ "$out" = "example/docs.authz: applied" ] && ok "rowstile apply, on a database with no extension" || bad "apply" "$out"
 [ "$(PSQL -c "SELECT count(*) FROM pg_extension WHERE extname <> 'plpgsql'")" = 0 ] &&
   ok "... which needs nothing installed but plpgsql" || bad "extensions" "$(PSQL -c "SELECT string_agg(extname, ',') FROM pg_extension")"
+# a table never analyzed is planned as ten pages of rows (JIT then compiles reads of a few rows): applying
+# analyzes the types' tables and its own that were never analyzed
+unanalyzed() { PSQL -c "SELECT count(*) FROM pg_class c WHERE c.relkind = 'r' AND c.reltuples < 0
+  AND (c.oid IN (SELECT to_regclass(tbl) FROM authz_int.types)
+       OR c.relnamespace IN (SELECT oid FROM pg_namespace WHERE nspname IN ('authz', 'authz_int')))"; }
+[ "$(unanalyzed)" = 0 ] && ok "... and leaves none of the tables the policy reads, nor of its own, never analyzed" ||
+  bad "never analyzed after apply" "$(unanalyzed)"
 run apply example/docs.authz; [ "$out" = "example/docs.authz: unchanged" ] && ok "... again: unchanged" || bad "apply unchanged" "$out"
 cp example/docs.authz "$T/docs.authz"; echo "-- a comment" >> "$T/docs.authz"
 run apply "$T/docs.authz"; [ "$out" = "$T/docs.authz: applied" ] && ok "... a changed text is applied" || bad "apply changed" "$out"

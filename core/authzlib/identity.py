@@ -63,6 +63,13 @@ LANGUAGE plpgsql VOLATILE {DEF} AS $f$
 BEGIN
   PERFORM set_config('authz.session', authz_int.session_sig(), true);
 END $f$;
+-- JIT off for the rest of the transaction, when it signs someone in (act_as, the logins, view_as). Postgres
+-- compiles a plan whose estimated cost passes jit_above_cost, and the rules' lookups are costed per row though
+-- each is hashed once: a read of a few thousand rows through row-level security is estimated at hundreds of
+-- thousands, and JIT takes most of a second compiling a read that runs in a few ms. The app may turn it back
+-- on after signing in (SET LOCAL jit = on); the transaction's end puts back the session's own setting.
+CREATE FUNCTION authz_int.jit_off() RETURNS void
+LANGUAGE sql VOLATILE AS $f$ SELECT pg_catalog.set_config('jit', 'off', true) $f$;
 -- Are the settings to be believed? PL/pgSQL, so its plans are kept for the session, and not a definer: all its
 -- callers run as the owner. (OR runs left to right: the refusal is asked only when the signature doesn't match.)
 CREATE FUNCTION authz_int.session_ok() RETURNS boolean
@@ -303,6 +310,7 @@ BEGIN
   PERFORM set_config('authz.scopes', '', true);
   PERFORM set_config('authz.acting_user', '', true);
   PERFORM authz_int.sign();
+  PERFORM authz_int.jit_off();
 END $f$;
 
 -- Sign in with an API key for this transaction: SELECT authz.login_key('ak_...'). Returns who:
@@ -333,6 +341,7 @@ BEGIN
                 WHERE x.id = k.id AND (x.last_used_at IS NULL OR x.last_used_at < now() - interval '1 minute')
                 FOR UPDATE SKIP LOCKED);
   END IF;
+  PERFORM authz_int.jit_off();
   RETURN authz_int.actor();
 END $f$;
 
@@ -415,6 +424,7 @@ BEGIN
     PERFORM set_config('authz.principal_type', '', true);
     RAISE EXCEPTION 'the token names no active user' USING ERRCODE = 'invalid_authorization_specification', HINT = 'rowstile help AZ703';
   END IF;
+  PERFORM authz_int.jit_off();
   RETURN authz_int.actor();
 END $f$;
 
@@ -448,6 +458,7 @@ BEGIN
   PERFORM set_config('authz.scopes', 'read', true);
   PERFORM authz_int.sign();
   PERFORM set_config('authz_ctx.reason', p_reason, true);
+  PERFORM authz_int.jit_off();
   PERFORM authz_int.audit('view_as', 'user', authz_int.canon('user', p_user), NULL, NULL, NULL, NULL, NULL);
 END $f$;
 

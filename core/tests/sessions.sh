@@ -27,7 +27,7 @@ dropdb --if-exists "$DB" 2>/dev/null; createdb "$DB" || exit 1
 PGOPTIONS="-c client_min_messages=error" psql -X -q -v ON_ERROR_STOP=1 -d "$DB" -f example/app_schema.sql >/dev/null || exit 1
 python3 cli/rowstile_cli.py --db "dbname=$DB" apply example/docs.authz >/dev/null 2>&1 || { bad "apply"; exit 1; }
 for r in $APP $OTHER; do psql -X -q -d postgres -c "DROP ROLE IF EXISTS $r" >/dev/null 2>&1; done
-psql -X -q -d postgres -c "CREATE ROLE $APP LOGIN IN ROLE app_user" -c "ALTER ROLE $APP SET jit = off" \
+psql -X -q -d postgres -c "CREATE ROLE $APP LOGIN IN ROLE app_user" -c "ALTER ROLE $APP SET jit = on" \
      -c "CREATE ROLE $OTHER LOGIN" >/dev/null
 # a login that is neither the app role nor a member of it has nothing of rowstile's, connection_check() included
 ROLE=$OTHER expect "a login outside the app role can't call connection_check() at all" "42501: permission denied for schema authz" \
@@ -50,6 +50,11 @@ expect "... and so is a user set directly" "28000: authz.user_id was set directl
 
 echo "-- signing in"
 expect "authz.act_as signs carol in: she sees her files" "$carol" -c "$(ACT "'user', '3'")" -c "SELECT count(*) FROM app.files"
+# JIT on, as most servers have it: signing in turns it off for the transaction (the rules' estimates are high)
+expect "signing in turns JIT off until the transaction ends" "off" -c "$(ACT "'user', '3'")" -c "SELECT current_setting('jit')"
+got=$(psql -X -q -At -U "$APP" -d "$DB" -c "BEGIN" -c "$(ACT "'user', '3'")" -c "COMMIT" -c "SELECT current_setting('jit')" 2>&1)
+[ "$got" = on ] && ok "... and the next transaction has the session's own setting" || bad "JIT after the transaction" "$got"
+expect "... which the app may turn back on after signing in" "on" -c "$(ACT "'user', '3'")" -c "SET LOCAL jit = on" -c "SELECT current_setting('jit')"
 expect "act_as(NULL, NULL): nobody, on purpose, no error" "0" -c "$(ACT "NULL, NULL")" -c "SELECT count(*) FROM app.files WHERE id = 12"
 expect "changing authz.user_id after signing in is an error" "28000: who is signed in was changed after signing in" -c "$(ACT "'user', '3'")" -c "SET LOCAL authz.user_id = 1" \
   -c "SELECT count(*) FROM app.files"
@@ -96,6 +101,7 @@ SQL
 echo "-- keys and scopes"
 key=$(PSQL -c "SET authz.user_id = 3" -c "SELECT authz.create_api_key('sessions test', 'read')" | tail -n 1)
 expect "a read-only key signs carol in" "$carol" -c "SELECT authz.login_key('$key') IS NOT NULL" -c "SELECT count(*) FROM app.files"
+expect "a key's sign-in turns JIT off too" "off" -c "SELECT authz.login_key('$key') IS NOT NULL" -c "SELECT current_setting('jit')"
 expect "... and can't write" "UPDATE 0" -c "SELECT authz.login_key('$key') IS NOT NULL" -c "\\set QUIET off" \
   -c "UPDATE app.files SET name = name WHERE id = 11"
 expect "clearing its scopes is an error, not a way to write" "28000: who is signed in was changed after signing in" -c "SELECT authz.login_key('$key') IS NOT NULL" \

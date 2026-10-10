@@ -9,8 +9,6 @@ the tables; everything else here is plain SQL.
   signed, so the app role can't change who is signed in by setting `authz.user_id`; only the app role (and
   its members) may call `act_as`, and services sign in with `authz.login_key()` or `authz.login_jwt()`.
   `SELECT * FROM authz.connection_check()` at start-up says what is wrong with the app's connection.
-- **Turn JIT off for the app role**: `ALTER ROLE app_user SET jit = off`. Permission checks are many
-  small subplans; with JIT on, Postgres may spend more time compiling a read than running it.
 - **Memory**: the inheritance tables are read on every check. Give Postgres enough shared buffers for
   the database's hot part; on the benchmark, 250k folders needed more than 1 GB and a million (a 6 GB
   database, 3.4 GB of it inheritance tables) more than 4 GB (`core/bench/`).

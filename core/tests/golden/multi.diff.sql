@@ -559,6 +559,13 @@ LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = pg_catalog, pg_temp
 BEGIN
   PERFORM set_config('authz.session', authz_int.session_sig(), true);
 END $f$;
+-- JIT off for the rest of the transaction, when it signs someone in (act_as, the logins, view_as). Postgres
+-- compiles a plan whose estimated cost passes jit_above_cost, and the rules' lookups are costed per row though
+-- each is hashed once: a read of a few thousand rows through row-level security is estimated at hundreds of
+-- thousands, and JIT takes most of a second compiling a read that runs in a few ms. The app may turn it back
+-- on after signing in (SET LOCAL jit = on); the transaction's end puts back the session's own setting.
+CREATE FUNCTION authz_int.jit_off() RETURNS void
+LANGUAGE sql VOLATILE AS $f$ SELECT pg_catalog.set_config('jit', 'off', true) $f$;
 -- Are the settings to be believed? PL/pgSQL, so its plans are kept for the session, and not a definer: all its
 -- callers run as the owner. (OR runs left to right: the refusal is asked only when the signature doesn't match.)
 CREATE FUNCTION authz_int.session_ok() RETURNS boolean
@@ -5139,6 +5146,7 @@ BEGIN
   PERFORM set_config('authz.scopes', '', true);
   PERFORM set_config('authz.acting_user', '', true);
   PERFORM authz_int.sign();
+  PERFORM authz_int.jit_off();
 END $f$;
 
 -- Sign in with an API key for this transaction: SELECT authz.login_key('ak_...'). Returns who:
@@ -5169,6 +5177,7 @@ BEGIN
                 WHERE x.id = k.id AND (x.last_used_at IS NULL OR x.last_used_at < now() - interval '1 minute')
                 FOR UPDATE SKIP LOCKED);
   END IF;
+  PERFORM authz_int.jit_off();
   RETURN authz_int.actor();
 END $f$;
 
@@ -5251,6 +5260,7 @@ BEGIN
     PERFORM set_config('authz.principal_type', '', true);
     RAISE EXCEPTION 'the token names no active user' USING ERRCODE = 'invalid_authorization_specification', HINT = 'rowstile help AZ703';
   END IF;
+  PERFORM authz_int.jit_off();
   RETURN authz_int.actor();
 END $f$;
 
@@ -5284,6 +5294,7 @@ BEGIN
   PERFORM set_config('authz.scopes', 'read', true);
   PERFORM authz_int.sign();
   PERFORM set_config('authz_ctx.reason', p_reason, true);
+  PERFORM authz_int.jit_off();
   PERFORM authz_int.audit('view_as', 'user', authz_int.canon('user', p_user), NULL, NULL, NULL, NULL, NULL);
 END $f$;
 
@@ -5818,15 +5829,6 @@ WHERE w.who IS NOT NULL AND n.nspname !~ '^pg_(toast_)?temp_' LOOP
       RETURN NEXT;
     END IF;
   END LOOP;
-  -- JIT for the app role: checks are many small subplans, which JIT may spend longer compiling than running
-  IF coalesce((SELECT split_part(c, '=', 2) FROM pg_db_role_setting s, unnest(s.setconfig) c
-               WHERE s.setrole = v_role AND c LIKE 'jit=%'
-                 AND s.setdatabase IN (0, (SELECT d.oid FROM pg_database d WHERE d.datname = current_database()))
-               ORDER BY s.setdatabase DESC LIMIT 1), current_setting('jit')) IN ('on', 'true', '1') THEN
-    severity := 'performance'; object := 'app_user';
-    problem := format('runs with JIT on: permission checks are many small subplans, and JIT can take longer to compile a read than to run it (a third of a second for a large one): ALTER ROLE %s SET jit = off', 'app_user');
-    RETURN NEXT;
-  END IF;
   -- rules for a command the app role has no privilege for (one column's is enough for a read, an insert or
   -- an update: the app may write some columns only)
   FOR r IN SELECT to_regclass(v.tbl) AS tbl, v.cmd FROM (VALUES ('"mt"."docs"', 'select'), ('"mt"."docs"', 'update')) v(tbl, cmd)
@@ -5912,7 +5914,7 @@ WHERE w.who IS NOT NULL AND n.nspname !~ '^pg_(toast_)?temp_' LOOP
 END $f$;
 
 -- What is wrong with this connection, for the app to check when it starts: SELECT * FROM authz.connection_check()
--- 'error': the rules don't apply to the role this connection runs as; 'performance'; 'info'. No rows: all is well.
+-- 'error': the rules don't apply to the role this connection runs as. No rows: all is well.
 CREATE OR REPLACE FUNCTION authz.connection_check() RETURNS TABLE (severity text, problem text)
 LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $f$
 DECLARE v_me oid := to_regrole(authz_int.caller_role()); v_app oid := to_regrole('app_user'); r record;
@@ -5953,11 +5955,6 @@ BEGIN
     severity := 'error';
     problem := format('%s is not the policy''s app role %s, nor a member of it: the rules apply to %s only',
                       v_me::regrole, 'app_user', 'app_user');
-    RETURN NEXT;
-  END IF;
-  IF current_setting('jit') = 'on' THEN
-    severity := 'performance';
-    problem := 'JIT is on: reads through row-level security can spend more time compiling than running (ALTER ROLE ... SET jit = off)';
     RETURN NEXT;
   END IF;
 END $f$;
@@ -6151,6 +6148,22 @@ GRANT EXECUTE ON FUNCTION
   authz.perms(text, bigint),
   authz.perms(text, uuid)
   TO app_user;
+
+-- Tables never analyzed (made just now, or too small for autovacuum to have reached them) are planned
+-- as ten pages of rows: a table of 6 rows as thousands. Through the rules' lookups that becomes an estimate of
+-- hundreds of thousands, and Postgres compiles (JIT) and plans for reads of a few rows. ANALYZE reads a
+-- sample (30,000 rows at most) and blocks neither reads nor writes.
+DO $an$
+DECLARE r record;
+BEGIN
+  FOR r IN SELECT c.oid::regclass AS tbl FROM pg_class c
+           WHERE c.relkind = 'r' AND c.relpersistence <> 't' AND c.reltuples < 0
+             AND pg_has_role(c.relowner, 'USAGE')
+             AND (c.relnamespace IN (SELECT oid FROM pg_namespace WHERE nspname IN ('authz', 'authz_int'))
+                  OR c.oid = ANY (SELECT to_regclass(x) FROM unnest(ARRAY['"mt"."users"', '"mt"."orgs"', '"mt"."org_members"', '"mt"."teams"', '"mt"."team_members"', '"mt"."projects"', '"mt"."folders"', '"mt"."docs"', '"mt"."doc_orgs"']::text[]) x)) LOOP
+    EXECUTE format('ANALYZE %s', r.tbl);
+  END LOOP;
+END $an$;
 
 
 DO $snap$

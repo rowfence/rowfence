@@ -7,13 +7,12 @@ The other services (RDS, Cloud SQL, Azure) have not been tried yet; the first pa
 
 ## On any service
 
-The role a service gives you owns your tables but isn't a superuser. That is enough, with three things done once,
+The role a service gives you owns your tables but isn't a superuser. That is enough, with two things done once,
 as that owner:
 
 ```sql
 -- the role your app connects as: made with SQL, so that it is no administrator
 CREATE ROLE app_user LOGIN PASSWORD 'a long random password' NOSUPERUSER NOBYPASSRLS;
-ALTER ROLE app_user SET jit = off;
 
 -- the owner may then look at the data as the app does (rowstile test, sql --as, plans, bench, Studio)
 GRANT app_user TO CURRENT_USER;
@@ -25,7 +24,6 @@ GRANT app_user TO CURRENT_USER;
 - **The owner gives itself the app role.** Since PostgreSQL 16 a role that makes another one only administers
   it. Without the `GRANT`, the commands that switch to the app role stop and say so (`rowstile help AZ618`).
   The app is not affected: it logs in as the app role.
-- **JIT off for the app role.** Neon leaves JIT on; Supabase has it off.
 - **The command, migrations and the change feed** connect to the database directly, or through a pooler in
   *session* mode. The app may go through a pooler in *transaction* mode ([Behind a pooler](operations.md#behind-a-pooler)
   says what each driver needs there).

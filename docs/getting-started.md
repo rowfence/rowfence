@@ -44,7 +44,6 @@ CREATE INDEX ON app.notes (project_id);
 CREATE INDEX ON app.notes (author_id);
 
 CREATE ROLE app_backend LOGIN PASSWORD 'change me' NOSUPERUSER NOBYPASSRLS;   -- the role your app connects as
-ALTER ROLE app_backend SET jit = off;
 GRANT USAGE ON SCHEMA app TO app_backend;
 GRANT SELECT ON ALL TABLES IN SCHEMA app TO app_backend;
 GRANT INSERT, UPDATE, DELETE ON app.projects, app.notes TO app_backend;   -- the tables the policy governs

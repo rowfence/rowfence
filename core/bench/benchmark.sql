@@ -13,7 +13,7 @@
 \set ON_ERROR_STOP on
 \o /dev/null
 SET client_min_messages = warning;
-SET jit = off;   -- recommended for the app role (ALTER ROLE app_user SET jit = off): JIT spends ~0.3 s compiling big RLS reads
+SET jit = off;   -- as in a signed-in transaction (authz.act_as turns it off): JIT spends ~0.3 s compiling big RLS reads
 
 TRUNCATE app.folder_links, app.folder_team_access, app.files, app.folders, app.team_members, app.teams,
          app.org_members, app.orgs, app.users CASCADE;

@@ -65,6 +65,12 @@ and superusers are believed without a signature (psql, migrations, tests). <!-- 
 `core/tests/sessions.sh` checks all
 of it, on the stock Postgres image.
 
+**Signing in turns JIT off** until the transaction ends (`act_as`, the logins and `view_as`). The rules' lookups
+are hashed once per read but estimated once per row, so a read of a few thousand rows through them passes
+Postgres's `jit_above_cost`, and JIT spends most of a second compiling a read that runs in a few milliseconds
+([Speed and limits](limits.md)). The next transaction has the session's own setting again, and the app may turn
+JIT back on after signing in (`SET LOCAL jit = on`). <!-- checked: tests/sessions.sh "signing in turns JIT off until the transaction ends"; tests/sessions.sh "and the next transaction has the session's own setting"; tests/sessions.sh "which the app may turn back on after signing in"; tests/identity.sh "and turns JIT off for the transaction" -->
+
 Who may call `act_as`: the app role and its members (the policy grants it), so a compromised app can still
 choose users. <!-- checked: tests/sessions.sh "a role that isn't the app role can't act_as"; tests/sessions.sh "authz.act_as signs carol in: she sees her files" -->
 Keep the app role's credentials in the backend.

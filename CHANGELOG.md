@@ -36,6 +36,14 @@ Each release upgrades from the one before it. How releases are numbered and made
 
 ### Changed
 
+- Signing in (`authz.act_as`, `authz.login_key`, `authz.login_jwt`, `authz.view_as`) turns JIT off until the
+  transaction ends, so `ALTER ROLE app_user SET jit = off` is no longer needed, and `authz.lint()` and
+  `authz.connection_check()` no longer report JIT. The rules' lookups are estimated once per row, so a read of
+  a few thousand rows through them looked costly enough to compile: with JIT on, counting 10,000 folders took
+  1.06 s instead of 23 ms. The setting of the role reached only that role's own logins, not its members. An app
+  that wants JIT back for one transaction runs `SET LOCAL jit = on` after signing in.
+- Applying and migrations analyze the tables the policy reads, and rowstile's own, that were never analyzed:
+  Postgres planned a table of a few rows as thousands, and JIT compiled reads of it (160 ms for 17 rows).
 - Each run of the command starts faster: it imports only what that command uses. `rowstile check` and `rowstile
   test` take about 35 ms less CPU of about 180, and `rowstile fmt`, `can`, `lint` and `--version` about 50 ms
   less of about 160: a hook or a CI step that runs the command many times gains the most.

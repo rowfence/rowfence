@@ -158,14 +158,12 @@ database = "{database}"     # a DSN or URL, or env:NAME for an environment varia
 {lines}
      The role your app connects as ({role}) must not bypass row-level security:
        CREATE ROLE {role} LOGIN PASSWORD '...' NOSUPERUSER NOBYPASSRLS;
-       ALTER ROLE {role} SET jit = off;
      The app connects as {role}, with a URL of its own: never the one this command uses, the
      tables' owner's, which row-level security doesn't apply to."""
     else:
         setup = f"""
   2. The role your app connects as ({role}) must not bypass row-level security:
        CREATE ROLE {role} LOGIN PASSWORD '...' NOSUPERUSER NOBYPASSRLS;
-       ALTER ROLE {role} SET jit = off;
      It says who is signed in first in each transaction: SELECT authz.act_as('user', '42')
      (the generated clients' sign_in does it)."""
     print(f"""

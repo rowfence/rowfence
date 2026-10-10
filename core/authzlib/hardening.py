@@ -490,15 +490,6 @@ BEGIN
       RETURN NEXT;
     END IF;
   END LOOP;
-  -- JIT for the app role: checks are many small subplans, which JIT may spend longer compiling than running
-  IF coalesce((SELECT split_part(c, '=', 2) FROM pg_db_role_setting s, unnest(s.setconfig) c
-               WHERE s.setrole = v_role AND c LIKE 'jit=%'
-                 AND s.setdatabase IN (0, (SELECT d.oid FROM pg_database d WHERE d.datname = current_database()))
-               ORDER BY s.setdatabase DESC LIMIT 1), current_setting('jit')) IN ('on', 'true', '1') THEN
-    severity := 'performance'; object := {lit(role)};
-    problem := format('runs with JIT on: permission checks are many small subplans, and JIT can take longer to compile a read than to run it (a third of a second for a large one): ALTER ROLE %s SET jit = off', {lit(role)});
-    RETURN NEXT;
-  END IF;
   -- rules for a command the app role has no privilege for (one column's is enough for a read, an insert or
   -- an update: the app may write some columns only)
   FOR r IN SELECT to_regclass(v.tbl) AS tbl, v.cmd FROM (VALUES {rule_rows or "(NULL::text, NULL::text)"}) v(tbl, cmd)
@@ -590,7 +581,7 @@ END $f$;"""
         role = self.role
         governed = "ARRAY[" + ", ".join(lit(qt(t)) for t in sorted({r.table for r in self.rules})) + "]::text[]"
         return f"""-- What is wrong with this connection, for the app to check when it starts: SELECT * FROM authz.connection_check()
--- 'error': the rules don't apply to the role this connection runs as; 'performance'; 'info'. No rows: all is well.
+-- 'error': the rules don't apply to the role this connection runs as. No rows: all is well.
 CREATE FUNCTION authz.connection_check() RETURNS TABLE (severity text, problem text)
 LANGUAGE plpgsql STABLE {DEF} AS $f$
 DECLARE v_me oid := to_regrole(authz_int.caller_role()); v_app oid := to_regrole({lit(role)}); r record;
@@ -631,11 +622,6 @@ BEGIN
     severity := 'error';
     problem := format('%s is not the policy''s app role %s, nor a member of it: the rules apply to %s only',
                       v_me::regrole, {lit(role)}, {lit(role)});
-    RETURN NEXT;
-  END IF;
-  IF current_setting('jit') = 'on' THEN
-    severity := 'performance';
-    problem := 'JIT is on: reads through row-level security can spend more time compiling than running (ALTER ROLE ... SET jit = off)';
     RETURN NEXT;
   END IF;
 END $f$;"""

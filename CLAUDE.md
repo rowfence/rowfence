@@ -359,4 +359,3 @@ For one suite, start a container and run it inside:
 
 See "Limits" in `docs/reference/limits.md`: no sharding, no SCIM endpoint (sync
 function only), HS256-only JWTs.
-Recommend `ALTER ROLE app_user SET jit = off`.

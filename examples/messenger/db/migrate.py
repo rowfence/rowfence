@@ -45,7 +45,6 @@ def main() -> None:
         if cur.fetchone() is None:
             cur.execute("CREATE ROLE ms_app LOGIN NOSUPERUSER NOBYPASSRLS")
         cur.execute(sql.SQL("ALTER ROLE ms_app PASSWORD {}").format(sql.Literal(password)))
-        cur.execute("ALTER ROLE ms_app SET jit = off")
         cur.execute(
             "CREATE TABLE IF NOT EXISTS public.ms_migrations (name text PRIMARY KEY, at timestamptz DEFAULT now())"
         )
