@@ -95,6 +95,10 @@ Each release upgrades from the one before it. How releases are numbered and made
   pushed another change without a word: only `apply --force` refused it. Apply and push now read those
   conditions again each time, and refuse one that no longer runs with its line, as the first apply did
   (AZ613).
+- `rowstile indexes`, `rowstile dev` and `authz.lint()` didn't look at the index on a type's own key, by which
+  every check on one object (`authz.can`, a write rule) finds its row: on a table with no primary key there, each
+  such check scanned the table, and nothing said so. They name it now, like any other lookup, with the index to
+  add. A primary key, a unique index or any index whose first columns are the key's (in any order) serves it.
 - `rowstile review --db` stopped with a traceback when the server ended its session in the middle of the review
   (a restart, or `pg_terminate_backend`): it says it lost the database, exit 2, as the other commands do. Its
   messages name the policy as you do (`db/policy.authz`), not by its full path; and `review`, `test` and `dev`
