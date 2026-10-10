@@ -112,6 +112,8 @@ PY
 )
 check "a valid token signs in as bob, with its scope" "2|read" \
   "BEGIN; SELECT authz.login_jwt('$T_OK'); SELECT authz.uid() || '|' || current_setting('authz.scopes'); COMMIT;"
+check "... and turns JIT off for the transaction" "off" \
+  "BEGIN; SET LOCAL jit = on; SELECT authz.login_jwt('$T_OK'); SELECT current_setting('jit'); COMMIT;"
 expect_code "wrong signature" "28000: invalid token" -c "BEGIN" -c "SELECT authz.login_jwt('$T_BADSIG')"
 expect_code "expired" "28000: token expired or not yet valid" -c "BEGIN" -c "SELECT authz.login_jwt('$T_EXPIRED')"
 expect_code "another issuer" "28000: token from another issuer" -c "BEGIN" -c "SELECT authz.login_jwt('$T_ISS')"
@@ -138,6 +140,8 @@ PSQL -c "DELETE FROM authz.settings WHERE key = 'jwt_audience'" >/dev/null
 echo "-- view as (support)"
 check "erin (Acme admin) views as carol: carol's files, read-only" "3|3|5|false" \
   "BEGIN; SET LOCAL authz.user_id = 5; SELECT authz.view_as('3', 'ticket 42'); SELECT (SELECT count(*) FROM app.files) || '|' || authz.uid() || '|' || current_setting('authz.acting_user') || '|' || authz.can('file', 11, 'edit'); COMMIT;"
+check "... and turns JIT off for the transaction" "off" \
+  "BEGIN; SET LOCAL jit = on; SET LOCAL authz.user_id = 5; SELECT authz.view_as('3', 'ticket 42'); SELECT current_setting('jit'); COMMIT;"
 expect_code "... and cannot change anything" "42501: this session is read-only (viewing as someone else, or a read-only token)" -c "BEGIN" -c "SET LOCAL authz.user_id = 5" \
   -c "SELECT authz.view_as('3', 'ticket 42')" -c "SELECT authz.share('folder', 2, 'viewer', 'user', 4)"
 # the scope view-as carries refuses sharing too; without it (the owner's session sets the settings), only the

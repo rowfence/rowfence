@@ -1330,6 +1330,7 @@ END $w$;"""
             ("always", "revoke", "REVOKE ALL ON ALL FUNCTIONS IN SCHEMA authz_gen FROM PUBLIC;"),
             ("created", "grant_functions", f"GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA authz_gen TO {self.role};"),
             ("created", "grant_api", "GRANT EXECUTE ON FUNCTION\n  " + ",\n  ".join(executes) + f"\n  TO {self.role};"),
+            ("always", "analyze", self.analyze_sql()),
             ("full", "commit", "COMMIT;" if transaction else ""),
         ]
         self.parts = [(mode, name, sql.strip()) for mode, name, sql in parts if sql and sql.strip()]
@@ -1343,6 +1344,25 @@ END $w$;"""
             )
             + "\n"
         )
+
+    def analyze_sql(self) -> str:
+        """ANALYZE the tables the policy reads, and rowstile's own, that were never analyzed."""
+        tables = ", ".join(f"{lit(qt(tb))}" for tb in dict.fromkeys(tb for tb, _, _ in self.columns))
+        return f"""-- Tables never analyzed (made just now, or too small for autovacuum to have reached them) are planned
+-- as ten pages of rows: a table of 6 rows as thousands. Through the rules' lookups that becomes an estimate of
+-- hundreds of thousands, and Postgres compiles (JIT) and plans for reads of a few rows. ANALYZE reads a
+-- sample (30,000 rows at most) and blocks neither reads nor writes.
+DO $an$
+DECLARE r record;
+BEGIN
+  FOR r IN SELECT c.oid::regclass AS tbl FROM pg_class c
+           WHERE c.relkind = 'r' AND c.relpersistence <> 't' AND c.reltuples < 0
+             AND pg_has_role(c.relowner, 'USAGE')
+             AND (c.relnamespace IN (SELECT oid FROM pg_namespace WHERE nspname IN ('authz', 'authz_int'))
+                  OR c.oid = ANY (SELECT to_regclass(x) FROM unnest(ARRAY[{tables or "NULL"}]::text[]) x)) LOOP
+    EXECUTE format('ANALYZE %s', r.tbl);
+  END LOOP;
+END $an$;"""
 
     @staticmethod
     def oids_sql(tables: list[str]) -> str:

@@ -111,8 +111,8 @@ Row-level security doesn't apply to superusers, roles with `BYPASSRLS`, or a tab
 
 ## A list or a page is slow
 
-- Turn JIT off for the app's role: `ALTER ROLE app_backend SET jit = off`. Permission checks are many small
-  subplans; JIT compiles them for longer than they take to run.
+- A query run outside the transaction that signed in has JIT as the server sets it: with JIT on, Postgres may
+  spend most of a second compiling a read through the rules ([Speed and limits](reference/limits.md)).
 - Add the indexes `authz.lint()` asks for: every column a check looks up (link tables' columns, foreign keys).
 - Page through long lists: `authz.list('file', 'view', '<last id>', 1000)`.
 

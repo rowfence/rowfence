@@ -54,7 +54,7 @@ owner's rights, SECURITY DEFINER functions that use them,
 membership tables the app may write, relationship columns anyone who can update the
 row may change, masked columns readable from the table, unique indexes that reveal
 hidden rows, missing indexes on the columns permission checks look up (a type's key among them), a select rule whose permissions are
-named so many times over that every read is slow to plan ([Speed and limits](limits.md)), and JIT being on. As notes, it lists
+named so many times over that every read is slow to plan ([Speed and limits](limits.md)). As notes, it lists
 the tables the app role may read in full: a type's table without rules, a table the policy reads for a
 relation (who is in which team), and any table in the same schemas that the policy doesn't name (password
 hashes, sessions: nothing filters them; fine for a lookup table). It also
@@ -69,7 +69,7 @@ where memberships have an `id` too): the row's is `this.id`. <!-- checked: tests
 
 `authz.connection_check()` is the same idea for the app itself, which may call it: what is wrong with
 the connection it runs on (a superuser, BYPASSRLS, the owner of a governed table, a table with rules whose
-row-level security is off, JIT). <!-- checked: tests/sessions.sh "the owner's connection: an error"; tests/sessions.sh "row-level security off on a table with rules: an error"; tests/sessions.sh "the app's role: nothing to report" -->
+row-level security is off). <!-- checked: tests/sessions.sh "the owner's connection: an error"; tests/sessions.sh "row-level security off on a table with rules: an error"; tests/sessions.sh "the app's role: nothing to report" -->
 A login that is neither the app role nor a member of it can't call it at all
 (`permission denied for schema authz`): the rules apply to the app role only. <!-- checked: tests/sessions.sh "a login outside the app role can't call connection_check() at all" -->
 A login that is a superuser or

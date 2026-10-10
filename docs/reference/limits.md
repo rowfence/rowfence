@@ -23,10 +23,12 @@ rows of inheritance in a 6 GB database; the same laptop, 8 GB of shared buffers)
 a p95 of 4.3 to 4.6 ms and tree writes at 28 to 38 ms. The folder with the most below it, 54,000, moves in 2 to
 3.7 s. Applying takes three minutes there (the backfill), and `authz.verify()` two and a half.
 
-**Turn JIT off for the app role** (`ALTER ROLE app_user SET jit = off`): with JIT on,
-Postgres spends about a third of a second compiling each large read through RLS (the list
-above takes 290 ms instead of 32). The audit trail and change feed add about 15 µs per changed row
-(10,000 owner changes: 292 ms instead of 137 ms).
+**JIT is off in signed-in transactions** ([Signed sessions](identity.md)): with JIT on, Postgres spends about
+a third of a second compiling each large read through RLS (the list above takes 290 ms instead of 32), since the
+rules' lookups are estimated once per row. Applying analyzes the tables the policy reads that were never
+analyzed: a table never analyzed is planned as ten pages of rows (6 rows as thousands), and a read of it as one
+JIT compiles. <!-- checked: tests/apply.sh "and leaves none of the tables the policy reads, nor of its own, never analyzed" -->
+The audit trail and change feed add about 15 µs per changed row (10,000 owner changes: 292 ms instead of 137 ms).
 
 ## Limits
 
