@@ -19,7 +19,8 @@ seeds name those tables and columns as an app's own may be (AWKWARD: capitals, w
 policy otherwise the same; nearly half give every key another type than bigint (KEYS: int, text or uuid), said
 on each type line; and a quarter of the others key their object types by (org_id, id), every column that points
 at an object then naming one in its row's org (`[org_id, c_up]`, `(parent_type, [org_id, parent_id])`, link tables
-`([org_id, obj_id] -> [org_id, subj_id])`); each drawn apart too.
+`([org_id, obj_id] -> [org_id, subj_id])`); each drawn apart too. And some have caveats (CAVEATS), which some of
+their shares carry, read in each user's context.
 Now and then a seed's policy has a twin, checked after it over fewer steps (variants()): the same with no rule at
 all, or with no permission at all, its rules naming relations.
 
@@ -201,6 +202,7 @@ class Spec:
     objs: list[Obj]
     invariants: list[tuple[str, Node]] = field(default_factory=list)
     spelling: Spelling = field(default_factory=Spelling)
+    caveats: bool = False  # the policy says CAVEATS, and some shares carry one
 
     def obj(self, name: str) -> Obj:
         return next(o for o in self.objs if o.name == name)
@@ -232,6 +234,11 @@ SHARED_IFS: dict[str, Callable[[str, str, str, set[str]], bool]] = {
 }
 
 
+# caveats, conditions a share carries and each request checks (in its context, authz_ctx.*): one on the context
+# alone, one on what the share was made with too. A share may also name one the policy doesn't have
+CAVEATS = {"c_mode": "{authz.ctx('mode') = 'business'}", "c_ip": "{authz.ctx('ip') = arg('ip')}"}
+
+
 def make(seed: int, respell: bool | None = None, keytype: str | None = None, composite: bool | None = None) -> Spec:
     """The seed's policy. Its names are AWKWARD's for a third of the seeds (respell: for this one, or not), its keys
     are int, text or uuid for about one seed in seven each, bigint otherwise (keytype: these), and a quarter of
@@ -244,7 +251,9 @@ def make(seed: int, respell: bool | None = None, keytype: str | None = None, com
     if composite is None:
         composite = keytype == "bigint" and random.Random(f"genpolicy/{seed}/composite").random() < 0.25
     spec = make_plain(seed)
-    return dataclasses.replace(spec, spelling=Spelling(awkward, keytype, composite))
+    shared = any(rel.kind == "shared" for o in spec.objs for rel in o.rels)  # (caveats ride on shares)
+    caveats = random.Random(f"genpolicy/{seed}/caveats").random() < 0.3 and shared
+    return dataclasses.replace(spec, spelling=Spelling(awkward, keytype, composite), caveats=caveats)
 
 
 def variants(seed: int) -> list[tuple[str, Spec]]:
@@ -541,6 +550,8 @@ def policy_text(spec: Spec) -> str:
                 out.append(f"  {rel.name} : {subj} = {src}")
         for p, e in o.perms.items():
             out.append(f"  can {p} = {text(e, s=s)}")
+    if spec.caveats:
+        out += [f"caveat {name} = {cond}" for name, cond in CAVEATS.items()]
     for o in spec.objs:
         if o.rules:
             out.append(f"rules {s.policy_table(o.name)}")
@@ -732,6 +743,14 @@ class GenPolicyGen(Gen):
             f"{str(r.random() < 0.8).lower()}) ON CONFLICT DO NOTHING;"
         )
 
+    def context(self, u: str) -> dict[str, str]:
+        """Where the policy has caveats, each user's request context: business hours for half of them, and an ip
+        of three."""
+        if not self.spec.caveats:
+            return {}
+        i = self.users.index(u) if u in self.users else len(self.users)
+        return {"mode": "business" if i % 2 == 0 else "night", "ip": f"10.0.0.{i % 3}"}
+
     def grants(self) -> str:
         return "\n".join(self.grant(None) for _ in range(12))
 
@@ -757,9 +776,20 @@ class GenPolicyGen(Gen):
                 ("now() + interval '1 day'", "NULL"),
             ]
         )
+        oid = lit(r.choice(self.subject_ids(o.name, ids)))
+        if self.spec.caveats:  # most carry none; some one of the policy's (with what it was made with), or another
+            caveat, args = r.choice(
+                [("NULL", "NULL")] * 3
+                + [("'c_mode'", "NULL"), ("'c_ip'", f'\'{{"ip": "10.0.0.{r.randint(0, 2)}"}}\''), ("'c_gone'", "NULL")]
+            )
+            return (
+                f"INSERT INTO authz.shares ({difftest.SHARE_COLUMNS}, caveat, caveat_args) VALUES ({lit(o.name)}, "
+                f"{oid}, {lit(rel.name)}, {lit(st)}, {lit(sid)}, {lit(sr)}, {expires}, {starts}, {caveat}, {args}) "
+                "ON CONFLICT DO NOTHING;"
+            )
         return (
             f"INSERT INTO authz.shares ({difftest.SHARE_COLUMNS}) VALUES ({lit(o.name)}, "
-            f"{lit(r.choice(self.subject_ids(o.name, ids)))}, {lit(rel.name)}, {lit(st)}, {lit(sid)}, {lit(sr)}, "
+            f"{oid}, {lit(rel.name)}, {lit(st)}, {lit(sid)}, {lit(sr)}, "
             f"{expires}, {starts}) ON CONFLICT DO NOTHING;"
         )
 
