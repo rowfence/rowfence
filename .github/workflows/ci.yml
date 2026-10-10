@@ -38,9 +38,9 @@ jobs:
             uv sync --project examples/$app/backend --frozen && uvx ty@0.0.56 check --project examples/$app || exit 1
           done
   # The suites, in the parts run_tests.sh names: each on a runner and in a container of its own, side by
-  # side, so the wait is the longest part's and not their sum
+  # side, so the wait is the longest part's and not their sum. They don't wait for the unit job: their own unit
+  # part runs the same checks, measured (--short has no unit part: 17 and 18 run it nightly)
   suites:
-    needs: unit
     name: suites (${{ matrix.pg }}, ${{ matrix.part }})
     runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
     env:
@@ -50,11 +50,14 @@ jobs:
       fail-fast: false
       matrix:
         pg: ["16", "17", "18"]
-        part: [policy, command, random]
+        part: [unit, policy, command, random]
         include:
           - {pg: "16", mode: ""}           # every suite (run_tests.sh --quick)
           - {pg: "17", mode: "--short"}    # what depends on the version; the rest runs nightly
           - {pg: "18", mode: "--short"}
+        exclude:
+          - {pg: "17", part: unit}
+          - {pg: "18", part: unit}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
       # --coverage: each Python process also measures what it runs of authzlib and cli (the coverage job reads it)

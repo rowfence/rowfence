@@ -182,7 +182,7 @@ simplest is Docker, from the repo root (Git Bash works on Windows):
     core/ci.sh                   # run_tests.sh --quick on 16, 17 and 18, each in a fresh container
     core/ci.sh --full 16         # the full run (~15 minutes) on one version
     core/ci.sh --short 17 18     # what depends on the version (what CI runs on 17 and 18 for each push)
-    ROWSTILE_PART=command core/ci.sh 16   # one part of a run (`run_tests.sh` names them: policy, command, random)
+    ROWSTILE_PART=command core/ci.sh 16   # one part of a run (`run_tests.sh` names them: unit, policy, command, random)
     core/ci.sh --coverage 16     # and what the suites run of authzlib and cli: .ci/coverage-16/report.txt says
                                  # what nothing runs (tests/coverage_report.py; CI's coverage job, --diff on PRs)
     python3 core/tests/unit_test.py   # a second, no database; --update rewrites tests/golden/ after an intended change
