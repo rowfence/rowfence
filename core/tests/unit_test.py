@@ -7367,6 +7367,18 @@ class GeneratedShapes(unittest.TestCase):
             {"without rules", "without permissions", "parent again", "a relation to users again", "a not first"}, drawn
         )
 
+    def test_arounds_seeds_draw_each_shared_if(self) -> None:
+        """around.py judges `shared if` by its calls of authz.share() to users: its four seeds on each push draw
+        one on a relation shared with users, and its sixteen of the full run each of the conditions."""
+        drawn: dict[str, set[int]] = {}
+        for seed in range(1, 17):
+            for o in self.g.make(seed, respell=False).objs:
+                for rel in o.rels:
+                    if rel.shared_if and "user" in rel.subjects:
+                        drawn.setdefault(rel.shared_if, set()).add(seed)
+        self.assertEqual(set(drawn), set(self.g.SHARED_IFS))
+        self.assertTrue(any(seed <= 4 for seeds in drawn.values() for seed in seeds), drawn)
+
 
 class CheckCounts(unittest.TestCase):
     """tests/check_counts.py, which ci.sh runs on run_tests.sh's log: each suite passes as many checks as
