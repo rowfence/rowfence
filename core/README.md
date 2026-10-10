@@ -93,6 +93,9 @@ measured (`.ci/coverage-16/`) and says:
   inline, is listed apart too;
 - with `--diff main`: the lines changed since `main` that nothing runs (exit 1 if there are any).
 
+CI measures on 16 alone: 17 and 18 ran the same lines, branches and functions (compared on 2026-10-10). Code that
+only another version runs would need theirs measured again (`--coverage` in `.github/workflows/ci.yml`).
+
 ### How many checks each suite passes
 
 A suite can stop checking something and stay green: a glob that matches nothing, a loop over an empty list, a
