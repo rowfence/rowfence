@@ -9,10 +9,12 @@ shares, to users, the service, `user:*`, `anyone` and other types' members; perm
 `not`, conditions, `signed_in`, `anyone`, `nobody`, arrows to other types, inheritance (stopped by a condition or not,
 across two types or not) and a deny that inherits; rules, the write rules sometimes with a condition that reads
 another governed table (a subquery, a function called by a quoted name, an operator the app made); invariants.
-Some also say what no draw above does, drawn apart so that the rest stays as it was (also(), shared_if()): a
-starting point with a `not` in a permission that inherits, a relation declared again for an earlier type through a
-link table (a `parent`, or a relation to users), and a condition on the shares made of a relation (`shared by p1 if
-{...}`, which around.py's calls of authz.share() judge). Then the tables it reads and their data. A third of the
+Some also say what no draw above does, drawn apart so that the rest stays as it was (also(), shared_if(),
+across()): a starting point with a `not` in a permission that inherits, a relation declared again for an earlier
+type through a link table (a `parent`, or a relation to users), a condition on the shares made of a relation
+(`shared by p1 if {...}`, which around.py's calls of authz.share() judge), and a recursion through two types (an
+earlier type's rows inside a later one's too, through a link table, inheriting back what the later type inherits
+from it: one tree across both). Then the tables it reads and their data. A third of the
 seeds name those tables and columns as an app's own may be (AWKWARD: capitals, words SQL reserves, 63 bytes), the
 policy otherwise the same; and nearly half give every key another type than bigint (KEYS: int, text or uuid), said
 on each type line, also drawn apart.
@@ -361,6 +363,7 @@ def make_plain(seed: int) -> Spec:
             spec.invariants.append(inv)
     also(spec, random.Random(f"genpolicy/{seed}/also"))
     shared_if(spec, random.Random(f"genpolicy/{seed}/shared-if"))
+    across(spec, random.Random(f"genpolicy/{seed}/across"))
     return spec
 
 
@@ -383,8 +386,7 @@ def also(spec: Spec, x: random.Random) -> None:
             assert not isinstance(e, str)
             o.perms[p] = ("or", [item, *e[1]])
         # (a deny that inherits through parent can't through another type's: no second source of it there)
-        denied = any(not isinstance(e, str) and e[0] == "and" and ("not", ["p1"]) in e[1] for e in o.perms.values())
-        if earlier and has(o, "parent") and not denied and x.random() < 0.5:
+        if earlier and has(o, "parent") and not denies(o) and x.random() < 0.5:
             o.rels.append(Rel("parent", "table", [x.choice(earlier)], x.random() < 0.4))
         others = [u for u in users if u != start]
         if earlier and others and x.random() < 0.2:
@@ -397,6 +399,51 @@ def shared_if(spec: Spec, x: random.Random) -> None:
         for rel in o.rels:
             if rel.kind == "shared" and x.random() < 0.4:
                 rel.shared_if = x.choice(list(SHARED_IFS))
+
+
+def across(spec: Spec, x: random.Random) -> None:
+    """Recursion through two types, as folders sit in projects and projects in folders, drawn apart from the rest
+    (x): where a type's `parent` names an earlier type, now and then that earlier type's rows sit inside the
+    type's too, through a link table (`inside`, sometimes `where {active}`), and a permission the type inherits
+    through `parent` is inherited back (`or inside.pN`): one recursion, one tree, across the two."""
+    for o in spec.objs:
+        earlier = [s for rel in o.rels if rel.name == "parent" for s in rel.subjects if s != o.name]
+        if not earlier or denies(o) or x.random() < 0.2:
+            continue
+        e = spec.obj(x.choice(earlier))
+        # (one that reaches the earlier type by `parent` alone: by `up` too, it would recurse otherwise than by
+        # inheriting, which the compiler refuses)
+        up = any(rel.name == "up" and rel.subjects == [e.name] for rel in o.rels)
+        inherits = [p for p, ex in o.perms.items() if f"parent.{p}" in atoms(ex) and not (up and reaches_up(o, p))]
+        # (nor what the earlier type denies, or denies with: a deny inherits through the links of what it denies)
+        inherits = [p for p in inherits if not (denies(e) and (p == "p1" or ("not", ["p1"]) in atoms_and(e.perms[p])))]
+        if not inherits or has(e, "inside"):
+            continue
+        p = x.choice(inherits)
+        e.rels.append(Rel("inside", "table", [o.name], x.random() < 0.5))
+        e.perms[p] = ("or", [e.perms[p], f"inside.{p}"])
+
+
+def denies(o: Obj) -> bool:
+    """Whether a permission of o takes away what it inherits (`... and not p1`)."""
+    return any(not isinstance(e, str) and e[0] == "and" and ("not", ["p1"]) in e[1] for e in o.perms.values())
+
+
+def reaches_up(o: Obj, p: str, seen: frozenset[str] = frozenset()) -> bool:
+    """Whether o.p follows `up`, itself or through the permissions of o it names."""
+    return any(
+        a.startswith("up.") or (a in o.perms and a not in seen and reaches_up(o, a, seen | {p}))
+        for a in atoms(o.perms[p])
+    )
+
+
+def atoms_and(n: Node) -> list[Node]:
+    """The items of an `and` (itself, for anything else)."""
+    return n[1] if not isinstance(n, str) and n[0] == "and" else [n]
+
+
+def atoms(n: Node) -> list[str]:
+    return [n] if isinstance(n, str) else [a for x in n[1] for a in atoms(x)]
 
 
 def has(o: Obj, rel: str) -> bool:

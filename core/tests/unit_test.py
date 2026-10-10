@@ -7329,9 +7329,10 @@ class Respelling(unittest.TestCase):
 
 
 class GeneratedShapes(unittest.TestCase):
-    """genpolicy's policies say now and then what no other draw does (also(), keys other than bigint, and the twins
-    of variants()), drawn apart from the rest: a seed's policy keeps all it drew before, the twelve seeds of the full
-    run draw each of them, and their twins compile (one that didn't would only be counted as refused)."""
+    """genpolicy's policies say now and then what no other draw does (also(), across(), keys other than bigint, and
+    the twins of variants()), drawn apart from the rest: a seed's policy keeps all it drew before, the twelve seeds
+    of the full run draw each of them (but across()), and their twins compile (one that didn't would only be counted
+    as refused)."""
 
     def setUp(self) -> None:
         sys.path.insert(0, os.path.join(ROOT, "tests"))
@@ -7343,7 +7344,10 @@ class GeneratedShapes(unittest.TestCase):
 
     def test_what_a_seed_drew_stays(self) -> None:
         for seed in range(1, 80):
-            with mock.patch.object(self.g, "also", lambda spec, x: None):
+            with (
+                mock.patch.object(self.g, "also", lambda spec, x: None),
+                mock.patch.object(self.g, "across", lambda spec, x: None),
+            ):
                 before = self.g.make(seed)
             after = self.g.make(seed)
             self.assertEqual(
@@ -7352,8 +7356,11 @@ class GeneratedShapes(unittest.TestCase):
             for b, a in zip(before.objs, after.objs, strict=True):
                 self.assertEqual((a.rels[: len(b.rels)], a.rules, a.where), (b.rels, b.rules, b.where), seed)
                 for p, e in b.perms.items():
-                    if a.perms[p] != e:  # a starting point put first, the rest as it was
-                        op, items = a.perms[p]
+                    got = a.perms[p]
+                    if not isinstance(got, str) and got[1][1:] == [f"inside.{p}"]:  # inherited back (across())
+                        got = got[1][0]
+                    if got != e:  # a starting point put first, the rest as it was
+                        op, items = got
                         self.assertEqual((op, items[0][1][1], items[1:]), ("or", self.NOT_FIRST, e[1]), seed)
 
     def test_the_full_runs_seeds_draw_each_shape(self) -> None:
@@ -7379,6 +7386,27 @@ class GeneratedShapes(unittest.TestCase):
             {"without rules", "without permissions", "parent again", "a relation to users again", "a not first"}, drawn
         )
         self.assertLessEqual({f"{k} keys" for k in self.g.KEYS}, drawn)
+
+    def test_a_recursion_through_two_types(self) -> None:
+        """across(): about one seed in seven (the nightly soak's hundred meet it, the full run's twelve may not),
+        nearly all compiled, each into a tree across two types, some of them stopped by a link table's where
+        alone."""
+        drawn = compiled = alone = 0
+        for seed in range(1, 101):
+            spec = self.g.make(seed)
+            if not any(rel.name == "inside" for o in spec.objs for rel in o.rels):
+                continue
+            drawn += 1
+            try:
+                sql = Compiler(parse_policy(self.g.policy_text(spec), "gen.authz")).compile("gen.authz")
+            except PolicyError:
+                continue
+            compiled += 1
+            self.assertRegex(sql, r"-- t\d, t\d: each node with every ancestor it inherits from", seed)
+            alone += "AS SELECT NULL::text AS t, NULL::text AS id, NULL::boolean[] AS v WHERE false;" in sql
+        self.assertGreaterEqual(drawn, 10)
+        self.assertGreaterEqual(compiled, drawn * 4 // 5)
+        self.assertGreaterEqual(alone, 1)
 
     def test_arounds_seeds_draw_each_shared_if(self) -> None:
         """around.py judges `shared if` by its calls of authz.share() to users: its four seeds on each push draw
