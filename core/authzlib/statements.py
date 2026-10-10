@@ -8,6 +8,7 @@ quotes, comments and BEGIN ATOMIC bodies (whose semicolons don't end the stateme
 from __future__ import annotations
 
 import re
+from functools import cache
 
 WORD = re.compile(r"[A-Za-z_][A-Za-z0-9_$]*")
 DOLLAR = re.compile(r"\$([A-Za-z_][A-Za-z0-9_]*)?\$")
@@ -178,49 +179,55 @@ def norm(name: str) -> str:
     return re.sub(r"\s*\.\s*", ".", name.strip())
 
 
-CREATE_FN = re.compile(rf"CREATE\s+(?:OR\s+REPLACE\s+)?FUNCTION\s+({QNAME})\s*\(", re.IGNORECASE)
-CREATE_VIEW = re.compile(rf"CREATE\s+(?:OR\s+REPLACE\s+)?VIEW\s+({QNAME})", re.IGNORECASE)
-CREATE_TABLE = re.compile(rf"CREATE\s+(?:UNLOGGED\s+)?TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?({QNAME})", re.IGNORECASE)
-CREATE_TRIGGER = re.compile(
-    rf"CREATE\s+(?:OR\s+REPLACE\s+)?(?:CONSTRAINT\s+)?TRIGGER\s+({NAME})\s.*?\bON\s+({QNAME})", re.IGNORECASE | re.S
+# made()'s patterns (and references()'s), each compiled when first used (_rx): compiling them all costs every command
+# ~5 ms, and one that compiles a policy without migrating it uses one or two
+CREATE_FN = rf"(?i)CREATE\s+(?:OR\s+REPLACE\s+)?FUNCTION\s+({QNAME})\s*\("
+CREATE_VIEW = rf"(?i)CREATE\s+(?:OR\s+REPLACE\s+)?VIEW\s+({QNAME})"
+CREATE_TABLE = rf"(?i)CREATE\s+(?:UNLOGGED\s+)?TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?({QNAME})"
+CREATE_TRIGGER = rf"(?is)CREATE\s+(?:OR\s+REPLACE\s+)?(?:CONSTRAINT\s+)?TRIGGER\s+({NAME})\s.*?\bON\s+({QNAME})"
+CREATE_POLICY = rf"(?i)CREATE\s+POLICY\s+({NAME})\s+ON\s+({QNAME})"
+CREATE_INDEX = (
+    rf"(?i)CREATE\s+(?:UNIQUE\s+)?INDEX\s+(?:CONCURRENTLY\s+)?(?:IF\s+NOT\s+EXISTS\s+)?({QNAME})?\s*ON\s+({QNAME})"
 )
-CREATE_POLICY = re.compile(rf"CREATE\s+POLICY\s+({NAME})\s+ON\s+({QNAME})", re.IGNORECASE)
-CREATE_INDEX = re.compile(
-    rf"CREATE\s+(?:UNIQUE\s+)?INDEX\s+(?:CONCURRENTLY\s+)?(?:IF\s+NOT\s+EXISTS\s+)?({QNAME})?\s*ON\s+({QNAME})",
-    re.IGNORECASE,
-)
-CREATE_TYPE = re.compile(rf"CREATE\s+TYPE\s+({QNAME})", re.IGNORECASE)
-CREATE_SCHEMA = re.compile(rf"CREATE\s+SCHEMA\s+(?:IF\s+NOT\s+EXISTS\s+)?({NAME})", re.IGNORECASE)
-RLS = re.compile(rf"ALTER\s+TABLE\s+({QNAME})\s+ENABLE\s+ROW\s+LEVEL\s+SECURITY", re.IGNORECASE)
-MARK = re.compile(r"^--\s*@object\s+(\w+)\s+(.+?)\s*$", re.M)
+CREATE_TYPE = rf"(?i)CREATE\s+TYPE\s+({QNAME})"
+CREATE_SCHEMA = rf"(?i)CREATE\s+SCHEMA\s+(?:IF\s+NOT\s+EXISTS\s+)?({NAME})"
+RLS = rf"(?i)ALTER\s+TABLE\s+({QNAME})\s+ENABLE\s+ROW\s+LEVEL\s+SECURITY"
+MARK = r"(?m)^--\s*@object\s+(\w+)\s+(.+?)\s*$"
+
+
+@cache
+def _rx(source: str) -> re.Pattern[str]:
+    return re.compile(source)
 
 
 def made(statement: str, comments: str = "") -> tuple[str, str] | None:
     """(kind, key) of the object a statement makes, or None: 'function' with its DROP signature, 'view',
     'table', 'trigger' ('name ON table'), 'policy' ('name ON table'), 'index', 'type', 'schema', 'rls'.
     A statement that makes one indirectly (a DO block) says so in a comment: -- @object view mt.docs_visible"""
-    m = MARK.search(comments)
+    m = _rx(MARK).search(comments)
     if m:
         return m.group(1), m.group(2)
     s = statement.lstrip()
-    m = CREATE_FN.match(s)
+    # each pattern starts with its own words, so the order they are tried in changes nothing: triggers first, as
+    # compiling a policy asks about triggers alone (governance.py) and then compiles no other pattern
+    m = _rx(CREATE_TRIGGER).match(s)
+    if m:
+        return "trigger", f"{m.group(1)} ON {norm(m.group(2))}"
+    m = _rx(CREATE_FN).match(s)
     if m:
         args, _ = _args(s, m.end() - 1)
         return "function", f"{norm(m.group(1))}({signature(args)})"
     for kind, rx in (("view", CREATE_VIEW), ("table", CREATE_TABLE), ("type", CREATE_TYPE), ("schema", CREATE_SCHEMA)):
-        m = rx.match(s)
+        m = _rx(rx).match(s)
         if m:
             return kind, norm(m.group(1))
-    m = CREATE_TRIGGER.match(s)
-    if m:
-        return "trigger", f"{m.group(1)} ON {norm(m.group(2))}"
-    m = CREATE_POLICY.match(s)
+    m = _rx(CREATE_POLICY).match(s)
     if m:
         return "policy", f"{m.group(1)} ON {norm(m.group(2))}"
-    m = CREATE_INDEX.match(s)
+    m = _rx(CREATE_INDEX).match(s)
     if m:
         return ("index", norm(m.group(1))) if m.group(1) else None  # unnamed: goes with its table
-    m = RLS.match(s)
+    m = _rx(RLS).match(s)
     if m:
         return "rls", norm(m.group(1))
     return None
@@ -239,13 +246,14 @@ def drop_sql(kind: str, key: str) -> str | None:
     }.get(kind)
 
 
-REF = re.compile(rf"\b(authz|authz_int|authz_gen)\s*\.\s*({NAME})")
+REF = rf"\b(authz|authz_int|authz_gen)\s*\.\s*({NAME})"
 
 
 def references(text: str) -> set[str]:
     """The authz* names a piece of SQL mentions: {'authz_int.x', ...} (quotes removed)."""
     return {
-        f"{s}.{n[1:-1].replace(chr(34) * 2, chr(34)) if n.startswith(chr(34)) else n}" for s, n in REF.findall(text)
+        f"{s}.{n[1:-1].replace(chr(34) * 2, chr(34)) if n.startswith(chr(34)) else n}"
+        for s, n in _rx(REF).findall(text)
     }
 
 

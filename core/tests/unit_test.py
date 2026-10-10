@@ -1571,6 +1571,90 @@ class Command(unittest.TestCase):
         self.assertEqual(database.text_array(["1", 'a"b', "c\\d"]), '{"1","a\\"b","c\\\\d"}')
 
 
+class Imports(unittest.TestCase):
+    """Each run of the command imports only what it uses: importing all of it cost every run ~70 ms of its ~150."""
+
+    WATCH = (
+        "dataclasses",
+        "ssl",
+        "socket",
+        "hashlib",
+        "urllib.parse",
+        "authzlib.assembled",
+        "authzlib.migrate",
+        "authzlib.statements",
+    )
+
+    def loaded(self, *argv: str) -> set[str]:
+        """Which of WATCH a fresh interpreter holds after running the command with argv."""
+        code = (
+            "import contextlib, io, sys\n"
+            "import rowstile_cli\n"
+            "with contextlib.redirect_stdout(io.StringIO()), contextlib.suppress(SystemExit):\n"
+            f"    rowstile_cli.main({list(argv)!r})\n"
+            f"print(' '.join(m for m in {self.WATCH!r} if m in sys.modules))\n"
+        )
+        env = dict(os.environ, PYTHONPATH=os.pathsep.join([os.path.join(ROOT, "cli"), ROOT]))
+        run = subprocess.run([sys.executable, "-c", code], cwd=ROOT, env=env, capture_output=True, text=True)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        return set(run.stdout.split())
+
+    def test_each_command_imports_what_it_uses(self) -> None:
+        # the version: no compiler, no TLS, no hashes (pgwire imports them as a connection needs them)
+        self.assertEqual(self.loaded("--version"), set())
+        # formatting parses: no compiler
+        self.assertEqual(self.loaded("fmt", "--check", "example/docs.authz"), set())
+        # checking compiles (and the compiler hashes long names): no migrations, no dataclasses, no connection
+        self.assertEqual(
+            self.loaded("check", "example/docs.authz"), {"hashlib", "authzlib.assembled", "authzlib.statements"}
+        )
+
+    def test_names_made_when_first_asked_for(self) -> None:
+        for name in authzlib.__all__:
+            self.assertIsNotNone(getattr(authzlib, name), name)
+        from authzlib.assembled import Compiler as assembled
+
+        self.assertIs(authzlib.__getattr__("Compiler"), assembled)
+        self.assertIs(Compiler, assembled)
+        self.assertEqual(authzlib.__getattr__("BUILD"), authzlib._build())
+        with self.assertRaisesRegex(AttributeError, "module 'authzlib' has no attribute 'nosuch'"):
+            authzlib.__getattr__("nosuch")
+
+    def test_model_classes_are_what_dataclasses_made(self) -> None:
+        # parse.py's and migrate.py's classes are written out (parse.Record), as @dataclass would have made them
+        import inspect
+
+        from authzlib import migrate
+        from authzlib.parse import Caveat, Loc, Policy, Record, Scope
+
+        here = Loc(None, 3)
+        a = Caveat("c", "true", here)
+        self.assertEqual(a, a)
+        self.assertEqual(a, Caveat("c", "true", Loc(None, 3)))
+        self.assertNotEqual(a, Caveat("c", "false", here))
+        self.assertNotEqual(a, Scope("c", [], here))  # another class: never equal, even with the same values
+
+        class Other(Caveat):
+            pass
+
+        self.assertNotEqual(a, Other("c", "true", here))
+        self.assertNotEqual(a, ("c", "true", here))
+        self.assertEqual(Policy(), Policy())
+        self.assertIsNot(Policy().types, Policy().types)  # each its own
+        self.assertEqual(repr(a), f"Caveat(name='c', sql='true', loc={here!r})")
+        with self.assertRaises(TypeError):
+            hash(a)  # equal by value, and changed in place: not hashable
+        obj = migrate.Obj("view", "authz_gen.x", [], 0)
+        self.assertNotEqual(obj, migrate.Obj("view", "authz_gen.x", [], 0))  # an object is itself (eq=False)
+        self.assertEqual(len({obj, obj}), 1)
+        # each class's fields are its __init__'s arguments, in order, and each is set
+        classes = Record.__subclasses__()
+        self.assertGreaterEqual(len(classes), 17)
+        for cls in classes:
+            params = list(inspect.signature(cls.__init__).parameters)[1:]
+            self.assertEqual(params, list(cls.__match_args__), cls.__name__)
+
+
 class Statements(unittest.TestCase):
     """Reading the compiled SQL back as statements, the way psql does (the migrations work on them)."""
 

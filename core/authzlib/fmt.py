@@ -17,6 +17,7 @@ from __future__ import annotations
 import re
 from typing import NamedTuple, TypeAlias
 
+from .parse import meaning_lines
 from .parse import open_braces as parse_open_braces
 
 TOP = re.compile(r"^(type|rules|scope|caveat|app\s+role|include|invariants|test)\b")
@@ -318,8 +319,6 @@ def tests_of(text: str, files: dict[str, str]) -> list[object]:
 
 def format(text: str, files: dict[str, str] | None = None) -> str:
     """The policy as rowstile fmt writes it; FormatError if that would change what it says."""
-    from .migrate import meaning_lines
-
     out = format_policy(text)
     try:
         same = [tight(x) for x in meaning_lines(text, files or {})] == [

@@ -1,15 +1,14 @@
 """authzlib: compile a .authz policy file into PostgreSQL (views, closure tables,
 triggers, row-level security policies and an API for app code)."""
 
-from .devtools import DevMixin
-from .output import OutputMixin
+from typing import TYPE_CHECKING
+
 from .parse import Loc, PolicyError, parse_policy
-from .testing import TestMixin
 
+if TYPE_CHECKING:
+    from .assembled import Compiler
 
-class Compiler(TestMixin, DevMixin, OutputMixin):
-    """A policy compiled: each part of the output is one of its bases (OutputMixin assembles them)."""
-
+    BUILD: str
 
 # set with packaging/version.py (the packages copy it); authz.policy_versions records it on each apply
 __version__ = "0.1.0-dev"
@@ -31,6 +30,17 @@ def _build() -> str:
     return f"{__version__}+{h.hexdigest()[:12]}"
 
 
-BUILD = _build()
+def __getattr__(name: str) -> object:
+    """Compiler and BUILD, made when first asked for: a command that compiles nothing (--version, help, can, fmt)
+    doesn't import the compiler, and only one that records or compares the version reads every source file."""
+    if name == "Compiler":
+        from .assembled import Compiler as value
+    elif name == "BUILD":
+        value = _build()
+    else:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    globals()[name] = value
+    return value
+
 
 __all__ = ["BUILD", "Compiler", "Loc", "PolicyError", "__version__", "parse_policy"]

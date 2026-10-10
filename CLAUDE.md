@@ -10,7 +10,7 @@ User-facing docs: `README.md`, then `docs/reference/` (read them first). Terms i
 - `core/` — rowstile itself: the compiler, the command, their tests (main work happens here)
   - `authzlib/` — compiler, standard library only; `__version__` in `__init__.py` is the version the command
     and the packages carry (`packaging/version.py X.Y.Z` sets it everywhere; `unit_test.py` checks they
-    agree). `Compiler` in `__init__.py` is a stack of mixins:
+    agree). `Compiler` (`assembled.py`; `authzlib.Compiler`, imported when first asked for) is a stack of mixins:
     - `parse.py` — parser (types, relations, perms, rules, scopes, caveats, invariants, tests, includes;
       includes come from a `files` map when given, never from disk)
     - `compiler.py` (Core) — validation, recursion/SCC analysis, per-relation/permission views
@@ -290,6 +290,10 @@ For one suite, start a container and run it inside:
   read it; `ErrorCodes` in `tests/unit_test.py` finds any RAISE without a code. Each RAISE is asked for by its own
   words by some check (an SQLSTATE alone can't tell which guard refused): `Guards` in `tests/unit_test.py` fails
   when none does, and lists the few whose words another guard's message has too.
+- Imports: each run of the command imports only what it uses (`Imports` in `tests/unit_test.py`): a module only
+  some commands need (the compiler, migrate.py, ssl, hashlib) is imported in the function that needs it, never at the
+  top of `rowstile_cli.py`, `database.py` or `pgwire.py`. The model's classes (`parse.Record`) are written out, not
+  dataclasses: importing dataclasses costs every run ~15 ms.
 - Types: all Python is strongly typed. `uvx ty@0.0.56 check && uvx ruff@0.15.12 check && uvx ruff@0.15.12
   format --check` from the root (CI's `unit` job): ty checks the types (`ty.toml`, every rule an error), Ruff
   the lint, that every function is annotated (`ruff.toml`, `ANN`, no exceptions), and the layout: run `uvx

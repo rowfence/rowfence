@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import re
 
 from .parse import Loc, fail
@@ -67,11 +66,52 @@ BEGIN
   END LOOP;
 END $authz_ch$;"""
 
+# What applying (output.py) and removing (database.REMOVE_SQL) both run: here, so that removing doesn't import the
+# compiler. The policies the previous version made, its masked views, and the tables left with no rules
+DROP_OLD_POLICIES = f"""-- Remove the policies the previous version of this policy made (remembering their tables)
+CREATE TEMP TABLE authz_old_tables ON COMMIT DROP AS
+  SELECT DISTINCT p.polrelid::regclass AS tbl
+  FROM pg_policy p
+  LEFT JOIN pg_description d ON d.objoid = p.oid AND d.classoid = 'pg_policy'::regclass
+  WHERE d.description IN {POLICY_MARKS} OR p.polname IN ('authz_select', 'authz_insert', 'authz_update', 'authz_delete');
+DO $d$
+DECLARE old record;
+BEGIN
+  FOR old IN SELECT pol.polname, pol.polrelid::regclass AS tbl
+             FROM pg_policy pol
+             LEFT JOIN pg_description d ON d.objoid = pol.oid AND d.classoid = 'pg_policy'::regclass
+             WHERE d.description IN {POLICY_MARKS} OR pol.polname IN ('authz_select', 'authz_insert', 'authz_update', 'authz_delete') LOOP
+    EXECUTE format('DROP POLICY %I ON %s', old.polname, old.tbl);
+  END LOOP;
+END $d$;"""
+
+DROP_MASKED_VIEWS = f"""-- The masked views the previous version made (views built on them stop this: drop those first)
+DO $mv$
+DECLARE v record;
+BEGIN
+  FOR v IN SELECT c.oid::regclass AS name FROM pg_class c JOIN pg_description d ON d.objoid = c.oid
+           AND d.classoid = 'pg_class'::regclass WHERE c.relkind = 'v' AND d.description IN {VIEW_MARKS} LOOP
+    EXECUTE format('DROP VIEW %s', v.name);
+  END LOOP;
+END $mv$;"""
+
+LOST_RULES = """-- Tables that had rules before but have none now keep row-level security on
+DO $l$
+DECLARE t record;
+BEGIN
+  FOR t IN SELECT o.tbl FROM pg_temp.authz_old_tables o JOIN pg_class c ON c.oid = o.tbl
+           WHERE c.relrowsecurity AND NOT EXISTS (SELECT 1 FROM pg_policy p WHERE p.polrelid = o.tbl) LOOP
+    RAISE WARNING '% has no rules any more, and row-level security is still on, so the app role sees none of its rows. If that is not what you want: ALTER TABLE % DISABLE ROW LEVEL SECURITY', t.tbl, t.tbl;
+  END LOOP;
+END $l$;"""
+
 
 def ident(name: str) -> str:
     """Generated names longer than Postgres allows (63 bytes) are shortened
     with a hash, the same way every time they appear."""
     if len(name.encode()) > 63:
+        import hashlib  # here: a command that only asks the database doesn't load it
+
         digest = hashlib.sha1(name.encode()).hexdigest()[:8]
         name = name.encode()[:54].decode(errors="ignore") + "_" + digest
     return name

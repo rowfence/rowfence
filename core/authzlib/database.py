@@ -19,23 +19,30 @@ import re
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from typing import TYPE_CHECKING, TypeAlias, TypedDict, TypeVar
 
-from . import (
-    BUILD,
-    Compiler,
-    PolicyError,
-    __version__,
-    migrate,
-    parse_policy,
-    statements,
-)
+from . import __version__
 from .connection import Db, Value, flag, number, text, text_or_none
-from .governance import DIFF_ROWS
-from .output import DROP_MASKED_VIEWS, DROP_OLD_POLICIES, LOST_RULES
-from .parse import KEYWORDS, Expr, Loc, braced, read_lines
-from .sqlutil import CAVEAT_ARG, IF_PARTITIONED, POLICY_MARKS, lit, q, qt, row_cond, sql_code, this_spans, with_uid
-from .testing import FN as TESTS_FN
+from .parse import KEYWORDS, Expr, Loc, PolicyError, braced, parse_policy, read_lines
+from .sqlutil import (
+    CAVEAT_ARG,
+    DROP_MASKED_VIEWS,
+    DROP_OLD_POLICIES,
+    IF_PARTITIONED,
+    LOST_RULES,
+    POLICY_MARKS,
+    lit,
+    q,
+    qt,
+    row_cond,
+    sql_code,
+    this_spans,
+    with_uid,
+)
 
+# The compiler, migrate.py and statements.py are imported in the functions that use them, and so is BUILD
+# (authzlib.__getattr__): a command that only asks the database (can, lint) or only reads the policy doesn't load them.
 if TYPE_CHECKING:
+    from . import migrate
+    from .assembled import Compiler
     from .coverage import Report
     from .grant import Answer
 
@@ -101,6 +108,8 @@ def older_than(mine: str, theirs: str | None) -> bool:
 
 def refuse_older(theirs: str | None, what: str) -> None:
     """An older command would put its own, older work in place of a newer version's, as if it were an upgrade."""
+    from . import BUILD
+
     if older_than(BUILD, theirs):
         raise Error(
             f"{what} was last written by rowstile {theirs}, which is newer than this command "
@@ -121,6 +130,8 @@ def files_map(files: Mapping[str, object] | str | None) -> Files:
 
 def build(policy: str, files: Mapping[str, object] | str | None, make: Callable[[Compiler], T]) -> T:
     """make(compiler) with the policy parsed. Raises PolicyError, naming the file and line."""
+    from . import Compiler
+
     return make(Compiler(parse_policy(policy, None, files=files_map(files))))
 
 
@@ -200,6 +211,8 @@ def lock_room(db: Db, sql: str) -> None:
     """A warning before running SQL that makes more objects in one transaction than Postgres's lock table holds:
     it takes a lock on each, and stops with 'out of shared memory' when the table is full (GitLab's thousand
     tables: after two and a half minutes). The table holds max_locks_per_transaction for each connection."""
+    from . import statements
+
     made = sum(1 for _, st in statements.split(sql) if re.match(r"\s*(CREATE|ALTER|DROP)\b", st, re.I))
     room = db.rows(
         "SELECT pg_catalog.current_setting('max_locks_per_transaction')::int AS per, "
@@ -236,6 +249,8 @@ def failing_condition(db: Db, err: Exception, policy: str, files: Files) -> Erro
     expression, or a trigger's): the policy's condition that fails with the same message tried alone on its table,
     if one does. Tried after the policy's SQL is undone, so a condition that only runs once the policy is in place
     (authz.uid() on a first apply) fails another way here, and is never named for an error it doesn't make."""
+    from . import Compiler
+
     fields = getattr(err, "fields", None)
     said, code = (str(fields.get("M", "")), str(fields.get("C", "42P17"))) if isinstance(fields, dict) else ("", "")
     c = Compiler(parse_policy(policy, None, files=files))  # it compiled a moment ago
@@ -338,6 +353,8 @@ def as_compiled(cond: str) -> re.Pattern[str]:
 def record(
     db: Db, action: str, policy: str | None = None, files: Mapping[str, object] | None = None, lock: str | None = None
 ) -> None:
+    from . import BUILD
+
     db.rows(
         "INSERT INTO authz.policy_versions (action, policy, files, version, lock) VALUES ($1, $2, $3::jsonb, $4, $5)",
         [action, policy, json.dumps(files_map(files)), BUILD, lock],
@@ -346,6 +363,7 @@ def record(
 
 def migratable(policy: str, files: Mapping[str, object] | str | None) -> tuple[str, migrate.Compiled, Compiler]:
     """(the whole compiled policy, the policy as migrate.py reads it, the compiler): what migrations start from."""
+    from . import migrate
 
     def make(c: Compiler) -> tuple[str, Compiler]:
         return c.compile("the policy", transaction=False), c  # compiling finds mistakes too: inside compiled()
@@ -356,6 +374,8 @@ def migratable(policy: str, files: Mapping[str, object] | str | None) -> tuple[s
 
 def lock_file(lock_text: str | None) -> migrate.Lock:
     """The lock file's text read: one with a line rowstile migrate doesn't write is an Error that says what to do."""
+    from . import migrate
+
     try:
         return migrate.parse_lock(lock_text)
     except migrate.LockError as e:
@@ -370,6 +390,8 @@ def migration(
     policy: str, files: Mapping[str, object] | str | None, lock_text: str | None, name: str = "policy"
 ) -> migrate.Migration:
     """The migration from the lock file's text (None or '': the first) to this policy (migrate.Migration)."""
+    from . import migrate
+
     sql, comp, _ = migratable(policy, files)
     return migrate.migration(sql, comp, lock_file(lock_text), name)
 
@@ -384,6 +406,8 @@ def migrations(
 ) -> list[migrate.Migration]:
     """The migrations from the lock file's text to this policy: one, or two when inheritance trees are
     built beside the ones in use first (migrate.migrations). Refused when a newer version wrote the lock."""
+    from . import migrate
+
     lock = lock_file(lock_text)
     if not downgrade:
         refuse_older(lock.version, "the lock file")
@@ -392,6 +416,8 @@ def migrations(
 
 
 def lock_hash(comp: migrate.Compiled) -> str:
+    from . import migrate
+
     return migrate.digest(migrate.lock_of(comp), 16)
 
 
@@ -494,6 +520,8 @@ def push(
 
 
 def _push(db: Db, policy: str, files: Files, downgrade: bool = False) -> str:
+    from . import BUILD, migrate
+
     last = None
     if there(db, "authz.policy_versions") and number(
         db.rows(
@@ -536,6 +564,8 @@ def unchanged(db: Db, policy: str, files: Files) -> bool:
     (enabled; on the tables that inherit too), no privilege on its schemas that the policy doesn't give, and each
     condition only a PL/pgSQL function holds still runs (a signing-in type's where on a column the app dropped
     since: applying again refuses it, AZ613, where the app's every query fails)."""
+    from . import BUILD, Compiler, statements
+
     if not there(db, "authz.policy_versions"):
         return False
     rows = db.rows(
@@ -835,6 +865,8 @@ def diff(
 ) -> list[DiffRow]:
     """Who would gain and lose what if the policy were applied: rows of change, user_id, type, what, id.
     Runs the new policy in a savepoint and undoes it (a condition Postgres refuses is named, as applying names it)."""
+    from .governance import DIFF_ROWS
+
     files = files_map(files)
     parts = compiled(policy, files, lambda c: c.diff_parts("the policy", users or None))
     rows: list[DiffRow] = []
@@ -931,6 +963,8 @@ def takes_app_role(db: Db, tests_sql: str, role: str) -> None:
 def test(db: Db, tests: Mapping[str, str] | None = None) -> list[TestRow]:
     """The current policy's tests, the named tests in `tests` (file name -> text) and the invariants:
     a row per check, as (test, line, ok, detail). Named tests roll back what they did."""
+    from .testing import FN as TESTS_FN
+
     policy, files = applied(db)
     named = test_files(tests)
 
@@ -950,6 +984,7 @@ def coverage(db: Db, tests: Mapping[str, str] | None = None) -> tuple[list[TestR
     """test(), and the coverage of the permissions' branches by its passing checks: (rows, coverage.report)."""
     from . import coverage as cov
     from .testing import COVERAGE
+    from .testing import FN as TESTS_FN
 
     policy, files = applied(db)
     named = test_files(tests)
