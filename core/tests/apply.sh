@@ -425,6 +425,23 @@ case "$out" in "policy line $(grep -c '' "$T/bad_cond.authz"): the condition {ac
 sed -i 's/{activ}/{active}/' "$T/bad_cond.authz"
 run apply "$T/bad_cond.authz"
 [ $rc -eq 0 ] && ok "... which once right applies" || bad "a bot type's where" "$out"
+# nothing depends on what such a condition reads, so the app may drop a column only it reads: apply reads them again
+# and refuses it with its line, where it would say unchanged (and the app's every query, or share, fails)
+PSQL -c "ALTER TABLE app.bots DROP COLUMN active" >/dev/null
+run apply "$T/bad_cond.authz"
+case "$out" in "policy line $(grep -c '' "$T/bad_cond.authz"): the condition {active} doesn't run: column \"active\" does not exist [AZ613]"*)
+  [ $rc -eq 1 ] && ok "... a column it reads that the app dropped since: apply refuses it with its line, not unchanged" ||
+  bad "apply after the app dropped a column a bot's where reads: exit" "$rc";;
+  *) bad "apply after the app dropped a column a bot's where reads" "$out";; esac
+PSQL -c "ALTER TABLE app.bots ADD COLUMN active boolean, ADD COLUMN note text" >/dev/null
+printf '  helper : user shared if {exists (select 1 from app.bots b where b.id::text = subject_id and b.note is null)}\n  can use = helper\n  can share = use\n' >> "$T/bad_cond.authz"
+run apply "$T/bad_cond.authz"
+[ $rc -eq 0 ] || bad "a bot type's shared if" "$out"
+PSQL -c "ALTER TABLE app.bots DROP COLUMN note" >/dev/null
+run apply "$T/bad_cond.authz"
+case "$out" in "policy line $(grep -n '^  helper : ' "$T/bad_cond.authz" | cut -d: -f1): the condition {exists (select 1 from app.bots b where b.id::text = subject_id and b.note is null)} doesn't run: column b.note does not exist [AZ613]"*)
+  [ $rc -eq 1 ] && ok "... and a shared if's, the same" || bad "apply after the app dropped a column a shared if reads: exit" "$rc";;
+  *) bad "apply after the app dropped a column a shared if reads" "$out";; esac
 dropdb "$DB"
 
 echo "-- conditions naming a function without its schema"

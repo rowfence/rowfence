@@ -10,7 +10,7 @@ from .governance import GovernanceMixin, trigger_if_partitioned
 from .hardening import LintMixin, path_writers_sql
 from .identity import SESSION_OK, IdentityMixin
 from .insight import InsightMixin
-from .parse import Expr, Not, Ref, Rule, Type, fail
+from .parse import Expr, Loc, Not, Ref, Rule, Type, fail
 from .refusals import RefusalMixin
 from .sqlutil import (
     CHILD_TRIGGERS,
@@ -63,7 +63,36 @@ def read_now(rows: list[str]) -> str:
     )
 
 
+def where_rows(table: str, where: str, alias: str) -> str:
+    """The rows a type's where reads in a PL/pgSQL function (authz.uid(), a principal's __me), for read_now."""
+    return f"{qt(table)} {alias} WHERE coalesce(({on_row(where, alias)}), false)"
+
+
+def shared_if_rows(pktype: str, cond: str) -> str:
+    """The row a `shared ... if` condition reads in authz_int.share_if (a share's), for read_now."""
+    return (
+        f"(SELECT NULL::{pktype} AS object_id, NULL::text AS subject_type, NULL::text AS "
+        f"subject_id, NULL::text AS subject_relation) share "
+        f"WHERE coalesce(({row_cond(cond, 'share')}), false)"
+    )
+
+
 class OutputMixin(RefusalMixin, InsightMixin, GovernanceMixin, IdentityMixin, LintMixin, TreeMixin):
+    def late_conditions(self) -> list[tuple[str, str, Loc]]:
+        """(rows, condition, line) for each condition only a PL/pgSQL function holds: a signing-in type's where,
+        a `shared ... if`. Nothing in the catalog depends on what they read, so the app may drop a column they
+        read after applying: read_now reads them when applying, and apply and push read them again when the
+        policy in force is unchanged (database.unchanged)."""
+        out: list[tuple[str, str, Loc]] = []
+        for t in self.types.values():
+            if t.principal and t.where:
+                out.append((where_rows(t.table, t.where, "u" if t.name == "user" else "w"), t.where, t.loc))
+            for r in t.relations.values():
+                for src in r.sources:
+                    if src.kind == "shared" and src.shared_if:
+                        out.append((shared_if_rows(t.pktype, src.shared_if), src.shared_if, src.loc))
+        return out
+
     # --- what sharing a relation needs ---------------------------------------
     def positive_refs(self, node: Expr, out: set[str]) -> set[str]:
         match node:
@@ -208,7 +237,7 @@ CREATE TRIGGER {q("authz_update_" + str(idx))} BEFORE UPDATE ON {qt(rule.table)}
         body = f"BEGIN RETURN (SELECT u.{q(self.pk(u))} FROM {qt(u.table)} u WHERE u.{q(self.pk(u))} = ({cast}){where}); END"
         attrs = "LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path FROM CURRENT"
         failing = ", or a user that fails the type''s where," if u.where else ""
-        read = read_now([f"{qt(u.table)} u WHERE coalesce(({on_row(u.where, 'u')}), false)"] if u.where else [])
+        read = read_now([where_rows(u.table, u.where, "u")] if u.where else [])
         return f"""-- Who is asking: SELECT authz.act_as('user', '42') first in each transaction (a signed session).
 -- An id the user table doesn't have{failing} counts as nobody.
 DO $u$
@@ -388,11 +417,7 @@ END $f$;
                                 f"p_object_id::{t.pktype} AS object_id, p_subject_type AS subject_type, "
                                 f"p_subject_id AS subject_id, p_subject_relation AS subject_relation) share);"
                             )
-                            if_rows.append(
-                                f"(SELECT NULL::{t.pktype} AS object_id, NULL::text AS subject_type, NULL::text AS "
-                                f"subject_id, NULL::text AS subject_relation) share "
-                                f"WHERE coalesce(({row_cond(src.shared_if, 'share')}), false)"
-                            )
+                            if_rows.append(shared_if_rows(t.pktype, src.shared_if))
         roles = [(t.name, subject_key(st, sr)) for t in self.types.values() if t.roles for st, sr in t.roles[0]]
         grantable = [(t.name, p) for t in self.types.values() if t.roles for p in t.roles[1]]
         catalog = [
@@ -1373,7 +1398,7 @@ END $keep$;"""
                 + (", or one failing the type's where," if t.where else "")
                 + " counts as nobody)\n"
                 f"CREATE FUNCTION authz_int.{q(t.name + '__me')}() RETURNS {t.pktype} {attrs} AS $me$ {body} $me$;"
-                + read_now([f"{qt(t.table)} w WHERE coalesce(({on_row(t.where, 'w')}), false)"] if t.where else [])
+                + read_now([where_rows(t.table, t.where, "w")] if t.where else [])
             )
             cases.append(f"    WHEN {lit(t.name)} THEN principal_id := authz_int.{q(t.name + '__me')}()::text;")
         whens = "\n".join(cases)
