@@ -93,6 +93,14 @@ def rule_name(rule: Rule) -> str:
     return "update " + ", ".join(rule.columns) + (" after" if rule.command == "update check" else "")
 
 
+def depends_on_itself(perm: str) -> str:
+    """What AZ302 says of a permission that depends on itself otherwise than by inheriting."""
+    return (
+        f"{perm} depends on itself; a permission can only recurse as 'or rel.perm' (optionally 'and {{condition}}') "
+        f"through a relation to objects, and a group only as 'member : group#member'"
+    )
+
+
 def only_on(node: Expr) -> list[str] | None:
     """The subject types an arrow the compiler narrowed (arrow_on) follows; None for any other item."""
     match node:
@@ -437,8 +445,8 @@ class Core:
                         f"{{conditions}} and `not <permission>`, e.g. (viewer or parent.{p.name}) and not denied",
                         "AZ304",
                     )
-                if not rest:
-                    continue  # recursion through a negation: analyze_recursion says why not
+                if not rest:  # it comes back to itself only through a `not`
+                    fail(p.loc, depends_on_itself(f"{t.name}.{p.name}"), "AZ302")
                 first = rest[0]
                 items = list(first.items) if isinstance(first, Or) else [first]
                 items = [
@@ -793,10 +801,9 @@ class Core:
                     self.lookup(t, name, loc)
                     used.add((t.name, name))
                 case ("arrow", rel, perm) | ("arrow_on", rel, perm, _):
-                    self.lookup(t, rel, loc)
+                    r, _ = self.targets(t, rel, loc)  # what a dot follows: a relation to objects
                     used.add((t.name, rel))
-                    r = t.relations.get(rel)
-                    for st, _sr in r.subjects() if r else []:
+                    for st, _sr in r.subjects():
                         used.add((st, perm))
                 case ("not", item):
                     walk(t, item, loc)
@@ -959,13 +966,7 @@ class Core:
                                     "AZ304",
                                 )
                     if inner & members:
-                        fail(
-                            perm.loc,
-                            f"{tn}.{pn} depends on itself; a permission can only recurse as "
-                            f"'or rel.perm' (optionally 'and {{condition}}') through a relation "
-                            f"to objects, and a group only as 'member : group#member'",
-                            "AZ302",
-                        )
+                        fail(perm.loc, depends_on_itself(f"{tn}.{pn}"), "AZ302")
             if len(set(tnames)) != len(tnames):
                 fail(
                     first.loc,
@@ -1195,19 +1196,6 @@ class Core:
         if not t.composite:
             return f"{q(self.pk(t))}::text"
         return "ROW(" + ", ".join(f"{q(c)}::{ty}" for c, ty in t.key) + ")::text"
-
-    def subject_text(self, src: Source, a: str) -> str:
-        """A column/table source's subject id as text (for any of its subject types)."""
-        col = self.source_columns(src)
-        if not src.type_col:
-            st = self.types.get(src.subjects[0][0])
-            return self.ref_text(st, a, col) if st else f"{a}.{q(cols(col)[0])}::text"
-        if not any(self.T(st).composite for st, _ in src.subjects if st in self.types):
-            return f"{a}.{q(cols(col)[0])}::text"
-        whens = " ".join(
-            f"WHEN {lit(st)} THEN {self.ref_text(self.T(st), a, col)}" for st, _ in src.subjects if st in self.types
-        )
-        return f"(CASE {a}.{q(src.type_col)} {whens} END)"
 
     def key_text(self, t: Type, a: str) -> str:
         return self.key(t, a) if t.composite else f"{self.key(t, a)}::text"
@@ -1674,8 +1662,7 @@ class Core:
                 return max(self.item_cost(t, x) for x in items)
             case ("arrow", rel, perm) | ("arrow_on", rel, perm, _):
                 r = t.relations.get(rel)
-                if r is None:
-                    return 2
+                assert r is not None, "validate refuses a dot that follows anything but a relation (AZ301)"
                 on = only_on(item)
                 names = on if on is not None else [st for st, _ in r.subjects()]
                 return max(max(1, self.item_cost(self.T(st), Ref("ref", perm))) for st in names)

@@ -180,6 +180,19 @@ CREATE TRIGGER authz_role_audit AFTER INSERT OR UPDATE OR DELETE ON authz.roles
 CREATE TRIGGER authz_role_perm_audit AFTER INSERT OR DELETE ON authz.role_permissions
   FOR EACH ROW EXECUTE FUNCTION authz_int.on_role();"""
 
+    def subject_text(self, src: Source, a: str) -> str:
+        """A column/table source's subject id as text (for any of its subject types), as the audit names it."""
+        col = self.source_columns(src)
+        if not src.type_col:
+            st = self.types.get(src.subjects[0][0])
+            return self.ref_text(st, a, col) if st else f"{a}.{q(columns_of(col)[0])}::text"
+        if not any(self.T(st).composite for st, _ in src.subjects if st in self.types):
+            return f"{a}.{q(columns_of(col)[0])}::text"
+        whens = " ".join(
+            f"WHEN {lit(st)} THEN {self.ref_text(self.T(st), a, col)}" for st, _ in src.subjects if st in self.types
+        )
+        return f"(CASE {a}.{q(src.type_col)} {whens} END)"
+
     def relationship_audit_sql(self) -> list[str]:
         """Audit and feed rows for relationships kept in your own tables."""
         out: list[str] = []
