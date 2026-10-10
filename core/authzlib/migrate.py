@@ -29,12 +29,11 @@ import hashlib
 import json
 import re
 from collections.abc import Iterable, Iterator
-from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, TypedDict
 
 from . import BUILD, __version__
 from .compiler import NextTree
-from .parse import read_lines
+from .parse import Record, meaning_lines
 from .sqlutil import DROP_CHILD_TRIGGERS, STUB_COLUMNS
 from .statements import drop_sql, made, references, split, unquoted
 
@@ -59,13 +58,20 @@ def code(sql: str) -> str:
 
 
 # --- the compiled policy, as objects -------------------------------------------------------------
-@dataclass(eq=False)
-class Obj:
-    kind: str
-    key: str
-    stmts: list[tuple[str, str]]  # [(comments, sql)]: the statement that makes it, then what goes with it
-    order: int
-    tree: str | None = None  # the inheritance tree it belongs to
+class Obj(Record):
+    __match_args__ = ("kind", "key", "stmts", "order", "tree")
+    __eq__ = object.__eq__  # each object is itself: compared and hashed as itself
+    __hash__ = object.__hash__
+
+    def __init__(
+        self,
+        kind: str,
+        key: str,
+        stmts: list[tuple[str, str]],  # [(comments, sql)]: the statement that makes it, then what goes with it
+        order: int,
+        tree: str | None = None,  # the inheritance tree it belongs to
+    ) -> None:
+        self.kind, self.key, self.stmts, self.order, self.tree = kind, key, stmts, order, tree
 
     @property
     def ident(self) -> str:
@@ -109,12 +115,17 @@ class Obj:
         return refs
 
 
-@dataclass
-class Step:
-    name: str
-    sql: str
-    when: str  # 'changed': when its SQL changed; 'always'; 'created': also when functions or views were made
-    order: int
+class Step(Record):
+    __match_args__ = ("name", "sql", "when", "order")
+
+    def __init__(
+        self,
+        name: str,
+        sql: str,
+        when: str,  # 'changed': when its SQL changed; 'always'; 'created': also when functions or views were made
+        order: int,
+    ) -> None:
+        self.name, self.sql, self.when, self.order = name, sql, when, order
 
     @property
     def hash(self) -> str:
@@ -122,22 +133,32 @@ class Step:
         return digest(re.sub(r"\bline \d+", "line", code(self.sql)))
 
 
-@dataclass
-class Tree:
-    name: str
-    sql: str
-    hash: str
-    objs: list[Obj]
-    order: int
-    next: NextTree | None = None  # how to build it beside the one in use (trees.next_tree), if it can be
+class Tree(Record):
+    __match_args__ = ("name", "sql", "hash", "objs", "order", "next")
+
+    def __init__(
+        self,
+        name: str,
+        sql: str,
+        hash: str,
+        objs: list[Obj],
+        order: int,
+        next: NextTree | None = None,  # how to build it beside the one in use (trees.next_tree), if it can be
+    ) -> None:
+        self.name, self.sql, self.hash, self.objs, self.order, self.next = name, sql, hash, objs, order, next
 
 
-@dataclass
-class Compiled:
-    items: list[Step | Obj | Tree]  # in the order the compiled policy makes them
-    meaning: list[str]  # the policy's lines, normalized
-    policy: str
-    files: dict[str, str]
+class Compiled(Record):
+    __match_args__ = ("items", "meaning", "policy", "files")
+
+    def __init__(
+        self,
+        items: list[Step | Obj | Tree],  # in the order the compiled policy makes them
+        meaning: list[str],  # the policy's lines, normalized
+        policy: str,
+        files: dict[str, str],
+    ) -> None:
+        self.items, self.meaning, self.policy, self.files = items, meaning, policy, files
 
     def objects(self) -> Iterator[Obj]:
         for it in self.items:
@@ -202,25 +223,6 @@ def attached_to(stmt: str, objs: list[Obj]) -> Obj | None:
     return next((o for o in reversed(objs) if o.name == name and o.kind in ("table", "view", "function")), None)
 
 
-def meaning_lines(policy: str, files: dict[str, str] | None) -> list[str]:
-    """The policy's declarations, one per line, whitespace and comments aside; lines in a block say
-    which block ('type folder: can edit = owner or parent.edit'). Tests are left out: they make nothing."""
-    out: list[str] = []
-    block: str | None = None
-    skip = False
-    for _, indent, s in read_lines(None, policy, files=files or {}):
-        s = " ".join(s.split())
-        if indent == 0:
-            skip = s == "test" or s.startswith("test ")
-            m = re.match(r"(type\s+\w+|rules\s+\S+|invariants)", s)
-            block = m.group(1) if m else None
-            if not skip:
-                out.append(s)
-        elif not skip:
-            out.append(f"{block}: {s}" if block else s)
-    return out
-
-
 # --- the lock file ---------------------------------------------------------------------------------
 class LockObject(TypedDict):
     """What the lock says of one object the migrations made."""
@@ -233,16 +235,26 @@ class LockObject(TypedDict):
     atomic: bool
 
 
-@dataclass
-class Lock:
-    version: str | None = None
-    meaning: list[str] = field(default_factory=list)
-    trees: dict[str, str] = field(default_factory=dict)  # name -> hash
-    steps: dict[str, str] = field(default_factory=dict)  # name -> hash
-    nexts: dict[str, str] = field(default_factory=dict)  # tree name -> hash: built beside, by the migration before
-    always: str | None = None  # the steps every migration runs, hashed (none: a lock from before)
-    objects: dict[str, LockObject] = field(default_factory=dict)  # 'kind key' -> what was made
-    text: str = ""
+class Lock(Record):
+    __match_args__ = ("version", "meaning", "trees", "steps", "nexts", "always", "objects", "text")
+
+    def __init__(
+        self,
+        version: str | None = None,
+        meaning: list[str] | None = None,
+        trees: dict[str, str] | None = None,  # name -> hash
+        steps: dict[str, str] | None = None,  # name -> hash
+        nexts: dict[str, str] | None = None,  # tree name -> hash: built beside, by the migration before
+        always: str | None = None,  # the steps every migration runs, hashed (none: a lock from before)
+        objects: dict[str, LockObject] | None = None,  # 'kind key' -> what was made
+        text: str = "",
+    ) -> None:
+        self.version, self.always, self.text = version, always, text
+        self.meaning: list[str] = [] if meaning is None else meaning
+        self.trees: dict[str, str] = {} if trees is None else trees
+        self.steps: dict[str, str] = {} if steps is None else steps
+        self.nexts: dict[str, str] = {} if nexts is None else nexts
+        self.objects: dict[str, LockObject] = {} if objects is None else objects
 
     @property
     def empty(self) -> bool:
@@ -332,13 +344,18 @@ def parse_lock(text: str | None) -> Lock:
 
 
 # --- a migration -----------------------------------------------------------------------------------
-@dataclass
-class Migration:
-    sql: str  # empty: nothing to do
-    lock: str  # the lock file after it
-    summary: list[str]  # what changed, in plain words (the migration's first comment lines)
-    rebuilt: list[str]  # inheritance trees it rebuilds
-    locks: list[str]  # app tables it changes policies or triggers on (they are locked while it runs)
+class Migration(Record):
+    __match_args__ = ("sql", "lock", "summary", "rebuilt", "locks")
+
+    def __init__(
+        self,
+        sql: str,  # empty: nothing to do
+        lock: str,  # the lock file after it
+        summary: list[str],  # what changed, in plain words (the migration's first comment lines)
+        rebuilt: list[str],  # inheritance trees it rebuilds
+        locks: list[str],  # app tables it changes policies or triggers on (they are locked while it runs)
+    ) -> None:
+        self.sql, self.lock, self.summary, self.rebuilt, self.locks = sql, lock, summary, rebuilt, locks
 
     @property
     def empty(self) -> bool:

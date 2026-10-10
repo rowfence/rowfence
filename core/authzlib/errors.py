@@ -7,8 +7,7 @@ the same policy fixed. `rowstile help AZ201` prints it; docs/errors/ is written 
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
 
 if TYPE_CHECKING:
     from .parse import PolicyError
@@ -18,8 +17,7 @@ PRELUDE = "app role app_user\ntype user = app.users\n"
 CODE = re.compile(r" \[(AZ\d{3})\]$")
 
 
-@dataclass(frozen=True)
-class Code:
+class Code(NamedTuple):  # not a dataclass: importing dataclasses would cost `rowstile help` ~15 ms
     title: str
     text: str  # what it means and what to do
     wrong: str = ""  # a policy that makes the mistake (after PRELUDE)

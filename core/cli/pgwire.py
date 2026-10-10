@@ -11,21 +11,17 @@ honoured as libpq honours it, left alone where that changes nothing checked, or 
 
 from __future__ import annotations
 
-import base64
-import hashlib
-import hmac
 import json
 import os
 import re
-import socket
-import ssl
-import stringprep
 import struct
 import sys
-import unicodedata
-import urllib.parse
 from collections.abc import Callable, Sequence
-from typing import NamedTuple, TypeAlias, TypedDict
+from typing import TYPE_CHECKING, NamedTuple, TypeAlias, TypedDict, TypeGuard
+
+if TYPE_CHECKING:
+    import socket
+    import ssl
 
 # what a column holds, decoded from its text form: NULL, a boolean, an integer, text, an array, or JSON
 Value: TypeAlias = "None | bool | int | float | str | list[Value] | dict[str, Value]"
@@ -263,6 +259,8 @@ class Connection:
                     self._send(b"p", self._cstr(password))
                     done = True
                 elif code == 5 and password is not None:
+                    import hashlib
+
                     salt = payload[4:8]
                     inner = hashlib.md5(password.encode() + user.encode()).hexdigest()
                     outer = hashlib.md5(inner.encode() + salt).hexdigest()
@@ -299,7 +297,7 @@ class Connection:
         and channel_binding isn't disable. A server in the middle has another certificate, and then the
         password exchange it passes on fails. Chosen as libpq's pg_SASL_init chooses, and refused as it refuses,
         before anything is sent."""
-        tls = isinstance(self.sock, ssl.SSLSocket)
+        tls = _is_tls(self.sock)
         if channel_binding == "require" and not tls:
             raise ProtocolError("channel binding required, but SSL not in use")
         if "SCRAM-SHA-256-PLUS" in mechs and not tls:
@@ -483,6 +481,9 @@ def _saslprep(password: str) -> str:
     compatibility characters their plain form. One with a prohibited character is used as it is, as Postgres does."""
     if password.isascii():
         return password
+    import stringprep
+    import unicodedata
+
     mapped = "".join(" " if stringprep.in_table_c12(c) else c for c in password if not stringprep.in_table_b1(c))
     out = unicodedata.normalize("NFKC", mapped)
     prohibited = (
@@ -567,9 +568,17 @@ def _signature_hash(cert: bytes) -> str | None:
     return _SIGNED_WITH.get(oid)
 
 
+def _is_tls(sock: socket.socket) -> TypeGuard[ssl.SSLSocket]:
+    """Whether the socket is under TLS. ssl is imported only to put one under it (_tls): until then, none is."""
+    tls = sys.modules.get("ssl")
+    return tls is not None and isinstance(sock, tls.SSLSocket)
+
+
 def _end_point(sock: socket.socket) -> bytes | None:
     """tls-server-end-point: the hash of the server's certificate, or None if there is nothing to hash it with."""
-    cert = sock.getpeercert(binary_form=True) if isinstance(sock, ssl.SSLSocket) else None
+    import hashlib
+
+    cert = sock.getpeercert(binary_form=True) if _is_tls(sock) else None
     name = _signature_hash(cert) if cert else None
     return hashlib.new(name, cert).digest() if cert and name else None
 
@@ -652,12 +661,16 @@ def _expected(code: int, rules: AuthRules | None, channel_binding: str, bound: b
             raise ProtocolError("channel binding required, but server authenticated client without channel binding")
 
 
+# SCRAM's hashing (hashlib, hmac, base64) is imported here, as it starts: a connection without a password doesn't
+# load OpenSSL's hashes
 class _Scram:
     def __init__(self, password: str, header: str = "n,,", binding: bytes | None = None) -> None:
         self.password = _saslprep(password).encode()
         self.header = header  # GS2: n,, (no channel binding), y,, (the server offered none), p=...,, (bound)
         self.binding = binding
         self.mechanism = "SCRAM-SHA-256-PLUS" if binding is not None else "SCRAM-SHA-256"
+        import base64
+
         self.nonce = base64.b64encode(os.urandom(18)).decode()
         self.first_bare = ""
         self.auth_message = b""
@@ -671,6 +684,10 @@ class _Scram:
         attrs = dict(kv.split("=", 1) for kv in server_first.split(","))
         if not attrs["r"].startswith(self.nonce):
             raise ProtocolError("SCRAM: the server's nonce does not extend ours")
+        import base64
+        import hashlib
+        import hmac
+
         salted = hashlib.pbkdf2_hmac("sha256", self.password, base64.b64decode(attrs["s"]), int(attrs["i"]))
         client_key = hmac.new(salted, b"Client Key", hashlib.sha256).digest()
         stored = hashlib.sha256(client_key).digest()
@@ -683,6 +700,10 @@ class _Scram:
         return f"{without_proof},p={base64.b64encode(proof).decode()}"
 
     def verify(self, server_final: str) -> None:
+        import base64
+        import hashlib
+        import hmac
+
         attrs = dict(kv.split("=", 1) for kv in server_final.split(","))
         want = hmac.new(self.server_key, self.auth_message, hashlib.sha256).digest()
         if not hmac.compare_digest(base64.b64decode(attrs.get("v", "")), want):
@@ -884,6 +905,8 @@ def parse_dsn(text: str | None) -> ConnectArgs:
 
     if text and re.match(r"postgres(ql)?://", text):
         # a URL: postgresql://user:password@host:port/dbname?sslmode=require
+        import urllib.parse
+
         u = urllib.parse.urlsplit(text)
         one(u.netloc.rpartition("@")[2])
         try:
@@ -989,6 +1012,8 @@ def parse_dsn(text: str | None) -> ConnectArgs:
 
 
 def _socket(host: str, port: int, timeout: float) -> socket.socket:
+    import socket
+
     if host.startswith("/"):
         if sys.platform == "win32":
             raise ProtocolError(f"host={host} is a Unix socket, which Windows doesn't have: use host=localhost")
@@ -1042,6 +1067,8 @@ def _tls(
         return sock
     if answer != b"S":
         raise ProtocolError("the server didn't answer as Postgres does (is this the right host and port?)")
+    import ssl
+
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
     context.check_hostname = False
     context.verify_mode = ssl.CERT_NONE  # encrypted, the server not checked: require without a root certificate

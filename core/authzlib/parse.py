@@ -6,7 +6,6 @@ import os
 import posixpath
 import re
 from collections.abc import Callable
-from dataclasses import dataclass, field
 from typing import Literal, NamedTuple, NoReturn, TypeAlias
 
 IDENT = r"[A-Za-z_][A-Za-z0-9_]*"
@@ -114,62 +113,136 @@ Cols: TypeAlias = "str | tuple[str, ...]"
 Subject: TypeAlias = "tuple[str, str | None]"
 
 
-@dataclass
-class Source:
-    kind: str  # column | table | shared | roles
-    subjects: list[Subject]
-    loc: Loc
-    column: Cols | None = None  # column source: the id column (a tuple for [a, b]: a composite key)
-    type_col: str | None = None  # polymorphic: the column holding the subject's type name
-    table: str | None = None  # table source
-    obj_col: Cols | None = None
-    subj_col: Cols | None = None
-    where: str | None = None
-    shared_by: str | None = None  # shared: the permission needed to share it (default: share)
-    shared_if: str | None = None  # shared: extra SQL condition on each share
-    perm: str | None = None  # roles: the permission these role assignments grant
-    owner: str | None = None  # roles: the relation naming the object's owner, whose roles alone count here
+class Record:
+    """What @dataclass would give the model's classes, written once: equality and repr, field by field. The fields
+    are __match_args__, each set by the class's __init__. Importing dataclasses and making the classes with it cost
+    every run of the command about 20 ms."""
+
+    __match_args__: tuple[str, ...] = ()
+
+    def _values(self) -> tuple[object, ...]:
+        return tuple(getattr(self, f) for f in self.__match_args__)
+
+    def __eq__(self, other: object, /) -> bool:  # and so not hashable, as a dataclass with eq isn't
+        if self is other:
+            return True
+        if not isinstance(other, Record) or other.__class__ is not self.__class__:
+            return NotImplemented
+        return self._values() == other._values()
+
+    def __repr__(self) -> str:
+        return f"{type(self).__qualname__}({', '.join(f'{f}={getattr(self, f)!r}' for f in self.__match_args__)})"
 
 
-@dataclass
-class Relation:
-    name: str
-    loc: Loc
-    sources: list[Source] = field(default_factory=list)
-    synthetic: bool = False  # made by the compiler (custom roles)
+class Source(Record):
+    __match_args__ = (
+        "kind",
+        "subjects",
+        "loc",
+        "column",
+        "type_col",
+        "table",
+        "obj_col",
+        "subj_col",
+        "where",
+        "shared_by",
+        "shared_if",
+        "perm",
+        "owner",
+    )
+
+    def __init__(
+        self,
+        kind: str,  # column | table | shared | roles
+        subjects: list[Subject],
+        loc: Loc,
+        column: Cols | None = None,  # column source: the id column (a tuple for [a, b]: a composite key)
+        type_col: str | None = None,  # polymorphic: the column holding the subject's type name
+        table: str | None = None,  # table source
+        obj_col: Cols | None = None,
+        subj_col: Cols | None = None,
+        where: str | None = None,
+        shared_by: str | None = None,  # shared: the permission needed to share it (default: share)
+        shared_if: str | None = None,  # shared: extra SQL condition on each share
+        perm: str | None = None,  # roles: the permission these role assignments grant
+        owner: str | None = None,  # roles: the relation naming the object's owner, whose roles alone count here
+    ) -> None:
+        self.kind, self.subjects, self.loc, self.column, self.type_col = kind, subjects, loc, column, type_col
+        self.table, self.obj_col, self.subj_col, self.where = table, obj_col, subj_col, where
+        self.shared_by, self.shared_if, self.perm, self.owner = shared_by, shared_if, perm, owner
+
+
+class Relation(Record):
+    __match_args__ = ("name", "loc", "sources", "synthetic")
+
+    def __init__(
+        self,
+        name: str,
+        loc: Loc,
+        sources: list[Source] | None = None,
+        synthetic: bool = False,  # made by the compiler (custom roles)
+    ) -> None:
+        self.name, self.loc, self.sources, self.synthetic = name, loc, [] if sources is None else sources, synthetic
 
     def subjects(self) -> list[Subject]:
         return list(dict.fromkeys(s for src in self.sources for s in src.subjects))
 
 
-@dataclass
-class Perm:
-    name: str
-    expr: Expr
-    src: str
-    loc: Loc
-    hidden: bool = False  # made by the compiler (the inheritance of a permission with a deny)
-    base: str | None = None  # for such a permission: the hidden one holding its inheritance
+class Perm(Record):
+    __match_args__ = ("name", "expr", "src", "loc", "hidden", "base")
+
+    def __init__(
+        self,
+        name: str,
+        expr: Expr,
+        src: str,
+        loc: Loc,
+        hidden: bool = False,  # made by the compiler (the inheritance of a permission with a deny)
+        base: str | None = None,  # for such a permission: the hidden one holding its inheritance
+    ) -> None:
+        self.name, self.expr, self.src, self.loc, self.hidden, self.base = name, expr, src, loc, hidden, base
 
 
 # custom roles: (who may hold them, the permissions that write `roles`, where the roles line is)
 Roles: TypeAlias = "tuple[list[Subject], list[str], Loc]"
 
 
-@dataclass
-class Type:
-    name: str
-    table: str
-    pk: str | None  # the key column; None for a composite key
-    pktype: str  # its type; text for a composite key (ids are its canonical row text)
-    loc: Loc
-    where: str | None = None  # rows that fail it hold nothing, and nothing passes through them
-    relations: dict[str, Relation] = field(default_factory=dict)
-    perms: dict[str, Perm] = field(default_factory=dict)
-    roles: Roles | None = None
-    roles_from: str | None = None  # `roles : ... from org`: only roles owned by the object's org count
-    key: list[tuple[str, str]] = field(default_factory=list)  # [(column, type)]: several for a composite key
-    principal: bool = False  # signs in and holds access itself (the user type, and `principal` types)
+class Type(Record):
+    __match_args__ = (
+        "name",
+        "table",
+        "pk",
+        "pktype",
+        "loc",
+        "where",
+        "relations",
+        "perms",
+        "roles",
+        "roles_from",
+        "key",
+        "principal",
+    )
+
+    def __init__(
+        self,
+        name: str,
+        table: str,
+        pk: str | None,  # the key column; None for a composite key
+        pktype: str,  # its type; text for a composite key (ids are its canonical row text)
+        loc: Loc,
+        where: str | None = None,  # rows that fail it hold nothing, and nothing passes through them
+        relations: dict[str, Relation] | None = None,
+        perms: dict[str, Perm] | None = None,
+        roles: Roles | None = None,
+        roles_from: str | None = None,  # `roles : ... from org`: only roles owned by the object's org count
+        key: list[tuple[str, str]] | None = None,  # [(column, type)]: several for a composite key
+        principal: bool = False,  # signs in and holds access itself (the user type, and `principal` types)
+    ) -> None:
+        self.name, self.table, self.pk, self.pktype, self.loc, self.where = name, table, pk, pktype, loc, where
+        self.relations: dict[str, Relation] = {} if relations is None else relations
+        self.perms: dict[str, Perm] = {} if perms is None else perms
+        self.roles, self.roles_from, self.principal = roles, roles_from, principal
+        self.key: list[tuple[str, str]] = [] if key is None else key
 
     @property
     def composite(self) -> bool:
@@ -186,83 +259,125 @@ def cols(c: Cols) -> tuple[str, ...]:
     return c if isinstance(c, tuple) else (c,)
 
 
-@dataclass
-class Rule:
-    table: str
-    command: str  # select | insert | update | update check (written "after") | delete | mask
-    expr: Expr
-    src: str
-    loc: Loc
-    columns: tuple[str, ...] = ()  # update rules on changed columns; mask rules: the masked columns
+class Rule(Record):
+    __match_args__ = ("table", "command", "expr", "src", "loc", "columns")
+
+    def __init__(
+        self,
+        table: str,
+        command: str,  # select | insert | update | update check (written "after") | delete | mask
+        expr: Expr,
+        src: str,
+        loc: Loc,
+        columns: tuple[str, ...] = (),  # update rules on changed columns; mask rules: the masked columns
+    ) -> None:
+        self.table, self.command, self.expr, self.src, self.loc, self.columns = table, command, expr, src, loc, columns
 
 
-@dataclass
-class Step:
+class Step(Record):
     """One line of a named test: given (data), check (can/cannot) or as (a statement as someone)."""
 
-    kind: str  # given | check | as
-    text: str
-    loc: Loc
-    var: str | None = None  # given: the $name it binds
-    sql: str | None = None  # given, as: the statement
-    ptype: str | None = None  # check, as: the principal type, or 'anyone'
-    who: str | None = None  # check, as: an id or a $name
-    expect: bool | str | int | None = None  # check: True (can) / False; as: 'allowed' | 'refused' | a row count
-    perm: str | None = None
-    type: str | None = None
-    obj: str | None = None  # check: an id or a $name
-    scopes: tuple[str, ...] = ()  # check, as: `with scope a, b`: signed in limited to them, as a key with them is
+    __match_args__ = ("kind", "text", "loc", "var", "sql", "ptype", "who", "expect", "perm", "type", "obj", "scopes")
+
+    def __init__(
+        self,
+        kind: str,  # given | check | as
+        text: str,
+        loc: Loc,
+        var: str | None = None,  # given: the $name it binds
+        sql: str | None = None,  # given, as: the statement
+        ptype: str | None = None,  # check, as: the principal type, or 'anyone'
+        who: str | None = None,  # check, as: an id or a $name
+        expect: bool | str | int | None = None,  # check: True (can) / False; as: 'allowed' | 'refused' | a row count
+        perm: str | None = None,
+        type: str | None = None,
+        obj: str | None = None,  # check: an id or a $name
+        scopes: tuple[str, ...] = (),  # check, as: `with scope a, b`: signed in limited to them, as a key with them is
+    ) -> None:
+        self.kind, self.text, self.loc, self.var, self.sql, self.ptype = kind, text, loc, var, sql, ptype
+        self.who, self.expect, self.perm, self.type, self.obj, self.scopes = who, expect, perm, type, obj, scopes
 
 
-@dataclass
-class Scenario:
+class Scenario(Record):
     """test "name": its own data (given), then checks; rolled back when it ends."""
 
-    name: str
-    loc: Loc | None  # None: the unnamed test section, gathered from its lines
-    steps: list[Step] = field(default_factory=list)
+    __match_args__ = ("name", "loc", "steps")
+
+    def __init__(
+        self,
+        name: str,
+        loc: Loc | None,  # None: the unnamed test section, gathered from its lines
+        steps: list[Step] | None = None,
+    ) -> None:
+        self.name, self.loc, self.steps = name, loc, [] if steps is None else steps
 
 
 # a scope's item: ('cmd' | 'perm', qualifier or None, name)
 ScopeItem: TypeAlias = "tuple[str, str | None, str]"
 
 
-@dataclass
-class Scope:
-    name: str
-    items: list[ScopeItem]
-    loc: Loc
+class Scope(Record):
+    __match_args__ = ("name", "items", "loc")
+
+    def __init__(self, name: str, items: list[ScopeItem], loc: Loc) -> None:
+        self.name, self.items, self.loc = name, items, loc
 
 
-@dataclass
-class Caveat:
-    name: str
-    sql: str
-    loc: Loc
+class Caveat(Record):
+    __match_args__ = ("name", "sql", "loc")
+
+    def __init__(self, name: str, sql: str, loc: Loc) -> None:
+        self.name, self.sql, self.loc = name, sql, loc
 
 
-@dataclass
-class Invariant:
-    type: str
-    expr: Expr
-    src: str
-    loc: Loc
+class Invariant(Record):
+    __match_args__ = ("type", "expr", "src", "loc")
+
+    def __init__(self, type: str, expr: Expr, src: str, loc: Loc) -> None:
+        self.type, self.expr, self.src, self.loc = type, expr, src, loc
 
 
-@dataclass
-class Policy:
-    role: str | None = None  # the app role (`app role app_user`): the Postgres role the rules apply to
-    types: dict[str, Type] = field(default_factory=dict)
-    rules: list[Rule] = field(default_factory=list)
-    tests: list[Step] = field(default_factory=list)  # the unnamed test section: checks of the data there
-    scenarios: list[Scenario] = field(default_factory=list)
-    scopes: dict[str, Scope] = field(default_factory=dict)
-    caveats: dict[str, Caveat] = field(default_factory=dict)
-    invariants: list[Invariant] = field(default_factory=list)
-    views: dict[str, str] = field(default_factory=dict)  # rules table -> masked view name
-    view_locs: dict[str, Loc] = field(default_factory=dict)  # rules table -> where the view was named
-    # read in the language before this one (a review's base): each of its old forms, where, and what it is now
-    previous: list[str] | None = None
+class Policy(Record):
+    __match_args__ = (
+        "role",
+        "types",
+        "rules",
+        "tests",
+        "scenarios",
+        "scopes",
+        "caveats",
+        "invariants",
+        "views",
+        "view_locs",
+        "previous",
+    )
+
+    def __init__(
+        self,
+        role: str | None = None,  # the app role (`app role app_user`): the Postgres role the rules apply to
+        types: dict[str, Type] | None = None,
+        rules: list[Rule] | None = None,
+        tests: list[Step] | None = None,  # the unnamed test section: checks of the data there
+        scenarios: list[Scenario] | None = None,
+        scopes: dict[str, Scope] | None = None,
+        caveats: dict[str, Caveat] | None = None,
+        invariants: list[Invariant] | None = None,
+        views: dict[str, str] | None = None,  # rules table -> masked view name
+        view_locs: dict[str, Loc] | None = None,  # rules table -> where the view was named
+        # read in the language before this one (a review's base): each of its old forms, where, and what it is now
+        previous: list[str] | None = None,
+    ) -> None:
+        self.role = role
+        self.types: dict[str, Type] = {} if types is None else types
+        self.rules: list[Rule] = [] if rules is None else rules
+        self.tests: list[Step] = [] if tests is None else tests
+        self.scenarios: list[Scenario] = [] if scenarios is None else scenarios
+        self.scopes: dict[str, Scope] = {} if scopes is None else scopes
+        self.caveats: dict[str, Caveat] = {} if caveats is None else caveats
+        self.invariants: list[Invariant] = [] if invariants is None else invariants
+        self.views: dict[str, str] = {} if views is None else views
+        self.view_locs: dict[str, Loc] = {} if view_locs is None else view_locs
+        self.previous = previous
 
 
 # ----------------------------------------------------------------------
@@ -556,6 +671,26 @@ def read_lines(
             out[-1] = (last[0], last[1], last[2] + " " + s)
         else:
             out.append((loc, indent, s))
+    return out
+
+
+def meaning_lines(policy: str, files: dict[str, str] | None) -> list[str]:
+    """The policy's declarations, one per line, whitespace and comments aside; lines in a block say
+    which block ('type folder: can edit = owner or parent.edit'). Tests are left out: they make nothing.
+    What the lock file holds (migrate.py), and what rowstile fmt must not change (here: fmt imports no compiler)."""
+    out: list[str] = []
+    block: str | None = None
+    skip = False
+    for _, indent, s in read_lines(None, policy, files=files or {}):
+        s = " ".join(s.split())
+        if indent == 0:
+            skip = s == "test" or s.startswith("test ")
+            m = re.match(r"(type\s+\w+|rules\s+\S+|invariants)", s)
+            block = m.group(1) if m else None
+            if not skip:
+                out.append(s)
+        elif not skip:
+            out.append(f"{block}: {s}" if block else s)
     return out
 
 

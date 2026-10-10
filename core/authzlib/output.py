@@ -15,7 +15,8 @@ from .refusals import RefusalMixin
 from .sqlutil import (
     CHILD_TRIGGERS,
     CHILD_TRIGGERS_FN,
-    POLICY_MARKS,
+    DROP_OLD_POLICIES,
+    LOST_RULES,
     STUB_COLUMNS,
     VIEW_MARKS,
     ident,
@@ -1468,23 +1469,6 @@ CREATE TRIGGER authz_shares_canon BEFORE INSERT OR UPDATE OF object_type, object
         return "\n".join(types + [canon, trigger])
 
 
-DROP_OLD_POLICIES = f"""-- Remove the policies the previous version of this policy made (remembering their tables)
-CREATE TEMP TABLE authz_old_tables ON COMMIT DROP AS
-  SELECT DISTINCT p.polrelid::regclass AS tbl
-  FROM pg_policy p
-  LEFT JOIN pg_description d ON d.objoid = p.oid AND d.classoid = 'pg_policy'::regclass
-  WHERE d.description IN {POLICY_MARKS} OR p.polname IN ('authz_select', 'authz_insert', 'authz_update', 'authz_delete');
-DO $d$
-DECLARE old record;
-BEGIN
-  FOR old IN SELECT pol.polname, pol.polrelid::regclass AS tbl
-             FROM pg_policy pol
-             LEFT JOIN pg_description d ON d.objoid = pol.oid AND d.classoid = 'pg_policy'::regclass
-             WHERE d.description IN {POLICY_MARKS} OR pol.polname IN ('authz_select', 'authz_insert', 'authz_update', 'authz_delete') LOOP
-    EXECUTE format('DROP POLICY %I ON %s', old.polname, old.tbl);
-  END LOOP;
-END $d$;"""
-
 CANONICAL_SHARES = """-- Shares stored with ids that aren't canonical ('007', an uppercase uuid: written directly before every
 -- write went through authz_int.canon) are made canonical, since the sweep below and the triggers compare
 -- text; one that then repeats a share already stored goes, the first made staying
@@ -1521,16 +1505,6 @@ BEGIN
   END LOOP;
 END $rls$;"""
 
-DROP_MASKED_VIEWS = f"""-- The masked views the previous version made (views built on them stop this: drop those first)
-DO $mv$
-DECLARE v record;
-BEGIN
-  FOR v IN SELECT c.oid::regclass AS name FROM pg_class c JOIN pg_description d ON d.objoid = c.oid
-           AND d.classoid = 'pg_class'::regclass WHERE c.relkind = 'v' AND d.description IN {VIEW_MARKS} LOOP
-    EXECUTE format('DROP VIEW %s', v.name);
-  END LOOP;
-END $mv$;"""
-
 # What apply does with them: gone, to be made again; one that something of the app's is built on (a view over it)
 # can't be dropped, so it is emptied in place, and CREATE OR REPLACE VIEW defines it again further down
 RESET_MASKED_VIEWS = (
@@ -1551,13 +1525,3 @@ BEGIN
   END LOOP;
 END $mv$;"""
 )
-
-LOST_RULES = """-- Tables that had rules before but have none now keep row-level security on
-DO $l$
-DECLARE t record;
-BEGIN
-  FOR t IN SELECT o.tbl FROM pg_temp.authz_old_tables o JOIN pg_class c ON c.oid = o.tbl
-           WHERE c.relrowsecurity AND NOT EXISTS (SELECT 1 FROM pg_policy p WHERE p.polrelid = o.tbl) LOOP
-    RAISE WARNING '% has no rules any more, and row-level security is still on, so the app role sees none of its rows. If that is not what you want: ALTER TABLE % DISABLE ROW LEVEL SECURITY', t.tbl, t.tbl;
-  END LOOP;
-END $l$;"""
