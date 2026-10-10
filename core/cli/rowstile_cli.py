@@ -705,7 +705,14 @@ class Dev:
                 lambda db: perf.missing_indexes(db, database.policy_compiler(*database.applied(db))),
                 keep=False,
             )
-        except (database.Error, pgwire.PgError, OSError):
+        except (database.Error, pgwire.PgError, pgwire.ProtocolError, OSError) as e:
+            if isinstance(e, database.Error) or (
+                isinstance(e, pgwire.PgError) and e.fields.get("S") not in ("FATAL", "PANIC")
+            ):
+                return  # the look didn't go through (a statement cancelled, say), and the session goes on
+            # the session is gone: said as a pass says it, and the next save connects again
+            self.say("x", f"lost the database: {e.message if isinstance(e, pgwire.PgError) else e}")
+            self.conn = None
             return
         if missing:
             self.say("!", perf.describe_missing(missing, self.cfg.tool or "sql"))

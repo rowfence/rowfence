@@ -127,6 +127,10 @@ Each release upgrades from the one before it. How releases are numbered and made
   with a traceback, the loop with it; it is said as `rowstile check` says it. And who loses rows was said as
   "3 user(s) lose rows readable on 3 app.filess": it is "rows readable in app.files (3 rows)", as the review
   says it.
+- `rowstile dev` lost the database as it looked for the lookups no index serves, once its first pass was
+  through: a connection closed without a word from the server stopped it with a traceback, and a session the
+  server ended was kept, so the next save said "lost the database: [Errno 9] Bad file descriptor" and only the
+  one after worked. It says "lost the database", goes on watching, and the next save connects again.
 - `rowstile review --db` on a database whose owner may not switch to the app role said so without the `GRANT`
   to run, which `rowstile test` gives: it gives it now.
 - `rowstile migrate --check` listed twenty changes and stopped there, as if they were all: it says how many
