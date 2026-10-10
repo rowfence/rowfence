@@ -40,7 +40,7 @@ they would agree. So the evaluator is held to answers that neither of them wrote
   SQL reserves (`select`, `order`, `user`), or as long as Postgres allows. Every name the compiler writes into
   SQL is then one it must quote. Nearly half give their keys another type than `bigint`: `int`, `text` or
   `uuid`; some key their rows by two columns, an org's and the row's own. Some put two types' rows inside
-  each other, so that one recursion runs through both.
+  each other, so that one recursion runs through both. Some have caveats, which some of their shares carry.
 - **Random worlds**: the two above compare answers in one setting: plain tables, and the owner's session
   switched to the app role. [`tests/around.py`](../core/tests/around.py) takes the random policies again and
   draws what is around each one too: tables that are partitioned, or have a table that inherits from them;

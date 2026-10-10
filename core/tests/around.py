@@ -15,7 +15,7 @@ policy for that seed and draws a world for it:
                 schema, which the database's search path supplies; a schema on that path that others may create in
   the session   who connects: the owner switched to the app role (as the other suites do), a login role that is
                 a member of the app role, or one that has to SET ROLE to it; the last two sign each user in with
-                authz.act_as(). Settings of the app's transaction that must change no answer: planner switches,
+                authz.act_as(). Each sets the user's request context (authz_ctx.*), which caveats read. Settings of the app's transaction that must change no answer: planner switches,
                 read-only, how dates and identifiers are written, a search path that starts with a schema of
                 decoys (a table, a function and an operator named as the policy's, a now() of its own)
   later         halfway, something changes behind the policy's back: a grant on rowstile's own objects,
@@ -369,6 +369,7 @@ def transaction(w: World, u: str, checker: Checker, body: list[str], reads: bool
         who = f"{lit(kind)}, {lit(pid)}" if pid else "NULL, NULL"
         lines.append(f"DO $$ BEGIN PERFORM authz.act_as({who}); END $$;")
     lines += [f"SET LOCAL {k} = {lit(v)};" for k, v in w.settings if k != "default_transaction_isolation"]
+    lines += [f"SET LOCAL authz_ctx.{k} = {lit(v)};" for k, v in checker.context(u).items()]  # caveats read it
     if w.decoys:
         lines.append(f"SET LOCAL search_path = {SCRATCH}, pg_catalog, {SCHEMA}, public;")
     if w.read_only and reads:
