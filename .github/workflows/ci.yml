@@ -60,8 +60,9 @@ jobs:
           - {pg: "18", part: unit}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
-      # --coverage: each Python process also measures what it runs of authzlib and cli (the coverage job reads it)
-      - run: bash core/ci.sh --coverage ${{ matrix.mode }} ${{ matrix.pg }}
+      # --coverage, on 16: each Python process also measures what it runs of authzlib and cli (the coverage job reads
+      # it). 17 and 18 run less and added nothing (2026-10-10: the same lines, branches and functions as 16 alone)
+      - run: bash core/ci.sh ${{ matrix.pg == '16' && '--coverage' || '' }} ${{ matrix.mode }} ${{ matrix.pg }}
         env: {ROWSTILE_CI_LOGS: "${{ runner.temp }}", ROWSTILE_PART: "${{ matrix.part }}"}
       # a cancelled job may stop before ci.sh removes its container: this job's own (the label names the job)
       - if: always()
@@ -73,7 +74,7 @@ jobs:
           path: ${{ runner.temp }}/rowstile-ci-${{ matrix.pg }}.log
       # what it measured: the lines, combined in one file (ci.sh's report made it, its name starts with a dot), and
       # the calls of rowstile's functions
-      - if: success()
+      - if: success() && matrix.pg == '16'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a   # v7.0.1
         with:
           name: coverage-pg${{ matrix.pg }}-${{ matrix.part }}
@@ -101,7 +102,7 @@ jobs:
           echo "the suites, all versions and parts together: $SUITES"
           test "$SUITES" = success
         env: {SUITES: "${{ needs.suites.result }}"}
-  # What the suites run of authzlib and cli, every version's and part's measure together (core/tests/coverage_report.py:
+  # What the suites run of authzlib and cli, every part's measure together (core/tests/coverage_report.py:
   # the table here, what nothing runs line by line in the artifact). On a pull request, a line it adds or changes
   # there that nothing runs fails the job
   coverage:
