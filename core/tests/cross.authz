@@ -16,11 +16,11 @@ type folder = cx.folders where {not archived}
   parent : folder, project = (parent_type, parent_id)          -- inside a folder or a project
   owner  : user = owner_id
   viewer : user  shared by view
-  can edit = owner or (parent.edit and {not exists (select 1 from cx.frozen z where z.folder_id = this.id)})
+  can edit = owner or (parent.edit and {not exists (select 1 from cx.frozen "z""s" where "z""s".folder_id = this.id)})
   can view = edit or viewer or parent.view
-  -- a comment, dollar quotes and an E'' string are text in a condition: this. stays as written there; and
-  -- <>-1 is <> then a minus, as Postgres reads it
-  can file = owner or (parent.file and {owner_id is null /* this.owner_id: nobody's */ and parent_type <> $$this.id$$ and parent_type <> e'it\'s' and id <>-1})
+  -- a comment, dollar quotes, an E'' string, a quote doubled in a string and in a name are text in a condition:
+  -- this. stays as written there; and <>-1 is <> then a minus, as Postgres reads it
+  can file = owner or (parent.file and {owner_id is null /* this.owner_id: nobody's */ and parent_type <> $$this.id$$ and parent_type <> e'it\'s' and parent_type <> 'this.id''s' and id <>-1})
   can fund = owner or parent.fund
 
 type project = cx.projects

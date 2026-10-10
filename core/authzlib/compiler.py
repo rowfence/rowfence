@@ -93,12 +93,11 @@ def rule_name(rule: Rule) -> str:
     return "update " + ", ".join(rule.columns) + (" after" if rule.command == "update check" else "")
 
 
-def depends_on_itself(perm: str) -> str:
-    """What AZ302 says of a permission that depends on itself otherwise than by inheriting."""
-    return (
-        f"{perm} depends on itself; a permission can only recurse as 'or rel.perm' (optionally 'and {{condition}}') "
-        f"through a relation to objects, and a group only as 'member : group#member'"
-    )
+# what AZ302 says of a permission that depends on itself otherwise than by inheriting
+DEPENDS_ON_ITSELF = (
+    "{} depends on itself; a permission can only recurse as 'or rel.perm' (optionally 'and {{condition}}') "
+    "through a relation to objects, and a group only as 'member : group#member'"
+)
 
 
 def only_on(node: Expr) -> list[str] | None:
@@ -446,7 +445,7 @@ class Core:
                         "AZ304",
                     )
                 if not rest:  # it comes back to itself only through a `not`
-                    fail(p.loc, depends_on_itself(f"{t.name}.{p.name}"), "AZ302")
+                    fail(p.loc, DEPENDS_ON_ITSELF.format(f"{t.name}.{p.name}"), "AZ302")
                 first = rest[0]
                 items = list(first.items) if isinstance(first, Or) else [first]
                 items = [
@@ -966,7 +965,7 @@ class Core:
                                     "AZ304",
                                 )
                     if inner & members:
-                        fail(perm.loc, depends_on_itself(f"{tn}.{pn}"), "AZ302")
+                        fail(perm.loc, DEPENDS_ON_ITSELF.format(f"{tn}.{pn}"), "AZ302")
             if len(set(tnames)) != len(tnames):
                 fail(
                     first.loc,

@@ -64,7 +64,7 @@ GONE = str(USERS + 1)  # an id the user table doesn't have: links may name it, a
 ROWS = 7  # rows of each object type at the start
 
 # The database's names as a third of the policies spell them, as an app's own may be named: capitals, words SQL
-# reserves, a name as long as Postgres allows (63 bytes). The policy writes a name as it is, and the compiler
+# reserves, a double quote, a name as long as Postgres allows (63 bytes). The policy writes a name as it is, and the compiler
 # quotes it in the SQL it writes; these policies' conditions, the data and the checks quote it themselves. A name
 # quoted wrongly anywhere (a quoted function's name was one, an app's capitals another) is then met by the checks.
 AWKWARD = {
@@ -77,7 +77,7 @@ AWKWARD = {
     "id": "Id",
     "b1": "B1",
     "b2": "order",
-    "b3": "Archived",
+    "b3": 'Arch"ived',  # a quote in a name: doubled wherever it is quoted
     "parent_type": "ParentType",
     "parent_id": "parentId",
     "obj_id": "Obj",
