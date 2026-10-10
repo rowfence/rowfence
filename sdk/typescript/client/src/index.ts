@@ -316,6 +316,8 @@ export function refusal(e: unknown, schemaOf?: (table: string) => string | undef
   const ours = OURS.exec(err.message);
   const code = errorCode(e);
   if (!ours && !err.constraint?.startsWith("authz_") && code === undefined) return null;
+  // no API key of yours (AZ708) is a 42501 too, but no refusal: the key isn't there for this user
+  if (code !== undefined && CALL_PROBLEMS.has(code)) return null;
   // the error's own fields say which table and command; a driver that drops them (Prisma's adapters) leaves
   // the message, which names both
   const column = columnRuleTable(err.message);
@@ -342,10 +344,22 @@ export function translate(e: unknown, schemaOf?: (table: string) => string | und
   return null;
 }
 
-/** The problem body and status for e (Refused: 403, NotFound: 404), or null. */
+// rowstile's codes for a call the database turned down that is no refusal, and what their pages say to answer
+// (rowstile help AZ708: what the call names isn't there; AZ710: a missing or wrong argument)
+const CALL_PROBLEMS = new Map<string, Pick<Problem, "type" | "title" | "status">>([
+  ["AZ708", { type: "https://rowstile.dev/problems/not-found", title: "Not Found", status: 404 }],
+  ["AZ710", { type: "https://rowstile.dev/problems/bad-argument", title: "Bad Request", status: 400 }],
+]);
+
+/** The problem body and status for e (Refused: 403, NotFound: 404), or null. A call the database says names
+ *  something that isn't there (AZ708: a share with someone who doesn't exist) is a 404 too, and one it says
+ *  lacks an argument or has a wrong one (AZ710: a negative page size) a 400, with the database's words. */
 export function problemOf(e: unknown): Problem | null {
   const t = translate(e);
-  return t instanceof Refused || t instanceof NotFound ? t.problem() : null;
+  if (t instanceof Refused || t instanceof NotFound) return t.problem();
+  const code = errorCode(e);
+  const call = code === undefined ? undefined : CALL_PROBLEMS.get(code);
+  return call ? { ...call, detail: dbError(e)!.message, code } : null;
 }
 
 /** A Response (application/problem+json) for e, or null: for route handlers. */

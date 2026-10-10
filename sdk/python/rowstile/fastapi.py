@@ -5,8 +5,10 @@
 
 Each request acts for user(request) (a user id, ("service", 3), a Principal, or None for nobody; it may be
 async), so every transaction it begins on `engine` signs in as them. A refused write answers 403 with the
-reason (an RFC 9457 problem body), a row the user can't see 404. At start-up the app refuses to run on a
-connection that skips row-level security (authz.connection_check()), with or without a lifespan of its own.
+reason (an RFC 9457 problem body), a row the user can't see 404. A call the database says names something that
+isn't there answers 404 too (AZ708: a share with someone who doesn't exist), and one it says lacks an argument or
+has a wrong one 400 (AZ710), with its words. At start-up the app refuses to run on a connection that skips
+row-level security (authz.connection_check()), with or without a lifespan of its own.
 
 user(request) runs in a middleware this adds: read the session or the token from the request itself. What a
 middleware of the app's puts on request.state is there only if it was added after Rowstile(...) (Starlette
@@ -38,6 +40,7 @@ from . import (
     Who,
     _current,
     _writes,
+    call_problem,
     check_problems,
     not_signed_in,
     refusal,
@@ -138,6 +141,9 @@ async def _db_error(request: Request, exc: Exception) -> Response:
     r = refusal(exc)
     if r is not None:
         return _json(r.problem())
+    problem = call_problem(exc)
+    if problem is not None:  # a share with someone who doesn't exist: 404; a negative page size: 400
+        return _json(problem)
     if not_signed_in(exc):  # the app's bug, not the user's doing: a 500 that says what
         raise NotSignedIn(
             "a query ran in a transaction nobody signed in to: every transaction must begin with "

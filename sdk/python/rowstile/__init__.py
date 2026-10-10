@@ -256,6 +256,27 @@ def error_code(exc: BaseException) -> str | None:
     return None
 
 
+# rowstile's codes for a call the database turned down that is no refusal, and what their pages say to answer
+# (rowstile help AZ708: what the call names isn't there; AZ710: a missing or wrong argument)
+_CALL_PROBLEMS: dict[str, tuple[str, str, int]] = {
+    "AZ708": ("https://rowstile.dev/problems/not-found", "Not Found", 404),
+    "AZ710": ("https://rowstile.dev/problems/bad-argument", "Bad Request", 400),
+}
+
+
+def call_problem(exc: BaseException) -> Problem | None:
+    """The problem body for a database error that is the call's own mistake, not a refusal: something it names
+    isn't there (AZ708: a share with someone who doesn't exist, a 404), or an argument is missing or wrong
+    (AZ710: a negative page size, a 400), with the database's words. None for any other error."""
+    code = error_code(exc)
+    if code is None or code not in _CALL_PROBLEMS:
+        return None
+    kind, title, status = _CALL_PROBLEMS[code]
+    errs = _db_error(exc)
+    detail = _field(errs, "message_primary", "message") or str(errs[-1]).split("\n")[0]
+    return {"type": kind, "title": title, "status": status, "detail": detail, "code": code}
+
+
 def sqlstate(exc: BaseException) -> str | None:
     err = _db_error(exc)
     return _field(err, "sqlstate", "pgcode")
@@ -269,7 +290,10 @@ def refusal(exc: BaseException) -> Refused | None:
     if _field(err, "sqlstate", "pgcode") != "42501":
         return None
     message = _field(err, "message_primary", "message") or str(err[-1]).split("\n")[0]
-    if error_code(exc) is None and not message.startswith("new row violates row-level security policy"):
+    code = error_code(exc)
+    if code is None and not message.startswith("new row violates row-level security policy"):
+        return None
+    if code in _CALL_PROBLEMS:  # no API key of yours (AZ708) is a 42501 too, but no refusal
         return None
     detail = _field(err, "message_detail", "detail") or ""
     schema, table = _field(err, "schema_name"), _field(err, "table_name")
@@ -292,7 +316,7 @@ def refusal(exc: BaseException) -> Refused | None:
         f"{schema}.{table}" if schema and table else table,
         constraint[6:] if constraint.startswith("authz_") else None,
         detail.split("\n") if detail else [],
-        error_code(exc),
+        code,
     )
 
 

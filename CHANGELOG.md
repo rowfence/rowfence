@@ -77,6 +77,19 @@ Each release upgrades from the one before it. How releases are numbered and made
 
 ### Fixed
 
+- The SDKs answer a call the database says names something that isn't there (AZ708) with 404, and one it says
+  lacks an argument or has a wrong one (AZ710) with 400, as those codes' pages say, each with a problem body
+  in the database's words: `rowstile.fastapi`, and `route()`, `action()`, `authzRoutes()` and `problemOf(e)` in
+  `@rowstile/next` and `@rowstile/client`. A negative page size or a page cursor that isn't an id answered 500;
+  a share with someone who doesn't exist answered 500 through `authzRoutes()`'s share route and `route()`;
+  revoking an API key that isn't yours (or isn't there) answered 403 as if a rule had refused it. The 404's
+  body is `https://rowstile.dev/problems/not-found`, with `code: "AZ708"`; the 400's is
+  `https://rowstile.dev/problems/bad-argument`. (#164)
+- `@rowstile/prisma`: a write refused inside `$transaction(async (tx) => ...)`, or a `findUniqueOrThrow` that
+  found no row there, is explained through the transaction. The question went outside it, and on a pool of one
+  connection waited for the one the transaction held, until Prisma's transaction timeout (5 s). (#165)
+- `@rowstile/prisma` named the table of a model with no `@@map` in a named schema (`@@schema("app")`) without
+  its schema in a refusal read back (`feedback`, where the policy says `app.feedback`). (#166)
 - `rowstile review --db` stopped with a traceback when the server ended its session in the middle of the review
   (a restart, or `pg_terminate_backend`): it says it lost the database, exit 2, as the other commands do. Its
   messages name the policy as you do (`db/policy.authz`), not by its full path; and `review`, `test` and `dev`

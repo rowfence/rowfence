@@ -149,6 +149,19 @@ were matched`. The row stays, and the request answers as if it was deleted. Dele
 An insert that reads the new row back (`flush()` uses `RETURNING`) also needs the select rule: if the user may
 insert but not read the row, the 403 names the select rule.
 
+A call the database says names something that isn't there answers 404 (an API key of the user's that isn't
+there, a share with someone who doesn't exist), and one it says lacks an argument or has a wrong one 400, each
+with the database's words (a negative page size: "the page size must not be negative (got -1)"):
+
+```python
+    @app.get("/projects/page")
+    async def page(limit: int, after: str | None = None) -> list[str]:
+        # the projects the user may see, a page at a time: the database says when the size or the cursor is wrong
+        async with Session() as s:
+            listed = text("SELECT x FROM authz.list('project', 'view', :after, :limit) x")
+            return list((await s.scalars(listed, {"after": after, "limit": limit})).all())
+```
+
 ## Lists by permission
 
 `ids(type, perm)` filters a query to the objects the user holds a permission on; `perms_of` answers a list's

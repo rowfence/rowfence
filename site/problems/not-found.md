@@ -2,7 +2,8 @@
 
 `https://rowstile.dev/problems/not-found` is the `type` of the problem body ([RFC 9457](https://www.rfc-editor.org/rfc/rfc9457))
 the SDKs answer with when a row isn't there, or whoever the transaction acts for can't see it. Both get the
-same answer.
+same answer. So does a call the database says names something that isn't there: a share with someone who
+doesn't exist, an API key of yours that isn't there.
 
 ```json
 {
@@ -13,8 +14,11 @@ same answer.
 }
 ```
 
+- `detail`: the row, by its table and key. For a call the database said no to, its words: "there is no user 99".
+- `code`: [AZ708](../../docs/errors/AZ708.md), only for a call the database said no to.
+
 Where it comes from: `NotFound.problem()` in both SDKs; `rowstile.fastapi` answers with it
 ([FastAPI](../../docs/stacks/fastapi.md)), and so do `route()` and `action()` in `@rowstile/next`
 ([Next.js](../../docs/stacks/nextjs.md)) and `problemOf(e)` for any other framework
-([Node](../../docs/stacks/node.md)). A write the user may not make, on a row they can see, is
-[Refused](refused.md) instead.
+([Node](../../docs/stacks/node.md)), for a hidden row and for AZ708 alike. A write the user may not make, on a
+row they can see, is [Refused](refused.md) instead.

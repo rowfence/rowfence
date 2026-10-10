@@ -80,3 +80,16 @@ model Message {
   @@map("inbox")
   @@schema("app")
 }
+
+// Feedback on a project: whoever may see the project may leave some, and only its owner reads it. A model with no
+// @@map, in a named schema: its table is its name, app.feedback
+model feedback {
+  id         Int    @id @default(autoincrement())
+  project_id Int
+  author_id  Int
+  body       String
+
+  @@index([project_id])
+  @@index([author_id])
+  @@schema("app")
+}

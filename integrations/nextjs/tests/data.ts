@@ -16,7 +16,7 @@ export async function seed(): Promise<void> {
   await c.connect();
   try {
     await c.query(`
-      TRUNCATE app.inbox, app.notes, app.members, app.project_services, app.projects, app.services, app.users;
+      TRUNCATE app.feedback, app.inbox, app.notes, app.members, app.project_services, app.projects, app.services, app.users;
       DELETE FROM authz.shares WHERE object_type = 'project';
       DELETE FROM authz.requests;
       INSERT INTO app.users VALUES (1, 'ann'), (2, 'bo'), (3, 'cy');

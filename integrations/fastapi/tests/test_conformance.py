@@ -136,6 +136,49 @@ async def test_8_insert_then_read_back(app: FastAPI) -> None:
     assert quiet.status_code == 202, quiet.text
 
 
+# 16: a call the database turns down that is no refusal answers as its code's page says: what it names isn't there
+# (AZ708) 404, a missing or wrong argument (AZ710) 400, with the database's words
+async def test_16_not_there_is_404_and_a_wrong_argument_400(app: FastAPI) -> None:
+    with psycopg.connect(libpq(OWNER)) as conn:  # an API key of ann's, in one transaction (it commits at the end)
+        conn.execute("SELECT authz.act_as('user', '1')")
+        conn.execute("SELECT authz.create_api_key('ci')")
+        key = conn.execute("SELECT max(id) FROM authz.api_keys WHERE user_id = '1'").fetchone()
+    assert key is not None
+    async with client(app) as c:
+        page = await c.get("/projects/page", params={"limit": 1}, headers=as_("1"))
+        negative = await c.get("/projects/page", params={"limit": -1}, headers=as_("1"))
+        cursor = await c.get("/projects/page", params={"limit": 1, "after": "x"}, headers=as_("1"))
+        others = await c.delete(f"/keys/{key[0]}", headers=as_("2"))  # bo's key it isn't
+        revoked = await c.delete(f"/keys/{key[0]}", headers=as_("1"))
+        again = await c.delete(f"/keys/{key[0]}", headers=as_("1"))  # revoked: there is none now
+    assert page.status_code == 200 and page.json() == ["1"], page.text
+    for r, detail in [
+        (negative, "the page size must not be negative (got -1)"),
+        (cursor, "the page cursor 'x' is not a project id"),
+    ]:
+        assert r.headers["content-type"] == "application/problem+json", r.text
+        assert r.json() == {
+            "type": "https://rowstile.dev/problems/bad-argument",
+            "title": "Bad Request",
+            "status": 400,
+            "detail": detail,
+            "code": "AZ710",
+        }, r.text
+        assert r.status_code == 400
+    assert revoked.status_code == 204, revoked.text
+    # the database says it with a refusal's SQLSTATE (42501), but it is none: the key isn't there for this user
+    for r in (others, again):
+        assert r.headers["content-type"] == "application/problem+json", r.text
+        assert r.json() == {
+            "type": "https://rowstile.dev/problems/not-found",
+            "title": "Not Found",
+            "status": 404,
+            "detail": f"no API key {key[0]} of yours",
+            "code": "AZ708",
+        }, r.text
+        assert r.status_code == 404
+
+
 # 9: the generated names type-check, and a wrong permission name doesn't
 def test_9_generated_names_type_check(tmp_path: Path) -> None:
     subprocess.run([sys.executable, "-m", "rowstile", "client"], cwd=HERE, check=True, capture_output=True)
