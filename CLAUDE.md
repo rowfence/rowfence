@@ -157,7 +157,8 @@ User-facing docs: `README.md`, then `docs/reference/` (read them first). Terms i
 - `.github/workflows/ci.yml` — on each push: `tests/unit_test.py` and the type checks, every suite on PG 16
   (`ci.sh`) and what depends on the version on 17 and 18 (`ci.sh --short`), the examples, the conformance suites,
   the editors, packaging, the site. The suites run in parts, a job each, side by side (`ROWSTILE_PART`;
-  `run_tests.sh` names them and puts each step in one: a new step goes inside an `if part ...`, and a new part
+  `run_tests.sh` names them and puts each step in one: a new step goes in a unit inside an `if part ...` (a
+  function, then `unit PART SECONDS NAME`: a part's units run in lanes, `tests/lanes.sh`), and a new part
   in the workflows' lists, which `Delivery` in `unit_test.py` checks); the jobs `postgres (16)` and the like,
   which `main` requires, only wait for their parts. `nightly.yml` (main) — every suite on 17 and 18, the proofs
   (`--proofs`) on each version, the soak (new seeds each night, one version in turn, in five parts side by side;
@@ -183,6 +184,7 @@ simplest is Docker, from the repo root (Git Bash works on Windows):
     core/ci.sh --full 16         # the full run (~15 minutes) on one version
     core/ci.sh --short 17 18     # what depends on the version (what CI runs on 17 and 18 for each push)
     ROWSTILE_PART=command core/ci.sh 16   # one part of a run (`run_tests.sh` names them: unit, policy, command, random)
+    ROWSTILE_LANES=1 core/ci.sh 16        # a part's steps one after the other (else in 3 lanes side by side)
     core/ci.sh --coverage 16     # and what the suites run of authzlib and cli: .ci/coverage-16/report.txt says
                                  # what nothing runs (tests/coverage_report.py; CI's coverage job, --diff on PRs)
     python3 core/tests/unit_test.py   # a second, no database; --update rewrites tests/golden/ after an intended change
@@ -195,6 +197,8 @@ For one suite, start a container and run it inside:
     MSYS_NO_PATHCONV=1 docker exec -e PGHOST=/var/run/postgresql -e PGUSER=authz_owner -e PGSUPERUSER=postgres -w /src/core pga16 bash tests/cli.sh
 
 - The suites run the mounted repository's code; the image only holds a copy of the command for `docker exec`.
+- A part's steps run in lanes side by side, on one server (`tests/lanes.sh`): a suite's databases, roles and
+  `/tmp` files have names of its own, and a check on `pg_stat_activity` or `pg_locks` names its database.
 - `ci.sh` starts Postgres with `fsync`, `synchronous_commit` and `full_page_writes` off: the databases last as
   long as the container. Its `wal_level` is `logical`: `governance.sh` copies the audit trail to another database
   by a subscription (skipped, saying why, on a server without it). `difftest.py` asks a snapshot's questions in up to four sessions side by side

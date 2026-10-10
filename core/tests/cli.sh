@@ -108,7 +108,7 @@ case "$out" in "unknown command 'bogus'"*) [ $rc -eq 2 ] && ok "an unknown comma
 run sql --as user:5 "SELECT count(*) FROM app.files -- --limit 3"; [ $rc -eq 0 ] && ok "sql's statement is left as it is" || bad "sql" "$rc $out"
 # Ctrl-C while sql waits on a statement: it stops at once, and the statement ends on the server too (started with job
 # control on, as a terminal starts it: a background job otherwise ignores Ctrl-C)
-sleeping() { PSQL -c "SELECT count(*) FROM pg_stat_activity WHERE query LIKE '%pg_sleep(30)%' AND state = 'active' AND pid <> pg_backend_pid()"; }
+sleeping() { PSQL -c "SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() AND query LIKE '%pg_sleep(30)%' AND state = 'active' AND pid <> pg_backend_pid()"; }
 set -m
 python3 cli/rowstile_cli.py --db "dbname=$DB" sql --as user:5 "SELECT pg_sleep(30)" > "$T/sleep.out" 2>&1 &
 sleeper=$!
