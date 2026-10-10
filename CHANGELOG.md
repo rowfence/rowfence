@@ -106,6 +106,9 @@ Each release upgrades from the one before it. How releases are numbered and made
 
 ### Fixed
 
+- `rowstile why`, Studio's how-to-grant and the MCP server's `why` turn JIT off for their own transaction. On a
+  server with JIT on, Postgres could spend most of a second compiling each count of what someone holds, though
+  the table held a few rows: Studio's own tests ran in 47 seconds instead of 129.
 - The SDKs answer a call the database says names something that isn't there (AZ708) with 404, and one it says
   lacks an argument or has a wrong one (AZ710) with 400, as those codes' pages say, each with a problem body
   in the database's words: `rowstile.fastapi`, and `route()`, `action()`, `authzRoutes()` and `problemOf(e)` in

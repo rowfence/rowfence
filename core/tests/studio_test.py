@@ -23,7 +23,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import Any, NamedTuple
 from unittest import mock
 
@@ -35,6 +35,8 @@ sys.path.insert(0, os.path.join(ROOT, "cli"))
 import pgwire  # noqa: E402
 import rowstile_cli  # noqa: E402
 import studio  # noqa: E402
+from authzlib import database, grant  # noqa: E402
+from authzlib.parse import Type  # noqa: E402
 
 fails = 0
 # an answer from Studio's API: its shape is what the checks check
@@ -360,6 +362,28 @@ def main() -> None:
     before = shares()
     rc, out = cli(db, "why", "--as", "user:7", "file", "10", "view")
     check("nothing it tried stays", shares() == before and "share viewer on file 10 with user 7" in out, out)
+    # JIT: off while it counts what each person holds, back as it was when its transaction ends
+    jit_conn = pgwire.connect(**pgwire.parse_dsn(f"dbname={db}"))
+    jit_db = rowstile_cli.Db(jit_conn)
+    jit_db.script("SET jit = on")
+    jit_seen: list[str] = []
+    held_now = grant.Grants.held
+
+    def counting(g: grant.Grants, who: grant.Person, kinds: Sequence[grant.Part], t: Type, oid: str) -> grant.Held:
+        jit_seen.append(str(g.db.rows("SELECT current_setting('jit') AS jit")[0]["jit"]))
+        return held_now(g, who, kinds, t, oid)
+
+    jit_conn.execute("BEGIN")
+    with mock.patch.object(grant.Grants, "held", counting):
+        database.why(jit_db, "user", "7", "file", "10", "view")
+    jit_conn.execute("COMMIT")  # (what it tried is undone: committed, a setting made for the session would stay)
+    jit_after = str(jit_db.rows("SELECT current_setting('jit') AS jit")[0]["jit"])
+    jit_conn.close()
+    check(
+        "JIT is off while it counts what each one holds, and as the session had it once its transaction ends",
+        jit_seen and set(jit_seen) == {"off"} and jit_after == "on",
+        (jit_seen, jit_after),
+    )
 
     print("-- Studio, read-only")
     dsn = f"dbname={db}"

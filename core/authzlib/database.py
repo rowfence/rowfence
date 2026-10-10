@@ -921,6 +921,9 @@ def why(
     from . import grant
 
     assert pid, "the command and Studio ask for someone signed in first: nobody can be given access"
+    # JIT off until the caller's transaction ends: counting what someone holds lists every object of a type, which
+    # Postgres may estimate at millions of rows and compile for most of a second, though the table holds a few
+    db.rows("SELECT pg_catalog.set_config('jit', 'off', true)")
     c = compiler or policy_compiler(*applied(db))
     return grant.how_to_grant(c, db, ptype, pid, type_name, oid, perm, tried)
 
