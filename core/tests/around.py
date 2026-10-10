@@ -26,8 +26,9 @@ and checks, after each random change to the data:
   - difftest's checks (lists, can, the rows each rule allows, explain, who, verify), the app role's answers
     asked in the world's session
   - real writes as the app role, each undone: an update that changes nothing, an update of a column with a rule,
-    a delete, a call of authz.share(), on every row and for every user, against what the reference evaluator
-    says of the rules and of who may share; and the tables under a governed one, read and written directly
+    a delete, calls of authz.share() to three users, on every row and for every user, against what the reference
+    evaluator says of the rules and of who may share, and what the relation's `shared if` says of the share; and
+    the tables under a governed one, read and written directly
   - no share is left on a row that is gone or whose key changed
   - a role the policy doesn't name gets no row of a governed table, whatever it was granted there, and a
     member of the app role that didn't sign in gets an error (28000) or nothing, never a row
@@ -393,6 +394,7 @@ class AroundChecker(Checker):
     world: World
     since: int = 2**62  # a transaction id from before the last change (none yet)
     excused: set[str]  # shares the changes wrote on rows they had removed (share_problems)
+    spec: Spec  # the policy (its `shared if`s)
 
     def snapshot(self) -> Snapshot:
         snap = super().snapshot()  # (it makes difftest_app's functions too, which the questions below call)
@@ -446,6 +448,8 @@ END $f$;"""
 CHECK_REFUSED = " may not update this row of "
 # ... and what Postgres says itself when the user could not read the row as changed (the select rule)
 UNREADABLE = "new row violates row-level security policy for table"
+# what authz.share() says when the relation's `shared if` doesn't hold for the share
+NOT_ALLOWED = "the policy does not allow this share"
 
 
 def tried(key: list[str], statement: str, ids: list[str]) -> str:
@@ -495,7 +499,11 @@ def write_problems(checker: AroundChecker, direct: bool = True) -> list[str]:
             "WHERE subject = 'user' ORDER BY 1, 2"
         )
     ]
-    someone = next(iter(sorted(snap[(first, "data", "valid", "user")])), None)  # who a share is tried with
+    # who a share is tried with: user 1, user 2 and a user whose row is not active (the last, if none is), whom
+    # genpolicy's `shared if`s tell apart (SHARED_IFS)
+    active = {i for (i,) in db.rows(f"SELECT {idsql(checker.types['user'])} FROM {SCHEMA}.users WHERE active")}
+    asleep = sorted(set(map(str, range(1, genpolicy.USERS + 1))) - active, key=int)
+    someone = list(dict.fromkeys(["1", "2", *(asleep[:1] or [str(genpolicy.USERS)])]))
     script = []
     for u in checker.users:
         body = [TRY]
@@ -509,10 +517,11 @@ def write_problems(checker: AroundChecker, direct: bool = True) -> list[str]:
                     body.append(
                         tried([u, "column", str(n)], f"UPDATE {table} SET b1 = (b1 IS NOT TRUE) WHERE id = %s", ids)
                     )
-        for ot, rel, _, _ in shared if someone else []:
+        for ot, rel, _, _ in shared:
             ids = snap[(first, "data", "ids", ot)]
-            call = f"SELECT authz.share({lit(ot)}, '%s', {lit(rel)}, 'user', {lit(someone)})"
-            body.append(tried([u, "share", ot, rel], call, ids))
+            for to in someone:
+                call = f"SELECT authz.share({lit(ot)}, '%s', {lit(rel)}, 'user', {lit(to)})"
+                body.append(tried([u, "share", ot, rel, to], call, ids))
         for n, (_, child) in enumerate(children):
             body.append(tried([u, "under", str(n)], f"SELECT 1 FROM {child}", ["0"]))
             body.append(tried([u, "under write", str(n)], f"DELETE FROM {child}", ["0"]))
@@ -555,17 +564,27 @@ def write_problems(checker: AroundChecker, direct: bool = True) -> list[str]:
                             f"{outcome}, expected {want}"
                         )
         # authz.share: for whoever is signed in and holds, on the object, the permission that shares the relation
-        # and every permission the relation gives (nobody gives more than they hold)
+        # and every permission the relation gives (nobody gives more than they hold), where the relation's `shared
+        # if` holds for the share
         kind, pid = evaluate.principal_of(u, checker.types)
         signed_in = bool(u) and pid in snap[(u, "data", "valid", kind)]
-        for ot, rel, by, needs in shared if someone else []:
-            for i, outcome in got[(u, "share", ot, rel)]:
-                may_share = signed_in and all(i in state[(ot, perm)] for perm in [by, *needs])
-                if (outcome == "rows 1") != may_share or not (may_share or outcome.startswith("42501 ")):
-                    problems.append(
-                        f"{who}: authz.share('{ot}', {i}, '{rel}', ...) as the app role: {outcome}, expected "
-                        f"{'the share' if may_share else 'a refusal (42501)'} (shared by {by}; gives {', '.join(needs)})"
-                    )
+        for ot, rel, by, needs in shared:
+            cond = next(x.shared_if for x in checker.spec.obj(ot).rels if x.name == rel and x.kind == "shared")
+            for to in someone:
+                for i, outcome in got[(u, "share", ot, rel, to)]:
+                    may_share = signed_in and all(i in state[(ot, perm)] for perm in [by, *needs])
+                    allowed = not cond or genpolicy.SHARED_IFS[cond](i, "user", to, active)
+                    if not may_share:
+                        ok, want = outcome.startswith("42501 you cannot "), "a refusal: you cannot ..."
+                    elif not allowed:
+                        ok, want = outcome.startswith(f"42501 {NOT_ALLOWED}"), f"a refusal: {cond} does not hold"
+                    else:
+                        ok, want = outcome == "rows 1", "the share"
+                    if not ok:
+                        problems.append(
+                            f"{who}: authz.share('{ot}', {i}, '{rel}', 'user', {to}) as the app role: {outcome}, "
+                            f"expected {want} (shared by {by}; gives {', '.join(needs)})"
+                        )
         for n, (top, child) in enumerate(children):
             for key, what in ((("under", str(n)), "read"), (("under write", str(n)), "written")):
                 outcome = got[(u, *key)][0][1]
@@ -836,7 +855,7 @@ def run(spec: Spec, w: World, db: DB, control: DB, steps: int, workdir: str, sec
     plain = privileges(control)
     problems += privilege_problems(db, plain, "after the first apply")
     checker = AroundChecker(db, policy_path, gen)
-    checker.world, checker.excused = w, set()
+    checker.world, checker.excused, checker.spec = w, set(), spec
     problems += stranger_problems(checker) + unsigned_problems(checker)
     if problems:
         return ["before any change:", *problems[:12]]

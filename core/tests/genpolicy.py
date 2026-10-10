@@ -9,10 +9,12 @@ shares, to users, the service, `user:*`, `anyone` and other types' members; perm
 `not`, conditions, `signed_in`, `anyone`, `nobody`, arrows to other types, inheritance (stopped by a condition or not,
 across two types or not) and a deny that inherits; rules, the write rules sometimes with a condition that reads
 another governed table (a subquery, a function called by a quoted name, an operator the app made); invariants.
-Some also say what no draw above does, drawn apart so that the rest stays as it was (also()): a starting point with
-a `not` in a permission that inherits, and a relation declared again for an earlier type through a link table (a
-`parent`, or a relation to users). Then the tables it reads and their data. A third of the seeds name those tables
-and columns as an app's own may be (AWKWARD: capitals, words SQL reserves, 63 bytes), the policy otherwise the same.
+Some also say what no draw above does, drawn apart so that the rest stays as it was (also(), shared_if()): a
+starting point with a `not` in a permission that inherits, a relation declared again for an earlier type through a
+link table (a `parent`, or a relation to users), and a condition on the shares made of a relation (`shared by p1 if
+{...}`, which around.py's calls of authz.share() judge). Then the tables it reads and their data. A third of the
+seeds name those tables and columns as an app's own may be (AWKWARD: capitals, words SQL reserves, 63 bytes), the
+policy otherwise the same.
 Now and then a seed's policy has a twin, checked after it over fewer steps (variants()): the same with no rule at
 all, or with no permission at all, its rules naming relations.
 
@@ -118,6 +120,7 @@ class Spelling:
         if not self.awkward:
             return plain
         text = plain.replace(f'{SCHEMA}."Flag"', f'{self.sql(SCHEMA)}."Flag"').replace(f"{SCHEMA}.t1", self.table("t1"))
+        text = text.replace(f"{SCHEMA}.users", self.table("users"))
         return re.sub(r"\b(id|b1|b2|b3|active)\b", lambda m: self.sql(m.group(1)), text)
 
 
@@ -128,6 +131,7 @@ class Rel:
     subjects: list[str]  # user, bot, user:*, anyone, tN#member, or an object type (links: up, parent)
     where: bool = False  # a link table's `where {active}`
     by: str = ""  # shared: `shared by <permission>`
+    shared_if: str = ""  # shared: `if {...}`, one of SHARED_IFS
 
 
 @dataclass
@@ -165,6 +169,15 @@ READS = [
     f'{{{SCHEMA}."Flag"(this.id + 1)}}',
     "{=!= (this.id + 1)}",
 ]
+# `shared ... if {...}`: a condition on the share being made, which authz.share() checks. difftest and genpolicy
+# write shares as the owner, which no condition sees; around.py's calls of authz.share() judge it, by what each
+# says here: (the object's id, the subject's type, its id, the users whose row is active) -> may it be shared
+SHARED_IFS: dict[str, Callable[[str, str, str, set[str]], bool]] = {
+    "{object_id % 2 = 0}": lambda obj, st, sid, active: int(obj) % 2 == 0,
+    "{subject_type <> 'user' or subject_id <> '2'}": lambda obj, st, sid, active: st != "user" or sid != "2",
+    f"{{subject_type <> 'user' or subject_id = '*' or exists (select 1 from {SCHEMA}.users u where "
+    "u.id::text = subject_id and u.active)}": lambda obj, st, sid, active: st != "user" or sid in ("*", *active),
+}
 
 
 def make(seed: int, respell: bool | None = None) -> Spec:
@@ -305,6 +318,7 @@ def make_plain(seed: int) -> Spec:
         if inv not in spec.invariants:
             spec.invariants.append(inv)
     also(spec, random.Random(f"genpolicy/{seed}/also"))
+    shared_if(spec, random.Random(f"genpolicy/{seed}/shared-if"))
     return spec
 
 
@@ -333,6 +347,14 @@ def also(spec: Spec, x: random.Random) -> None:
         others = [u for u in users if u != start]
         if earlier and others and x.random() < 0.2:
             o.rels.append(Rel(x.choice(others), "table", [x.choice(earlier)]))
+
+
+def shared_if(spec: Spec, x: random.Random) -> None:
+    """A condition on the shares made of some shared relations (SHARED_IFS), drawn apart from the rest (x)."""
+    for o in spec.objs:
+        for rel in o.rels:
+            if rel.kind == "shared" and x.random() < 0.4:
+                rel.shared_if = x.choice(list(SHARED_IFS))
 
 
 def has(o: Obj, rel: str) -> bool:
@@ -387,7 +409,11 @@ def policy_text(spec: Spec) -> str:
                 )
             else:
                 src = "shared"
-            out.append(f"  {rel.name} : {subj}" + (f" = {src}" if src != "shared" else f" shared by {rel.by}"))
+            if src == "shared":
+                src = f"shared by {rel.by}" + (f" if {s.cond(rel.shared_if)}" if rel.shared_if else "")
+                out.append(f"  {rel.name} : {subj} {src}")
+            else:
+                out.append(f"  {rel.name} : {subj} = {src}")
         for p, e in o.perms.items():
             out.append(f"  can {p} = {text(e, s=s)}")
     for o in spec.objs:
@@ -732,6 +758,9 @@ def smaller(spec: Spec) -> list[Spec]:
                 out.append(with_obj(spec, k, dataclasses.replace(o, perms={**o.perms, p: simpler})))
         for i, rel in enumerate(o.rels):
             out.append(with_obj(spec, k, dataclasses.replace(o, rels=o.rels[:i] + o.rels[i + 1 :])))
+            if rel.shared_if:
+                plain = dataclasses.replace(rel, shared_if="")
+                out.append(with_obj(spec, k, dataclasses.replace(o, rels=o.rels[:i] + [plain] + o.rels[i + 1 :])))
             if len(rel.subjects) > 1:
                 for j in range(len(rel.subjects)):
                     fewer = dataclasses.replace(rel, subjects=rel.subjects[:j] + rel.subjects[j + 1 :])
