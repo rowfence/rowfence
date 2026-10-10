@@ -338,6 +338,18 @@ def main() -> None:
             and shares() == before,
             w,
         )
+        status, w = c.call("/api/why?as=user:1&type=folder&id=5&perm=share")
+        check(
+            "... and none that changes nothing: alice owns folder 3, above it, already (folder 5 doesn't inherit)",
+            status == 200
+            and [x["text"] for x in w["ways"]]
+            == [
+                "set role = 'admin' on user 1's row of app.org_members for org 1",
+                "set owner_id of folder 5 to 1",
+                "set owner_id of folder 1 to 1",
+            ],
+            w,
+        )
         status, e = c.call(
             "/api/share",
             {
@@ -1193,7 +1205,8 @@ def main() -> None:
 
 # rowstile why on what the docs example doesn't have: groups in groups through a permission, a table naming its
 # rows' type, a share that expired, `shared if`, a link table with a column no change fills, a chain of five, a
-# service that signs in, a deny, a condition, a key of two columns, and a type's where
+# service that signs in, a deny, a condition, a key of two columns, a type's where, a `shared if` that reads who
+# shares, and a share that takes away (a deny on what it gives)
 WHY_SCHEMA = """
 CREATE SCHEMA cn;
 CREATE TABLE cn.clubs (id bigint PRIMARY KEY);
@@ -1219,14 +1232,21 @@ CREATE TABLE cn.project_groups (org_id bigint, project_id bigint, group_id bigin
 CREATE TABLE cn.shelves (id bigint PRIMARY KEY, closed boolean);
 CREATE TABLE cn.shelf_keepers (shelf_id bigint REFERENCES cn.shelves, user_id bigint REFERENCES cn.users,
   since date NOT NULL, PRIMARY KEY (shelf_id, user_id));
+CREATE TABLE cn.teams (id bigint PRIMARY KEY);
+CREATE TABLE cn.team_members (team_id bigint REFERENCES cn.teams, user_id bigint REFERENCES cn.users,
+  PRIMARY KEY (team_id, user_id));
+CREATE TABLE cn.rooms (id bigint PRIMARY KEY, owner_id bigint REFERENCES cn.users);
+CREATE TABLE cn.room_mics (room_id bigint REFERENCES cn.rooms, user_id bigint REFERENCES cn.users,
+  PRIMARY KEY (room_id, user_id));
 GRANT USAGE ON SCHEMA cn TO app_user;
 GRANT SELECT ON ALL TABLES IN SCHEMA cn TO app_user;
 -- ann (1) owns docs 1 to 5, each inside the one before, and doc 6, archived; bo (2) is in group 2, which is in
 -- group 1, as group 3 is; dee (4) is no longer active; bot 1 may view doc 4; ann leads project (1,5) and is one of
 -- its members, and group 3's members are its members too; cy is in club 2; shelf 1 is closed, shelf 2 open,
--- and whether shelf 3 is closed isn't known (NULL: the type's where doesn't hold)
+-- and whether shelf 3 is closed isn't known (NULL: the type's where doesn't hold); bo and eve (5) are team 7; ann
+-- owns rooms 1 and 3, nobody room 2; bo has the mic in room 1
 INSERT INTO cn.clubs VALUES (1), (2);
-INSERT INTO cn.users VALUES (1, true, NULL), (2, true, NULL), (3, true, 2), (4, false, NULL);
+INSERT INTO cn.users VALUES (1, true, NULL), (2, true, NULL), (3, true, 2), (4, false, NULL), (5, true, NULL);
 INSERT INTO cn.bots VALUES (1, 1);
 INSERT INTO cn.groups VALUES (1, NULL), (2, 1), (3, 1);
 INSERT INTO cn.group_members VALUES (2, 'user', 2);
@@ -1237,6 +1257,10 @@ INSERT INTO cn.projects VALUES (1, 5, 1);
 INSERT INTO cn.project_members VALUES (1, 5, 1);
 INSERT INTO cn.project_groups VALUES (1, 5, 3);
 INSERT INTO cn.shelves VALUES (1, true), (2, false), (3, NULL);
+INSERT INTO cn.teams VALUES (7);
+INSERT INTO cn.team_members VALUES (7, 2), (7, 5);
+INSERT INTO cn.rooms VALUES (1, 1), (2, NULL), (3, 1);
+INSERT INTO cn.room_mics VALUES (1, 2);
 """
 WHY_POLICY = """app role app_user
 
@@ -1283,6 +1307,19 @@ type club = cn.clubs
 type shelf = cn.shelves where {not closed}
   keeper : user = cn.shelf_keepers(shelf_id -> user_id)
   can use = keeper
+
+type team = cn.teams
+  member : user = cn.team_members(team_id -> user_id)
+
+type room = cn.rooms
+  owner : user = owner_id
+  mic   : user = cn.room_mics(room_id -> user_id)
+  host  : user, team#member shared
+  guest : user, team#member shared if {subject_id <> authz.uid()::text}
+  can share   = owner
+  can enter   = owner or host or guest
+  can speak   = (owner or host) and not guest
+  can present = owner and mic
 """
 
 
@@ -1298,13 +1335,15 @@ def corners(db: str) -> None:
         rc, out = cli(db, "apply", path)
     if rc:
         raise SystemExit(out)
-    # cy (3) could view doc 3 until yesterday; bot 1 may view doc 4; page 2 was shared with every user before page 1,
-    # above it, was hidden
+    # cy (3) could view doc 3 until yesterday; bot 1 may view doc 4; eve hosts room 1, and room 3 as its guest too;
+    # page 2 was shared with every user before page 1, above it, was hidden
     psql(
         db,
         "SELECT authz.act_as('user', '1'); "
         "SELECT authz.share('doc', '3', 'viewer', 'user', '3', '', now() - interval '1 day'); "
         "SELECT authz.share('doc', '4', 'viewer', 'bot', '1'); "
+        "SELECT authz.share('room', '1', 'host', 'user', '5'); "
+        "SELECT authz.share('room', '3', 'host', 'user', '5'); SELECT authz.share('room', '3', 'guest', 'user', '5'); "
         "INSERT INTO authz.shares (object_type, object_id, relation, subject_type, subject_id) "
         "VALUES ('page', '2', 'reader', 'user', '*')",
     )
@@ -1320,6 +1359,8 @@ def corners(db: str) -> None:
             "cn.project_members",
             "cn.project_groups",
             "cn.shelf_keepers",
+            "cn.rooms",
+            "cn.room_mics",
         )
     )
     before = psql(db, data)
@@ -1365,11 +1406,14 @@ def corners(db: str) -> None:
         said,
     )
     check(
-        "the owner of the doc above gives all an owner holds there: after the doc's own owner, which gives less",
+        "the owner of the doc above gives all an owner holds there, and takes all ann holds there as its owner: "
+        "after the doc's own owner, which gives less",
         ways[:2]
         == [
-            "set owner_id of doc 5 to 4 (also gives archive, edit, share on it)  [line 15]",
-            "set owner_id of doc 4 to 4 (also gives view, archive, edit, share on 1 more doc for user:4)  [line 15]",
+            "set owner_id of doc 5 to 4 (also gives archive, edit, share on it) (takes archive, edit, share on it "
+            "from 1 person)  [line 15]",
+            "set owner_id of doc 4 to 4 (also gives view, archive, edit, share on 1 more doc for user:4) (takes "
+            "archive, edit, share on 1 other doc from 1 person)  [line 15]",
         ],
         said,
     )
@@ -1420,12 +1464,12 @@ def corners(db: str) -> None:
         said,
     )
     check(
-        "two ways that each give one other permission: the one that gives it on fewer objects first (lead: share on "
-        "the project; group 3: belonging to it)",
+        "two ways that each give one other permission: the one that takes nothing from anyone first (group 3: "
+        "belonging to it; lead: share on the project, which ann, its lead, loses)",
         ways[3:]
         == [
-            "set lead_id of project (1,5) to 2 (also gives share on it)  [line 32]",
             "add user 2 to cn.group_members for grp 3 (also gives belong on 1 more grp for user:2)  [line 9]",
+            "set lead_id of project (1,5) to 2 (also gives share on it) (takes share on it from 1 person)  [line 32]",
         ],
         said,
     )
@@ -1464,6 +1508,63 @@ def corners(db: str) -> None:
             "no single change to shares or links grants it\n"
             "note: doc 6 must not meet {archived}: no share or link changes that\n"
         ),
+        said,
+    )
+    # a `shared if` that reads who shares: judged as authz.share judges it, as someone who may share the room (ann)
+    rc, said, ways, _ = why("--as", "user:2", "room", "1", "enter")
+    made = psql(
+        db,
+        "BEGIN; SELECT authz.act_as('user', '1'); SELECT authz.share('room', '1', 'guest', 'user', '2'); "
+        "SELECT authz.act_as('user', '2'); SELECT authz.can('room', '1', 'enter'); ROLLBACK",
+    )
+    check(
+        "a `shared if` that reads who shares is judged as one who may share (ann): the share is offered, as "
+        "authz.share run as ann makes it and it grants",
+        rc == 0 and ways[:1] == ["share guest on room 1 with user 2  [line 54]"] and made.splitlines()[-1] == "t",
+        (said, made),
+    )
+    check(
+        "a share that a deny reads: what it takes from the others in the team (eve, a host, can no longer speak)",
+        "share guest on room 1 with team#member 7 (takes speak on it from 1 person)  [line 54]" in ways,
+        said,
+    )
+    check(
+        "a column that changes hands: all the owner it replaces loses on it",
+        "set owner_id of room 1 to 2 (also gives present, share, speak on it) (takes enter, share, speak on it from 1 "
+        "person)  [line 51]" in ways,
+        said,
+    )
+    rc, said, ways, _ = why("--as", "user:2", "room", "2", "enter")
+    check(
+        "two ways that each give one other permission: the one that gives this one to fewer people first",
+        rc == 0
+        and ways[:2]
+        == [
+            "share host on room 2 with user 2 (also gives speak on it)  [line 53]",
+            "share host on room 2 with team#member 7 (also gives speak on it, and enter on it to 1 more person)  "
+            "[line 53]",
+        ],
+        said,
+    )
+    # a change that changes nothing (a column holding what it would set, a link's row that is there) is no way, alone
+    # or beside another: not tried, and not refused
+    rc, said, ways, after = why("--as", "user:1", "room", "1", "present")
+    check(
+        "the owner who needs the mic: the mic alone, not the owner she is already beside it",
+        rc == 0 and ways == ["add user 1 to cn.room_mics for room 1  [line 52]"] and after == [],
+        said,
+    )
+    rc, said, ways, after = why("--as", "user:2", "room", "1", "present")
+    check(
+        "the mic's holder who needs the room: the owner alone, and no row of cn.room_mics he has already (refused as "
+        "a duplicate)",
+        rc == 0
+        and ways
+        == [
+            "set owner_id of room 1 to 2 (also gives enter, share, speak on it) (takes enter, share, speak on it "
+            "from 1 person)  [line 51]"
+        ]
+        and after == [],
         said,
     )
     # what no change makes count: an object or a person that isn't there (as authz.share says of a subject), or a row
@@ -1559,6 +1660,22 @@ def corners(db: str) -> None:
             ],
             (status, w),
         )
+        status, w = Client(s).call("/api/why?as=user:2&type=room&id=1&perm=enter")
+        check(
+            "Studio says what a change takes from others, as the command does",
+            status == 200
+            and [x["takes"] for x in w["ways"] if x["text"] == "share guest on room 1 with team#member 7"]
+            == [[{"type": "room", "perm": "speak", "n": 0, "people": 1}]],
+            (status, w),
+        )
+        status, w = Client(s).call("/api/why?as=user:4&type=doc&id=5&perm=view")
+        check(
+            "... on the object asked about, and on others",
+            status == 200
+            and [x["takes"] for x in w["ways"][1:2]]
+            == [[{"type": "doc", "perm": p, "n": 1, "people": 1} for p in ("share", "edit", "archive")]],
+            (status, w),
+        )
         status, w = Client(s).call("/api/why?as=user:3&type=doc&id=999&perm=view")
         check(
             "Studio says there is no such doc, as the command does, and tries nothing",
@@ -1596,6 +1713,36 @@ def corners(db: str) -> None:
         check(
             "... and what no change to the data would do, said beside them (nothing tried, nothing is known to grant)",
             status == 200 and w["notes"] == ["doc 6 must not meet {archived}: no share or link changes that"],
+            (status, w),
+        )
+        check("... and no change that changes nothing (ann owns doc 6 already)", w["ways"] == [], w)
+        status, w = Client(s).call("/api/why?as=user:5&type=room&id=3&perm=speak")
+        check(
+            "... nor a share there already (eve hosts room 3): only what would change something is listed",
+            status == 200
+            and [x["text"] for x in w["ways"]]
+            == ["share host on room 3 with team#member 7", "set owner_id of room 3 to 5"],
+            (status, w),
+        )
+        # a `shared if` why can't judge, or that no one who may share passes: said
+        status, w = Client(s).call("/api/why?as=user:2&type=room&id=2&perm=enter")
+        check(
+            "a `shared if` on an object nobody may share: not offered, and said",
+            status == 200
+            and "room.guest wasn't tried with user 2: nobody may share room 2, and its shared if "
+            "{subject_id <> authz.uid()::text} is judged as the one who shares"
+            in w["notes"]
+            and not any("guest" in x["text"] for x in w["ways"]),
+            (status, w),
+        )
+        status, w = Client(s).call("/api/why?as=user:4&type=doc&id=5&perm=view")
+        check(
+            "a `shared if` no one who may share passes (dee isn't active): not offered, and said",
+            status == 200
+            and "doc.viewer wasn't tried with user 4: its shared if {subject_type <> 'user' or subject_id in (select "
+            "id::text from cn.users where active)} refuses it to everyone who may share doc 5"
+            in w["notes"]
+            and not any("viewer" in x["text"] for x in w["ways"]),
             (status, w),
         )
     finally:
