@@ -7334,7 +7334,7 @@ class Respelling(unittest.TestCase):
 
 class GeneratedShapes(unittest.TestCase):
     """genpolicy's policies say now and then what no other draw does (also(), across(), perm_groups(), keys other
-    than bigint, composite keys, caveats, scopes, and the twins of variants()), drawn apart from the rest: a seed's policy keeps all it drew before,
+    than bigint, composite keys, caveats, scopes, masks, and the twins of variants()), drawn apart from the rest: a seed's policy keeps all it drew before,
     the twelve seeds of the full run draw each of them (but across()), and their twins compile (one that didn't would
     only be counted as refused)."""
 
@@ -7390,6 +7390,7 @@ class GeneratedShapes(unittest.TestCase):
             drawn |= {"composite keys"} if variants[0][1].spelling.composite else set()
             drawn |= {"caveats"} if variants[0][1].caveats else set()
             drawn |= {"scopes"} if variants[0][1].scopes else set()
+            drawn |= {"masks"} if any(o.mask for o in variants[0][1].objs) else set()
         self.assertLessEqual(
             {
                 "without rules",
@@ -7401,7 +7402,9 @@ class GeneratedShapes(unittest.TestCase):
             },
             drawn,
         )
-        self.assertLessEqual({f"{k} keys" for k in self.g.KEYS} | {"composite keys", "caveats", "scopes"}, drawn)
+        self.assertLessEqual(
+            {f"{k} keys" for k in self.g.KEYS} | {"composite keys", "caveats", "scopes", "masks"}, drawn
+        )
         # around.py's four seeds of each push have caveats too, which its sessions read from their context
         self.assertTrue(any(self.g.make(seed).caveats for seed in range(1, 5)))
 

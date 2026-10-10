@@ -9,19 +9,20 @@ shares, to users, the service, `user:*`, `anyone` and other types' members; perm
 `not`, conditions, `signed_in`, `anyone`, `nobody`, arrows to other types, inheritance (stopped by a condition or not,
 across two types or not) and a deny that inherits; rules, the write rules sometimes with a condition that reads
 another governed table (a subquery, a function called by a quoted name, an operator the app made); invariants.
-Some also say what no draw above does, drawn apart so that the rest stays as it was (also(), shared_if(),
-across(), perm_groups()): a starting point with a `not` in a permission that inherits, a relation declared again
-for an earlier type through a link table (a `parent`, or a relation to users), a condition on the shares made of a
-relation (`shared by p1 if {...}`, which around.py's calls of authz.share() judge), a recursion through two types
-(an earlier type's rows inside a later one's too, through a link table, inheriting back what the later type
-inherits from it: one tree across both), and a group named by a permission (`t1#p2`). Then the tables it reads and their data. A third of the
-seeds name those tables and columns as an app's own may be (AWKWARD: capitals, words SQL reserves, 63 bytes), the
-policy otherwise the same; nearly half give every key another type than bigint (KEYS: int, text or uuid), said
-on each type line; and a quarter of the others key their object types by (org_id, id), every column that points
-at an object then naming one in its row's org (`[org_id, c_up]`, `(parent_type, [org_id, parent_id])`, link tables
-`([org_id, obj_id] -> [org_id, subj_id])`); each drawn apart too. And some have caveats (CAVEATS), which some of
-their shares carry, read in each user's context; and some have scopes (draw_scopes()), with which the checks ask
-one user again each time.
+Some also say what no draw above does, drawn apart so that the rest stays as it was (also(), shared_if(), masks(),
+across(), perm_groups()): a starting point with a `not` in a permission that inherits, a relation declared again for
+an earlier type through a link table (a `parent`, or a relation to users), a condition on the shares made of a
+relation (`shared by p1 if {...}`, which around.py's calls of authz.share() judge), a table read through a view the
+policy makes, a column masked there, a recursion through two types (an earlier type's rows inside a later one's too,
+through a link table, inheriting back what the later type inherits from it: one tree across both), and a group named
+by a permission (`t1#p2`).
+Then the tables it reads and their data. A third of the seeds name those tables and columns as an app's own may be
+(AWKWARD: capitals, words SQL reserves, a double quote, 63 bytes), the policy otherwise the same; nearly half give
+every key another type than bigint (KEYS: int, text or uuid), said on each type line; and a quarter of the others
+key their object types by (org_id, id), every column that points at an object then naming one in its row's org
+(`[org_id, c_up]`, `(parent_type, [org_id, parent_id])`, link tables `([org_id, obj_id] -> [org_id, subj_id])`).
+Some have caveats (CAVEATS), which some of their shares carry, read in each user's context, and some scopes
+(draw_scopes()), with which the checks ask one user again each time: each of these drawn apart too.
 Now and then a seed's policy has a twin, checked after it over fewer steps (variants()): the same with no rule at
 all, or with no permission at all, its rules naming relations.
 
@@ -88,6 +89,7 @@ AWKWARD = {
     "obj_id": "Obj",
     "subj_id": "Subj",
     "active": "Active",
+    "note": "Note",
 }
 
 
@@ -193,6 +195,7 @@ class Obj:
     rels: list[Rel]
     perms: dict[str, Node]  # p1, p2, p3
     rules: list[tuple[str, Node]]  # (head, expression): 'select', 'update', 'update b1', 'delete', 'insert'
+    mask: str = ""  # a permission: the table's rows through a view, its note NULL there unless it holds (masks())
 
 
 @dataclass
@@ -286,7 +289,10 @@ def variants(seed: int) -> list[tuple[str, Spec]]:
     out = [("", spec)]
     if x.random() < 0.15:
         out.append(
-            ("without rules", dataclasses.replace(spec, objs=[dataclasses.replace(o, rules=[]) for o in spec.objs]))
+            (
+                "without rules",
+                dataclasses.replace(spec, objs=[dataclasses.replace(o, rules=[], mask="") for o in spec.objs]),
+            )
         )
     if x.random() < 0.15:
         out.append(("without permissions", without_permissions(spec, x)))
@@ -328,7 +334,7 @@ def without_permissions(spec: Spec, x: random.Random) -> Spec:
         for name in atoms:
             if name not in named and f"{o.name}#{name}" not in groups and not name.startswith("{"):
                 rules = [(h, ("or", [e, name]) if h == "select" else e) for h, e in rules]
-        objs.append(Obj(o.name, o.where, kept[o.name], {}, rules))
+        objs.append(Obj(o.name, o.where, kept[o.name], {}, rules))  # (no mask: masks name permissions)
     # a scope's permissions go with them; a scope left with nothing goes too
     scopes = [(n, items) for n, s_items in spec.scopes if (items := [i for i in s_items if i[0] == "cmd"])]
     return dataclasses.replace(spec, objs=objs, invariants=[], scopes=scopes)
@@ -414,6 +420,7 @@ def make_plain(seed: int) -> Spec:
             spec.invariants.append(inv)
     also(spec, random.Random(f"genpolicy/{seed}/also"))
     shared_if(spec, random.Random(f"genpolicy/{seed}/shared-if"))
+    masks(spec, random.Random(f"genpolicy/{seed}/masks"))
     across(spec, random.Random(f"genpolicy/{seed}/across"))
     perm_groups(spec, random.Random(f"genpolicy/{seed}/perm-groups"))
     return spec
@@ -451,6 +458,14 @@ def shared_if(spec: Spec, x: random.Random) -> None:
         for rel in o.rels:
             if rel.kind == "shared" and x.random() < 0.4:
                 rel.shared_if = x.choice(list(SHARED_IFS))
+
+
+def masks(spec: Spec, x: random.Random) -> None:
+    """Now and then a table read through a view of the policy's, its note masked (NULL there) unless a permission
+    holds, drawn apart from the rest (x)."""
+    for o in spec.objs:
+        if any(head == "select" for head, _ in o.rules) and x.random() < 0.25:
+            o.mask = x.choice(list(o.perms))
 
 
 def across(spec: Spec, x: random.Random) -> None:
@@ -583,7 +598,9 @@ def policy_text(spec: Spec) -> str:
         out += [f"caveat {name} = {cond}" for name, cond in CAVEATS.items()]
     for o in spec.objs:
         if o.rules:
-            out.append(f"rules {s.policy_table(o.name)}")
+            view = f" view {s.policy_table(f'{o.name}_seen')}" if o.mask else ""
+            out.append(f"rules {s.policy_table(o.name)}{view}")
+            out += [f"  mask {s.name('note')} : {o.mask}"] if o.mask else []
             out += [
                 f"  {' '.join([head.split()[0], *map(s.name, head.split()[1:])])} : {text(e, s=s)}"
                 for head, e in o.rules
@@ -613,6 +630,7 @@ def schema_text(spec: Spec) -> str:
             f"{n.sql('parent_id')} {k}",
         ]
         cols += [f"{n.sql(f'c_{rel.name}')} {k}" for rel in o.rels if rel.kind == "column" and rel.name != "parent"]
+        cols += [f"{n.sql('note')} text"] if o.mask else []
         cols += [f"PRIMARY KEY ({org}, {i})"] if n.composite else []
         s.append(f"CREATE TABLE {n.table(o.name)} ({', '.join(cols)});")
         for rel in o.rels:
@@ -722,6 +740,8 @@ class GenPolicyGen(Gen):
         ]
         if org is not None:
             cols, vals = ["org_id", *cols], [org, *vals]
+        if o.mask:  # what the view shows only to whoever holds the mask's permission
+            cols, vals = [*cols, "note"], [*vals, f"'note {i}'"]
         for rel in o.rels:
             if rel.kind != "column":
                 continue
@@ -1024,6 +1044,8 @@ def smaller(spec: Spec) -> list[Spec]:
                     spec, objs=spec.objs[:-1], invariants=[x for x in spec.invariants if x[0] != o.name]
                 )
             )
+        if o.mask:
+            out.append(with_obj(spec, k, dataclasses.replace(o, mask="")))
         for i in range(len(o.rules)):
             out.append(with_obj(spec, k, dataclasses.replace(o, rules=o.rules[:i] + o.rules[i + 1 :])))
         for p, e in o.perms.items():
