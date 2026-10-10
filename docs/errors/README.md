@@ -91,5 +91,6 @@ Every mistake rowstile reports ends with its code: `line 4: folder.owner: unknow
 - [AZ711](AZ711.md): The audit trail can't be changed
 - [AZ712](AZ712.md): The change feed was trimmed
 - [AZ713](AZ713.md): Moved inside itself
+- [AZ714](AZ714.md): Sign in first
 
 These pages are written from `core/authzlib/errors.py`; edit it, then `python3 core/tests/unit_test.py --update`.

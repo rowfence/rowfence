@@ -276,7 +276,7 @@ BEGIN
   END IF;
   CASE p_table
 {cases}
-    ELSE RAISE EXCEPTION 'the policy has no rules for table %', p_table USING ERRCODE = 'undefined_table', HINT = 'rowstile help AZ707';
+    ELSE RAISE EXCEPTION 'the policy has no rules for table %', p_table USING HINT = 'rowstile help AZ707';
   END CASE;
 END $f$;"""
 

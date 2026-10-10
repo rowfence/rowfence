@@ -29,16 +29,20 @@ PERMISSIONS: dict[str, list[str]] = {
     ],
     "message": [
         "read"
+    ],
+    "folder": [
+        "edit"
     ]
 }
 SHARED_RELATIONS: dict[str, dict[str, list[str]]] = {}
 SCOPES: list[str] = []
 
-ObjectType = Literal["project", "note", "message"]
+ObjectType = Literal["project", "note", "message", "folder"]
 Permission = Literal["edit", "read", "view"]
 ProjectPermission = Literal["edit", "view"]
 NotePermission = Literal["edit", "view"]
 MessagePermission = Literal["read"]
+FolderPermission = Literal["edit"]
 # an object's id; for a composite key, its columns in order: (org_id, id)
 Id = int | str | uuid.UUID | tuple[int | str | uuid.UUID, ...]
 When = datetime.datetime | str                  # a timestamptz: a datetime, or text Postgres reads

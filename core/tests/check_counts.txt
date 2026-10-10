@@ -11,8 +11,8 @@ confidence 43
 cookbook 79
 devx 100
 docs 11
-governance 155
-identity 54
+governance 157
+identity 55
 keep unchanged trees 7
 language server 84
 masks 26
@@ -20,7 +20,7 @@ mcp 50
 migrate vs apply 43
 migrations 61
 moves 22
-multi scenario 81
+multi scenario 82
 policy errors 183
 principals 45
 races 4
@@ -30,5 +30,5 @@ scenario 93
 signed sessions 37
 studio 175
 tools 36
-unit 324
+unit 326
 upgrade 53

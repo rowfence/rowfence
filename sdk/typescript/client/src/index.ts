@@ -316,7 +316,7 @@ export function refusal(e: unknown, schemaOf?: (table: string) => string | undef
   const ours = OURS.exec(err.message);
   const code = errorCode(e);
   if (!ours && !err.constraint?.startsWith("authz_") && code === undefined) return null;
-  // no API key of yours (AZ708) is a 42501 too, but no refusal: the key isn't there for this user
+  // sign in first (AZ714) is a 42501 too, but no refusal: a 401
   if (code !== undefined && CALL_PROBLEMS.has(code)) return null;
   // the error's own fields say which table and command; a driver that drops them (Prisma's adapters) leaves
   // the message, which names both
@@ -326,9 +326,12 @@ export function refusal(e: unknown, schemaOf?: (table: string) => string | undef
   return new Refused(err.message, table, command, err.detail ? err.detail.split("\n") : [], { cause: e, code });
 }
 
-/** Whether e is strict sign-in's error: a query that needs to know who is asking, and nobody signed in. */
+/** Whether e is strict sign-in's error (rowstile help AZ701): a query that needs to know who is asking, and nobody
+ *  signed in. A login refused (AZ703) and settings changed by hand (AZ702) share its SQLSTATE, 28000, but are no
+ *  such thing. */
 export function notSignedIn(e: unknown): boolean {
-  return sqlstate(e) === "28000";
+  const code = errorCode(e);
+  return sqlstate(e) === "28000" && (code === undefined || code === "AZ701");
 }
 
 /** e as rowstile's error: Refused, NotFound or NotSignedIn as they are, a database refusal as Refused, strict
@@ -345,15 +348,21 @@ export function translate(e: unknown, schemaOf?: (table: string) => string | und
 }
 
 // rowstile's codes for a call the database turned down that is no refusal, and what their pages say to answer
-// (rowstile help AZ708: what the call names isn't there; AZ710: a missing or wrong argument)
+// (rowstile help AZ703: a login refused; AZ708: what the call names isn't there; AZ710: a missing or wrong
+// argument; AZ713: moved inside itself; AZ714: sign in first)
 const CALL_PROBLEMS = new Map<string, Pick<Problem, "type" | "title" | "status">>([
+  ["AZ703", { type: "https://rowstile.dev/problems/not-signed-in", title: "Unauthorized", status: 401 }],
   ["AZ708", { type: "https://rowstile.dev/problems/not-found", title: "Not Found", status: 404 }],
   ["AZ710", { type: "https://rowstile.dev/problems/bad-argument", title: "Bad Request", status: 400 }],
+  ["AZ713", { type: "https://rowstile.dev/problems/conflict", title: "Conflict", status: 409 }],
+  ["AZ714", { type: "https://rowstile.dev/problems/not-signed-in", title: "Unauthorized", status: 401 }],
 ]);
 
-/** The problem body and status for e (Refused: 403, NotFound: 404), or null. A call the database says names
- *  something that isn't there (AZ708: a share with someone who doesn't exist) is a 404 too, and one it says
- *  lacks an argument or has a wrong one (AZ710: a negative page size) a 400, with the database's words. */
+/** The problem body and status for e (Refused: 403, NotFound: 404), or null. A call the database turns down that is
+ *  no refusal answers as its code's page says, with the database's words: a login refused or a call that needs
+ *  someone signed in 401 (AZ703, AZ714), something it names that isn't there 404 (AZ708: a share with someone who
+ *  doesn't exist), an argument missing or wrong 400 (AZ710: a negative page size), a move inside itself 409
+ *  (AZ713). */
 export function problemOf(e: unknown): Problem | null {
   const t = translate(e);
   if (t instanceof Refused || t instanceof NotFound) return t.problem();

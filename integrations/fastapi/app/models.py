@@ -1,5 +1,5 @@
-"""The conformance app's tables: projects with members, notes in them, a service that reads projects, and
-an inbox people can write to but only the recipient reads."""
+"""The conformance app's tables: projects with members, notes in them, a service that reads projects, an
+inbox people can write to but only the recipient reads, and folders inside folders."""
 
 from sqlalchemy import BigInteger, Boolean, ForeignKey, MetaData, Text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -55,3 +55,11 @@ class Message(Base):
     sender_id: Mapped[int] = mapped_column(ForeignKey("app.users.id"), index=True)
     recipient_id: Mapped[int] = mapped_column(ForeignKey("app.users.id"), index=True)
     body: Mapped[str] = mapped_column(Text)
+
+
+class Folder(Base):
+    __tablename__ = "folders"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    parent_id: Mapped[int | None] = mapped_column(ForeignKey("app.folders.id"), index=True)
+    owner_id: Mapped[int] = mapped_column(ForeignKey("app.users.id"), index=True)
+    name: Mapped[str] = mapped_column(Text)

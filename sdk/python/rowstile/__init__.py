@@ -257,17 +257,22 @@ def error_code(exc: BaseException) -> str | None:
 
 
 # rowstile's codes for a call the database turned down that is no refusal, and what their pages say to answer
-# (rowstile help AZ708: what the call names isn't there; AZ710: a missing or wrong argument)
+# (rowstile help AZ703: a login refused; AZ708: what the call names isn't there; AZ710: a missing or wrong
+# argument; AZ713: moved inside itself; AZ714: sign in first)
 _CALL_PROBLEMS: dict[str, tuple[str, str, int]] = {
+    "AZ703": ("https://rowstile.dev/problems/not-signed-in", "Unauthorized", 401),
     "AZ708": ("https://rowstile.dev/problems/not-found", "Not Found", 404),
     "AZ710": ("https://rowstile.dev/problems/bad-argument", "Bad Request", 400),
+    "AZ713": ("https://rowstile.dev/problems/conflict", "Conflict", 409),
+    "AZ714": ("https://rowstile.dev/problems/not-signed-in", "Unauthorized", 401),
 }
 
 
 def call_problem(exc: BaseException) -> Problem | None:
-    """The problem body for a database error that is the call's own mistake, not a refusal: something it names
-    isn't there (AZ708: a share with someone who doesn't exist, a 404), or an argument is missing or wrong
-    (AZ710: a negative page size, a 400), with the database's words. None for any other error."""
+    """The problem body for a database error that is no refusal and answers as its code's page says: a login
+    refused or a call that needs someone signed in (AZ703, AZ714: 401), something the call names isn't there
+    (AZ708: a share with someone who doesn't exist, 404), an argument missing or wrong (AZ710: a negative page
+    size, 400), a move inside itself (AZ713: 409); with the database's words. None for any other error."""
     code = error_code(exc)
     if code is None or code not in _CALL_PROBLEMS:
         return None
@@ -293,7 +298,7 @@ def refusal(exc: BaseException) -> Refused | None:
     code = error_code(exc)
     if code is None and not message.startswith("new row violates row-level security policy"):
         return None
-    if code in _CALL_PROBLEMS:  # no API key of yours (AZ708) is a 42501 too, but no refusal
+    if code in _CALL_PROBLEMS:  # sign in first (AZ714) is a 42501 too, but no refusal: a 401
         return None
     detail = _field(err, "message_detail", "detail") or ""
     schema, table = _field(err, "schema_name"), _field(err, "table_name")
@@ -321,7 +326,10 @@ def refusal(exc: BaseException) -> Refused | None:
 
 
 def not_signed_in(exc: BaseException) -> bool:
-    return sqlstate(exc) == "28000"
+    """Whether exc is strict sign-in's error (rowstile help AZ701): a query that needs to know who is asking ran in
+    a transaction nobody signed in to. A login refused (AZ703) and settings changed by hand (AZ702) share its
+    SQLSTATE, 28000, but are no such thing."""
+    return sqlstate(exc) == "28000" and error_code(exc) in (None, "AZ701")
 
 
 def check_problems(rows: Iterable[tuple[str, str]]) -> list[str]:

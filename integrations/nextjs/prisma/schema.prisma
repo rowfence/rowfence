@@ -1,5 +1,6 @@
-// The conformance app's tables: projects with members, notes in them, a service that reads projects, and an
-// inbox people can write to but only the recipient reads. The same app as integrations/fastapi.
+// The conformance app's tables: projects with members, notes in them, a service that reads projects, an inbox
+// people can write to but only the recipient reads, and folders inside folders. The same app as
+// integrations/fastapi.
 generator client {
   provider = "prisma-client"
   output   = "../src/generated/prisma"
@@ -91,5 +92,18 @@ model feedback {
 
   @@index([project_id])
   @@index([author_id])
+  @@schema("app")
+}
+
+// Folders inside folders: their owner and the owners of the folders above edit them
+model Folder {
+  id        Int    @id
+  parent_id Int?
+  owner_id  Int
+  name      String
+
+  @@index([parent_id])
+  @@index([owner_id])
+  @@map("folders")
   @@schema("app")
 }

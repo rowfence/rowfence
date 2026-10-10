@@ -216,7 +216,7 @@ SELECT test.ok('alice makes folder 150 and shares it with herself as editor',
   test.try($$INSERT INTO app.folders (id, org_id, parent_id, owner_id, name) VALUES (150, 1, 4, 1, 'tmp')$$) = 'ok'
   AND test.try($$SELECT authz.share('folder', 150, 'editor', 'user', 1)$$) = 'ok');
 SELECT test.ok('sharing with someone who does not exist is refused',
-  test.try($$SELECT authz.share('folder', 150, 'viewer', 'user', 999)$$) = '23503');
+  test.try($$SELECT authz.share('folder', 150, 'viewer', 'user', 999)$$) = 'P0001');
 SELECT test.ok('alice deletes it', test.rows($$DELETE FROM app.folders WHERE id = 150$$) = 1);
 RESET ROLE;
 INSERT INTO app.folders (id, org_id, parent_id, owner_id, name) VALUES (150, 2, 20, 6, 'Globex board');

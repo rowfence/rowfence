@@ -3,7 +3,7 @@
 // request, inside a cache, outside a request and inside after().
 import pg from "pg";
 import { afterAll, beforeEach, describe, expect, test, vi } from "vitest";
-import { actingAs, NotFound, NotSignedIn, principal, Refused } from "@rowstile/client";
+import { actingAs, errorCode, NotFound, NotSignedIn, principal, Refused, sqlstate } from "@rowstile/client";
 import { authz as rowstile } from "@rowstile/pg";
 import { action, authzRoutes, checkAtStart, keepOutOfCaches, route } from "@rowstile/next";
 import { db, pool } from "@/db";
@@ -103,36 +103,87 @@ describe("route handlers and server actions", () => {
     await expect(action(async () => { throw notSignedIn; })()).rejects.toBeInstanceOf(NotSignedIn);
   });
 
-  // 16: what the call names isn't there (AZ708) is 404, a missing or wrong argument (AZ710) 400, each with the
-  // database's words, as their pages say
+  // 16: a call the database turns down that is no refusal answers as its code's page says, with the database's
+  // words: what it names isn't there (AZ708) 404, a missing or wrong argument (AZ710) 400, a call that needs someone
+  // signed in (AZ714) or a login refused (AZ703) 401, a move inside itself (AZ713) 409. Each is [who, the call].
+  const one = new pg.Pool({ connectionString: APP, max: 1 });
+  afterAll(() => one.end());
   const calls = {
-    // a share with someone who doesn't exist (Prisma's adapter keeps no hint for its SQLSTATE: the SDK says it)
-    nobody: () => db.$authz.share("project", 1, "viewer", "user", 99),
-    // an API key of ann's that isn't there: a refusal's SQLSTATE (42501), but no refusal
-    noKey: () => db.$queryRaw`SELECT 1 AS ok FROM authz.revoke_api_key(${987654}::bigint)`,
-    negative: () => db.$authz.list("project", "view", { limit: -1 }),
-  };
-  const notThere = (detail: string) =>
-    ({ type: "https://rowstile.dev/problems/not-found", title: "Not Found", status: 404, detail, code: "AZ708" });
-  const expected = {
-    nobody: notThere("there is no user 99"),
-    noKey: notThere("no API key 987654 of yours"),
-    negative: { type: "https://rowstile.dev/problems/bad-argument", title: "Bad Request", status: 400,
-                detail: "the page size must not be negative (got -1)", code: "AZ710" },
+    nobody: ["1", () => db.$authz.share("project", 1, "viewer", "user", 99)],   // a share with someone who doesn't exist
+    noKey: ["1", () => db.$queryRaw`SELECT 1 AS ok FROM authz.revoke_api_key(${987654}::bigint)`],   // an API key of ann's
+    negative: ["1", () => db.$authz.list("project", "view", { limit: -1 })],
+    signInFirst: [null, () => db.$authz.requestAccess("project", 1, "viewer", "the review")],
+    // through pg: Prisma's driver adapter keeps no hint, so no code, for a 28000
+    loginRefused: ["1", () => rowstile(one).query("SELECT authz.login_key('ak_nope')")],
+    inside: ["1", () => db.folder.update({ where: { id: 1 }, data: { parent_id: 2 } })],
+  } satisfies Record<string, [string | null, () => Promise<unknown>]>;
+  const problem = (kind: string, title: string, status: number, detail: string, code: string) =>
+    ({ type: `https://rowstile.dev/problems/${kind}`, title, status, detail, code });
+  const expected: Record<keyof typeof calls, ReturnType<typeof problem>> = {
+    nobody: problem("not-found", "Not Found", 404, "there is no user 99", "AZ708"),
+    noKey: problem("not-found", "Not Found", 404, "no API key 987654 of yours", "AZ708"),
+    negative: problem("bad-argument", "Bad Request", 400, "the page size must not be negative (got -1)", "AZ710"),
+    signInFirst: problem("not-signed-in", "Unauthorized", 401, "sign in first", "AZ714"),
+    loginRefused: problem("not-signed-in", "Unauthorized", 401, "invalid API key", "AZ703"),
+    inside: problem("conflict", "Conflict", 409, "folder 1 cannot be moved inside itself", "AZ713"),
   };
 
-  test("16: route: not there is 404, a wrong argument 400, with the database's words", async () => {
-    for (const [name, call] of Object.entries(calls)) {
-      const r = await actingAs("1", () => route(async () => { await call(); return new Response(null, { status: 204 }); })());
-      expect([r.status, r.headers.get("content-type"), await r.json()], name)
-        .toEqual([expected[name as keyof typeof calls].status, "application/problem+json", expected[name as keyof typeof calls]]);
+  test("16: route: each code as its page says, with the database's words", async () => {
+    for (const [name, [who, call]] of Object.entries(calls)) {
+      const r = await actingAs(who, () => route(async () => { await call(); return new Response(null, { status: 204 }); })());
+      const want = expected[name as keyof typeof calls];
+      expect([r.status, r.headers.get("content-type"), await r.json()], name).toEqual([want.status, "application/problem+json", want]);
     }
   });
 
-  test("16: action: not there and a wrong argument come back as their problems", async () => {
-    for (const [name, call] of Object.entries(calls)) {
-      expect(await actingAs("1", () => action(call)()), name).toEqual({ ok: false, problem: expected[name as keyof typeof calls] });
+  test("16: action: each comes back as its problem", async () => {
+    for (const [name, [who, call]] of Object.entries(calls)) {
+      expect(await actingAs(who, () => action(call)()), name).toEqual({ ok: false, problem: expected[name as keyof typeof calls] });
     }
+  });
+
+  // 16: a refusal by the database's own code is 403 (AZ705: the shares of a project bo may not share; AZ704: a key
+  // made in a session signed in with a key that may only read); the app's mistakes stay errors: a share the policy
+  // doesn't declare (AZ706), a name not in the policy (AZ707), who is signed in changed by hand (AZ702, not
+  // NotSignedIn)
+  test("16: a refusal by the database's code is 403; the app's mistakes are thrown", async () => {
+    const refused = (detail: string, code: string) => ({ type: "https://rowstile.dev/problems/refused", title: "Forbidden",
+      status: 403, detail, table: null, command: null, why: [], code });
+    const shares = await actingAs("2", () => route(async () => Response.json(await db.$authz.listShares("project", 1)))());
+    expect([shares.status, await shares.json()]).toEqual([403, refused("you cannot see the shares of project 1", "AZ705")]);
+    const owner = new pg.Client({ connectionString: OWNER });      // a key of ann's that may only read
+    await owner.connect();
+    let key: string;
+    try {
+      await owner.query("BEGIN");
+      await owner.query("SELECT authz.act_as('user', '1')");
+      key = (await owner.query("SELECT authz.create_api_key('ro', 'read') AS k")).rows[0].k;
+      await owner.query("COMMIT");
+    } finally {
+      await owner.end();
+    }
+    const scoped = await actingAs("1", () => route(async () => {
+      await rowstile(one).transaction(async (c) => {
+        await c.query("SELECT authz.login_key($1)", [key]);
+        return c.query("SELECT authz.create_api_key('more')");
+      });
+      return new Response(null, { status: 204 });
+    })());
+    expect([scoped.status, await scoped.json()]).toEqual(
+      [403, refused("this session is read-only (viewing as someone else, or a read-only token)", "AZ704")]);
+    const thrown = async (who: string, call: () => Promise<unknown>) => {
+      const e = await actingAs(who, () => route(async () => { await call(); return new Response(null, { status: 204 }); })())
+        .catch((err: unknown) => err);
+      return [e instanceof NotSignedIn, errorCode(e), sqlstate(e), (e as Error).message];
+    };
+    expect(await thrown("1", () => db.$authz.share("project", 1, "member" as never, "user", 2))).toEqual(
+      [false, "AZ706", "P0001", expect.stringContaining("the policy does not allow sharing project.member with user")]);
+    expect(await thrown("1", () => db.$authz.list("nosuch" as never, "view" as never))).toEqual(
+      [false, "AZ707", "P0001", expect.stringContaining("no permission nosuch.view in the policy")]);
+    expect(await thrown("1", () => rowstile(one).transaction(async (c) => {
+      await c.query("SELECT set_config('authz.user_id', '2', true)");
+      return c.query("SELECT count(*) FROM app.notes");
+    }))).toEqual([false, "AZ702", "28000", "who is signed in was changed after signing in"]);
   });
 });
 
@@ -140,7 +191,7 @@ describe("authzRoutes, for @rowstile/react", () => {
   const { GET, POST } = authzRoutes({ calls: db.$authz });
   const get = (who: string, path: string) => actingAs(who, () => GET(new Request(`http://app.test/api/authz/${path}`)));
   // (bytes, for a request with no content type at all: a string body is text/plain)
-  const post = (who: string, path: string, body: object, type: string | null = "application/json") =>
+  const post = (who: string | null, path: string, body: object, type: string | null = "application/json") =>
     actingAs(who, () => POST(new Request(`http://app.test/api/authz/${path}`, {
       method: "POST", body: new TextEncoder().encode(JSON.stringify(body)), headers: type ? { "content-type": type } : {},
     })));
@@ -175,6 +226,12 @@ describe("authzRoutes, for @rowstile/react", () => {
     expect([why.status, why.headers.get("content-type"), await why.json()]).toEqual([400, "application/problem+json", {
       type: "https://rowstile.dev/problems/bad-argument", title: "Bad Request", status: 400, detail: "say why you need it",
       code: "AZ710",
+    }]);
+    // 16: from someone not signed in: 401, in the database's words (rowstile help AZ714)
+    const anonymous = await post(null, "request", { type: "project", id: "1", relation: "viewer", reason: "the review" });
+    expect([anonymous.status, await anonymous.json()]).toEqual([401, {
+      type: "https://rowstile.dev/problems/not-signed-in", title: "Unauthorized", status: 401, detail: "sign in first",
+      code: "AZ714",
     }]);
     // 16: a share with someone who isn't there: 404, in the database's words
     const nobody = await post("1", "share", { ...share, subjectId: "99" });

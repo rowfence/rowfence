@@ -138,8 +138,11 @@ export default async function Notes() {
 
 `route()` answers a refusal with a problem body: 404 for a row the user can't see, 403 with the rule and the
 reason for one they may not change (its fields: <https://rowstile.dev/problems/refused>). A call the database
-says names something that isn't there (a share with someone who doesn't exist) is 404 too, and one it says
-lacks an argument or has a wrong one (a negative page size) 400, each with the database's words.
+says names something that isn't there (a share with someone who doesn't exist) is 404 too, one it says
+lacks an argument or has a wrong one (a negative page size) 400, one that needs someone signed in, from a
+visitor who isn't, 401, and a folder moved into one of its own subfolders 409, each with the database's words.
+Prisma's driver adapter keeps no hint for SQLSTATE 28000, so a login the database refuses
+(`authz.login_key`, AZ703) reads as `NotSignedIn` through Prisma; through `pg` it answers 401.
 
 ```ts
 import { route } from "@rowstile/next";
@@ -214,8 +217,9 @@ function Buttons() {
 
 `useShares` and a headless `<ShareDialog>` share and unshare as the database allows; `useAccessRequest` asks
 for access. They stay current over server-sent events. A request without a reason answers 400 with the
-database's words, "say why you need it" (its fields: <https://rowstile.dev/problems/bad-argument>), and a
-share with someone who doesn't exist 404, "there is no user 99".
+database's words, "say why you need it" (its fields: <https://rowstile.dev/problems/bad-argument>), one from
+someone not signed in 401, "sign in first" (<https://rowstile.dev/problems/not-signed-in>), and a share with
+someone who doesn't exist 404, "there is no user 99".
 
 Your own code shares with `db.$authz.share`: the object, the relation, then who it is shared with (a type and
 an id; for a team's members, `"team", 7, "member"`). Who may share is the policy's (`viewer : user shared by

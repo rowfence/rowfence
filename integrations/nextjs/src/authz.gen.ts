@@ -17,6 +17,9 @@ export const permissions = {
   ],
   "feedback": [
     "read"
+  ],
+  "folder": [
+    "edit"
   ]
 } as const;
 export type ObjectType = keyof typeof permissions;

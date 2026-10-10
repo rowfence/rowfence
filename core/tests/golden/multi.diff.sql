@@ -852,7 +852,7 @@ LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $f$
 DECLARE v_before timestamptz; n bigint;
 BEGIN
   IF p_keep IS NULL OR p_keep < interval '0' THEN
-    RAISE EXCEPTION 'say how long to keep the audit trail, e.g. authz.trim_audit(interval ''2 years'')' USING HINT = 'rowstile help AZ710';
+    RAISE EXCEPTION 'say how long to keep the audit trail, e.g. authz.trim_audit(interval ''2 years'')' USING ERRCODE = 'invalid_parameter_value', HINT = 'rowstile help AZ710';
   END IF;
   v_before := now() - p_keep;
   -- the one way past the trigger is DDL, as the owner, here: nothing a session can set lets a DELETE through
@@ -3355,7 +3355,7 @@ BEGIN
         INTO v_found USING p_subject_id;
     END IF;
     IF NOT v_found THEN
-      RAISE EXCEPTION 'there is no % %', p_subject_type, p_subject_id USING ERRCODE = 'foreign_key_violation', HINT = 'rowstile help AZ708';
+      RAISE EXCEPTION 'there is no % %', p_subject_type, p_subject_id USING HINT = 'rowstile help AZ708';
     END IF;
   END IF;
   IF p_relation LIKE 'role:%' THEN
@@ -3398,7 +3398,7 @@ BEGIN
     END IF;
     IF NOT authz_int.share_if(p_type || '.' || p_relation || '.' || v_key, p_id, p_subject_type,
                               p_subject_id, p_subject_relation) THEN
-      RAISE EXCEPTION 'the policy does not allow this share (%)', coalesce((SELECT l.loc FROM authz_gen.policy_lines l WHERE l.what = v_rel.loc), '?') USING ERRCODE = 'insufficient_privilege', HINT = 'rowstile help AZ706';
+      RAISE EXCEPTION 'the policy does not allow this share (%)', coalesce((SELECT l.loc FROM authz_gen.policy_lines l WHERE l.what = v_rel.loc), '?') USING ERRCODE = 'insufficient_privilege', HINT = 'rowstile help AZ705';
     END IF;
   END IF;
   IF p_caveat IS NOT NULL AND NOT EXISTS (SELECT 1 FROM authz_int.caveats WHERE name = p_caveat) THEN
@@ -3621,7 +3621,7 @@ BEGIN
   END IF;
   CASE p_table
     WHEN 'mt.docs' THEN RETURN authz_gen."mt.docs:rules:explain"(p_command, p_id, p_row);
-    ELSE RAISE EXCEPTION 'the policy has no rules for table %', p_table USING ERRCODE = 'undefined_table', HINT = 'rowstile help AZ707';
+    ELSE RAISE EXCEPTION 'the policy has no rules for table %', p_table USING HINT = 'rowstile help AZ707';
   END CASE;
 END $f$;
 
@@ -5047,7 +5047,7 @@ BEGIN
   PERFORM authz_int.check_writable();
   IF p_principal_id IS NULL THEN
     IF v_type <> 'user' OR authz.uid() IS NULL THEN
-      RAISE EXCEPTION 'sign in to create an API key' USING ERRCODE = 'insufficient_privilege', HINT = 'rowstile help AZ701';
+      RAISE EXCEPTION 'sign in to create an API key' USING ERRCODE = 'insufficient_privilege', HINT = 'rowstile help AZ714';
     END IF;
     v_id := authz.uid()::text;
   ELSE
@@ -5077,7 +5077,7 @@ BEGIN
   END IF;
   IF NOT EXISTS (SELECT 1 FROM authz_int.perms WHERE type = p_type AND perm = 'manage_keys') THEN
     RAISE EXCEPTION 'the policy gives % no manage_keys permission, so nobody manages its keys', p_type
-      USING ERRCODE = 'insufficient_privilege', HINT = 'rowstile help AZ707';
+      USING HINT = 'rowstile help AZ707';
   END IF;
   IF NOT EXISTS (SELECT 1 FROM authz.principal()) OR NOT coalesce(authz.can(p_type, p_id, 'manage_keys'), false) THEN
     RAISE EXCEPTION 'you cannot manage the keys of % %', p_type, p_id USING ERRCODE = 'insufficient_privilege', HINT = 'rowstile help AZ705';
@@ -5115,7 +5115,7 @@ BEGIN
        OR (EXISTS (SELECT 1 FROM authz_int.perms WHERE type = k.principal_type AND perm = 'manage_keys')
            AND EXISTS (SELECT 1 FROM authz.principal())
            AND coalesce(authz.can(k.principal_type, k.user_id, 'manage_keys'), false))) THEN
-    RAISE EXCEPTION 'no API key % of yours', p_id USING ERRCODE = 'insufficient_privilege', HINT = 'rowstile help AZ708';
+    RAISE EXCEPTION 'no API key % of yours', p_id USING HINT = 'rowstile help AZ708';
   END IF;
   UPDATE authz.api_keys SET revoked_at = now() WHERE id = p_id;
   PERFORM authz_int.audit('revoke_api_key', k.principal_type, k.user_id, NULL, NULL, NULL, NULL,
@@ -5130,7 +5130,7 @@ LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $f$
 BEGIN
   IF p_id IS NOT NULL AND coalesce(p_type, 'user') <> 'user'
      AND NOT EXISTS (SELECT 1 FROM authz_int.types WHERE name = p_type AND principal) THEN
-    RAISE EXCEPTION '% is not a type that signs in', p_type USING ERRCODE = 'invalid_parameter_value',
+    RAISE EXCEPTION '% is not a type that signs in', p_type USING
       HINT = 'principal types are marked "principal" in the policy: type service = app.services principal (rowstile help AZ707)';
   END IF;
   -- stored as every other id is ('05' is 5), so the audit and created_by name the user as shares do
@@ -5201,7 +5201,7 @@ DECLARE parts text[] := string_to_array(coalesce(p_token, ''), '.'); v_head json
         v_user text; v_type text; v_scopes text[]; v_now numeric := extract(epoch FROM now()); v_want text;
 BEGIN
   SELECT value INTO v_secret FROM authz.settings WHERE key = 'jwt_secret';
-  IF v_secret IS NULL THEN RAISE EXCEPTION 'JWT login is not configured (authz.settings jwt_secret)' USING HINT = 'rowstile help AZ703'; END IF;
+  IF v_secret IS NULL THEN RAISE EXCEPTION 'JWT login is not configured (authz.settings jwt_secret)' USING ERRCODE = 'invalid_authorization_specification', HINT = 'rowstile help AZ703'; END IF;
   BEGIN
     IF cardinality(parts) <> 3 THEN RAISE EXCEPTION 'bad'; END IF;
     v_head := convert_from(authz_int.b64url(parts[1]), 'UTF8')::jsonb;
@@ -5265,7 +5265,7 @@ BEGIN
     RAISE EXCEPTION 'already viewing as someone' USING ERRCODE = 'insufficient_privilege', HINT = 'rowstile help AZ704';
   END IF;
   IF coalesce(btrim(p_reason), '') = '' THEN
-    RAISE EXCEPTION 'say why (the reason is kept in the audit trail)' USING HINT = 'rowstile help AZ710';
+    RAISE EXCEPTION 'say why (the reason is kept in the audit trail)' USING ERRCODE = 'invalid_parameter_value', HINT = 'rowstile help AZ710';
   END IF;
   IF NOT (authz_int.caller_is_admin()
           ) THEN
@@ -5347,9 +5347,9 @@ DECLARE v_id bigint; v_tbl text;
 BEGIN
   p_id := authz_int.canon(p_type, p_id);
   PERFORM authz_int.check_writable();
-  IF authz.uid() IS NULL THEN RAISE EXCEPTION 'sign in first' USING ERRCODE = 'insufficient_privilege', HINT = 'rowstile help AZ701'; END IF;
-  IF coalesce(btrim(p_reason), '') = '' THEN RAISE EXCEPTION 'say why you need it' USING HINT = 'rowstile help AZ710'; END IF;
-  IF p_duration IS NOT NULL AND p_duration <= interval '0' THEN RAISE EXCEPTION 'the duration must be positive' USING HINT = 'rowstile help AZ710'; END IF;
+  IF authz.uid() IS NULL THEN RAISE EXCEPTION 'sign in first' USING ERRCODE = 'insufficient_privilege', HINT = 'rowstile help AZ714'; END IF;
+  IF coalesce(btrim(p_reason), '') = '' THEN RAISE EXCEPTION 'say why you need it' USING ERRCODE = 'invalid_parameter_value', HINT = 'rowstile help AZ710'; END IF;
+  IF p_duration IS NOT NULL AND p_duration <= interval '0' THEN RAISE EXCEPTION 'the duration must be positive' USING ERRCODE = 'invalid_parameter_value', HINT = 'rowstile help AZ710'; END IF;
   SELECT tbl INTO v_tbl FROM authz_int.types WHERE name = p_type;
   IF v_tbl IS NULL THEN RAISE EXCEPTION 'no type % in the policy', p_type USING HINT = 'rowstile help AZ707'; END IF;
   IF authz_int.manage_perm(p_type, p_relation, CASE WHEN p_relation LIKE 'role:%' THEN NULL ELSE 'user' END) IS NULL
@@ -5391,7 +5391,7 @@ LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $f$
 DECLARE r authz.requests;
 BEGIN
   PERFORM authz_int.check_writable();
-  IF p_approve IS NULL THEN RAISE EXCEPTION 'approve (true) or deny (false)' USING HINT = 'rowstile help AZ710'; END IF;
+  IF p_approve IS NULL THEN RAISE EXCEPTION 'approve (true) or deny (false)' USING ERRCODE = 'invalid_parameter_value', HINT = 'rowstile help AZ710'; END IF;
   SELECT * INTO r FROM authz.requests WHERE id = p_id AND status = 'pending' FOR UPDATE;
   IF r.id IS NULL THEN RAISE EXCEPTION 'no pending request %', p_id USING HINT = 'rowstile help AZ708'; END IF;
   IF authz.uid() IS NULL OR r.requester = authz.uid()::text THEN
@@ -5430,9 +5430,9 @@ DECLARE g authz.shares; v_until timestamptz; v_audit bigint;
 BEGIN
   p_id := authz_int.canon(p_type, p_id);
   PERFORM authz_int.check_writable();
-  IF coalesce(btrim(p_reason), '') = '' THEN RAISE EXCEPTION 'say why (it is kept in the audit trail)' USING HINT = 'rowstile help AZ710'; END IF;
+  IF coalesce(btrim(p_reason), '') = '' THEN RAISE EXCEPTION 'say why (it is kept in the audit trail)' USING ERRCODE = 'invalid_parameter_value', HINT = 'rowstile help AZ710'; END IF;
   IF p_duration IS NULL OR p_duration <= interval '0' OR p_duration > interval '1 day' THEN
-    RAISE EXCEPTION 'emergency access lasts more than nothing and one day at most' USING HINT = 'rowstile help AZ710';
+    RAISE EXCEPTION 'emergency access lasts more than nothing and one day at most' USING ERRCODE = 'invalid_parameter_value', HINT = 'rowstile help AZ710';
   END IF;
   IF authz.uid() IS NULL
      OR NOT EXISTS (SELECT 1 FROM authz_int.perms WHERE type = p_type AND perm = 'break_glass')

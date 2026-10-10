@@ -340,6 +340,19 @@ test("a share made in the app's own code", async () => {
   }]);
 });
 
+// 16: a folder moved inside one of its own subfolders, by the app's own route: 409, in the database's words
+// (rowstile help AZ713)
+test("a folder moved inside itself is a conflict", async () => {
+  const move = (id: number, parent_id: number | null) =>
+    fetch(`${SERVER}/api/folders/${id}`, as("1", { method: "PATCH", body: JSON.stringify({ parent_id }) }));
+  const inside = await move(1, 2);
+  expect([inside.status, inside.headers.get("content-type"), await inside.json()]).toEqual([409, "application/problem+json", {
+    type: "https://rowstile.dev/problems/conflict", title: "Conflict", status: 409,
+    detail: "folder 1 cannot be moved inside itself", code: "AZ713",
+  }]);
+  expect((await move(2, 1)).status).toBe(200);         // where it is already: nothing in the way
+});
+
 // a write refused inside an interactive transaction, on a pool of one: why is asked inside the transaction, which
 // holds the one connection, so the answer comes at once (asked outside, it waited for Prisma's timeout, 5 s)
 test("a refusal inside a transaction, on a pool of one, is explained at once", async () => {

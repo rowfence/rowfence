@@ -564,7 +564,7 @@ BEGIN
         INTO v_found USING p_subject_id;
     END IF;
     IF NOT v_found THEN
-      RAISE EXCEPTION 'there is no % %', p_subject_type, p_subject_id USING ERRCODE = 'foreign_key_violation', HINT = 'rowstile help AZ708';
+      RAISE EXCEPTION 'there is no % %', p_subject_type, p_subject_id USING HINT = 'rowstile help AZ708';
     END IF;
   END IF;
   IF p_relation LIKE 'role:%' THEN
@@ -607,7 +607,7 @@ BEGIN
     END IF;
     IF NOT authz_int.share_if(p_type || '.' || p_relation || '.' || v_key, p_id, p_subject_type,
                               p_subject_id, p_subject_relation) THEN
-      RAISE EXCEPTION 'the policy does not allow this share (%)', {self.line_sql(None, None, "v_rel.loc")} USING ERRCODE = 'insufficient_privilege', HINT = 'rowstile help AZ706';
+      RAISE EXCEPTION 'the policy does not allow this share (%)', {self.line_sql(None, None, "v_rel.loc")} USING ERRCODE = 'insufficient_privilege', HINT = 'rowstile help AZ705';
     END IF;
   END IF;
   IF p_caveat IS NOT NULL AND NOT EXISTS (SELECT 1 FROM authz_int.caveats WHERE name = p_caveat) THEN

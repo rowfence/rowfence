@@ -116,6 +116,8 @@ export const PAGES = {
   "site/problems/refused.md": "problems/refused.md",
   "site/problems/not-found.md": "problems/not-found.md",
   "site/problems/bad-argument.md": "problems/bad-argument.md",
+  "site/problems/not-signed-in.md": "problems/not-signed-in.md",
+  "site/problems/conflict.md": "problems/conflict.md",
   "docs/errors/README.md": "errors/index.md",
   ...Object.fromEntries(errorPages.map((f) => [`docs/errors/${f}`, `errors/${f}`])),
   ...(POSTS.length ? { "docs/blog/README.md": "blog/index.md" } : {}),
@@ -179,6 +181,8 @@ export const DESCRIPTIONS = {
   "problems/refused.md": "The problem type the rowstile SDKs answer with (403) when Postgres refused a write, with the rule and the reason.",
   "problems/not-found.md": "The problem type the rowstile SDKs answer with (404) when a row isn't there or can't be seen, or what a call names isn't there.",
   "problems/bad-argument.md": "The problem type the rowstile SDKs answer with (400) when the database says a call lacks an argument or has a wrong one.",
+  "problems/not-signed-in.md": "The problem type the rowstile SDKs answer with (401) when the database says a call needs someone signed in, or a login was refused.",
+  "problems/conflict.md": "The problem type the rowstile SDKs answer with (409) when the database turns down a move that would put an object inside itself.",
   "errors/index.md": "Every rowstile error code: what it means, the mistake, and the same mistake fixed.",
 };
 

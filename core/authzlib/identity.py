@@ -211,7 +211,7 @@ BEGIN
   PERFORM authz_int.check_writable();
   IF p_principal_id IS NULL THEN
     IF v_type <> 'user' OR authz.uid() IS NULL THEN
-      RAISE EXCEPTION 'sign in to create an API key' USING ERRCODE = 'insufficient_privilege', HINT = 'rowstile help AZ701';
+      RAISE EXCEPTION 'sign in to create an API key' USING ERRCODE = 'insufficient_privilege', HINT = 'rowstile help AZ714';
     END IF;
     v_id := authz.uid()::text;
   ELSE
@@ -241,7 +241,7 @@ BEGIN
   END IF;
   IF NOT EXISTS (SELECT 1 FROM authz_int.perms WHERE type = p_type AND perm = 'manage_keys') THEN
     RAISE EXCEPTION 'the policy gives % no manage_keys permission, so nobody manages its keys', p_type
-      USING ERRCODE = 'insufficient_privilege', HINT = 'rowstile help AZ707';
+      USING HINT = 'rowstile help AZ707';
   END IF;
   IF NOT EXISTS (SELECT 1 FROM authz.principal()) OR NOT coalesce(authz.can(p_type, p_id, 'manage_keys'), false) THEN
     RAISE EXCEPTION 'you cannot manage the keys of % %', p_type, p_id USING ERRCODE = 'insufficient_privilege', HINT = 'rowstile help AZ705';
@@ -279,7 +279,7 @@ BEGIN
        OR (EXISTS (SELECT 1 FROM authz_int.perms WHERE type = k.principal_type AND perm = 'manage_keys')
            AND EXISTS (SELECT 1 FROM authz.principal())
            AND coalesce(authz.can(k.principal_type, k.user_id, 'manage_keys'), false))) THEN
-    RAISE EXCEPTION 'no API key % of yours', p_id USING ERRCODE = 'insufficient_privilege', HINT = 'rowstile help AZ708';
+    RAISE EXCEPTION 'no API key % of yours', p_id USING HINT = 'rowstile help AZ708';
   END IF;
   UPDATE authz.api_keys SET revoked_at = now() WHERE id = p_id;
   PERFORM authz_int.audit('revoke_api_key', k.principal_type, k.user_id, NULL, NULL, NULL, NULL,
@@ -294,7 +294,7 @@ LANGUAGE plpgsql {DEF} AS $f$
 BEGIN
   IF p_id IS NOT NULL AND coalesce(p_type, 'user') <> 'user'
      AND NOT EXISTS (SELECT 1 FROM authz_int.types WHERE name = p_type AND principal) THEN
-    RAISE EXCEPTION '% is not a type that signs in', p_type USING ERRCODE = 'invalid_parameter_value',
+    RAISE EXCEPTION '% is not a type that signs in', p_type USING
       HINT = 'principal types are marked "principal" in the policy: type service = app.services principal (rowstile help AZ707)';
   END IF;
   -- stored as every other id is ('05' is 5), so the audit and created_by name the user as shares do
@@ -365,7 +365,7 @@ DECLARE parts text[] := string_to_array(coalesce(p_token, ''), '.'); v_head json
         v_user text; v_type text; v_scopes text[]; v_now numeric := extract(epoch FROM now()); v_want text;
 BEGIN
   SELECT value INTO v_secret FROM authz.settings WHERE key = 'jwt_secret';
-  IF v_secret IS NULL THEN RAISE EXCEPTION 'JWT login is not configured (authz.settings jwt_secret)' USING HINT = 'rowstile help AZ703'; END IF;
+  IF v_secret IS NULL THEN RAISE EXCEPTION 'JWT login is not configured (authz.settings jwt_secret)' USING ERRCODE = 'invalid_authorization_specification', HINT = 'rowstile help AZ703'; END IF;
   BEGIN
     IF cardinality(parts) <> 3 THEN RAISE EXCEPTION 'bad'; END IF;
     v_head := convert_from(authz_int.b64url(parts[1]), 'UTF8')::jsonb;
@@ -429,7 +429,7 @@ BEGIN
     RAISE EXCEPTION 'already viewing as someone' USING ERRCODE = 'insufficient_privilege', HINT = 'rowstile help AZ704';
   END IF;
   IF coalesce(btrim(p_reason), '') = '' THEN
-    RAISE EXCEPTION 'say why (the reason is kept in the audit trail)' USING HINT = 'rowstile help AZ710';
+    RAISE EXCEPTION 'say why (the reason is kept in the audit trail)' USING ERRCODE = 'invalid_parameter_value', HINT = 'rowstile help AZ710';
   END IF;
   IF NOT (authz_int.caller_is_admin()
           {"OR (EXISTS (SELECT 1 FROM authz.principal()) AND authz.can(" + lit("user") + ", p_user, " + lit("impersonate") + "))" if imp else ""}) THEN
