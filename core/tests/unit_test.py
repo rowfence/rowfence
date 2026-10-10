@@ -7329,10 +7329,10 @@ class Respelling(unittest.TestCase):
 
 
 class GeneratedShapes(unittest.TestCase):
-    """genpolicy's policies say now and then what no other draw does (also(), across(), keys other than bigint, and
-    the twins of variants()), drawn apart from the rest: a seed's policy keeps all it drew before, the twelve seeds
-    of the full run draw each of them (but across()), and their twins compile (one that didn't would only be counted
-    as refused)."""
+    """genpolicy's policies say now and then what no other draw does (also(), across(), perm_groups(), keys other
+    than bigint, and the twins of variants()), drawn apart from the rest: a seed's policy keeps all it drew before,
+    the twelve seeds of the full run draw each of them (but across()), and their twins compile (one that didn't would
+    only be counted as refused)."""
 
     def setUp(self) -> None:
         sys.path.insert(0, os.path.join(ROOT, "tests"))
@@ -7378,12 +7378,21 @@ class GeneratedShapes(unittest.TestCase):
                 for rel in o.rels:
                     if rel.kind == "table" and any(x.name == rel.name and x.kind == "column" for x in o.rels):
                         drawn.add("parent again" if rel.name == "parent" else "a relation to users again")
+                    drawn |= {"a group by a permission" for x in rel.subjects if "#p" in x}
                 for e in o.perms.values():
                     if not isinstance(e, str) and e[0] == "or" and not isinstance(e[1][0], str):
                         drawn |= {"a not first" for item in [e[1][0]] if item[1][1:] == [self.NOT_FIRST]}
             drawn.add(f"{variants[0][1].spelling.keytype} keys")
         self.assertLessEqual(
-            {"without rules", "without permissions", "parent again", "a relation to users again", "a not first"}, drawn
+            {
+                "without rules",
+                "without permissions",
+                "parent again",
+                "a relation to users again",
+                "a not first",
+                "a group by a permission",
+            },
+            drawn,
         )
         self.assertLessEqual({f"{k} keys" for k in self.g.KEYS}, drawn)
 
