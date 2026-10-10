@@ -1584,29 +1584,33 @@ class Imports(unittest.TestCase):
         "authzlib.statements",
     )
 
-    def loaded(self, *argv: str) -> set[str]:
-        """Which of WATCH a fresh interpreter holds after running the command with argv."""
+    def loaded(self, *argv: str) -> tuple[set[str], set[str]]:
+        """Which of WATCH a fresh interpreter holds after running the command with argv and didn't before, and which
+        it held before (what starts with the interpreter isn't the command's: coverage.py, started by a .pth where
+        the suites measure)."""
         code = (
             "import contextlib, io, sys\n"
+            "before = set(sys.modules)\n"
             "import rowstile_cli\n"
             "with contextlib.redirect_stdout(io.StringIO()), contextlib.suppress(SystemExit):\n"
             f"    rowstile_cli.main({list(argv)!r})\n"
-            f"print(' '.join(m for m in {self.WATCH!r} if m in sys.modules))\n"
+            f"print(' '.join(m for m in {self.WATCH!r} if m in sys.modules and m not in before))\n"
+            f"print(' '.join(m for m in {self.WATCH!r} if m in before))\n"
         )
         env = dict(os.environ, PYTHONPATH=os.pathsep.join([os.path.join(ROOT, "cli"), ROOT]))
         run = subprocess.run([sys.executable, "-c", code], cwd=ROOT, env=env, capture_output=True, text=True)
         self.assertEqual(run.returncode, 0, run.stderr)
-        return set(run.stdout.split())
+        added, started = (set(line.split()) for line in run.stdout.splitlines()[-2:])
+        return added, started
 
     def test_each_command_imports_what_it_uses(self) -> None:
         # the version: no compiler, no TLS, no hashes (pgwire imports them as a connection needs them)
-        self.assertEqual(self.loaded("--version"), set())
+        self.assertEqual(self.loaded("--version")[0], set())
         # formatting parses: no compiler
-        self.assertEqual(self.loaded("fmt", "--check", "example/docs.authz"), set())
+        self.assertEqual(self.loaded("fmt", "--check", "example/docs.authz")[0], set())
         # checking compiles (and the compiler hashes long names): no migrations, no connection
-        self.assertEqual(
-            self.loaded("check", "example/docs.authz"), {"hashlib", "authzlib.assembled", "authzlib.statements"}
-        )
+        added, started = self.loaded("check", "example/docs.authz")
+        self.assertEqual(added, {"hashlib", "authzlib.assembled", "authzlib.statements"} - started)
 
     def test_names_made_when_first_asked_for(self) -> None:
         for name in authzlib.__all__:
