@@ -21,6 +21,7 @@ import tempfile
 import urllib.error
 import urllib.request
 from typing import Any, NamedTuple
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -626,19 +627,45 @@ def main() -> None:
         ):
             status, e = c.call(path, sent)
             check(f"{label}: 400, missing or wrong", status == 400 and e["detail"] == f"missing or wrong: {words}", e)
-        # what Studio didn't foresee (here a body nested deeper than Python's JSON reader goes): 500, with what went
-        # wrong, the traceback where Studio runs, and the server goes on
+        # a body nested deeper than Python's JSON reader goes, or a field nested deeper than the command's client
+        # sends to the database: the caller's mistake, said as a body that isn't JSON is, and no traceback
+        for label, sent in (
+            ("a body nested deeper than JSON's reader goes", b"[" * 100000 + b"]" * 100000),
+            (
+                "a body with a field nested too deep to send",
+                b'{"as": "user:1", "type": '
+                + b"[" * 600
+                + b"]" * 600
+                + b', "id": "3", "relation": "editor", "subject_type": "user", "subject_id": "3"}',
+            ),
+        ):
+            logged = io.StringIO()
+            with contextlib.redirect_stderr(logged):
+                status, e = c.call("/api/share", sent)
+            check(
+                f"{label}: 400, missing or wrong, and no traceback",
+                status == 400
+                and e["detail"] == "missing or wrong: the body is nested too deep to read"
+                and not logged.getvalue(),
+                (status, e, logged.getvalue()[-300:]),
+            )
+        # what Studio didn't foresee: 500, with what went wrong, the traceback where Studio runs, and the server goes
+        # on. No request the checks know of reaches it (a body nested too deep did), so a fault is put in the code
+        # the graph's tab runs
         logged = io.StringIO()
-        with contextlib.redirect_stderr(logged):
-            status, e = c.call("/api/share", b"[" * 100000 + b"]" * 100000)
+        with (
+            mock.patch.object(studio.database, "graph", side_effect=RuntimeError("a fault the test put in")),
+            contextlib.redirect_stderr(logged),
+        ):
+            status, e = c.call("/api/graph")
         check(
             "a request Studio didn't foresee: 500, and what went wrong",
-            status == 500 and e["title"] == "Error" and "maximum recursion depth exceeded" in e["detail"],
+            status == 500 and e["title"] == "Error" and e["detail"] == "a fault the test put in",
             (status, e),
         )
         check(
             "... its traceback where Studio runs, and the server goes on",
-            "RecursionError" in logged.getvalue() and c.call("/api/overview")[0] == 200,
+            "RuntimeError: a fault the test put in" in logged.getvalue() and c.call("/api/graph")[0] == 200,
             logged.getvalue()[-300:],
         )
         status, e = c.call("/api/why?as=user:3&type=folder&id=3&perm=fly")

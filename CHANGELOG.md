@@ -412,6 +412,9 @@ Each release upgrades from the one before it. How releases are numbered and made
 - Studio's access diff of a policy file with an expression nested too deep to read answered with Python's words
   (500), and a traceback where Studio runs (`rowstile dev`'s terminal): it says what the command says, "an
   expression in the policy is nested too deep to read".
+- Studio answered a request body nested too deep (`[[[[...]]]]`, a hundred thousand levels, or a field a few
+  hundred deep) with Python's words (500), and a traceback where Studio runs. It answers 400, "missing or wrong:
+  the body is nested too deep to read", as it answers a body that isn't JSON.
 - Four things the docs promised were said wrong. The threat model said a condition in `rules` runs with the app
   role's privileges: a condition reads with the policy's rights in rules as in permissions, as the language's
   page says. It said the change feed was append-only for everyone: the app role can't touch it, and the

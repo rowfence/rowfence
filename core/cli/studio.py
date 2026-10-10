@@ -611,9 +611,11 @@ class Studio:
                         return self.send(200, gets[name](q))
                     if method == "POST" and name in ("share", "unshare", "decide"):
                         length = int(self.headers.get("Content-Length") or 0)
-                        return self.send(
-                            200, studio.change(name, as_object(json.loads(self.rfile.read(length) or b"{}")))
-                        )
+                        try:
+                            body = as_object(json.loads(self.rfile.read(length) or b"{}"))
+                            return self.send(200, studio.change(name, body))
+                        except RecursionError:  # nested deeper than JSON's reader, or the client sending it, goes
+                            raise ValueError("the body is nested too deep to read") from None
                     return self.send(404, {"title": "Not Found", "status": 404, "detail": name})
                 except Problem as e:
                     return self.send(e.status, {"title": "Problem", "status": e.status, "detail": str(e)})
