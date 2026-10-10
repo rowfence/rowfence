@@ -37,7 +37,7 @@ Each release upgrades from the one before it. How releases are numbered and made
 ### Changed
 
 - Each run of the command starts faster: it imports only what that command uses. `rowstile check` and `rowstile
-  test` take about 50 ms less CPU of about 170, and `rowstile fmt`, `can`, `lint` and `--version` about 70 ms
+  test` take about 35 ms less CPU of about 180, and `rowstile fmt`, `can`, `lint` and `--version` about 50 ms
   less of about 160: a hook or a CI step that runs the command many times gains the most.
 - `rowstile review` stops when git can't read a file it needs at the base: the policy, a file it includes, the
   lock file or a test file (a partial clone that can't fetch it, a repository missing objects). It says "git
