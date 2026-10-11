@@ -7333,10 +7333,10 @@ class Respelling(unittest.TestCase):
 
 
 class GeneratedShapes(unittest.TestCase):
-    """genpolicy's policies say now and then what no other draw does (also(), across(), perm_groups(), keys other
-    than bigint, composite keys, caveats, scopes, masks, and the twins of variants()), drawn apart from the rest: a seed's policy keeps all it drew before,
-    the twelve seeds of the full run draw each of them (but across()), and their twins compile (one that didn't would
-    only be counted as refused)."""
+    """genpolicy's policies say now and then what no other draw does (also(), across(), perm_groups(), keys other than
+    bigint, composite keys, caveats, scopes, masks, custom roles, and the twins of variants()), drawn apart from the
+    rest: a seed's policy keeps all it drew before, the twelve seeds of the full run draw each of them (but
+    across()), and their twins compile (one that didn't would only be counted as refused)."""
 
     def setUp(self) -> None:
         sys.path.insert(0, os.path.join(ROOT, "tests"))
@@ -7351,6 +7351,7 @@ class GeneratedShapes(unittest.TestCase):
             with (
                 mock.patch.object(self.g, "also", lambda spec, x: None),
                 mock.patch.object(self.g, "across", lambda spec, x: None),
+                mock.patch.object(self.g, "custom_roles", lambda spec, x: None),
             ):
                 before = self.g.make(seed)
             after = self.g.make(seed)
@@ -7361,6 +7362,10 @@ class GeneratedShapes(unittest.TestCase):
                 self.assertEqual((a.rels[: len(b.rels)], a.rules, a.where), (b.rels, b.rules, b.where), seed)
                 for p, e in b.perms.items():
                     got = a.perms[p]
+                    if not isinstance(got, str) and got[1][1:] == ["roles"]:  # what a custom role gives
+                        got = got[1][0]
+                    elif not isinstance(got, str) and not isinstance(got[1][0], str) and got[1][0][1][-1:] == ["roles"]:
+                        got = ("and", [("or", got[1][0][1][:-1]), *got[1][1:]])  # ... inside what a deny narrows
                     if not isinstance(got, str) and got[1][1:] == [f"inside.{p}"]:  # inherited back (across())
                         got = got[1][0]
                     if got != e:  # a starting point put first, the rest as it was
@@ -7391,6 +7396,7 @@ class GeneratedShapes(unittest.TestCase):
             drawn |= {"caveats"} if variants[0][1].caveats else set()
             drawn |= {"scopes"} if variants[0][1].scopes else set()
             drawn |= {"masks"} if any(o.mask for o in variants[0][1].objs) else set()
+            drawn |= {f"custom roles{' from' if o.roles[1] else ''}" for o in variants[0][1].objs if o.roles}
         self.assertLessEqual(
             {
                 "without rules",
@@ -7403,7 +7409,10 @@ class GeneratedShapes(unittest.TestCase):
             drawn,
         )
         self.assertLessEqual(
-            {f"{k} keys" for k in self.g.KEYS} | {"composite keys", "caveats", "scopes", "masks"}, drawn
+            {f"{k} keys" for k in self.g.KEYS}
+            | {"composite keys", "caveats", "scopes", "masks"}
+            | {"custom roles", "custom roles from"},
+            drawn,
         )
         # around.py's four seeds of each push have caveats too, which its sessions read from their context
         self.assertTrue(any(self.g.make(seed).caveats for seed in range(1, 5)))
