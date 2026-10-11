@@ -10,12 +10,13 @@ shares, to users, the service, `user:*`, `anyone` and other types' members; perm
 across two types or not) and a deny that inherits; rules, the write rules sometimes with a condition that reads
 another governed table (a subquery, a function called by a quoted name, an operator the app made); invariants.
 Some also say what no draw above does, drawn apart so that the rest stays as it was (also(), shared_if(), masks(),
-across(), perm_groups()): a starting point with a `not` in a permission that inherits, a relation declared again for
-an earlier type through a link table (a `parent`, or a relation to users), a condition on the shares made of a
-relation (`shared by p1 if {...}`, which around.py's calls of authz.share() judge), a table read through a view the
-policy makes, a column masked there, a recursion through two types (an earlier type's rows inside a later one's too,
-through a link table, inheriting back what the later type inherits from it: one tree across both), and a group named
-by a permission (`t1#p2`).
+across(), perm_groups(), custom_roles()): a starting point with a `not` in a permission that inherits, a relation
+declared again for an earlier type through a link table (a `parent`, or a relation to users), a condition on the
+shares made of a relation (`shared by p1 if {...}`, which around.py's calls of authz.share() judge), a table read
+through a view the policy makes, a column masked there, a recursion through two types (an earlier type's rows inside
+a later one's too, through a link table, inheriting back what the later type inherits from it: one tree across
+both), a group named by a permission (`t1#p2`), and custom roles, with and without `from` (custom_roles(): roles,
+permissions that give them, manage_roles where they are made, and some given in the data).
 Then the tables it reads and their data. A third of the seeds name those tables and columns as an app's own may be
 (AWKWARD: capitals, words SQL reserves, a double quote, 63 bytes), the policy otherwise the same; nearly half give
 every key another type than bigint (KEYS: int, text or uuid), said on each type line; and a quarter of the others
@@ -196,6 +197,7 @@ class Obj:
     perms: dict[str, Node]  # p1, p2, p3
     rules: list[tuple[str, Node]]  # (head, expression): 'select', 'update', 'update b1', 'delete', 'insert'
     mask: str = ""  # a permission: the table's rows through a view, its note NULL there unless it holds (masks())
+    roles: tuple[list[str], str] | None = None  # custom roles: who may hold them, and `from` what (custom_roles())
 
 
 @dataclass
@@ -423,6 +425,7 @@ def make_plain(seed: int) -> Spec:
     masks(spec, random.Random(f"genpolicy/{seed}/masks"))
     across(spec, random.Random(f"genpolicy/{seed}/across"))
     perm_groups(spec, random.Random(f"genpolicy/{seed}/perm-groups"))
+    custom_roles(spec, random.Random(f"genpolicy/{seed}/roles"))
     return spec
 
 
@@ -500,6 +503,27 @@ def perm_groups(spec: Spec, x: random.Random) -> None:
                 st = subject.split("#")[0]
                 if "#" in subject and st != o.name and x.random() < 0.4:
                     rel.subjects[i] = f"{st}#{x.choice(list(spec.obj(st).perms))}"
+
+
+def custom_roles(spec: Spec, x: random.Random) -> None:
+    """Custom roles on some types, drawn apart from the rest (x): users may hold them, sometimes an earlier type's
+    members too; where the type has `up`, often `from up` (a role then counts where up links the object to the
+    role's owner); one or two permissions a role may give (`... or roles`); and `can manage_roles` on the type
+    that owns them, for whoever makes them (the checks try the roles API too)."""
+    for k, o in enumerate(spec.objs):
+        if x.random() >= 0.15:
+            continue
+        groups = [f"{e.name}#member" for e in spec.objs[:k] if has(e, "member")]
+        subjects = ["user"] + ([x.choice(groups)] if groups and x.random() < 0.5 else [])
+        up = next((rel.subjects[0] for rel in o.rels if rel.name == "up" and rel.kind == "column"), "")
+        o.roles = (subjects, "up" if up and x.random() < 0.6 else "")
+        for p in x.sample(["p1", "p2", "p3"], x.randint(1, 2)):
+            e = o.perms[p]  # (in what a deny or a condition narrows, if that is how it reads: it stays that shape)
+            narrowed = not isinstance(e, str) and e[0] == "and" and not isinstance(e[1][0], str) and e[1][0][0] == "or"
+            o.perms[p] = ("and", [("or", [*e[1][0][1], "roles"]), *e[1][1:]]) if narrowed else ("or", [e, "roles"])
+        # who makes the roles: whoever holds manage_roles on their owner, of up's type (`from up`) or of any type
+        owner = spec.obj(up) if o.roles[1] else o
+        owner.perms.setdefault("manage_roles", x.choice(["p1", "p2", "p3"]))
 
 
 def denies(o: Obj) -> bool:
@@ -586,6 +610,8 @@ def policy_text(spec: Spec) -> str:
                 out.append(f"  {rel.name} : {subj} {src}")
             else:
                 out.append(f"  {rel.name} : {subj} = {src}")
+        if o.roles:
+            out.append(f"  roles : {', '.join(o.roles[0])}" + (f" from {o.roles[1]}" if o.roles[1] else ""))
         for p, e in o.perms.items():
             out.append(f"  can {p} = {text(e, s=s)}")
     for name, items in spec.scopes:
@@ -801,10 +827,62 @@ class GenPolicyGen(Gen):
         return {"mode": "business" if i % 2 == 0 else "night", "ip": f"10.0.0.{i % 3}"}
 
     def grants(self) -> str:
-        return "\n".join(self.grant(None) for _ in range(12))
+        return "\n".join([*self.custom_roles(), *(self.grant(None) for _ in range(12))])
+
+    def when(self) -> tuple[str, str]:
+        """A share's expires_at and starts_at: live, not started yet, expired, or live until tomorrow."""
+        return self.r.choice(
+            [
+                ("NULL", "NULL"),
+                ("NULL", "NULL"),
+                ("NULL", difftest.LATER),
+                (difftest.EXPIRED, "NULL"),
+                ("now() + interval '1 day'", "NULL"),
+            ]
+        )
+
+    def custom_roles(self) -> list[str]:
+        """Two custom roles on each type that has them: one owned where the type takes its roles `from` (an object
+        of up's type), or by a user; one giving a permission, the other two (a role may name one that doesn't
+        write `roles`: it gives nothing there)."""
+        r = self.r
+        self.role_ids: list[tuple[int, Obj]] = []
+        rows, perms = [], []
+        for o in self.spec.objs:
+            if not o.roles:
+                continue
+            owner = next((rel.subjects[0] for rel in o.rels if rel.name == "up" and rel.kind == "column"), "")
+            for n in (1, 2):
+                rid = len(self.role_ids) + 1
+                self.role_ids.append((rid, o))
+                owned = (
+                    (owner, r.choice(self.subject_ids(owner, None)))
+                    if o.roles[1]
+                    else ("user", self.spec.spelling.ident(1))
+                )
+                rows.append(f"({rid}, {lit(owned[0])}, {lit(owned[1])}, {lit(o.name)}, 'r{rid}')")
+                perms += [f"({rid}, {lit(p)})" for p in r.sample(["p1", "p2", "p3"], n)]
+        if not rows:
+            return []
+        return [
+            f"INSERT INTO authz.roles (id, owner_type, owner_id, object_type, name) VALUES {', '.join(rows)};",
+            f"INSERT INTO authz.role_permissions VALUES {', '.join(perms)};",
+            "SELECT setval(pg_get_serial_sequence('authz.roles', 'id'), 100);",
+        ]
 
     def grant(self, ids: Ids | None) -> str:
         r = self.r
+        if getattr(self, "role_ids", []) and r.random() < 0.3:  # a custom role given on an object
+            rid, o = r.choice(self.role_ids)
+            assert o.roles is not None
+            subject = r.choice(o.roles[0])
+            st, sr = subject.split("#")[0], subject.split("#")[1] if "#" in subject else ""
+            return (
+                f"INSERT INTO authz.shares ({difftest.SHARE_COLUMNS}) VALUES ({lit(o.name)}, "
+                f"{lit(r.choice(self.subject_ids(o.name, ids)))}, 'role:{rid}', {lit(st)}, "
+                f"{lit(r.choice(self.subject_ids(subject, ids)))}, {lit(sr)}, {', '.join(self.when())}) "
+                "ON CONFLICT DO NOTHING;"
+            )
         shared = [(o, rel) for o in self.spec.objs for rel in o.rels if rel.kind == "shared"]
         if not shared:
             return "SELECT 1;"
@@ -815,16 +893,7 @@ class GenPolicyGen(Gen):
             subject.split("#")[1] if "#" in subject else "",
         )
         sid = "*" if subject in ("user:*", "anyone") else r.choice(self.subject_ids(subject, ids))
-        # live, not started yet, expired, or live until tomorrow
-        expires, starts = r.choice(
-            [
-                ("NULL", "NULL"),
-                ("NULL", "NULL"),
-                ("NULL", difftest.LATER),
-                (difftest.EXPIRED, "NULL"),
-                ("now() + interval '1 day'", "NULL"),
-            ]
-        )
+        expires, starts = self.when()
         oid = lit(r.choice(self.subject_ids(o.name, ids)))
         if self.spec.caveats:  # most carry none; some one of the policy's (with what it was made with), or another
             caveat, args = r.choice(
